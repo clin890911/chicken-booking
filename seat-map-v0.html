@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>雞王刷刷鍋 — 桌位地圖 v0</title>
+<style>
+  :root {
+    --brand-red: #e60012;
+    --brand-yellow: #f29100;
+    --brand-green: #9eb63a;
+    --bg-base: #faf7f0;
+    --bg-card: #ffffff;
+    --text-dark: #3a2e26;
+    --text-muted: #8a7e72;
+    --border: #e5e0d8;
+    --status-vacant: #22c55e;
+    --status-reserved: #eab308;
+    --status-dining: #ef4444;
+    --status-cleaning: #f97316;
+    --status-blocked: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+    background: var(--bg-base);
+    color: var(--text-dark);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100vw;
+  }
+  /* === TOP BAR === */
+  .topbar {
+    display: flex;
+    align-items: center;
+    background: var(--bg-card);
+    border-bottom: 2px solid var(--border);
+    padding: 10px 18px;
+    gap: 18px;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .logo-badge {
+    width: 42px; height: 42px;
+    background: var(--brand-red);
+    color: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 22px;
+    box-shadow: 0 2px 6px rgba(230,0,18,0.3);
+  }
+  .logo-text { display: flex; flex-direction: column; line-height: 1.1; }
+  .logo-title { font-size: 15px; font-weight: 700; }
+  .logo-subtitle { font-size: 10px; color: var(--text-muted); letter-spacing: 1.2px; margin-top: 2px; }
+  .stats { display: flex; gap: 10px; flex: 1; justify-content: center; }
+  .stat-card {
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 14px;
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 64px;
+  }
+  .stat-card.accent { border-color: var(--brand-red); background: #fff5f6; }
+  .stat-num { font-size: 22px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat-label { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
+  .stat-num.vacant { color: var(--status-vacant); }
+  .stat-num.reserved { color: var(--status-reserved); }
+  .stat-num.dining { color: var(--status-dining); }
+  .stat-num.cleaning { color: var(--status-cleaning); }
+  .stat-num.waitlist { color: var(--brand-red); }
+  .clock { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .clock-date { font-size: 10px; color: var(--text-muted); text-align: right; margin-top: 2px; }
+
+  /* === MAIN === */
+  .main { flex: 1; display: flex; overflow: hidden; }
+  .left { flex: 1; display: flex; flex-direction: column; padding: 14px; overflow: hidden; }
+  .floor-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+  .floor-tab {
+    background: var(--bg-card);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 22px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s;
+    color: var(--text-muted);
+    font-family: inherit;
+  }
+  .floor-tab.active {
+    background: var(--brand-red);
+    border-color: var(--brand-red);
+    color: white;
+    box-shadow: 0 2px 6px rgba(230,0,18,0.25);
+  }
+  .floor-tab .small { font-size: 11px; opacity: 0.7; margin-left: 4px; font-weight: 500; }
+  .floor-tab.active .small { opacity: 0.9; }
+  .floorplan-wrap {
+    flex: 1;
+    background: var(--bg-card);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    padding: 14px;
+    overflow: hidden;
+    position: relative;
+  }
+  .floorplan-svg { width: 100%; height: 100%; display: block; }
+  .merge-banner {
+    position: absolute;
+    top: 16px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--brand-yellow);
+    color: white;
+    padding: 8px 22px;
+    border-radius: 22px;
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+    display: none;
+    z-index: 5;
+  }
+  .merge-banner.active { display: block; }
+
+  /* === Drawer === */
+  .drawer {
+    width: 360px;
+    background: var(--bg-card);
+    border-left: 2px solid var(--border);
+    padding: 22px 22px 16px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .drawer.empty { display: flex; align-items: center; justify-content: center; color: var(--text-muted); padding: 22px; }
+  .drawer-empty-text { text-align: center; font-size: 14px; }
+  .drawer-empty-icon { font-size: 56px; margin-bottom: 14px; opacity: 0.25; }
+  .drawer-section { margin-bottom: 14px; }
+  .drawer-table-num { font-size: 30px; font-weight: 800; color: var(--brand-red); letter-spacing: -0.5px; }
+  .drawer-table-meta { font-size: 13px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+  .drawer-status-pill {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-top: 10px;
+    color: white;
+  }
+  .pill-vacant { background: var(--status-vacant); }
+  .pill-reserved { background: var(--status-reserved); }
+  .pill-dining { background: var(--status-dining); }
+  .pill-cleaning { background: var(--status-cleaning); }
+  .pill-blocked { background: var(--status-blocked); }
+  .info-row {
+    display: flex; justify-content: space-between;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+  }
+  .info-row:last-child { border-bottom: none; }
+  .info-label { color: var(--text-muted); }
+  .info-value { font-weight: 500; text-align: right; max-width: 220px; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+  .btn {
+    background: var(--bg-base);
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    padding: 11px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-dark);
+    font-family: inherit;
+  }
+  .btn:hover { background: #fff; border-color: var(--text-dark); }
+  .btn:active { transform: scale(0.98); }
+  .btn.primary { background: var(--brand-red); border-color: var(--brand-red); color: white; }
+  .btn.primary:hover { background: #c2000f; border-color: #c2000f; }
+  .btn.success { background: var(--status-vacant); border-color: var(--status-vacant); color: white; }
+  .btn.warning { background: var(--status-cleaning); border-color: var(--status-cleaning); color: white; }
+  .btn.full { grid-column: 1 / -1; }
+
+  /* === Bottom legend === */
+  .legend {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 18px;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .legend-group { display: flex; align-items: center; gap: 8px; }
+  .legend-label { font-size: 11px; color: var(--text-muted); margin-right: 2px; font-weight: 600; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+  .legend-dot { width: 14px; height: 14px; border-radius: 4px; }
+  .legend-spacer { flex: 1; }
+  .merge-toggle {
+    background: var(--brand-red);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .merge-toggle.active { background: var(--brand-yellow); animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+
+  /* === SVG === */
+  .table-shape { transition: opacity 0.18s; }
+  .table-shape:hover { opacity: 0.82; }
+  .table-num { font-size: 11px; font-weight: 700; fill: white; text-anchor: middle; pointer-events: none; }
+  .table-cap { font-size: 9px; fill: white; text-anchor: middle; pointer-events: none; opacity: 0.95; }
+  .table-time { font-size: 8.5px; fill: white; text-anchor: middle; pointer-events: none; font-weight: 600; }
+  .static-label { font-size: 11px; fill: #8a7e72; text-anchor: middle; pointer-events: none; }
+  .vapor-strip { fill: #fef3c7; stroke: #f29100; stroke-width: 1.5; stroke-dasharray: 5 3; }
+
+  .fuel-tag {
+    font-size: 9px;
+    fill: var(--text-muted);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="logo">
+      <div class="logo-badge">王</div>
+      <div class="logo-text">
+        <div class="logo-title">雞王刷刷鍋</div>
+        <div class="logo-subtitle">MASTER OF CHICKEN · 桌位地圖</div>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat-card"><span class="stat-num vacant" id="s-vacant">0</span><span class="stat-label">空桌</span></div>
+      <div class="stat-card"><span class="stat-num reserved" id="s-reserved">0</span><span class="stat-label">已預訂</span></div>
+      <div class="stat-card"><span class="stat-num dining" id="s-dining">0</span><span class="stat-label">用餐中</span></div>
+      <div class="stat-card"><span class="stat-num cleaning" id="s-cleaning">0</span><span class="stat-label">等待清桌</span></div>
+      <div class="stat-card accent"><span class="stat-num waitlist" id="s-wait">0</span><span class="stat-label">候位中</span></div>
+      <div class="stat-card"><span class="stat-num" id="s-occupied">0</span><span class="stat-label">在席人數</span></div>
+    </div>
+    <div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="clock-date" id="clock-date"></div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="left">
+      <div class="floor-tabs">
+        <button class="floor-tab active" data-floor="1F">1F 主用餐區<span class="small" id="cnt-1F"></span></button>
+        <button class="floor-tab" data-floor="2F">2F 用餐區<span class="small" id="cnt-2F"></span></button>
+      </div>
+      <div class="floorplan-wrap">
+        <div class="merge-banner" id="merge-banner">⇆ 併桌模式：點選兩張相鄰桌子合併</div>
+        <svg class="floorplan-svg" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid meet" id="svg-floor"></svg>
+      </div>
+    </div>
+    <div class="drawer empty" id="drawer">
+      <div class="drawer-empty-text">
+        <div class="drawer-empty-icon">🪑</div>
+        <div>點選一張桌子查看詳情</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-group">
+      <span class="legend-label">狀態</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#22c55e"></span>空桌</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#eab308"></span>已預訂</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#ef4444"></span>用餐中</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#f97316"></span>等待清桌</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#94a3b8"></span>不可用</span>
+    </div>
+    <div class="legend-group">
+      <span class="legend-label">桌型</span>
+      <span class="legend-item">4 人 (120×100)</span>
+      <span class="legend-item">6 人 (180×100)</span>
+    </div>
+    <div class="legend-spacer"></div>
+    <button class="merge-toggle" id="merge-btn">⇆ 併桌模式</button>
+  </div>
+</div>
+
+<script>
+// ================================
+// FLOOR DATA — 從 PDF 配置圖按比例轉繪
+// ================================
+const FLOORS = {
+  '1F': {
+    static: [],
+    tables: [
+      // 西側靠牆 6 人桌（綠色 180×100）
+      { id: '1F-A1', x: 180, y: 320, w: 60, h: 100, cap: 6 },
+      { id: '1F-A2', x: 180, y: 430, w: 60, h: 100, cap: 6 },
+      { id: '1F-A3', x: 180, y: 540, w: 60, h: 100, cap: 6 },
+      { id: '1F-A4', x: 180, y: 650, w: 60, h: 70, cap: 4 },
+      // 中間 col 1 (4人桌)
+      { id: '1F-B1', x: 280, y: 320, w: 60, h: 70, cap: 4 },
+      { id: '1F-B2', x: 280, y: 410, w: 60, h: 70, cap: 4 },
+      { id: '1F-B3', x: 280, y: 500, w: 60, h: 70, cap: 4 },
+      { id: '1F-B4', x: 280, y: 590, w: 60, h: 70, cap: 4 },
+      // 中間 col 2 (6人桌)
+      { id: '1F-C1', x: 380, y: 320, w: 60, h: 100, cap: 6 },
+      { id: '1F-C2', x: 380, y: 440, w: 60, h: 100, cap: 6 },
+      { id: '1F-C3', x: 380, y: 560, w: 60, h: 100, cap: 6 },
+      // 中間 col 3 (4人桌)
+      { id: '1F-D1', x: 480, y: 320, w: 60, h: 70, cap: 4 },
+      { id: '1F-D2', x: 480, y: 410, w: 60, h: 70, cap: 4 },
+      { id: '1F-D3', x: 480, y: 500, w: 60, h: 70, cap: 4 },
+      { id: '1F-D4', x: 480, y: 590, w: 60, h: 70, cap: 4 },
+      // 東側冰箱旁
+      { id: '1F-E1', x: 670, y: 590, w: 60, h: 70, cap: 4 },
+    ]
+  },
+  '2F': {
+    static: [],
+    tables: [
+      // ============ 北區 (天然氣，藍/深藍) ============
+      // 第一排（緊接自動門下）
+      { id: '2F-N1', x: 540, y: 220, w: 60, h: 100, cap: 6 },
+      { id: '2F-N2', x: 620, y: 220, w: 60, h: 100, cap: 6 },
+      { id: '2F-N3', x: 850, y: 220, w: 60, h: 100, cap: 6 },
+      { id: '2F-N4', x: 930, y: 220, w: 60, h: 100, cap: 6 },
+      { id: '2F-N5', x: 1040, y: 220, w: 60, h: 100, cap: 6 },
+      // 第二排
+      { id: '2F-N6', x: 540, y: 340, w: 60, h: 100, cap: 6 },
+      { id: '2F-N7', x: 620, y: 340, w: 60, h: 100, cap: 6 },
+      { id: '2F-N8', x: 850, y: 340, w: 60, h: 70, cap: 4 },
+      { id: '2F-N9', x: 930, y: 340, w: 60, h: 70, cap: 4 },
+      { id: '2F-N10', x: 1040, y: 340, w: 60, h: 100, cap: 6 },
+      // 第三排
+      { id: '2F-N11', x: 540, y: 460, w: 60, h: 100, cap: 6 },
+      { id: '2F-N12', x: 620, y: 460, w: 60, h: 100, cap: 6 },
+
+      // ============ 南左區 (天然氣，藍 4 人為主) ============
+      // 第一排
+      { id: '2F-S1', x: 540, y: 590, w: 60, h: 70, cap: 4 },
+      { id: '2F-S2', x: 610, y: 590, w: 60, h: 70, cap: 4 },
+      { id: '2F-S3', x: 680, y: 590, w: 60, h: 100, cap: 6 },
+      { id: '2F-S4', x: 760, y: 590, w: 60, h: 70, cap: 4 },
+      // 第二排
+      { id: '2F-S5', x: 540, y: 680, w: 60, h: 70, cap: 4 },
+      { id: '2F-S6', x: 610, y: 680, w: 60, h: 70, cap: 4 },
+      { id: '2F-S7', x: 760, y: 680, w: 60, h: 70, cap: 4 },
+
+      // ============ 南右區 (瓦斯桶，橘/紅) ============
+      // 第一行
+      { id: '2F-G1', x: 870, y: 480, w: 60, h: 70, cap: 4 },
+      { id: '2F-G2', x: 940, y: 480, w: 60, h: 100, cap: 6, fuel: 'tank' },
+      { id: '2F-G3', x: 1020, y: 480, w: 60, h: 70, cap: 4 },
+      // 第二行
+      { id: '2F-G4', x: 870, y: 570, w: 60, h: 70, cap: 4 },
+      { id: '2F-G5', x: 940, y: 600, w: 60, h: 70, cap: 4, fuel: 'tank' },
+      { id: '2F-G6', x: 1020, y: 570, w: 60, h: 70, cap: 4 },
+      // 第三行
+      { id: '2F-G7', x: 870, y: 660, w: 60, h: 70, cap: 4 },
+      { id: '2F-G8', x: 940, y: 690, w: 60, h: 70, cap: 4, fuel: 'tank' },
+      { id: '2F-G9', x: 1020, y: 660, w: 60, h: 70, cap: 4 },
+    ]
+  }
+};
+
+// ================================
+// FAKE STATE GENERATION
+// ================================
+const NAMES = ['林先生','陳小姐','王太太','張董','李媽媽','黃爸爸','吳家','蔡先生','鄭小姐','劉太太','謝家族','周先生','葉小姐','宋董','徐媽媽','羅家','高先生','蕭小姐','潘老師','曾家','遊覽車-大山旅遊','遊覽車-雄獅','溪頭民宿團'];
+const NOTES = ['','','長輩需軟食','兒童椅 ×1','慶生有蛋糕','輪椅進出','靠窗','海鮮過敏','不吃辣','','剪雞肉服務','兩位 80+ 長輩','VIP 銅卡','憑溪頭票根換肉盤','記者場','過敏:花生'];
+
+function pick(arr) { return arr[Math.floor(Math.random()*arr.length)]; }
+function phone() {
+  return `09${Math.floor(Math.random()*100).toString().padStart(2,'0')}-${Math.floor(Math.random()*1000).toString().padStart(3,'0')}-${Math.floor(Math.random()*1000).toString().padStart(3,'0')}`;
+}
+
+const STATE = {};
+const allTables = [...FLOORS['1F'].tables, ...FLOORS['2F'].tables];
+
+(function seed() {
+  // distribution: ~35% vacant, 25% reserved, 25% dining, 8% cleaning, 4% blocked
+  const dist = ['vacant','vacant','vacant','vacant','vacant','vacant','vacant',
+                'reserved','reserved','reserved','reserved','reserved',
+                'dining','dining','dining','dining','dining',
+                'cleaning','cleaning',
+                'blocked'];
+  allTables.forEach((t, i) => {
+    const status = dist[Math.floor(Math.random()*dist.length)];
+    const partySize = Math.min(t.cap, Math.max(2, t.cap - Math.floor(Math.random()*2)));
+    const reserveOffset = Math.floor(Math.random()*5) - 1;
+    const seatedOffset = Math.floor(Math.random()*100) + 5;
+    const now = Date.now();
+    STATE[t.id] = {
+      status,
+      partySize: (status === 'vacant' || status === 'blocked') ? null : partySize,
+      customerName: (status === 'reserved' || status === 'dining') ? pick(NAMES) : null,
+      phone: (status === 'reserved' || status === 'dining') ? phone() : null,
+      reserveTime: status === 'reserved' ? new Date(now + reserveOffset*3600000 + Math.random()*1800000) : null,
+      seatedTime: status === 'dining' ? new Date(now - seatedOffset*60000) : null,
+      note: (status !== 'vacant' && status !== 'blocked') ? pick(NOTES) : '',
+      blockReason: status === 'blocked' ? pick(['桌椅維修','瓦斯管線檢查','地板施工']) : null,
+      mergedWith: null,
+      depositPaid: status === 'reserved' ? Math.random() > 0.15 : false,
+    };
+  });
+  // Force a couple obvious examples per status for demo
+  STATE['1F-A1'] = { ...STATE['1F-A1'], status: 'dining', partySize: 6, customerName: '林家三代', phone: phone(), seatedTime: new Date(Date.now() - 45*60000), note: '剪雞肉服務 + 兒童椅 ×2', depositPaid: false };
+  STATE['1F-C1'] = { ...STATE['1F-C1'], status: 'reserved', partySize: 6, customerName: '遊覽車-大山旅遊', phone: phone(), reserveTime: new Date(Date.now() + 25*60000), note: 'TA-C 旅行社線 / 訂金已付', depositPaid: true };
+  STATE['2F-G2'] = { ...STATE['2F-G2'], status: 'blocked', blockReason: '瓦斯桶定期檢查' };
+})();
+
+let WAITLIST = 7;
+let currentFloor = '1F';
+let selectedId = null;
+let mergeMode = false;
+let mergeFirst = null;
+
+// ================================
+// HELPERS
+// ================================
+const STATUS_COLOR = {
+  vacant: '#22c55e', reserved: '#eab308', dining: '#ef4444',
+  cleaning: '#f97316', blocked: '#94a3b8'
+};
+const STATUS_LABEL = {
+  vacant: '空桌', reserved: '已預訂', dining: '用餐中',
+  cleaning: '等待清桌', blocked: '不可用'
+};
+
+function fmtTime(d) {
+  return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+}
+function fmtRel(d) {
+  const m = Math.round((d.getTime() - Date.now())/60000);
+  if (m < 0) return `已遲到 ${-m} 分`;
+  if (m < 60) return `${m} 分後`;
+  return `${Math.floor(m/60)} 小時 ${m%60} 分後`;
+}
+
+// ================================
+// RENDER FLOOR
+// ================================
+function svgEsc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+function renderFloor(floor) {
+  const svg = document.getElementById('svg-floor');
+  const f = FLOORS[floor];
+  let html = '';
+
+  // Static
+  f.static.forEach(s => {
+    if (s.kind === 'wall') {
+      html += `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="none" stroke="#3a2e26" stroke-width="3" rx="6"/>`;
+    } else if (s.kind === 'void') {
+      html += `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="#fafaf6" stroke="#cfc8bb" stroke-width="1" stroke-dasharray="6 4" rx="4"/>`;
+      html += `<line x1="${s.x}" y1="${s.y}" x2="${s.x+s.w}" y2="${s.y+s.h}" stroke="#d8d2c5" stroke-width="1"/>`;
+      html += `<line x1="${s.x+s.w}" y1="${s.y}" x2="${s.x}" y2="${s.y+s.h}" stroke="#d8d2c5" stroke-width="1"/>`;
+      // 兩個 3.6m 圓
+      html += `<circle cx="${s.x+s.w*0.3}" cy="${s.y+s.h*0.32}" r="60" fill="none" stroke="#cfc8bb" stroke-width="1" stroke-dasharray="3 3"/>`;
+      html += `<text x="${s.x+s.w*0.3}" y="${s.y+s.h*0.32+4}" font-size="10" fill="#a8a094" text-anchor="middle">3.6m</text>`;
+      html += `<circle cx="${s.x+s.w*0.3}" cy="${s.y+s.h*0.72}" r="60" fill="none" stroke="#cfc8bb" stroke-width="1" stroke-dasharray="3 3"/>`;
+      html += `<text x="${s.x+s.w*0.3}" y="${s.y+s.h*0.72+4}" font-size="10" fill="#a8a094" text-anchor="middle">3.6m</text>`;
+      html += `<text x="${s.x+s.w/2+50}" y="${s.y+s.h/2+5}" font-size="22" fill="#a8a094" text-anchor="middle" font-weight="600">挑空</text>`;
+    } else if (s.kind === 'vapor') {
+      html += `<rect class="vapor-strip" x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" rx="4"/>`;
+      html += `<text x="${s.x+s.w-6}" y="${s.y+12}" font-size="9" fill="#c2671d" text-anchor="end" font-weight="600">瓦斯桶區</text>`;
+    } else if (s.kind === 'door') {
+      html += `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="#ddd6c7" stroke="#a8a094" stroke-width="1"/>`;
+      html += `<text x="${s.x+s.w/2}" y="${s.y-3}" font-size="9" fill="#8a7e72" text-anchor="middle">${s.label}</text>`;
+    } else if (s.kind === 'special') {
+      html += `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="${s.accent}" stroke="${s.accent}" stroke-width="1" rx="3"/>`;
+      // 直式或橫式文字
+      if (s.h > s.w * 1.5) {
+        const chars = s.label.split('');
+        chars.forEach((c, i) => {
+          html += `<text x="${s.x+s.w/2}" y="${s.y+18+i*14}" font-size="11" fill="white" text-anchor="middle" font-weight="600">${c}</text>`;
+        });
+      } else {
+        html += `<text x="${s.x+s.w/2}" y="${s.y+s.h/2+4}" font-size="11" fill="white" text-anchor="middle" font-weight="600">${s.label}</text>`;
+      }
+    } else { // static
+      html += `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" fill="#f0ebe2" stroke="#d4cdc1" stroke-width="1" rx="3"/>`;
+      html += `<text class="static-label" x="${s.x+s.w/2}" y="${s.y+s.h/2+4}">${s.label}</text>`;
+    }
+  });
+
+  // Tables
+  f.tables.forEach(t => {
+    const st = STATE[t.id];
+    const color = STATUS_COLOR[st.status];
+    const isSel = selectedId === t.id;
+    const isMergeFirst = mergeFirst === t.id;
+    const stroke = isSel ? '#e60012' : (isMergeFirst ? '#f29100' : 'rgba(0,0,0,0.18)');
+    const sw = (isSel || isMergeFirst) ? 3 : 1;
+    const dash = isMergeFirst ? 'stroke-dasharray="4 2"' : '';
+    const num = t.id.split('-')[1];
+
+    html += `<g style="cursor:pointer" onclick="selectTable('${t.id}')">`;
+    html += `<rect class="table-shape" x="${t.x}" y="${t.y}" width="${t.w}" height="${t.h}" fill="${color}" rx="6" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`;
+    html += `<text class="table-num" x="${t.x+t.w/2}" y="${t.y+t.h/2-3}">${num}</text>`;
+    html += `<text class="table-cap" x="${t.x+t.w/2}" y="${t.y+t.h/2+10}">${t.cap}人</text>`;
+    if (st.status === 'dining' && st.seatedTime) {
+      const m = Math.floor((Date.now()-st.seatedTime.getTime())/60000);
+      html += `<text class="table-time" x="${t.x+t.w/2}" y="${t.y+t.h-4}">${m} 分</text>`;
+    }
+    if (st.status === 'reserved' && st.reserveTime) {
+      html += `<text class="table-time" x="${t.x+t.w/2}" y="${t.y+t.h-4}">${fmtTime(st.reserveTime)}</text>`;
+    }
+    html += `</g>`;
+  });
+
+  svg.innerHTML = html;
+}
+
+// ================================
+// STATS
+// ================================
+function updateStats() {
+  const c = { vacant:0, reserved:0, dining:0, cleaning:0, blocked:0 };
+  let occ = 0;
+  Object.values(STATE).forEach(s => {
+    c[s.status]++;
+    if (s.status === 'dining' && s.partySize) occ += s.partySize;
+  });
+  document.getElementById('s-vacant').textContent = c.vacant;
+  document.getElementById('s-reserved').textContent = c.reserved;
+  document.getElementById('s-dining').textContent = c.dining;
+  document.getElementById('s-cleaning').textContent = c.cleaning;
+  document.getElementById('s-wait').textContent = WAITLIST;
+  document.getElementById('s-occupied').textContent = occ;
+  document.getElementById('cnt-1F').textContent = `(${FLOORS['1F'].tables.length})`;
+  document.getElementById('cnt-2F').textContent = `(${FLOORS['2F'].tables.length})`;
+}
+
+// ================================
+// DRAWER
+// ================================
+function renderDrawer() {
+  const d = document.getElementById('drawer');
+  if (!selectedId) {
+    d.classList.add('empty');
+    d.innerHTML = `<div class="drawer-empty-text"><div class="drawer-empty-icon">🪑</div><div>點選一張桌子查看詳情</div></div>`;
+    return;
+  }
+  d.classList.remove('empty');
+  const t = allTables.find(x => x.id === selectedId);
+  const st = STATE[selectedId];
+  const floor = selectedId.startsWith('1F') ? '一樓' : '二樓';
+  const fuel = (selectedId.includes('-G') || st.fuel === 'tank') ? '瓦斯桶' : (selectedId.startsWith('2F') ? '天然氣管線' : '—');
+
+  let html = `
+    <div class="drawer-section">
+      <div class="drawer-table-num">${t.id}</div>
+      <div class="drawer-table-meta">
+        ${t.cap} 人桌 · ${t.cap === 6 ? '180×100 cm' : '120×100 cm'}<br>
+        ${floor}${selectedId.startsWith('2F') ? ' · ' + fuel : ''}
+      </div>
+      <span class="drawer-status-pill pill-${st.status}">${STATUS_LABEL[st.status]}</span>
+    </div>
+    <div class="drawer-section">`;
+
+  if (st.status === 'reserved') {
+    html += `
+      <div class="info-row"><span class="info-label">訂位人</span><span class="info-value">${st.customerName}</span></div>
+      <div class="info-row"><span class="info-label">電話</span><span class="info-value">${st.phone}</span></div>
+      <div class="info-row"><span class="info-label">人數</span><span class="info-value">${st.partySize} 位</span></div>
+      <div class="info-row"><span class="info-label">預訂時間</span><span class="info-value">${fmtTime(st.reserveTime)}</span></div>
+      <div class="info-row"><span class="info-label">距離到達</span><span class="info-value">${fmtRel(st.reserveTime)}</span></div>
+      <div class="info-row"><span class="info-label">訂金</span><span class="info-value">${st.depositPaid ? '✅ 已付' : '⚠️ 未付'}</span></div>
+      <div class="info-row"><span class="info-label">備註</span><span class="info-value">${st.note || '—'}</span></div>`;
+  } else if (st.status === 'dining') {
+    const m = Math.floor((Date.now()-st.seatedTime.getTime())/60000);
+    html += `
+      <div class="info-row"><span class="info-label">客人</span><span class="info-value">${st.customerName}</span></div>
+      <div class="info-row"><span class="info-label">人數</span><span class="info-value">${st.partySize} 位</span></div>
+      <div class="info-row"><span class="info-label">入座</span><span class="info-value">${fmtTime(st.seatedTime)}</span></div>
+      <div class="info-row"><span class="info-label">已用餐</span><span class="info-value">${m} 分鐘</span></div>
+      <div class="info-row"><span class="info-label">備註</span><span class="info-value">${st.note || '—'}</span></div>`;
+  } else if (st.status === 'cleaning') {
+    html += `<div class="info-row"><span class="info-label">狀態</span><span class="info-value">外場清理中</span></div>`;
+  } else if (st.status === 'blocked') {
+    html += `<div class="info-row"><span class="info-label">原因</span><span class="info-value">${st.blockReason || '—'}</span></div>`;
+  } else {
+    html += `<div style="text-align:center;color:var(--text-muted);padding:18px 0">此桌目前可使用</div>`;
+  }
+
+  html += `</div><div class="actions">`;
+  if (st.status === 'vacant') {
+    html += `<button class="btn primary full" onclick="setStatus('reserved')">📋 建立訂位</button>`;
+    html += `<button class="btn success full" onclick="setStatus('dining')">✅ 直接入座</button>`;
+    html += `<button class="btn warning" onclick="setStatus('blocked')">🚫 設為不可用</button>`;
+    html += `<button class="btn" onclick="enterMergeFromSel()">⇆ 併桌</button>`;
+  } else if (st.status === 'reserved') {
+    html += `<button class="btn success full" onclick="setStatus('dining')">✅ 客人到了 — 入座</button>`;
+    html += `<button class="btn" onclick="setStatus('vacant')">取消訂位</button>`;
+    html += `<button class="btn" onclick="enterMergeFromSel()">⇆ 併桌</button>`;
+  } else if (st.status === 'dining') {
+    html += `<button class="btn warning full" onclick="setStatus('cleaning')">🧹 結帳離席（待清桌）</button>`;
+    html += `<button class="btn" onclick="alert('開啟訂單詳情（v0 模擬連結到肚肚 POS）')">📝 查看訂單</button>`;
+    html += `<button class="btn" onclick="alert('已派送餐機器人 #2 前往 ${selectedId}')">🤖 送餐</button>`;
+  } else if (st.status === 'cleaning') {
+    html += `<button class="btn success full" onclick="setStatus('vacant')">✨ 清桌完成</button>`;
+  } else if (st.status === 'blocked') {
+    html += `<button class="btn success full" onclick="setStatus('vacant')">恢復可用</button>`;
+  }
+  html += `</div>`;
+  d.innerHTML = html;
+}
+
+// ================================
+// ACTIONS
+// ================================
+function selectTable(id) {
+  if (mergeMode) {
+    if (!mergeFirst) {
+      mergeFirst = id;
+      renderFloor(currentFloor);
+    } else if (mergeFirst === id) {
+      mergeFirst = null;
+      renderFloor(currentFloor);
+    } else {
+      doMerge(mergeFirst, id);
+      mergeFirst = null; mergeMode = false;
+      document.getElementById('merge-banner').classList.remove('active');
+      document.getElementById('merge-btn').classList.remove('active');
+      renderFloor(currentFloor);
+    }
+    return;
+  }
+  selectedId = id;
+  renderFloor(currentFloor);
+  renderDrawer();
+}
+
+function doMerge(id1, id2) {
+  const t1 = allTables.find(x => x.id === id1);
+  const t2 = allTables.find(x => x.id === id2);
+  if (id1.substring(0,2) !== id2.substring(0,2)) {
+    alert('⚠️ 不能跨樓層併桌'); return;
+  }
+  const dx = Math.abs((t1.x+t1.w/2) - (t2.x+t2.w/2));
+  const dy = Math.abs((t1.y+t1.h/2) - (t2.y+t2.h/2));
+  if (dx > 130 && dy > 130) {
+    alert(`⚠️ ${t1.id} 與 ${t2.id} 距離太遠，無法併桌`); return;
+  }
+  STATE[id1].mergedWith = id2;
+  STATE[id2].mergedWith = id1;
+  alert(`✅ ${t1.id} + ${t2.id} 已併桌\n合計 ${t1.cap + t2.cap} 人座位`);
+}
+
+function setStatus(s) {
+  if (!selectedId) return;
+  const t = allTables.find(x => x.id === selectedId);
+  STATE[selectedId].status = s;
+  if (s === 'vacant' || s === 'cleaning') {
+    Object.assign(STATE[selectedId], { customerName:null, phone:null, reserveTime:null, seatedTime:null, partySize:null, note:'', depositPaid:false });
+  }
+  if (s === 'reserved') {
+    Object.assign(STATE[selectedId], {
+      customerName: pick(NAMES), phone: phone(),
+      reserveTime: new Date(Date.now() + 30*60000),
+      partySize: t.cap, depositPaid: false
+    });
+  }
+  if (s === 'dining') {
+    if (!STATE[selectedId].customerName) STATE[selectedId].customerName = pick(NAMES);
+    if (!STATE[selectedId].partySize) STATE[selectedId].partySize = t.cap;
+    STATE[selectedId].seatedTime = new Date();
+  }
+  if (s === 'blocked') {
+    STATE[selectedId].blockReason = '臨時保留';
+  }
+  renderFloor(currentFloor);
+  renderDrawer();
+  updateStats();
+}
+
+function enterMergeFromSel() {
+  mergeMode = true;
+  mergeFirst = selectedId;
+  selectedId = null;
+  document.getElementById('merge-banner').classList.add('active');
+  document.getElementById('merge-btn').classList.add('active');
+  renderFloor(currentFloor);
+  renderDrawer();
+}
+
+// Tabs
+document.querySelectorAll('.floor-tab').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.floor-tab').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    currentFloor = b.dataset.floor;
+    selectedId = null;
+    renderFloor(currentFloor);
+    renderDrawer();
+  });
+});
+
+// Merge button
+document.getElementById('merge-btn').addEventListener('click', () => {
+  mergeMode = !mergeMode;
+  mergeFirst = null;
+  document.getElementById('merge-banner').classList.toggle('active', mergeMode);
+  document.getElementById('merge-btn').classList.toggle('active', mergeMode);
+  renderFloor(currentFloor);
+});
+
+// Clock
+function tick() {
+  const d = new Date();
+  document.getElementById('clock').textContent =
+    `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
+  document.getElementById('clock-date').textContent =
+    `${d.getFullYear()}/${(d.getMonth()+1).toString().padStart(2,'0')}/${d.getDate().toString().padStart(2,'0')} 週${'日一二三四五六'[d.getDay()]}`;
+}
+setInterval(() => {
+  tick();
+  // refresh dining timers every 30 sec
+  if (Math.floor(Date.now()/1000) % 30 === 0) renderFloor(currentFloor);
+}, 1000);
+tick();
+
+// Init
+renderFloor(currentFloor);
+updateStats();
+</script>
+</body>
+</html>

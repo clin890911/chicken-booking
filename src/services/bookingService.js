@@ -1,4 +1,9 @@
-// bookingService：統一封裝訂位 CRUD。目前後端是 localStorage，未來切到 Firestore 只改本檔即可。
+// bookingService：統一封裝訂位 CRUD
+// schema: { id, name, phone, guests, date, timeSlot, notes, source, status,
+//           assignedTableId, lineUserId, createdAt, updatedAt, createdBy }
+// 後端：localStorage（v0），未來切到 Firestore 只改本檔
+import * as customerService from './customerService'
+
 const STORAGE_KEY = 'chicken_bookings_v1'
 const NOSHOW_KEY = 'chicken_noshow_v1'
 
@@ -18,18 +23,29 @@ function uid() {
   return 'B' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6).toUpperCase()
 }
 
+// === 讀取 ===
 export function listAll() {
-  return read()
+  // 補上新欄位的預設值（向後相容）
+  return read().map(b => ({
+    assignedTableId: null,
+    lineUserId: null,
+    ...b,
+  }))
 }
 
 export function listByDate(date) {
-  return read().filter(b => b.date === date)
+  return listAll().filter(b => b.date === date)
+}
+
+export function listByTable(tableNumber) {
+  return listAll().filter(b => b.assignedTableId === tableNumber)
 }
 
 export function getById(id) {
-  return read().find(b => b.id === id) || null
+  return listAll().find(b => b.id === id) || null
 }
 
+// === 新增 ===
 export function create(data) {
   const list = read()
   const booking = {
@@ -47,15 +63,31 @@ export function create(data) {
     },
     source: data.source || 'online',
     status: data.status || 'confirmed',
+    assignedTableId: data.assignedTableId || null,
+    lineUserId: data.lineUserId || null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     createdBy: data.createdBy || 'guest'
   }
   list.push(booking)
   write(list)
+
+  // upsert 到 customers（自動建立顧客檔）
+  if (booking.phone) {
+    customerService.upsert({
+      phone: booking.phone,
+      name: booking.name,
+      lineUserId: booking.lineUserId,
+      partySize: booking.guests,
+      source: booking.source,
+      notes: booking.notes.text,
+    })
+  }
+
   return booking
 }
 
+// === 更新 ===
 export function update(id, patch) {
   const list = read()
   const idx = list.findIndex(b => b.id === id)
@@ -70,8 +102,19 @@ export function remove(id) {
   write(list)
 }
 
+// === 狀態 ===
 export function setStatus(id, status) {
-  const b = update(id, { status })
+  const patch = { status }
+  // 從非到達狀態變成 arrived → 記錄實際到達時間
+  if (status === 'arrived') {
+    const cur = getById(id)
+    if (cur && !cur.actualArrivalTime) patch.actualArrivalTime = new Date().toISOString()
+  }
+  // 從 arrived 變回 confirmed（誤觸復原）→ 清掉
+  if (status === 'confirmed') {
+    patch.actualArrivalTime = null
+  }
+  const b = update(id, patch)
   if (status === 'noshow' && b) recordNoshow(b)
   return b
 }
@@ -86,7 +129,16 @@ export function cycleStatus(id) {
   return setStatus(id, next)
 }
 
-// No-show 記錄
+// === 桌位指派 ===
+export function assignTable(bookingId, tableNumber) {
+  return update(bookingId, { assignedTableId: tableNumber })
+}
+
+export function unassignTable(bookingId) {
+  return update(bookingId, { assignedTableId: null })
+}
+
+// === No-show 記錄 ===
 function readNoshow() {
   try {
     return JSON.parse(localStorage.getItem(NOSHOW_KEY) || '{}')
@@ -122,14 +174,29 @@ export function searchNoshow(phone) {
     .map(([k, v]) => ({ phone: k, ...v }))
 }
 
-// 匯出 CSV
+// === 工具 ===
+// 找出指定時段「即將到達」的訂位（用於即時通知外場）
+export function listUpcoming(date, withinMinutes = 60) {
+  const now = new Date()
+  return listByDate(date).filter(b => {
+    if (b.status !== 'confirmed') return false
+    if (!b.timeSlot) return false
+    const [hh, mm] = b.timeSlot.split(':').map(Number)
+    const slot = new Date(now)
+    slot.setHours(hh, mm, 0, 0)
+    const diffMin = (slot - now) / 60000
+    return diffMin >= -15 && diffMin <= withinMinutes
+  }).sort((a, b) => (a.timeSlot || '').localeCompare(b.timeSlot || ''))
+}
+
+// === 匯出 CSV ===
 export function exportCSV() {
   const list = read()
-  const headers = ['訂位編號', '姓名', '電話', '人數', '日期', '時段', '寵物', '兒童', '行動不便', '備註', '來源', '狀態', '建立時間']
+  const headers = ['訂位編號', '姓名', '電話', '人數', '日期', '時段', '指派桌', '寵物', '兒童', '行動不便', '備註', '來源', '狀態', '建立時間']
   const rows = list.map(b => [
-    b.id, b.name, b.phone, b.guests, b.date, b.timeSlot,
-    b.notes.pet ? 'Y' : '', b.notes.child ? 'Y' : '', b.notes.mobility ? 'Y' : '',
-    b.notes.text, b.source, b.status, b.createdAt
+    b.id, b.name, b.phone, b.guests, b.date, b.timeSlot, b.assignedTableId || '',
+    b.notes?.pet ? 'Y' : '', b.notes?.child ? 'Y' : '', b.notes?.mobility ? 'Y' : '',
+    b.notes?.text || '', b.source, b.status, b.createdAt
   ])
   const escape = (v) => {
     const s = String(v ?? '')

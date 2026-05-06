@@ -4,8 +4,8 @@ import { Card, EmptyState } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { todayStr, formatDate } from '../../utils/timeSlots'
 
-export default function CalendarView() {
-  const { bookings, cycleStatus, setStatus } = useBooking()
+export default function CalendarView({ onAssignTable }) {
+  const { bookings } = useBooking()
   const [cursor, setCursor] = useState(() => {
     const d = new Date()
     return { year: d.getFullYear(), month: d.getMonth() }
@@ -98,8 +98,7 @@ export default function CalendarView() {
               <BookingCard
                 key={b.id}
                 booking={b}
-                onCycleStatus={() => cycleStatus(b.id)}
-                onNoshow={() => { if (confirm(`標記 ${b.name} 為 no-show?`)) setStatus(b.id, 'noshow') }}
+                onAssign={onAssignTable}
               />
             ))}
           </div>

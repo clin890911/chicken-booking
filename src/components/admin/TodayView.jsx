@@ -1,59 +1,124 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import BookingCard from '../booking/BookingCard'
 import StatsCard from './StatsCard'
 import { EmptyState } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { todayStr, generateTimeSlots } from '../../utils/timeSlots'
 
-export default function TodayView() {
-  const { bookings, settings, cycleStatus, setStatus } = useBooking()
+const SOURCE_FILTERS = [
+  { key: 'all',    label: '全部',     icon: '🔍' },
+  { key: 'online', label: '線上',     icon: '🌐' },
+  { key: 'phone',  label: '電話',     icon: '📞' },
+  { key: 'walkin', label: '現場',     icon: '🚶' },
+  { key: 'group',  label: '團體',     icon: '👥' },
+  { key: 'line',   label: 'LINE',    icon: '💚' },
+]
+
+export default function TodayView({ onAssignTable }) {
+  const { bookings, settings } = useBooking()
   const today = todayStr()
+  const [query, setQuery] = useState('')
+  const [source, setSource] = useState('all')
+  const [hideCompleted, setHideCompleted] = useState(true)
+
+  const filtered = useMemo(() => {
+    let list = bookings.filter(b => b.date === today && b.status !== 'cancelled')
+    if (hideCompleted) list = list.filter(b => b.status !== 'completed')
+    if (source !== 'all') list = list.filter(b => b.source === source)
+    if (query.trim()) {
+      const q = query.trim().toLowerCase()
+      list = list.filter(b =>
+        (b.name || '').toLowerCase().includes(q) ||
+        (b.phone || '').includes(q) ||
+        (b.assignedTableId || '').toLowerCase().includes(q)
+      )
+    }
+    return list
+  }, [bookings, today, source, query, hideCompleted])
 
   const stats = useMemo(() => {
-    const todayBookings = bookings.filter(b => b.date === today && b.status !== 'cancelled')
-    const totalGroups = todayBookings.length
-    const totalGuests = todayBookings.reduce((s, b) => s + Number(b.guests || 0), 0)
-    const arrivedGroups = todayBookings.filter(b => b.status === 'arrived' || b.status === 'completed').length
-    return { totalGroups, totalGuests, arrivedGroups, todayBookings }
+    const todayAll = bookings.filter(b => b.date === today && b.status !== 'cancelled')
+    const totalGroups = todayAll.length
+    const totalGuests = todayAll.reduce((s, b) => s + Number(b.guests || 0), 0)
+    const arrivedGroups = todayAll.filter(b => b.status === 'arrived' || b.status === 'completed').length
+    const dining = todayAll.filter(b => b.status === 'arrived').length
+    const unassigned = todayAll.filter(b => b.status === 'confirmed' && !b.assignedTableId).length
+    return { totalGroups, totalGuests, arrivedGroups, dining, unassigned }
   }, [bookings, today])
 
   const grouped = useMemo(() => {
     const slots = generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval)
     const map = {}
     slots.forEach(s => { map[s] = [] })
-    stats.todayBookings.forEach(b => {
+    filtered.forEach(b => {
       if (!map[b.timeSlot]) map[b.timeSlot] = []
       map[b.timeSlot].push(b)
     })
     return Object.entries(map).filter(([, list]) => list.length > 0)
-  }, [stats.todayBookings, settings])
+  }, [filtered, settings])
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-2">
-        <StatsCard icon="📋" label="今日訂位" value={`${stats.totalGroups} 組`} color="red" />
-        <StatsCard icon="👥" label="總人數" value={`${stats.totalGuests} 位`} color="yellow" />
-        <StatsCard icon="✅" label="已到" value={`${stats.arrivedGroups} 組`} color="green" />
+      {/* 統計 */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <StatsCard icon="📋" label="今日訂位" value={`${stats.totalGroups}`} color="red" />
+        <StatsCard icon="👥" label="總人數" value={`${stats.totalGuests}`} color="yellow" />
+        <StatsCard icon="🪑" label="未指派" value={`${stats.unassigned}`} color="red" />
+        <StatsCard icon="🍲" label="用餐中" value={`${stats.dining}`} color="red" />
+        <StatsCard icon="✅" label="已到/離" value={`${stats.arrivedGroups}`} color="green" />
       </div>
 
+      {/* 搜尋 + Filter */}
+      <div className="space-y-2">
+        <div className="flex gap-2 items-center">
+          <input
+            type="search"
+            placeholder="🔍 搜尋姓名 / 電話 / 桌號"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            className="input flex-1"
+          />
+          <label className="flex items-center gap-1.5 text-xs text-chicken-brown/70 whitespace-nowrap">
+            <input type="checkbox" checked={hideCompleted} onChange={e => setHideCompleted(e.target.checked)} />
+            <span>隱藏已離</span>
+          </label>
+        </div>
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+          {SOURCE_FILTERS.map(f => (
+            <button
+              key={f.key}
+              onClick={() => setSource(f.key)}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all
+                ${source === f.key
+                  ? 'bg-chicken-red text-white shadow'
+                  : 'bg-white border border-chicken-brown/15 text-chicken-brown/70 hover:border-chicken-red/40'}`}
+            >
+              {f.icon} {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 列表 */}
       {grouped.length === 0 ? (
-        <EmptyState icon="🍽️" title="今日尚無訂位" hint="客人線上訂位後會出現在這裡" />
+        filtered.length === 0 && (query || source !== 'all') ? (
+          <EmptyState icon="🔍" title="找不到符合的訂位" hint="試試其他關鍵字或清除過濾條件" />
+        ) : (
+          <EmptyState icon="🍽️" title="今日尚無訂位" hint="客人線上訂位後會出現在這裡" />
+        )
       ) : (
         grouped.map(([slot, list]) => (
           <div key={slot}>
             <div className="flex items-center gap-2 mb-2 px-1">
-              <span className="text-base font-black text-chicken-red">{slot}</span>
+              <span className="text-base font-black text-chicken-red tabular-nums">{slot}</span>
               <div className="flex-1 h-px bg-chicken-brown/10" />
-              <span className="text-xs text-chicken-brown/60">{list.length} 組 / {list.reduce((s, b) => s + Number(b.guests || 0), 0)} 位</span>
+              <span className="text-xs text-chicken-brown/60">
+                {list.length} 組 / {list.reduce((s, b) => s + Number(b.guests || 0), 0)} 位
+              </span>
             </div>
             <div className="space-y-2">
               {list.map(b => (
-                <BookingCard
-                  key={b.id}
-                  booking={b}
-                  onCycleStatus={() => cycleStatus(b.id)}
-                  onNoshow={() => { if (confirm(`標記 ${b.name} 為 no-show?`)) setStatus(b.id, 'noshow') }}
-                />
+                <BookingCard key={b.id} booking={b} onAssign={onAssignTable} />
               ))}
             </div>
           </div>

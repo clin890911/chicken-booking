@@ -8,3 +8,9 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 *.log
+
+# Vite HMR temp files
+vite.config.js.timestamp-*.mjs
+
+# Local Claude/IDE config
+.claude/
