@@ -1,40 +1,29 @@
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { motion, AnimatePresence } from 'framer-motion'
-import DatePicker from '../components/booking/DatePicker'
-import TimeSlotPicker from '../components/booking/TimeSlotPicker'
+import { AnimatePresence, motion } from 'framer-motion'
+import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { Input, Textarea } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
-import { dayLabel } from '../utils/timeSlots'
-
-// 步驟式訂位頁：人數 → 日期 → 時段 → 個資
-// 設計重點：
-// 1. 手機優先、單欄、大按鈕
-// 2. 每步只問一件事；上方顯示已選資訊（可點擊回去改）
-// 3. 進度點顯示流程進度
-// 4. 流暢動畫減少切換不適感
-
-const STEPS = [
-  { key: 'guests', label: '幾位用餐' },
-  { key: 'date', label: '哪一天' },
-  { key: 'time', label: '幾點到' },
-  { key: 'info', label: '聯絡資訊' },
-]
+import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
+import { calcSlotCapacity } from '../utils/capacity'
 
 const NOTE_OPTIONS = [
-  { key: 'pet', label: '🐾 攜帶寵物' },
-  { key: 'child', label: '👶 有兒童' },
-  { key: 'mobility', label: '♿ 行動不便' },
+  { key: 'pet', label: '攜帶寵物' },
+  { key: 'child', label: '有兒童' },
+  { key: 'mobility', label: '行動不便' },
 ]
+
+const QUICK_GUESTS = [2, 4, 6, 8]
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 
 export default function BookingPage() {
   const navigate = useNavigate()
   const { bookings, tables, settings, addBooking } = useBooking()
 
-  const [step, setStep] = useState(0)
+  const [step, setStep] = useState('availability')
   const [data, setData] = useState({
-    guests: 0,
-    date: '',
+    guests: 2,
+    date: todayStr(),
     timeSlot: '',
     name: '',
     phone: '',
@@ -43,26 +32,53 @@ export default function BookingPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState({})
 
-  const guestOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  const dates = useMemo(() => {
+    const today = new Date(todayStr() + 'T00:00:00')
+    return Array.from({ length: settings.maxDaysAhead }, (_, i) => {
+      const d = addDays(today, i)
+      const value = formatDate(d)
+      return {
+        value,
+        label: dayLabel(value),
+        isToday: i === 0,
+        isWeekend: [0, 6].includes(d.getDay()),
+      }
+    })
+  }, [settings.maxDaysAhead])
 
-  const set = (k, v) => setData(d => ({ ...d, [k]: v }))
-  const toggleNote = (k) => setData(d => ({ ...d, notes: { ...d.notes, [k]: !d.notes[k] } }))
+  const slots = useMemo(() => {
+    return generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval).map(time => {
+      const remaining = calcSlotCapacity(tables, bookings, data.date, time)
+      return {
+        time,
+        remaining,
+        full: remaining < data.guests,
+        period: Number(time.slice(0, 2)) < 15 ? '午餐' : '晚餐',
+      }
+    })
+  }, [bookings, data.date, data.guests, settings, tables])
 
-  const canNext = useMemo(() => {
-    if (step === 0) return data.guests > 0
-    if (step === 1) return !!data.date
-    if (step === 2) return !!data.timeSlot
-    if (step === 3) return data.name.trim() && /^[\d\-+\s]{7,}$/.test(data.phone.trim())
-    return false
-  }, [step, data])
+  const groupedSlots = useMemo(() => {
+    const available = slots.filter(s => !s.full)
+    return {
+      午餐: available.filter(s => s.period === '午餐'),
+      晚餐: available.filter(s => s.period === '晚餐'),
+    }
+  }, [slots])
 
-  const next = () => {
-    if (!canNext) return
-    if (step < STEPS.length - 1) setStep(step + 1)
-    else submit()
+  const selectedReady = data.guests > 0 && data.date && data.timeSlot
+  const canSubmit = data.name.trim() && /^[\d\-+\s]{7,}$/.test(data.phone.trim())
+
+  const set = (key, value) => setData(d => ({ ...d, [key]: value }))
+  const setGuests = (next) => setData(d => ({ ...d, guests: Math.max(1, Math.min(12, next)), timeSlot: '' }))
+  const setDate = (date) => setData(d => ({ ...d, date, timeSlot: '' }))
+  const toggleNote = (key) => setData(d => ({ ...d, notes: { ...d.notes, [key]: !d.notes[key] } }))
+
+  const continueToInfo = () => {
+    if (!selectedReady) return
+    setStep('info')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  const back = () => setStep(s => Math.max(0, s - 1))
-  const goTo = (i) => { if (i <= step) setStep(i) }
 
   const submit = async () => {
     const errs = {}
@@ -71,233 +87,484 @@ export default function BookingPage() {
     else if (!/^[\d\-+\s]{7,}$/.test(data.phone.trim())) errs.phone = '電話格式不正確'
     setError(errs)
     if (Object.keys(errs).length > 0) return
+
     setBusy(true)
     try {
-      const b = addBooking({
+      const booking = addBooking({
         ...data,
         source: 'online',
         status: 'confirmed',
         createdBy: 'guest',
       })
-      navigate(`/confirm/${b.id}`)
+      navigate(`/confirm/${booking.id}`)
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-chicken-cream via-chicken-cream to-white pb-36">
-      {/* Compact Header */}
-      <header className="bg-chicken-red text-white px-4 py-3 sticky top-0 z-30 shadow-md">
-        <div className="max-w-md mx-auto flex items-center gap-3">
-          <button onClick={() => step > 0 ? back() : navigate('/')}
-                  className="text-white/80 hover:text-white text-xl">←</button>
+    <div className="min-h-screen bg-gradient-to-b from-chicken-red/5 via-chicken-cream to-white pb-36">
+      <header className="sticky top-0 z-30 border-b border-chicken-brown/10 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
+          <button
+            onClick={() => step === 'info' ? setStep('availability') : navigate('/')}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-chicken-brown/5 text-chicken-brown transition hover:bg-chicken-brown/10"
+            aria-label="返回"
+          >
+            <ChevronLeft size={22} />
+          </button>
           <div className="flex-1">
-            <div className="text-base font-black leading-tight">線上訂位</div>
-            <div className="text-[11px] opacity-80 leading-tight">{STEPS[step].label}</div>
+            <div className="text-base font-black text-chicken-brown">線上訂位</div>
+            <div className="text-xs font-bold text-chicken-brown/55">
+              {step === 'availability' ? '選擇人數、日期與時段' : '填寫聯絡資訊'}
+            </div>
           </div>
-          <div className="text-[11px] font-bold opacity-90">{step + 1} / {STEPS.length}</div>
+          <div className="hidden rounded-full bg-chicken-red/10 px-3 py-1 text-xs font-black text-chicken-red sm:block">
+            立即確認
+          </div>
         </div>
       </header>
 
-      {/* Progress dots */}
-      <div className="max-w-md mx-auto px-4 pt-4">
-        <div className="flex items-center gap-1.5">
-          {STEPS.map((s, i) => (
-            <div
-              key={s.key}
-              onClick={() => goTo(i)}
-              className={`flex-1 h-1.5 rounded-full cursor-pointer transition-all ${
-                i <= step ? 'bg-chicken-red' : 'bg-chicken-brown/15'
-              }`}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Summary card (顯示已選資訊，點擊可返回該步) */}
-      {step > 0 && (
-        <div className="max-w-md mx-auto px-4 pt-4">
-          <div className="surface p-3 space-y-1.5 text-xs">
-            {data.guests > 0 && (
-              <button onClick={() => goTo(0)}
-                      className="w-full flex items-center justify-between text-left hover:bg-chicken-cream/50 -mx-1 px-1 py-0.5 rounded">
-                <span className="text-chicken-brown/60">用餐人數</span>
-                <span className="font-bold text-chicken-brown">{data.guests} 位 · 點擊修改</span>
-              </button>
-            )}
-            {data.date && step > 1 && (
-              <button onClick={() => goTo(1)}
-                      className="w-full flex items-center justify-between text-left hover:bg-chicken-cream/50 -mx-1 px-1 py-0.5 rounded">
-                <span className="text-chicken-brown/60">用餐日期</span>
-                <span className="font-bold text-chicken-brown">{dayLabel(data.date)}</span>
-              </button>
-            )}
-            {data.timeSlot && step > 2 && (
-              <button onClick={() => goTo(2)}
-                      className="w-full flex items-center justify-between text-left hover:bg-chicken-cream/50 -mx-1 px-1 py-0.5 rounded">
-                <span className="text-chicken-brown/60">用餐時段</span>
-                <span className="font-bold text-chicken-brown">{data.timeSlot}</span>
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Step content */}
-      <main className="max-w-md mx-auto px-4 pt-6">
+      <main className="mx-auto grid w-full max-w-5xl gap-5 px-4 py-5 lg:grid-cols-[1fr_340px]">
         <AnimatePresence mode="wait">
-          <motion.div
-            key={step}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.2 }}
-          >
-            {step === 0 && (
-              <div>
-                <h2 className="text-xl font-black text-chicken-brown mb-4">幾位用餐？</h2>
-                <div className="grid grid-cols-4 gap-2">
-                  {guestOptions.map(g => (
-                    <button
-                      key={g}
-                      onClick={() => set('guests', g)}
-                      className={`aspect-square rounded-2xl border-2 flex flex-col items-center justify-center text-2xl font-black transition-all ${
-                        data.guests === g
-                          ? 'border-chicken-red bg-chicken-red text-white shadow-md scale-105'
-                          : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'
-                      }`}
-                    >
-                      {g}
-                      <span className="text-[10px] font-normal opacity-70 mt-0.5">位</span>
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-chicken-brown/50 mt-4 text-center">
-                  超過 12 位請選 12 後在備註說明，或來電 04-XXXX-XXXX
+          {step === 'availability' ? (
+            <motion.section
+              key="availability"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.22 }}
+              className="space-y-4"
+            >
+              <HeroPanel />
+              <PartyPanel guests={data.guests} onSetGuests={setGuests} />
+              <CalendarPicker dates={dates} value={data.date} onChange={setDate} />
+              <TimeGrid groupedSlots={groupedSlots} value={data.timeSlot} guests={data.guests} onChange={(time) => set('timeSlot', time)} />
+            </motion.section>
+          ) : (
+            <motion.section
+              key="info"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -12 }}
+              transition={{ duration: 0.22 }}
+              className="space-y-4"
+            >
+              <div className="surface p-5">
+                <div className="mb-1 text-xs font-black text-chicken-red">最後一步</div>
+                <h1 className="text-2xl font-black text-chicken-brown">留下聯絡資訊</h1>
+                <p className="mt-2 text-sm leading-6 text-chicken-brown/65">
+                  送出後會立即建立訂位紀錄。到店時出示訂位編號即可。
                 </p>
               </div>
-            )}
 
-            {step === 1 && (
-              <div>
-                <h2 className="text-xl font-black text-chicken-brown mb-4">哪一天用餐？</h2>
-                <DatePicker value={data.date} onChange={(d) => set('date', d)} maxDaysAhead={settings.maxDaysAhead} />
-                {data.date && (
-                  <div className="mt-4 px-3 py-2 bg-chicken-green/10 rounded-xl text-xs text-chicken-green text-center">
-                    已選：{dayLabel(data.date)}
-                  </div>
-                )}
-              </div>
-            )}
+              <div className="surface space-y-4 p-5">
+                <Input label="姓名" value={data.name} onChange={e => set('name', e.target.value)} placeholder="王小姐" error={error.name} />
+                <Input label="電話" type="tel" inputMode="numeric" value={data.phone} onChange={e => set('phone', e.target.value)} placeholder="0912345678" error={error.phone} />
 
-            {step === 2 && (
-              <div>
-                <h2 className="text-xl font-black text-chicken-brown mb-4">幾點到雞王？</h2>
-                <TimeSlotPicker
-                  date={data.date}
-                  value={data.timeSlot}
-                  onChange={(t) => set('timeSlot', t)}
-                  settings={settings}
-                  tables={tables}
-                  bookings={bookings}
-                  guests={data.guests}
-                  hideFull
-                />
-                <p className="text-xs text-chicken-brown/50 mt-4 text-center">
-                  ⏱ 用餐時段 90 分鐘 · 逾時 15 分恕不保留
-                </p>
-              </div>
-            )}
-
-            {step === 3 && (
-              <div className="space-y-4">
-                <h2 className="text-xl font-black text-chicken-brown">您的聯絡資訊</h2>
-                <div className="rounded-xl border border-chicken-red/15 bg-white p-4">
-                  <div className="mb-2 text-xs font-black text-chicken-red">訂位摘要</div>
-                  <div className="grid gap-2 text-sm">
-                    <SummaryLine label="人數" value={`${data.guests} 位`} />
-                    <SummaryLine label="日期" value={dayLabel(data.date)} />
-                    <SummaryLine label="時段" value={data.timeSlot} />
-                    <SummaryLine label="規則" value="用餐 90 分鐘，逾時 15 分鐘釋出" />
-                  </div>
-                </div>
-                <Input
-                  label="姓名"
-                  value={data.name}
-                  onChange={e => set('name', e.target.value)}
-                  placeholder="王小姐"
-                  error={error.name}
-                />
-                <Input
-                  label="電話"
-                  type="tel"
-                  inputMode="numeric"
-                  value={data.phone}
-                  onChange={e => set('phone', e.target.value)}
-                  placeholder="0912345678"
-                  error={error.phone}
-                />
                 <div>
                   <label className="label">特殊需求（可複選）</label>
                   <div className="grid grid-cols-3 gap-2">
-                    {NOTE_OPTIONS.map(n => {
-                      const active = data.notes[n.key]
+                    {NOTE_OPTIONS.map(option => {
+                      const active = data.notes[option.key]
                       return (
                         <button
                           type="button"
-                          key={n.key}
-                          onClick={() => toggleNote(n.key)}
-                          className={`px-3 py-3 rounded-xl border-2 transition-all text-sm font-bold ${
+                          key={option.key}
+                          onClick={() => toggleNote(option.key)}
+                          className={`min-h-[48px] rounded-xl border px-2 text-sm font-bold transition-all ${
                             active
-                              ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'
-                              : 'border-chicken-brown/15 bg-white text-chicken-brown'
+                              ? 'border-chicken-red bg-chicken-red text-white shadow-sm'
+                              : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'
                           }`}
                         >
-                          {n.label}
+                          {option.label}
                         </button>
                       )
                     })}
                   </div>
                 </div>
+
                 <Textarea
                   label="備註（選填）"
                   value={data.notes.text}
                   onChange={e => set('notes', { ...data.notes, text: e.target.value })}
                   placeholder="例：靠窗、慶生、過敏、長輩需剪雞肉..."
                 />
-                <p className="rounded-xl bg-chicken-brown/5 px-3 py-2 text-xs leading-5 text-chicken-brown/65">
-                  送出後會立即建立訂位紀錄。若需取消或更改，請來電通知同仁。
-                </p>
               </div>
-            )}
-          </motion.div>
+            </motion.section>
+          )}
         </AnimatePresence>
+
+        <aside className="lg:sticky lg:top-[86px] lg:h-fit">
+          <BookingSummary
+            data={data}
+            ready={selectedReady}
+            step={step}
+            busy={busy}
+            canSubmit={canSubmit}
+            onEdit={() => setStep('availability')}
+            onContinue={continueToInfo}
+            onSubmit={submit}
+          />
+        </aside>
       </main>
 
-      {/* Bottom action bar */}
-      <div className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur border-t border-chicken-brown/10 safe-bottom z-30">
-        <div className="max-w-md mx-auto px-4 py-3 flex gap-2">
-          {step > 0 && (
-            <button onClick={back} className="btn-secondary px-6">← 上一步</button>
-          )}
-          <button
-            onClick={next}
-            disabled={!canNext || busy}
-            className="btn-primary flex-1 text-base"
-          >
-            {busy ? '送出中...' : step === STEPS.length - 1 ? '✅ 完成訂位' : '下一步 →'}
-          </button>
+      <MobileActionBar
+        data={data}
+        ready={selectedReady}
+        step={step}
+        busy={busy}
+        canSubmit={canSubmit}
+        onEdit={() => setStep('availability')}
+        onContinue={continueToInfo}
+        onSubmit={submit}
+      />
+    </div>
+  )
+}
+
+function HeroPanel() {
+  return (
+    <div className="surface relative overflow-hidden p-5">
+      <motion.div
+        aria-hidden
+        className="absolute right-5 top-5 h-16 w-16 rounded-full bg-chicken-red/10"
+        animate={{ scale: [1, 1.08, 1], opacity: [0.55, 0.9, 0.55] }}
+        transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+      />
+      <div className="relative">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-chicken-red/10 px-3 py-1 text-xs font-black text-chicken-red">
+          <Sparkles size={14} />
+          即時可訂時段
         </div>
+        <h1 className="text-3xl font-black leading-tight text-chicken-brown">找一張適合您的餐桌</h1>
+        <p className="mt-3 max-w-xl text-sm leading-6 text-chicken-brown/65">
+          48 小時冷藏文昌雞，線上訂位立即保留。選好抵達時段後，到店出示訂位編號即可。
+        </p>
       </div>
     </div>
   )
 }
 
-function SummaryLine({ label, value }) {
+function PartyPanel({ guests, onSetGuests }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-chicken-brown/55">{label}</span>
+    <section className="surface p-5">
+      <SectionTitle icon={Users} title="幾位用餐？" hint="最多 12 位，更多人數可於備註說明" />
+      <div className="mt-4 flex items-center gap-3">
+        <button className="btn-secondary flex h-12 w-12 items-center justify-center !p-0" onClick={() => onSetGuests(guests - 1)} aria-label="減少人數">
+          <Minus size={18} />
+        </button>
+        <motion.div
+          key={guests}
+          initial={{ scale: 0.92, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="flex-1 rounded-xl border border-chicken-brown/10 bg-white px-4 py-3 text-center"
+        >
+          <span className="text-3xl font-black tabular-nums text-chicken-brown">{guests}</span>
+          <span className="ml-1 text-sm font-bold text-chicken-brown/55">位</span>
+        </motion.div>
+        <button className="btn-secondary flex h-12 w-12 items-center justify-center !p-0" onClick={() => onSetGuests(guests + 1)} aria-label="增加人數">
+          <Plus size={18} />
+        </button>
+      </div>
+      <div className="mt-3 grid grid-cols-4 gap-2">
+        {QUICK_GUESTS.map(g => (
+          <button
+            key={g}
+            onClick={() => onSetGuests(g)}
+            className={`rounded-xl border px-3 py-2 text-sm font-black transition-all ${
+              guests === g ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown/65'
+            }`}
+          >
+            {g} 位
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function CalendarPicker({ dates, value, onChange }) {
+  const availableMap = useMemo(() => {
+    const map = new Map()
+    dates.forEach(date => map.set(date.value, date))
+    return map
+  }, [dates])
+  const [monthCursor, setMonthCursor] = useState(() => {
+    const base = new Date((value || todayStr()) + 'T00:00:00')
+    return new Date(base.getFullYear(), base.getMonth(), 1)
+  })
+
+  const today = todayStr()
+  const monthKey = `${monthCursor.getFullYear()}-${String(monthCursor.getMonth() + 1).padStart(2, '0')}`
+  const monthLabel = `${monthCursor.getFullYear()} 年 ${monthCursor.getMonth() + 1} 月`
+  const firstAvailable = dates[0]?.value
+  const lastAvailable = dates[dates.length - 1]?.value
+  const canPrev = firstAvailable && monthKey > firstAvailable.slice(0, 7)
+  const canNext = lastAvailable && monthKey < lastAvailable.slice(0, 7)
+
+  const cells = useMemo(() => {
+    const y = monthCursor.getFullYear()
+    const m = monthCursor.getMonth()
+    const first = new Date(y, m, 1)
+    const start = new Date(y, m, 1 - first.getDay())
+    return Array.from({ length: 42 }, (_, i) => {
+      const d = addDays(start, i)
+      const date = formatDate(d)
+      const meta = availableMap.get(date)
+      return {
+        date,
+        day: d.getDate(),
+        inMonth: d.getMonth() === m,
+        isToday: date === today,
+        isWeekend: [0, 6].includes(d.getDay()),
+        available: Boolean(meta),
+      }
+    })
+  }, [availableMap, monthCursor, today])
+
+  const shiftMonth = (dir) => {
+    setMonthCursor(current => new Date(current.getFullYear(), current.getMonth() + dir, 1))
+  }
+
+  return (
+    <section className="surface p-5">
+      <div className="flex items-start justify-between gap-3">
+        <SectionTitle icon={CalendarDays} title="哪一天用餐？" hint="點選日期後，下方會顯示當天可訂時段" />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => shiftMonth(-1)}
+            disabled={!canPrev}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-chicken-brown/10 bg-white text-chicken-brown disabled:opacity-30"
+            aria-label="上一個月"
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={() => shiftMonth(1)}
+            disabled={!canNext}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-chicken-brown/10 bg-white text-chicken-brown disabled:opacity-30"
+            aria-label="下一個月"
+          >
+            ›
+          </button>
+        </div>
+      </div>
+
+      <motion.div
+        key={monthKey}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2 }}
+        className="mt-4 overflow-hidden rounded-xl border border-chicken-brown/10 bg-white"
+      >
+        <div className="flex items-center justify-between border-b border-chicken-brown/10 px-4 py-3">
+          <div className="text-base font-black text-chicken-brown">{monthLabel}</div>
+          <div className="text-xs font-bold text-chicken-brown/50">
+            {value ? `已選 ${dayLabel(value)}` : '請選擇日期'}
+          </div>
+        </div>
+        <div className="grid grid-cols-7 border-b border-chicken-brown/10 bg-chicken-cream/60">
+          {WEEKDAYS.map(day => (
+            <div key={day} className={`py-2 text-center text-xs font-black ${day === '日' || day === '六' ? 'text-chicken-red' : 'text-chicken-brown/55'}`}>
+              {day}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7">
+          {cells.map(cell => {
+            const active = value === cell.date
+            const disabled = !cell.available
+          return (
+            <motion.button
+              key={cell.date}
+              type="button"
+              onClick={() => !disabled && onChange(cell.date)}
+              disabled={disabled}
+              whileTap={!disabled ? { scale: 0.95 } : undefined}
+              className={`relative min-h-[58px] border-b border-r border-chicken-brown/10 p-1 text-center transition-all sm:min-h-[72px] ${
+                active ? 'bg-chicken-red text-white' :
+                disabled ? 'bg-chicken-brown/[0.02] text-chicken-brown/20' :
+                cell.isToday ? 'bg-chicken-yellow/10 text-chicken-brown hover:bg-chicken-red/5' :
+                cell.isWeekend ? 'bg-white text-chicken-red hover:bg-chicken-red/5' :
+                'bg-white text-chicken-brown hover:bg-chicken-red/5'
+              } ${!cell.inMonth ? 'opacity-35' : ''}`}
+            >
+              <div className="flex h-full flex-col items-center justify-center">
+                <div className="text-lg font-black tabular-nums sm:text-xl">{cell.day}</div>
+                <div className={`mt-0.5 text-[10px] font-black ${active ? 'text-white/80' : disabled ? 'text-chicken-brown/20' : cell.isToday ? 'text-chicken-yellow' : 'text-chicken-brown/45'}`}>
+                  {cell.isToday ? '今天' : disabled ? '—' : '可訂'}
+                </div>
+              </div>
+            </motion.button>
+          )
+        })}
+        </div>
+      </motion.div>
+
+      <div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-chicken-brown/50">
+        <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-chicken-red" />已選日期</span>
+        <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-chicken-yellow" />今天</span>
+        <span>灰色日期暫不可預訂</span>
+      </div>
+    </section>
+  )
+}
+
+function TimeGrid({ groupedSlots, value, guests, onChange }) {
+  const total = groupedSlots.午餐.length + groupedSlots.晚餐.length
+
+  return (
+    <section className="surface p-5">
+      <SectionTitle icon={Clock} title="選擇抵達時間" hint="符合人數的可訂時段" />
+      {total === 0 ? (
+        <div className="empty-panel mt-4">
+          <div className="text-3xl mb-2">⏳</div>
+          <p className="font-bold text-chicken-brown">這天目前沒有可訂時段</p>
+          <p className="mt-1 text-sm text-chicken-brown/60">請改選其他日期，或來電詢問現場座位。</p>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-5">
+          {Object.entries(groupedSlots).map(([period, slots]) => (
+            slots.length > 0 && (
+              <div key={period}>
+                <div className="mb-2 flex items-center gap-2">
+                  <div className="text-xs font-black text-chicken-brown/55">{period}</div>
+                  <div className="h-px flex-1 bg-chicken-brown/10" />
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {slots.map(slot => {
+                    const active = value === slot.time
+                    const scarce = slot.remaining <= Math.max(guests * 2, 12)
+                    return (
+                      <motion.button
+                        layout
+                        key={slot.time}
+                        onClick={() => onChange(slot.time)}
+                        whileTap={{ scale: 0.97 }}
+                        className={`relative min-h-[74px] rounded-xl border-2 px-3 py-3 text-left transition-all ${
+                          active
+                            ? 'border-chicken-red bg-chicken-red text-white shadow-md'
+                            : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/45'
+                        }`}
+                      >
+                        <div className="text-lg font-black tabular-nums">{slot.time}</div>
+                        <div className={`mt-1 text-[11px] font-black ${active ? 'text-white/85' : scarce ? 'text-chicken-yellow' : 'text-chicken-green'}`}>
+                          {scarce ? '少量名額' : '可訂位'}
+                        </div>
+                        {active && (
+                          <motion.span
+                            layoutId="selected-time-check"
+                            className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-white text-chicken-red"
+                          >
+                            <Check size={14} strokeWidth={3} />
+                          </motion.span>
+                        )}
+                      </motion.button>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function BookingSummary({ data, ready, step, busy, canSubmit, onEdit, onContinue, onSubmit }) {
+  return (
+    <motion.div layout className="hidden rounded-2xl border border-chicken-brown/10 bg-white p-5 shadow-sm lg:block">
+      <div className="mb-4 flex items-center gap-2 text-sm font-black text-chicken-brown">
+        <ShieldCheck size={18} className="text-chicken-red" />
+        訂位摘要
+      </div>
+      <SummaryRows data={data} />
+      <div className="mt-4 rounded-xl bg-chicken-cream px-3 py-2 text-xs leading-5 text-chicken-brown/65">
+        用餐 90 分鐘，逾時 15 分鐘釋出。若有特殊需求，請於備註說明。
+      </div>
+      <div className="mt-4 space-y-2">
+        {step === 'availability' ? (
+          <button disabled={!ready} onClick={onContinue} className="btn-primary w-full">
+            {ready ? '填寫聯絡資訊' : '請先選擇時段'}
+          </button>
+        ) : (
+          <>
+            <button disabled={!canSubmit || busy} onClick={onSubmit} className="btn-primary w-full">
+              {busy ? '送出中...' : '完成訂位'}
+            </button>
+            <button onClick={onEdit} className="btn-secondary w-full">修改人數 / 日期 / 時間</button>
+          </>
+        )}
+      </div>
+    </motion.div>
+  )
+}
+
+function MobileActionBar({ data, ready, step, busy, canSubmit, onEdit, onContinue, onSubmit }) {
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-30 border-t border-chicken-brown/10 bg-white/95 backdrop-blur lg:hidden safe-bottom">
+      <div className="mx-auto max-w-md px-4 py-3">
+        <div className="mb-2 flex items-center justify-between text-xs">
+          <span className="font-bold text-chicken-brown/55">目前選擇</span>
+          <span className="font-black text-chicken-brown">
+            {data.guests} 位 · {data.date ? dayLabel(data.date) : '選日期'} · {data.timeSlot || '選時段'}
+          </span>
+        </div>
+        {step === 'availability' ? (
+          <button disabled={!ready} onClick={onContinue} className="btn-primary w-full">
+            {ready ? '填寫聯絡資訊' : '請先選擇可訂時段'}
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={onEdit} className="btn-secondary px-4">修改</button>
+            <button disabled={!canSubmit || busy} onClick={onSubmit} className="btn-primary flex-1">
+              {busy ? '送出中...' : '完成訂位'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SectionTitle({ icon: Icon, title, hint }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-chicken-red/10 text-chicken-red">
+        <Icon size={20} />
+      </div>
+      <div>
+        <h2 className="text-lg font-black text-chicken-brown">{title}</h2>
+        {hint && <p className="mt-0.5 text-xs font-bold text-chicken-brown/50">{hint}</p>}
+      </div>
+    </div>
+  )
+}
+
+function SummaryRows({ data }) {
+  return (
+    <div className="space-y-2 text-sm">
+      <SummaryLine label="人數" value={`${data.guests} 位`} />
+      <SummaryLine label="日期" value={data.date ? dayLabel(data.date) : '尚未選擇'} />
+      <SummaryLine label="時間" value={data.timeSlot || '尚未選擇'} />
+      <SummaryLine label="確認" value="送出立即保留" />
+      <SummaryLine label="電話" value="04-XXXX-XXXX" icon={Phone} />
+    </div>
+  )
+}
+
+function SummaryLine({ label, value, icon: Icon }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-chicken-brown/5 px-3 py-2">
+      <span className="inline-flex items-center gap-1.5 text-chicken-brown/55">
+        {Icon && <Icon size={13} />}
+        {label}
+      </span>
       <span className="text-right font-black text-chicken-brown">{value}</span>
     </div>
   )

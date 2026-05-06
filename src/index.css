@@ -14,6 +14,23 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .animate-soft-enter {
+    animation: soft-enter 420ms cubic-bezier(.2,.8,.2,1) both;
+  }
+}
+
+@keyframes soft-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @layer components {
   .btn-primary {
     @apply bg-chicken-red hover:bg-chicken-red/90 active:scale-[.98] text-white font-bold py-3 px-6 rounded-xl transition-all shadow-sm disabled:opacity-40 disabled:cursor-not-allowed;

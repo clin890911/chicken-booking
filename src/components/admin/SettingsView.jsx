@@ -22,6 +22,36 @@ export default function SettingsView() {
     setSavedMsg('✅ 已儲存')
     setTimeout(() => setSavedMsg(''), 2000)
   }
+  const handleBannerFiles = async (files) => {
+    const list = Array.from(files || [])
+    if (list.length === 0) return
+    try {
+      const images = await Promise.all(list.map(file => readBannerFile(file)))
+      setForm(f => ({ ...f, heroBanners: [...(f.heroBanners || []), ...images] }))
+    } catch (err) {
+      alert(err.message || '圖片讀取失敗')
+    }
+  }
+  const saveBanners = () => {
+    updateSettings({ heroBanners: form.heroBanners || [] })
+    setSavedMsg('✅ 首頁廣告已儲存')
+    setTimeout(() => setSavedMsg(''), 2000)
+  }
+  const removeBanner = (id) => {
+    setForm(f => ({ ...f, heroBanners: (f.heroBanners || []).filter(b => b.id !== id) }))
+  }
+  const moveBanner = (id, dir) => {
+    setForm(f => {
+      const next = [...(f.heroBanners || [])]
+      const index = next.findIndex(b => b.id === id)
+      const target = index + dir
+      if (index < 0 || target < 0 || target >= next.length) return f
+      const item = next[index]
+      next[index] = next[target]
+      next[target] = item
+      return { ...f, heroBanners: next }
+    })
+  }
   const handleSearch = () => {
     setSearchResult(searchNoshow(searchPhone.trim()))
   }
@@ -64,6 +94,68 @@ export default function SettingsView() {
           <div className="flex gap-2 items-center">
             <Button onClick={handleSave} className="flex-1">儲存設定</Button>
             {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="首頁廣告輪播" description="新增橫式照片，會顯示在客人首頁第一屏。" defaultOpen>
+        <div className="space-y-4">
+          <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-chicken-brown/15 bg-white px-4 py-8 text-center transition hover:border-chicken-red/40">
+            <span className="text-sm font-black text-chicken-brown">上傳橫式照片</span>
+            <span className="mt-1 text-xs text-chicken-brown/55">建議 16:9 或 2:1，單張小於 2MB，支援多選</span>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={e => handleBannerFiles(e.target.files)}
+            />
+          </label>
+
+          {(form.heroBanners || []).length === 0 ? (
+            <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-sm text-chicken-brown/60">
+              尚未新增廣告圖。首頁會先顯示品牌 logo 與預設訂位宣傳。
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(form.heroBanners || []).map((banner, index) => (
+                <div key={banner.id} className="overflow-hidden rounded-xl border border-chicken-brown/10 bg-white">
+                  <div className="aspect-[16/9] bg-chicken-cream">
+                    <img src={banner.image} alt={banner.title || `首頁廣告 ${index + 1}`} className="h-full w-full object-cover" />
+                  </div>
+                  <div className="space-y-2 p-3">
+                    <Input
+                      label="標題"
+                      value={banner.title || ''}
+                      onChange={e => setForm(f => ({
+                        ...f,
+                        heroBanners: (f.heroBanners || []).map(b => b.id === banner.id ? { ...b, title: e.target.value } : b)
+                      }))}
+                      placeholder="例：母親節限定套餐"
+                    />
+                    <Input
+                      label="副標"
+                      value={banner.subtitle || ''}
+                      onChange={e => setForm(f => ({
+                        ...f,
+                        heroBanners: (f.heroBanners || []).map(b => b.id === banner.id ? { ...b, subtitle: e.target.value } : b)
+                      }))}
+                      placeholder="例：限量供應，建議提前訂位"
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <button onClick={() => moveBanner(banner.id, -1)} className="btn-secondary !px-2 !py-2 text-xs" disabled={index === 0}>上移</button>
+                      <button onClick={() => moveBanner(banner.id, 1)} className="btn-secondary !px-2 !py-2 text-xs" disabled={index === (form.heroBanners || []).length - 1}>下移</button>
+                      <button onClick={() => removeBanner(banner.id)} className="btn-danger !px-2 !py-2 text-xs">刪除</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Button onClick={saveBanners} className="flex-1">儲存首頁廣告</Button>
+            {savedMsg && <span className="text-sm font-bold text-chicken-green">{savedMsg}</span>}
           </div>
         </div>
       </SettingsSection>
@@ -154,6 +246,24 @@ export default function SettingsView() {
       <LayoutEditor open={showLayoutEditor} onClose={() => setShowLayoutEditor(false)} />
     </div>
   )
+}
+
+function readBannerFile(file) {
+  return new Promise((resolve, reject) => {
+    if (file.size > 2 * 1024 * 1024) {
+      reject(new Error(`${file.name} 超過 2MB`))
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => resolve({
+      id: crypto.randomUUID?.() || `${Date.now()}-${file.name}`,
+      title: file.name.replace(/\.[^.]+$/, ''),
+      subtitle: '雞王刷刷鍋',
+      image: reader.result,
+    })
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
 }
 
 function SettingsSection({ title, description, children, defaultOpen = false, danger = false }) {

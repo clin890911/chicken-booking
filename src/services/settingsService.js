@@ -4,7 +4,8 @@ const DEFAULT = {
   openTime: '11:00',
   closeTime: '19:00',
   slotInterval: 30,
-  maxDaysAhead: 30
+  maxDaysAhead: 30,
+  heroBanners: []
 }
 
 export function getSettings() {
