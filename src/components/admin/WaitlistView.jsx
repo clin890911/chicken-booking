@@ -87,7 +87,7 @@ export default function WaitlistView({ onSeatWaitlist }) {
             }`}
           >全部</button>
         </div>
-        <button onClick={() => setShowAdd(true)} className="btn-primary text-sm">+ 新增取號</button>
+        <button onClick={() => setShowAdd(true)} className="btn-primary text-sm">新增取號</button>
       </div>
 
       {/* 候位列表 */}
@@ -103,9 +103,14 @@ export default function WaitlistView({ onSeatWaitlist }) {
                     <span className="text-xl font-black text-chicken-red">#{w.queueNumber}</span>
                     <span className="text-base font-bold">{w.name}</span>
                     <span className="text-sm text-chicken-brown/60">{w.partySize} 位</span>
+                    {(w.status === 'waiting' || w.status === 'called') && (
+                      <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-[11px] font-bold text-chicken-brown/60">
+                        建議 {w.partySize > 4 ? '六人桌' : '四人桌'}
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-chicken-brown/60 mt-1">
-                    📱 {w.phone || '—'} · 取號 {fmtTime(w.takenAt)}
+                    {w.phone || '—'} · 取號 {fmtTime(w.takenAt)}
                     {(w.status === 'waiting' || w.status === 'called') && <span> · 已等 {diffMin(w.takenAt)} 分</span>}
                     {w.assignedTableNumber && <span className="ml-1 text-chicken-green font-bold">· 入座 {w.assignedTableNumber}</span>}
                   </div>
@@ -122,12 +127,12 @@ export default function WaitlistView({ onSeatWaitlist }) {
                   <button
                     onClick={() => onSeatWaitlist?.(w)}
                     className="flex-1 bg-chicken-green hover:opacity-90 text-white font-bold py-2 rounded-lg text-sm"
-                  >✅ 入座</button>
+                  >入座</button>
                   {w.status === 'waiting' && (
                     <button
                       onClick={() => callWaitlist(w.id)}
                       className="flex-1 bg-chicken-yellow hover:opacity-90 text-white font-bold py-2 rounded-lg text-sm"
-                    >📢 叫號</button>
+                    >叫號</button>
                   )}
                   <button
                     onClick={() => { if (confirm('棄號？')) leaveWaitlist(w.id) }}

@@ -43,8 +43,7 @@ export default function SettingsView() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <h2 className="font-bold text-chicken-brown mb-3">🕐 營業時段設定</h2>
+      <SettingsSection title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" defaultOpen>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Input label="開始時間" type="time" value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))} />
@@ -63,40 +62,39 @@ export default function SettingsView() {
             options={[{ value: 7, label: '7 天' }, { value: 14, label: '14 天' }, { value: 30, label: '30 天' }, { value: 60, label: '60 天' }]}
           />
           <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1">💾 儲存設定</Button>
+            <Button onClick={handleSave} className="flex-1">儲存設定</Button>
             {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
         </div>
-      </Card>
+      </SettingsSection>
 
       {/* Telegram 通知 + 備份 */}
-      <TelegramSettings />
+      <SettingsSection title="通知與備份" description="Telegram 事件推送與備份狀態。">
+        <TelegramSettings embedded />
+      </SettingsSection>
 
       {/* 桌位佈局編輯（拖拉位置、新增/刪除桌、改容量）*/}
       {can('table.config') && (
-        <Card>
-          <h2 className="font-bold text-chicken-brown mb-1">🛠 桌位佈局編輯</h2>
+        <SettingsSection title="桌位佈局" description="拖拉桌位、調整容量與燃料型態。">
           <p className="text-xs text-chicken-brown/60 mb-3">
             打開全螢幕編輯器：拖拉移動桌位、調整容量與瓦斯型態、新增或刪除桌位。
             修改完按「儲存變更」才會生效。
           </p>
           <Button onClick={() => setShowLayoutEditor(true)} className="w-full">
-            🛠 開啟桌位佈局編輯器
+            開啟桌位佈局編輯器
           </Button>
-        </Card>
+        </SettingsSection>
       )}
 
       {/* 桌位啟用/停用 — 簡單方格切換 */}
       {can('table.config') && (
-        <Card>
-          <h2 className="font-bold text-chicken-brown mb-3">🪑 桌位啟用設定</h2>
+        <SettingsSection title="桌位啟用" description="停用桌位不會出現在現場營運頁，也不計入可訂位人數。">
           <p className="text-xs text-chicken-brown/60 mb-3">點擊桌號可切換啟用 / 停用。停用的桌位不會出現在現場營運頁，也不計入可訂位人數。</p>
           <TableGrid />
-        </Card>
+        </SettingsSection>
       )}
 
-      <Card>
-        <h2 className="font-bold text-chicken-brown mb-3">⚠️ No-show 查詢</h2>
+      <SettingsSection title="No-show 查詢" description="用電話快速查詢過往未到紀錄。">
         <div className="flex gap-2">
           <Input placeholder="輸入電話號碼" value={searchPhone} onChange={e => setSearchPhone(e.target.value)} inputMode="numeric" />
           <Button onClick={handleSearch} variant="secondary" className="whitespace-nowrap">查詢</Button>
@@ -120,27 +118,24 @@ export default function SettingsView() {
             )}
           </div>
         )}
-      </Card>
+      </SettingsSection>
 
-      <Card>
-        <h2 className="font-bold text-chicken-brown mb-3">📊 資料匯出</h2>
-        <Button onClick={handleExport} variant="secondary" className="w-full">⬇️ 匯出全部訂位 CSV</Button>
-      </Card>
+      <SettingsSection title="資料匯出" description="下載目前瀏覽器 LocalStorage 內的訂位資料。">
+        <Button onClick={handleExport} variant="secondary" className="w-full">匯出全部訂位 CSV</Button>
+      </SettingsSection>
 
-      <Card>
-        <h2 className="font-bold text-chicken-brown mb-3">👤 帳號</h2>
+      <SettingsSection title="帳號" description="目前登入者與角色資訊。">
         <div className="text-sm text-chicken-brown/70 mb-3">
           <div>已登入：<span className="font-mono font-bold text-chicken-brown">{user?.email}</span></div>
           <div className="text-xs text-chicken-brown/60 mt-1">角色：<span className="font-bold">{user?.roleLabel || '—'}</span></div>
         </div>
-        <Button onClick={() => { if (confirm('確定登出？')) signOut() }} variant="secondary" className="w-full">🚪 登出</Button>
-      </Card>
+        <Button onClick={() => { if (confirm('確定登出？')) signOut() }} variant="secondary" className="w-full">登出</Button>
+      </SettingsSection>
 
       {can('settings.update') && (
-        <Card className="border-chicken-red/30 !border-2">
-          <h2 className="font-bold text-chicken-red mb-3">⚠️ 危險操作</h2>
+        <SettingsSection title="危險操作" description="會清除資料，僅店長需要時使用。" danger>
           <p className="text-xs text-chicken-brown/60 mb-3">清除所有訂位、桌位狀態、候位、顧客資料（不可復原）</p>
-          <Button onClick={() => setShowDanger(true)} variant="secondary" className="w-full !text-chicken-red">🗑️ 重設所有資料</Button>
+          <button onClick={() => setShowDanger(true)} className="btn-danger w-full">重設所有資料</button>
           <Modal open={showDanger} onClose={() => setShowDanger(false)} title="確認重設？" footer={
             <>
               <button onClick={() => setShowDanger(false)} className="btn-secondary px-4 py-2">取消</button>
@@ -149,7 +144,7 @@ export default function SettingsView() {
           }>
             <p className="text-sm text-chicken-brown">所有訂位、候位、桌位狀態、顧客資料將被清除，桌位佈局還原為預設。<br/>此動作無法復原。</p>
           </Modal>
-        </Card>
+        </SettingsSection>
       )}
 
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
@@ -158,5 +153,22 @@ export default function SettingsView() {
 
       <LayoutEditor open={showLayoutEditor} onClose={() => setShowLayoutEditor(false)} />
     </div>
+  )
+}
+
+function SettingsSection({ title, description, children, defaultOpen = false, danger = false }) {
+  return (
+    <details className={`card group ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`} open={defaultOpen}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+        <div>
+          <h2 className={`font-black ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
+          {description && <p className="mt-0.5 text-xs text-chicken-brown/55">{description}</p>}
+        </div>
+        <span className="rounded-full bg-chicken-brown/5 px-2 py-1 text-xs font-black text-chicken-brown/45 group-open:rotate-180">⌄</span>
+      </summary>
+      <div className="mt-4">
+        {children}
+      </div>
+    </details>
   )
 }

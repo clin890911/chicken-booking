@@ -124,7 +124,7 @@ export default function AdminPage() {
           </div>
         </div>
 
-        <main className="flex-1 px-3 sm:px-6 py-4 pb-24 lg:pb-6 overflow-x-hidden max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 px-3 sm:px-6 py-4 pb-32 lg:pb-6 overflow-x-hidden max-w-[1600px] w-full mx-auto">
           <AnimatePresence mode="wait">
             <motion.div
               key={tab}

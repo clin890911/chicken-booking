@@ -1,8 +1,8 @@
 // 手機版底部導航（lg 以下顯示）
 export default function BottomNav({ tabs, active, onChange, badges = {} }) {
   return (
-    <nav className="lg:hidden safe-bottom fixed bottom-0 inset-x-0 z-30 bg-white border-t border-chicken-brown/10 shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
-      <div className="grid grid-cols-5">
+    <nav className="lg:hidden safe-bottom fixed bottom-0 inset-x-0 z-30 border-t border-chicken-brown/10 bg-white/95 shadow-[0_-6px_18px_rgba(58,46,38,0.08)] backdrop-blur">
+      <div className="grid grid-cols-5 px-1 py-1">
         {tabs.map(t => {
           const isActive = active === t.key
           const badge = t.badgeKey ? badges[t.badgeKey] : 0
@@ -10,8 +10,8 @@ export default function BottomNav({ tabs, active, onChange, badges = {} }) {
             <button
               key={t.key}
               onClick={() => onChange(t.key)}
-              className={`flex flex-col items-center justify-center py-2.5 transition-colors relative ${
-                isActive ? 'text-chicken-red' : 'text-chicken-brown/60 hover:text-chicken-brown'
+              className={`relative flex min-h-[60px] flex-col items-center justify-center rounded-xl py-2 transition-colors ${
+                isActive ? 'bg-chicken-red/10 text-chicken-red ring-1 ring-chicken-red/20' : 'text-chicken-brown/50 hover:text-chicken-brown'
               }`}
             >
               <span className="relative">

@@ -175,12 +175,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
 
       {/* 樓層切換 + 模式 banner */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex gap-1.5">
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
           {['1F', '2F'].map(f => (
             <button
               key={f}
               onClick={() => setFloor(f)}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border-2 ${
+              className={`whitespace-nowrap px-4 py-2 rounded-xl text-sm font-bold transition-all border-2 ${
                 floor === f
                   ? 'bg-chicken-red border-chicken-red text-white shadow'
                   : 'bg-white border-chicken-brown/15 text-chicken-brown'
@@ -198,12 +198,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
               <button
                 onClick={() => setShowLayoutEditor(true)}
                 className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown hover:border-chicken-red"
-              >🛠 編輯佈局</button>
+              >編輯佈局</button>
             )}
             <button
               onClick={() => setMode({ type: 'merge', first: null })}
               className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown hover:border-chicken-yellow"
-            >⇆ 併桌模式</button>
+            >併桌模式</button>
           </>
         )}
       </div>
@@ -219,7 +219,13 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
       {/* 主區：地圖 + 側邊 */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-3">
         {/* 地圖區 */}
-        <div className="bg-white rounded-2xl border border-chicken-brown/10 p-2 sm:p-3 min-h-[480px] lg:min-h-[640px]">
+        <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 min-h-[430px] sm:min-h-[560px] lg:min-h-[680px] overflow-hidden">
+          <div className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-emerald-500" />可入座</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-sky-500" />已預訂</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />用餐中</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-500" />待清桌</span>
+          </div>
           <FloorMap
             floor={floor}
             tables={tables}
@@ -253,8 +259,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
             />
           ) : (
             <>
-              <div className="bg-white rounded-2xl border border-chicken-brown/10 p-4">
-                <h3 className="font-bold text-chicken-brown mb-3 text-sm">⏰ 即將到達</h3>
+              <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
+                <h3 className="font-bold text-chicken-brown mb-3 text-sm">即將到達</h3>
                 <UpcomingPanel
                   onClickBooking={(b) => {
                     if (b.assignedTableId) setSelectedTable(b.assignedTableId)
@@ -262,7 +268,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
                   onAssignTable={startAssign}
                 />
               </div>
-              <div className="bg-white rounded-2xl border border-chicken-brown/10 p-4">
+              <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
                 <WaitlistMiniPanel onSeatWaitlist={startSeatWaitlist} />
               </div>
             </>
@@ -270,8 +276,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
         </div>
       </div>
 
-      <div className="text-center text-[11px] text-chicken-brown/40 mt-2">
-        💡 點桌位看詳情 · 訂位「指派桌位」進指派模式 · 紅色超時桌可禮貌詢問結帳 · ESC 隨時取消
+      <div className="text-center text-[11px] text-chicken-brown/45 mt-2">
+        點桌位看詳情 · 訂位「指派桌位」進指派模式 · 紅色超時桌可禮貌詢問結帳 · ESC 取消
       </div>
 
       {/* 桌位佈局編輯器 */}

@@ -11,21 +11,21 @@ export default function StatusBar({ tables, waitlist }) {
   const called = waitlist.filter(w => w.status === 'called').length
 
   const items = [
-    { label: '空桌',     value: counts.vacant,   color: 'text-emerald-600' },
-    { label: '已預訂',   value: counts.reserved, color: 'text-yellow-600' },
-    { label: '用餐中',   value: counts.dining,   color: 'text-red-600' },
-    { label: '等待清桌', value: counts.cleaning, color: 'text-orange-600' },
-    { label: '候位中',   value: waiting + called,color: 'text-chicken-red', accent: true },
-    { label: '在席人數', value: occSeats,        color: 'text-chicken-brown' },
+    { label: '可入座',   value: counts.vacant,   color: 'text-emerald-700', className: 'status-vacant' },
+    { label: '即將到',   value: counts.reserved, color: 'text-sky-700', className: 'status-reserved' },
+    { label: '用餐中',   value: counts.dining,   color: 'text-orange-700', className: 'status-dining' },
+    { label: '待清桌',   value: counts.cleaning, color: 'text-amber-700', className: 'status-cleaning' },
+    { label: '候位需處理', value: waiting + called,color: 'text-red-700', className: 'status-danger', accent: true },
+    { label: '在席人數', value: occSeats,        color: 'text-chicken-brown', className: 'bg-white text-chicken-brown border-chicken-brown/10' },
   ]
   return (
     <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
       {items.map(it => (
         <div key={it.label}
-             className={`bg-white border ${it.accent ? 'border-chicken-red bg-chicken-red/5' : 'border-chicken-brown/10'}
-                         rounded-xl px-3 py-2 flex flex-col items-center`}>
+             className={`border rounded-xl px-3 py-2 flex flex-col items-center ${it.className}
+                         ${it.accent && it.value > 0 ? 'ring-2 ring-red-100' : ''}`}>
           <div className={`text-2xl font-black tabular-nums leading-none ${it.color}`}>{it.value}</div>
-          <div className="text-[11px] text-chicken-brown/60 mt-1">{it.label}</div>
+          <div className="text-[11px] font-bold opacity-70 mt-1">{it.label}</div>
         </div>
       ))}
     </div>

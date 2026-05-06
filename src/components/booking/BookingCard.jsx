@@ -6,8 +6,8 @@ import { useBooking } from '../../contexts/BookingContext'
 
 const STATUS_MAP = {
   pending:   { label: '待確認', color: 'bg-chicken-brown/10 text-chicken-brown' },
-  confirmed: { label: '待到',  color: 'bg-chicken-yellow/15 text-chicken-yellow' },
-  arrived:   { label: '用餐中', color: 'bg-chicken-red/10 text-chicken-red' },
+  confirmed: { label: '待到',  color: 'bg-sky-50 text-sky-700' },
+  arrived:   { label: '用餐中', color: 'bg-orange-50 text-orange-700' },
   completed: { label: '已離', color: 'bg-chicken-brown/10 text-chicken-brown/60' },
   noshow:    { label: 'No-show', color: 'bg-chicken-red text-white' },
   cancelled: { label: '已取消', color: 'bg-chicken-brown/10 text-chicken-brown/40' },
@@ -124,12 +124,12 @@ export default function BookingCard({ booking, onAssign, onClick }) {
   const cardBorder = booking.status === 'arrived'
     ? stage === 'overtime' ? 'border-chicken-red border-2 ring-2 ring-chicken-red/20'
     : stage === 'late' ? 'border-chicken-yellow border-2'
-    : 'border-chicken-red/20 border-2'
+    : 'border-orange-200 border-2'
     : booking.status === 'noshow' ? 'border-chicken-red/40 border'
     : 'border-chicken-brown/10 border'
 
   return (
-    <div className={`bg-white rounded-2xl shadow-sm hover:shadow-md transition-all p-3.5 ${cardBorder}`}>
+    <div className={`bg-white rounded-xl shadow-sm hover:shadow-md transition-all p-3.5 ${cardBorder}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           {/* 主資訊 */}
@@ -140,9 +140,9 @@ export default function BookingCard({ booking, onAssign, onClick }) {
             {booking.assignedTableId && (
               <span className={`text-xs font-black px-2.5 py-0.5 rounded-full
                 ${booking.status === 'arrived'
-                  ? 'bg-chicken-red text-white'
-                  : 'bg-chicken-green text-white'}`}>
-                🪑 {booking.assignedTableId}
+                  ? 'bg-orange-600 text-white'
+                  : 'bg-emerald-600 text-white'}`}>
+                桌 {booking.assignedTableId}
               </span>
             )}
             {booking.status === 'arrived' && (
@@ -159,7 +159,7 @@ export default function BookingCard({ booking, onAssign, onClick }) {
 
           {/* 副資訊 */}
           <div className="text-xs text-chicken-brown/70 mt-1 flex items-center gap-2 flex-wrap">
-            <span>📱 {booking.phone || '—'}</span>
+            <span>{booking.phone || '—'}</span>
             {SOURCE_MAP[booking.source] && (
               <span className="text-chicken-brown/50">{SOURCE_MAP[booking.source]}</span>
             )}
@@ -191,24 +191,24 @@ export default function BookingCard({ booking, onAssign, onClick }) {
               <button
                 onClick={(e) => { e.stopPropagation(); onAssign?.(booking) }}
                 className="text-xs px-3.5 py-1.5 bg-chicken-red text-white rounded-lg font-bold hover:opacity-90"
-              >🪑 指派桌位</button>
+              >指派桌位</button>
             )}
             {booking.status === 'confirmed' && booking.assignedTableId && (
               <button
                 onClick={(e) => { e.stopPropagation(); handleSeat() }}
                 className="text-xs px-3.5 py-1.5 bg-chicken-green text-white rounded-lg font-bold hover:opacity-90"
-              >✅ 客人到了</button>
+              >客人到了</button>
             )}
             {booking.status === 'arrived' && (
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleCheckout() }}
                   className="text-xs px-3.5 py-1.5 bg-orange-500 text-white rounded-lg font-bold hover:opacity-90"
-                >🚪 已離席（待清桌）</button>
+                >已離席（待清桌）</button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleFinalize() }}
                   className="text-xs px-3.5 py-1.5 bg-chicken-green text-white rounded-lg font-bold hover:opacity-90"
-                >✨ 已離席+清桌</button>
+                >已離席+清桌</button>
               </>
             )}
             {(booking.status === 'confirmed' || booking.status === 'pending') && (

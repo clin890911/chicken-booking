@@ -92,14 +92,6 @@ export default function ConfirmPage() {
                 transition={{ duration: 0.5, delay: 0.2, ease: 'easeOut' }}
               />
             </motion.svg>
-            <motion.div
-              className="absolute -top-1 -right-2 text-3xl"
-              initial={{ scale: 0, rotate: -45 }}
-              animate={{ scale: 1, rotate: 12 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 12, delay: 0.5 }}
-            >
-              🐔
-            </motion.div>
           </motion.div>
           <motion.h1
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
@@ -111,8 +103,7 @@ export default function ConfirmPage() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.55 }}
             className="text-sm text-chicken-brown/70 mt-1"
           >
-            雞王刷刷鍋 · Master of Chicken<br />
-            期待您的光臨 🍲
+            訂位已建立，請截圖或保存此頁面
           </motion.p>
         </div>
 
@@ -123,7 +114,6 @@ export default function ConfirmPage() {
         >
           <div className="bg-chicken-red text-white px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-xl">🐔</span>
               <div className="leading-tight">
                 <div className="text-xs opacity-90">雞王刷刷鍋 · 訂位券</div>
                 <div className="font-black text-sm">Master of Chicken</div>
@@ -171,6 +161,15 @@ export default function ConfirmPage() {
             )}
             {b.notes?.text && <Row icon="📝" label="備註" value={<span className="text-sm">{b.notes.text}</span>} />}
           </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
+          className="mt-4 grid grid-cols-3 gap-2"
+        >
+          <MiniRule label="保留" value="15 分鐘" />
+          <MiniRule label="用餐" value="90 分鐘" />
+          <MiniRule label="狀態" value="已確認" />
         </motion.div>
 
         {/* 截圖提示 */}
@@ -230,6 +229,15 @@ function Tip({ icon, children }) {
       <span className="leading-6">{icon}</span>
       <span className="flex-1">{children}</span>
     </li>
+  )
+}
+
+function MiniRule({ label, value }) {
+  return (
+    <div className="rounded-xl border border-chicken-brown/10 bg-white px-2 py-3 text-center shadow-sm">
+      <div className="text-[11px] font-bold text-chicken-brown/50">{label}</div>
+      <div className="mt-1 text-sm font-black text-chicken-brown">{value}</div>
+    </div>
   )
 }
 

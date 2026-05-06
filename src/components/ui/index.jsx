@@ -87,12 +87,13 @@ export function LoadingScreen({ label = '載入中...' }) {
   )
 }
 
-export function EmptyState({ icon = '🍽️', title, hint }) {
+export function EmptyState({ icon = '🍽️', title, hint, action }) {
   return (
-    <div className="text-center py-12">
-      <div className="text-5xl mb-3">{icon}</div>
+    <div className="empty-panel">
+      <div className="text-4xl mb-3">{icon}</div>
       <p className="text-chicken-brown font-bold">{title}</p>
       {hint && <p className="text-sm text-chicken-brown/60 mt-1">{hint}</p>}
+      {action && <div className="mt-4">{action}</div>}
     </div>
   )
 }

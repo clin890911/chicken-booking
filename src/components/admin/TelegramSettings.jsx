@@ -5,7 +5,7 @@ import { useBooking } from '../../contexts/BookingContext'
 import * as tg from '../../services/telegramService'
 
 // Telegram 通知 + 備份設定
-export default function TelegramSettings() {
+export default function TelegramSettings({ embedded = false }) {
   const toast = useToast()
   const { bookings, waitlist } = useBooking()
   const [chatId, setChatIdLocal] = useState(tg.getChatId())
@@ -92,13 +92,17 @@ export default function TelegramSettings() {
     }
   }
 
-  return (
-    <Card>
-      <h2 className="font-bold text-chicken-brown mb-1">📨 Telegram 通知 + 備份</h2>
-      <p className="text-xs text-chicken-brown/60 mb-3">
-        所有訂位/候位事件即時推送到 Telegram chat，含完整 JSON 作為備份。
-        資料丟失時可從 chat 還原。
-      </p>
+  const content = (
+    <>
+      {!embedded && (
+        <>
+          <h2 className="font-bold text-chicken-brown mb-1">Telegram 通知 + 備份</h2>
+          <p className="text-xs text-chicken-brown/60 mb-3">
+            所有訂位/候位事件即時推送到 Telegram chat，含完整 JSON 作為備份。
+            資料丟失時可從 chat 還原。
+          </p>
+        </>
+      )}
 
       {!hasToken && (
         <div className="mb-3 px-3 py-2 bg-chicken-red/10 border border-chicken-red/20 rounded-lg text-xs text-chicken-red">
@@ -187,6 +191,8 @@ export default function TelegramSettings() {
           </div>
         </>
       )}
-    </Card>
+    </>
   )
+
+  return embedded ? content : <Card>{content}</Card>
 }

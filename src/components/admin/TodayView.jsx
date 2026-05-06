@@ -6,12 +6,12 @@ import { useBooking } from '../../contexts/BookingContext'
 import { todayStr, generateTimeSlots } from '../../utils/timeSlots'
 
 const SOURCE_FILTERS = [
-  { key: 'all',    label: '全部',     icon: '🔍' },
-  { key: 'online', label: '線上',     icon: '🌐' },
-  { key: 'phone',  label: '電話',     icon: '📞' },
-  { key: 'walkin', label: '現場',     icon: '🚶' },
-  { key: 'group',  label: '團體',     icon: '👥' },
-  { key: 'line',   label: 'LINE',    icon: '💚' },
+  { key: 'all',    label: '全部' },
+  { key: 'online', label: '線上' },
+  { key: 'phone',  label: '電話' },
+  { key: 'walkin', label: '現場' },
+  { key: 'group',  label: '團體' },
+  { key: 'line',   label: 'LINE' },
 ]
 
 export default function TodayView({ onAssignTable }) {
@@ -61,11 +61,11 @@ export default function TodayView({ onAssignTable }) {
     <div className="space-y-4">
       {/* 統計 */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <StatsCard icon="📋" label="今日訂位" value={`${stats.totalGroups}`} color="red" />
-        <StatsCard icon="👥" label="總人數" value={`${stats.totalGuests}`} color="yellow" />
-        <StatsCard icon="🪑" label="未指派" value={`${stats.unassigned}`} color="red" />
-        <StatsCard icon="🍲" label="用餐中" value={`${stats.dining}`} color="red" />
-        <StatsCard icon="✅" label="已到/離" value={`${stats.arrivedGroups}`} color="green" />
+        <StatsCard label="今日訂位" value={`${stats.totalGroups}`} color="red" />
+        <StatsCard label="總人數" value={`${stats.totalGuests}`} color="yellow" />
+        <StatsCard label="未指派" value={`${stats.unassigned}`} color="red" />
+        <StatsCard label="用餐中" value={`${stats.dining}`} color="brown" />
+        <StatsCard label="已到/離" value={`${stats.arrivedGroups}`} color="green" />
       </div>
 
       {/* 搜尋 + Filter */}
@@ -73,7 +73,7 @@ export default function TodayView({ onAssignTable }) {
         <div className="flex gap-2 items-center">
           <input
             type="search"
-            placeholder="🔍 搜尋姓名 / 電話 / 桌號"
+            placeholder="搜尋姓名 / 電話 / 桌號"
             value={query}
             onChange={e => setQuery(e.target.value)}
             className="input flex-1"
@@ -93,7 +93,7 @@ export default function TodayView({ onAssignTable }) {
                   ? 'bg-chicken-red text-white shadow'
                   : 'bg-white border border-chicken-brown/15 text-chicken-brown/70 hover:border-chicken-red/40'}`}
             >
-              {f.icon} {f.label}
+              {f.label}
             </button>
           ))}
         </div>

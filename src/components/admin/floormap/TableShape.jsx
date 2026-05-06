@@ -4,16 +4,16 @@
 //   60-90 分：紅色 + 黃色光暈（即將結束）
 //   90+ 分：深紅 + 紅色邊框閃動 + ⚠️ 警示
 const STATUS_COLOR = {
-  vacant:   { fill: '#22c55e', stroke: '#16a34a' },
-  reserved: { fill: '#eab308', stroke: '#ca8a04' },
-  dining:   { fill: '#ef4444', stroke: '#dc2626' },
-  cleaning: { fill: '#f97316', stroke: '#ea580c' },
+  vacant:   { fill: '#10b981', stroke: '#047857' },
+  reserved: { fill: '#0ea5e9', stroke: '#0369a1' },
+  dining:   { fill: '#f97316', stroke: '#c2410c' },
+  cleaning: { fill: '#f59e0b', stroke: '#b45309' },
   blocked:  { fill: '#94a3b8', stroke: '#64748b' },
 }
 
 // dining 階段顏色（依時長變深）
 const DINING_STAGE_FILL = {
-  normal:   '#ef4444',  // 0-60
+  normal:   '#f97316',  // 0-60
   late:     '#dc2626',  // 60-90
   overtime: '#991b1b',  // 90+ 深紅
 }
@@ -125,6 +125,12 @@ export default function TableShape({
         <text x={x + w / 2} y={y + h - 8}
               fontSize={9} fill="white" textAnchor="middle" pointerEvents="none">
           清桌中
+        </text>
+      )}
+      {status === 'vacant' && (
+        <text x={x + w / 2} y={y + h - 8}
+              fontSize={9} fill="white" textAnchor="middle" pointerEvents="none">
+          可入座
         </text>
       )}
 

@@ -5,7 +5,7 @@ import DatePicker from '../components/booking/DatePicker'
 import TimeSlotPicker from '../components/booking/TimeSlotPicker'
 import { Input, Textarea } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
-import { todayStr, dayLabel } from '../utils/timeSlots'
+import { dayLabel } from '../utils/timeSlots'
 
 // 步驟式訂位頁：人數 → 日期 → 時段 → 個資
 // 設計重點：
@@ -86,7 +86,7 @@ export default function BookingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-chicken-cream via-chicken-cream to-white pb-32">
+    <div className="min-h-screen bg-gradient-to-b from-chicken-cream via-chicken-cream to-white pb-36">
       {/* Compact Header */}
       <header className="bg-chicken-red text-white px-4 py-3 sticky top-0 z-30 shadow-md">
         <div className="max-w-md mx-auto flex items-center gap-3">
@@ -118,7 +118,7 @@ export default function BookingPage() {
       {/* Summary card (顯示已選資訊，點擊可返回該步) */}
       {step > 0 && (
         <div className="max-w-md mx-auto px-4 pt-4">
-          <div className="bg-white rounded-2xl border border-chicken-brown/10 p-3 space-y-1.5 text-xs">
+          <div className="surface p-3 space-y-1.5 text-xs">
             {data.guests > 0 && (
               <button onClick={() => goTo(0)}
                       className="w-full flex items-center justify-between text-left hover:bg-chicken-cream/50 -mx-1 px-1 py-0.5 rounded">
@@ -213,6 +213,15 @@ export default function BookingPage() {
             {step === 3 && (
               <div className="space-y-4">
                 <h2 className="text-xl font-black text-chicken-brown">您的聯絡資訊</h2>
+                <div className="rounded-xl border border-chicken-red/15 bg-white p-4">
+                  <div className="mb-2 text-xs font-black text-chicken-red">訂位摘要</div>
+                  <div className="grid gap-2 text-sm">
+                    <SummaryLine label="人數" value={`${data.guests} 位`} />
+                    <SummaryLine label="日期" value={dayLabel(data.date)} />
+                    <SummaryLine label="時段" value={data.timeSlot} />
+                    <SummaryLine label="規則" value="用餐 90 分鐘，逾時 15 分鐘釋出" />
+                  </div>
+                </div>
                 <Input
                   label="姓名"
                   value={data.name}
@@ -257,6 +266,9 @@ export default function BookingPage() {
                   onChange={e => set('notes', { ...data.notes, text: e.target.value })}
                   placeholder="例：靠窗、慶生、過敏、長輩需剪雞肉..."
                 />
+                <p className="rounded-xl bg-chicken-brown/5 px-3 py-2 text-xs leading-5 text-chicken-brown/65">
+                  送出後會立即建立訂位紀錄。若需取消或更改，請來電通知同仁。
+                </p>
               </div>
             )}
           </motion.div>
@@ -278,6 +290,15 @@ export default function BookingPage() {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function SummaryLine({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-chicken-brown/55">{label}</span>
+      <span className="text-right font-black text-chicken-brown">{value}</span>
     </div>
   )
 }
