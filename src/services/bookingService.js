@@ -146,6 +146,38 @@ export function update(id, patch) {
   return list[idx]
 }
 
+export function upsertFromRemote(data) {
+  if (!data?.id) return null
+  const list = read()
+  const idx = list.findIndex(b => b.id === data.id)
+  const booking = {
+    name: '',
+    phone: '',
+    guests: 1,
+    date: '',
+    timeSlot: '',
+    notes: {},
+    source: 'line',
+    status: 'confirmed',
+    assignedTableId: null,
+    lineUserId: null,
+    manageToken: data.manageToken || data.token || null,
+    lastGuestEditAt: null,
+    guestEditCount: 0,
+    guestEditHistory: [],
+    cancellationReason: null,
+    createdAt: data.createdAt || new Date().toISOString(),
+    createdBy: 'guest',
+    ...data,
+    manageToken: data.manageToken || data.token || null,
+    updatedAt: data.updatedAt || new Date().toISOString(),
+  }
+  if (idx >= 0) list[idx] = { ...list[idx], ...booking }
+  else list.push(booking)
+  write(list)
+  return booking
+}
+
 export function verifyGuestAccess(id, token, tail) {
   const booking = ensureManageToken(id)
   if (!booking) return { ok: false, reason: '找不到此訂位' }

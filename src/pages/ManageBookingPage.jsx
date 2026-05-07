@@ -21,7 +21,7 @@ import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
 import * as tg from '../services/telegramService'
-import { lineBindUrl, notifyLineBooking } from '../services/lineService'
+import { fetchLineBooking, lineBindUrl, notifyLineBooking } from '../services/lineService'
 import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
 import { calcSlotCapacity } from '../utils/capacity'
 
@@ -55,12 +55,42 @@ export default function ManageBookingPage() {
   const [busy, setBusy] = useState(false)
   const [cancelReason, setCancelReason] = useState('')
   const [cancelOther, setCancelOther] = useState('')
+  const [loadingRemote, setLoadingRemote] = useState(true)
 
   useEffect(() => {
-    const b = bookingService.ensureManageToken(id)
-    setBooking(b)
-    if (b) setForm(toForm(b))
-  }, [id])
+    let cancelled = false
+    async function loadBooking() {
+      setLoadingRemote(true)
+      const local = bookingService.ensureManageToken(id)
+      if (local) {
+        if (!cancelled) {
+          setBooking(local)
+          setForm(toForm(local))
+          setLoadingRemote(false)
+        }
+        return
+      }
+
+      const remote = await fetchLineBooking(settings, id, token)
+      if (cancelled) return
+      if (remote.ok && remote.booking) {
+        const restored = bookingService.upsertFromRemote({
+          ...remote.booking,
+          manageToken: remote.booking.manageToken || remote.booking.token || token,
+        })
+        setBooking(restored)
+        setForm(toForm(restored))
+        setError('')
+      } else {
+        setBooking(null)
+        setForm(null)
+        setError(remote.error || '找不到此訂位')
+      }
+      setLoadingRemote(false)
+    }
+    loadBooking()
+    return () => { cancelled = true }
+  }, [id, settings, token])
 
   const maxDate = useMemo(() => {
     const today = new Date(todayStr() + 'T00:00:00')
@@ -198,12 +228,25 @@ export default function ManageBookingPage() {
     }
   }
 
+  if (loadingRemote) {
+    return (
+      <Shell>
+        <div className="surface p-6 text-center">
+          <Clock className="mx-auto mb-3 animate-spin text-chicken-red" size={34} />
+          <h1 className="text-xl font-black text-chicken-brown">正在讀取訂位</h1>
+          <p className="mt-2 text-sm font-bold text-chicken-brown/55">請稍候，正在確認您的管理連結。</p>
+        </div>
+      </Shell>
+    )
+  }
+
   if (!booking || !form) {
     return (
       <Shell>
         <div className="surface p-6 text-center">
           <AlertTriangle className="mx-auto mb-3 text-chicken-red" size={36} />
           <h1 className="text-xl font-black text-chicken-brown">找不到此訂位</h1>
+          {error && <p className="mt-2 text-sm font-bold text-chicken-brown/55">{error}</p>}
           <Link to="/book" className="mt-4 inline-flex text-sm font-bold text-chicken-red underline">重新訂位</Link>
         </div>
       </Shell>

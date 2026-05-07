@@ -4,6 +4,11 @@ const DEFAULT_LIFF_URL = 'https://liff.line.me/2009996489-f1SCb75q'
 const DEFAULT_LIFF_ID = '2009996489-f1SCb75q'
 const DEFAULT_BIND_ENDPOINT = 'https://linebind-reaor76eyq-uc.a.run.app'
 const DEFAULT_PUSH_ENDPOINT = 'https://linepushbooking-reaor76eyq-uc.a.run.app'
+const DEFAULT_MANAGE_ENDPOINT = 'https://linegetbooking-reaor76eyq-uc.a.run.app'
+const DEFAULT_STORE_ADDRESS = '南投縣鹿谷鄉中正路二段377號'
+const DEFAULT_STORE_MAP_URL = 'https://www.google.com/maps/search/?api=1&query=%E5%8D%97%E6%8A%95%E7%B8%A3%E9%B9%BF%E8%B0%B7%E9%84%89%E4%B8%AD%E6%AD%A3%E8%B7%AF%E4%BA%8C%E6%AE%B5377%E8%99%9F'
+const DEFAULT_STORE_LATITUDE = '23.7523874'
+const DEFAULT_STORE_LONGITUDE = '120.746746'
 
 export function lineBindUrl(settings = {}, booking, manageUrl) {
   if (!booking) return ''
@@ -29,6 +34,10 @@ export function lineBindEndpoint(settings = {}) {
 
 export function linePushEndpoint(settings = {}) {
   return settings.linePushEndpoint || import.meta.env.VITE_LINE_PUSH_ENDPOINT || DEFAULT_PUSH_ENDPOINT
+}
+
+export function lineManageEndpoint(settings = {}) {
+  return settings.lineManageEndpoint || import.meta.env.VITE_LINE_MANAGE_ENDPOINT || DEFAULT_MANAGE_ENDPOINT
 }
 
 export function lineLiffId(settings = {}) {
@@ -80,11 +89,11 @@ export function bookingLinePayload(booking, settings = {}, manageUrl = '') {
     },
     store: {
       name: settings.storeName || '雞王刷刷鍋',
-      address: settings.storeAddress || '',
+      address: settings.storeAddress || DEFAULT_STORE_ADDRESS,
       phone: settings.storePhone || '',
-      mapUrl: settings.storeMapUrl || '',
-      latitude: settings.storeLatitude || '',
-      longitude: settings.storeLongitude || '',
+      mapUrl: settings.storeMapUrl || DEFAULT_STORE_MAP_URL,
+      latitude: settings.storeLatitude || DEFAULT_STORE_LATITUDE,
+      longitude: settings.storeLongitude || DEFAULT_STORE_LONGITUDE,
       lineOfficialUrl: lineOfficialUrl(settings),
     },
   }
@@ -128,5 +137,22 @@ export async function notifyLineBooking(settings = {}, booking, type = 'updated'
   } catch (err) {
     console.warn('LINE notify failed:', err)
     return { ok: false, error: err.message }
+  }
+}
+
+export async function fetchLineBooking(settings = {}, bookingId, token) {
+  const endpoint = lineManageEndpoint(settings)
+  if (!endpoint || !bookingId || !token) return { ok: false, reason: 'not-configured' }
+  try {
+    const url = new URL(endpoint)
+    url.searchParams.set('bookingId', bookingId)
+    url.searchParams.set('token', token)
+    const res = await fetch(url.toString(), { method: 'GET' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.ok === false) return { ok: false, error: data.error || `HTTP ${res.status}` }
+    return { ok: true, booking: data.booking, store: data.store, line: data.line }
+  } catch (err) {
+    console.warn('LINE booking fetch failed:', err)
+    return { ok: false, error: err.message || 'Load failed' }
   }
 }

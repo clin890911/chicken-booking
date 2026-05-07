@@ -12,6 +12,10 @@ const LINE_CHANNEL_SECRET = defineSecret('LINE_CHANNEL_SECRET')
 
 const LINE_REPLY_URL = 'https://api.line.me/v2/bot/message/reply'
 const LINE_PUSH_URL = 'https://api.line.me/v2/bot/message/push'
+const DEFAULT_STORE_ADDRESS = '南投縣鹿谷鄉中正路二段377號'
+const DEFAULT_STORE_MAP_URL = 'https://www.google.com/maps/search/?api=1&query=%E5%8D%97%E6%8A%95%E7%B8%A3%E9%B9%BF%E8%B0%B7%E9%84%89%E4%B8%AD%E6%AD%A3%E8%B7%AF%E4%BA%8C%E6%AE%B5377%E8%99%9F'
+const DEFAULT_STORE_LATITUDE = '23.7523874'
+const DEFAULT_STORE_LONGITUDE = '120.746746'
 
 export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
@@ -84,6 +88,36 @@ export const linePushBooking = onRequest({ cors: true, invoker: 'public', secret
   } catch (err) {
     console.error('linePushBooking failed:', err)
     return res.status(500).json({ ok: false, error: err.message || 'line-push-failed' })
+  }
+})
+
+export const lineGetBooking = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
+  if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  try {
+    const input = req.method === 'GET' ? req.query : req.body || {}
+    const bookingId = String(input.bookingId || input.id || '')
+    const token = String(input.token || '')
+    if (!bookingId || !token) return res.status(400).json({ ok: false, error: 'missing-required-fields' })
+
+    const snap = await db.collection('lineBookingBindings').doc(bookingId).get()
+    if (!snap.exists) return res.status(404).json({ ok: false, error: 'booking-not-found' })
+    const data = snap.data()
+    if (!data?.manageToken || data.manageToken !== token) {
+      return res.status(403).json({ ok: false, error: 'invalid-token' })
+    }
+
+    return res.json({
+      ok: true,
+      booking: data.booking,
+      store: normalizeStore(data.store),
+      line: {
+        displayName: data.lineDisplayName || '',
+        pictureUrl: data.linePictureUrl || '',
+      },
+    })
+  } catch (err) {
+    console.error('lineGetBooking failed:', err)
+    return res.status(500).json({ ok: false, error: err.message || 'line-get-booking-failed' })
   }
 })
 
@@ -203,11 +237,11 @@ function locationMessage(store) {
 function normalizeStore(store = {}) {
   return {
     name: store.name || '雞王刷刷鍋',
-    address: store.address || '',
+    address: store.address || DEFAULT_STORE_ADDRESS,
     phone: store.phone || '',
-    mapUrl: store.mapUrl || '',
-    latitude: store.latitude || '',
-    longitude: store.longitude || '',
+    mapUrl: store.mapUrl || DEFAULT_STORE_MAP_URL,
+    latitude: store.latitude || DEFAULT_STORE_LATITUDE,
+    longitude: store.longitude || DEFAULT_STORE_LONGITUDE,
     lineOfficialUrl: store.lineOfficialUrl || '',
   }
 }

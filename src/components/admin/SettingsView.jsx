@@ -202,6 +202,13 @@ export default function SettingsView() {
             onChange={e => setForm(f => ({ ...f, linePushEndpoint: e.target.value.trim() }))}
             placeholder="https://.../linePushBooking"
           />
+          <Input
+            label="LINE 訂位讀取端點（選填）"
+            type="url"
+            value={form.lineManageEndpoint || ''}
+            onChange={e => setForm(f => ({ ...f, lineManageEndpoint: e.target.value.trim() }))}
+            placeholder="https://.../lineGetBooking"
+          />
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             目前會先導向 LINE 官方帳號；若日後填入 LIFF 連結，客人按下「用 LINE 接收訂位資訊」會優先進入 LIFF 綁定頁。
             LINE API Token 仍必須放在後端或 Cloud Functions，不能放前端。
