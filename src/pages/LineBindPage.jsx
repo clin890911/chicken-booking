@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { CheckCircle2, ChevronLeft, Loader2, MessageCircle, ShieldCheck, TriangleAlert } from 'lucide-react'
@@ -10,6 +10,8 @@ import { dayLabel } from '../utils/timeSlots'
 
 const LINE_BIND_STATE_KEY = 'chicken_line_bind_params_v1'
 const LINE_BIND_REDIRECT_KEY = 'chicken_line_bind_redirect_v1'
+const LINE_BIND_SUBMITTED_KEY = 'chicken_line_bind_submitted_v1'
+const LINE_BIND_SUBMIT_DEDUPE_MS = 5 * 60 * 1000
 
 export default function LineBindPage() {
   const location = useLocation()
@@ -28,6 +30,7 @@ export default function LineBindPage() {
   const [state, setState] = useState('loading')
   const [message, setMessage] = useState('正在準備 LINE 訂位通知...')
   const [profile, setProfile] = useState(null)
+  const submittedRef = useRef(new Set())
 
   const booking = useMemo(() => {
     const localBooking = bookingId ? bookingService.ensureManageToken(bookingId) : null
@@ -52,6 +55,7 @@ export default function LineBindPage() {
   useEffect(() => {
     let cancelled = false
     async function run() {
+      let activeSubmitKey = ''
       if (!booking) {
         setState('error')
         setMessage('找不到此訂位資料，請回到訂位成功頁重新按一次 LINE 接收按鈕。')
@@ -92,6 +96,14 @@ export default function LineBindPage() {
         if (cancelled) return
         setProfile(nextProfile)
         setMessage('正在綁定您的 LINE 訂位通知...')
+        activeSubmitKey = `${booking.id}:${nextProfile.userId}`
+        if (submittedRef.current.has(activeSubmitKey) || hasRecentlySubmittedBind(activeSubmitKey)) {
+          setState('success')
+          setMessage('LINE 訂位通知已完成設定；剛剛已傳送過訂位資訊，因此不重複發送。')
+          return
+        }
+        submittedRef.current.add(activeSubmitKey)
+        rememberSubmittedBind(activeSubmitKey)
 
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -109,9 +121,15 @@ export default function LineBindPage() {
         if (!res.ok || data.ok === false) throw new Error(data.error || 'LINE 綁定失敗')
         clearPersistedBindParams()
         setState('success')
-        setMessage('已完成 LINE 訂位通知設定，官方帳號會傳送訂位摘要與定位資訊。')
+        setMessage(data.skippedPush
+          ? 'LINE 訂位通知已完成設定；剛剛已傳送過訂位資訊，因此不重複發送。'
+          : '已完成 LINE 訂位通知設定，官方帳號會傳送訂位摘要與定位資訊。')
       } catch (err) {
         console.warn('LINE bind failed:', err)
+        if (activeSubmitKey) {
+          submittedRef.current.delete(activeSubmitKey)
+          forgetSubmittedBind(activeSubmitKey)
+        }
         setState('error')
         setMessage(err.message || 'LINE 綁定失敗，請稍後再試。')
       }
@@ -271,6 +289,36 @@ function hasRecentlyRedirected(bookingId) {
 function rememberLiffRedirect(bookingId) {
   try {
     sessionStorage.setItem(LINE_BIND_REDIRECT_KEY, JSON.stringify({ bookingId, at: Date.now() }))
+  } catch {}
+}
+
+function hasRecentlySubmittedBind(key) {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(LINE_BIND_SUBMITTED_KEY) || '{}')
+    const submittedAt = Number(data[key] || 0)
+    return submittedAt > 0 && Date.now() - submittedAt < LINE_BIND_SUBMIT_DEDUPE_MS
+  } catch {
+    return false
+  }
+}
+
+function rememberSubmittedBind(key) {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(LINE_BIND_SUBMITTED_KEY) || '{}')
+    const now = Date.now()
+    const next = Object.fromEntries(
+      Object.entries(data).filter(([, value]) => now - Number(value || 0) < LINE_BIND_SUBMIT_DEDUPE_MS)
+    )
+    next[key] = now
+    sessionStorage.setItem(LINE_BIND_SUBMITTED_KEY, JSON.stringify(next))
+  } catch {}
+}
+
+function forgetSubmittedBind(key) {
+  try {
+    const data = JSON.parse(sessionStorage.getItem(LINE_BIND_SUBMITTED_KEY) || '{}')
+    delete data[key]
+    sessionStorage.setItem(LINE_BIND_SUBMITTED_KEY, JSON.stringify(data))
   } catch {}
 }
 

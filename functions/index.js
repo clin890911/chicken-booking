@@ -19,6 +19,7 @@ const DEFAULT_STORE_LONGITUDE = '120.746746'
 const DEFAULT_STORE_PHONE = '049-2753377'
 const DEFAULT_DINING_DURATION_MIN = 90
 const DEFAULT_CLEANUP_BUFFER_MIN = 10
+const LINE_BIND_PUSH_DEDUPE_MS = 10 * 60 * 1000
 const PUBLIC_CORS = true
 
 const COLLECTIONS = {
@@ -247,6 +248,17 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       return res.status(400).json({ ok: false, error: 'missing-required-fields' })
     }
 
+    const bindingRef = db.collection('lineBookingBindings').doc(booking.id)
+    const bookingRef = db.collection(COLLECTIONS.bookings).doc(booking.id)
+    const existingSnap = await bindingRef.get()
+    const existing = existingSnap.exists ? existingSnap.data() : null
+    const now = new Date().toISOString()
+    const lastPushAt = existing?.lastBindPushAt || existing?.lastPushedAt || ''
+    const lastPushMs = lastPushAt ? new Date(lastPushAt).getTime() : 0
+    const recentlyPushed = existing?.lineUserId === line.userId
+      && Number.isFinite(lastPushMs)
+      && Date.now() - lastPushMs < LINE_BIND_PUSH_DEDUPE_MS
+
     const record = {
       bookingId: booking.id,
       manageToken: booking.token,
@@ -256,21 +268,25 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       booking,
       store: normalizeStore(store),
       updatedAt: FieldValue.serverTimestamp(),
-      createdAt: FieldValue.serverTimestamp(),
+      createdAt: existing?.createdAt || FieldValue.serverTimestamp(),
+      lastBindAttemptAt: now,
+      ...(recentlyPushed ? {} : { lastBindPushAt: now }),
     }
 
     const batch = db.batch()
-    batch.set(db.collection('lineBookingBindings').doc(booking.id), record, { merge: true })
-    batch.set(db.collection(COLLECTIONS.bookings).doc(booking.id), {
+    batch.set(bindingRef, record, { merge: true })
+    batch.set(bookingRef, {
       lineUserId: line.userId,
       lineDisplayName: line.displayName || '',
       linePictureUrl: line.pictureUrl || '',
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     }, { merge: true })
     await batch.commit()
-    await pushLineMessages(line.userId, buildBookingMessages(booking, record.store, 'confirmed'))
+    if (!recentlyPushed) {
+      await pushLineMessages(line.userId, buildBookingMessages(booking, record.store, 'confirmed'))
+    }
 
-    return res.json({ ok: true })
+    return res.json({ ok: true, skippedPush: recentlyPushed })
   } catch (err) {
     console.error('lineBind failed:', err)
     return res.status(500).json({ ok: false, error: err.message || 'line-bind-failed' })
