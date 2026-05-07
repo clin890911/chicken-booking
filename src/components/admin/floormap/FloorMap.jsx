@@ -9,6 +9,7 @@ export default function FloorMap({
   floor,
   tables,
   bookings = [],
+  settings = {},
   selectedTableNumber,
   onSelectTable,
   mergeMode = false,
@@ -59,6 +60,7 @@ export default function FloorMap({
             key={t.number}
             table={t}
             booking={booking}
+            settings={settings}
             isSelected={isSelected}
             isMergeCandidate={isMergeFirst}
             isHighlight={isHighlight}

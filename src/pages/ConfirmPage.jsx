@@ -10,6 +10,8 @@ import { lineBindUrl } from '../services/lineService'
 export default function ConfirmPage() {
   const { id } = useParams()
   const { settings } = useBooking()
+  const diningDuration = Number(settings.diningDurationMin) || 90
+  const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
   const [b, setB] = useState(null)
   const [copied, setCopied] = useState(false)
   const [copiedManage, setCopiedManage] = useState(false)
@@ -194,8 +196,8 @@ export default function ConfirmPage() {
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
           className="mt-4 grid grid-cols-3 gap-2"
         >
-          <MiniRule label="保留" value="15 分鐘" />
-          <MiniRule label="用餐" value="90 分鐘" />
+          <MiniRule label="保留" value={`${cleanupBuffer} 分鐘`} />
+          <MiniRule label="用餐" value={`${diningDuration} 分鐘`} />
           <MiniRule label="狀態" value="已確認" />
         </motion.div>
 
@@ -294,7 +296,7 @@ export default function ConfirmPage() {
           </div>
           <ul className="px-4 py-3 space-y-2 text-sm text-chicken-brown leading-relaxed">
             <Tip icon="⏱">請於用餐時段前 <strong>5 分鐘</strong> 抵達現場</Tip>
-            <Tip icon="⌛">逾時 <strong>15 分鐘</strong>，訂位將自動釋出</Tip>
+            <Tip icon="⌛">用餐時間 <strong>{diningDuration} 分鐘</strong>，保留 <strong>{cleanupBuffer} 分鐘</strong> 翻桌緩衝</Tip>
             <Tip icon="📞">用餐前 2 小時以前可用管理連結修改或取消；更近時間請來電</Tip>
             <Tip icon="🐔">本店使用 <strong>48 小時冷藏文昌雞</strong>，當日限量供應</Tip>
           </ul>
@@ -359,7 +361,9 @@ function generateConfetti(n) {
 
 function googleCalendarUrl(booking, settings = {}) {
   const start = new Date(`${booking.date}T${booking.timeSlot}:00`)
-  const end = new Date(start.getTime() + 90 * 60 * 1000)
+  const diningDuration = Number(settings.diningDurationMin) || 90
+  const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
+  const end = new Date(start.getTime() + diningDuration * 60 * 1000)
   const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
   const params = new URLSearchParams({
     action: 'TEMPLATE',
@@ -369,7 +373,7 @@ function googleCalendarUrl(booking, settings = {}) {
       `訂位編號：${booking.id}`,
       `姓名：${booking.name}`,
       `人數：${booking.guests} 位`,
-      '請於用餐時段前 5 分鐘抵達，逾時 15 分鐘訂位將釋出。',
+      `請於用餐時段前 5 分鐘抵達。用餐時間 ${diningDuration} 分鐘，店內保留 ${cleanupBuffer} 分鐘翻桌緩衝。`,
     ].join('\n'),
     location: settings.storeAddress || '雞王刷刷鍋',
   })

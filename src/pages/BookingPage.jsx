@@ -5,7 +5,7 @@ import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, ShieldChec
 import { Input, Textarea } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
-import { calcSlotCapacity } from '../utils/capacity'
+import { bookingOccupancyLabel, calcSlotCapacity } from '../utils/capacity'
 
 const NOTE_OPTIONS = [
   { key: 'pet', label: '攜帶寵物' },
@@ -48,7 +48,7 @@ export default function BookingPage() {
 
   const slots = useMemo(() => {
     return generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval).map(time => {
-      const remaining = calcSlotCapacity(tables, bookings, data.date, time)
+      const remaining = calcSlotCapacity(tables, bookings, data.date, time, settings)
       return {
         time,
         remaining,
@@ -139,7 +139,7 @@ export default function BookingPage() {
               <HeroPanel />
               <PartyPanel guests={data.guests} onSetGuests={setGuests} />
               <CalendarPicker dates={dates} value={data.date} onChange={setDate} />
-              <TimeGrid groupedSlots={groupedSlots} value={data.timeSlot} guests={data.guests} onChange={(time) => set('timeSlot', time)} />
+              <TimeGrid groupedSlots={groupedSlots} value={data.timeSlot} guests={data.guests} settings={settings} onChange={(time) => set('timeSlot', time)} />
             </motion.section>
           ) : (
             <motion.section
@@ -199,6 +199,7 @@ export default function BookingPage() {
         <aside className="lg:sticky lg:top-[86px] lg:h-fit">
           <BookingSummary
             data={data}
+            settings={settings}
             ready={selectedReady}
             step={step}
             busy={busy}
@@ -212,6 +213,7 @@ export default function BookingPage() {
 
       <MobileActionBar
         data={data}
+        settings={settings}
         ready={selectedReady}
         step={step}
         busy={busy}
@@ -414,12 +416,12 @@ function CalendarPicker({ dates, value, onChange }) {
   )
 }
 
-function TimeGrid({ groupedSlots, value, guests, onChange }) {
+function TimeGrid({ groupedSlots, value, guests, settings, onChange }) {
   const total = groupedSlots.午餐.length + groupedSlots.晚餐.length
 
   return (
     <section className="surface p-5">
-      <SectionTitle icon={Clock} title="選擇抵達時間" hint="符合人數的可訂時段" />
+      <SectionTitle icon={Clock} title="選擇抵達時間" hint={bookingOccupancyLabel(settings)} />
       {total === 0 ? (
         <div className="empty-panel mt-4">
           <div className="text-3xl mb-2">⏳</div>
@@ -476,16 +478,16 @@ function TimeGrid({ groupedSlots, value, guests, onChange }) {
   )
 }
 
-function BookingSummary({ data, ready, step, busy, canSubmit, onEdit, onContinue, onSubmit }) {
+function BookingSummary({ data, settings, ready, step, busy, canSubmit, onEdit, onContinue, onSubmit }) {
   return (
     <motion.div layout className="hidden rounded-2xl border border-chicken-brown/10 bg-white p-5 shadow-sm lg:block">
       <div className="mb-4 flex items-center gap-2 text-sm font-black text-chicken-brown">
         <ShieldCheck size={18} className="text-chicken-red" />
         訂位摘要
       </div>
-      <SummaryRows data={data} />
+      <SummaryRows data={data} settings={settings} />
       <div className="mt-4 rounded-xl bg-chicken-cream px-3 py-2 text-xs leading-5 text-chicken-brown/65">
-        用餐 90 分鐘，逾時 15 分鐘釋出。若有特殊需求，請於備註說明。
+        {bookingOccupancyLabel(settings)}。若有特殊需求，請於備註說明。
       </div>
       <div className="mt-4 space-y-2">
         {step === 'availability' ? (
@@ -546,14 +548,14 @@ function SectionTitle({ icon: Icon, title, hint }) {
   )
 }
 
-function SummaryRows({ data }) {
+function SummaryRows({ data, settings }) {
   return (
     <div className="space-y-2 text-sm">
       <SummaryLine label="人數" value={`${data.guests} 位`} />
       <SummaryLine label="日期" value={data.date ? dayLabel(data.date) : '尚未選擇'} />
       <SummaryLine label="時間" value={data.timeSlot || '尚未選擇'} />
       <SummaryLine label="確認" value="送出立即保留" />
-      <SummaryLine label="電話" value="04-XXXX-XXXX" icon={Phone} />
+      <SummaryLine label="電話" value={settings.storePhone || '049-2753377'} icon={Phone} />
     </div>
   )
 }

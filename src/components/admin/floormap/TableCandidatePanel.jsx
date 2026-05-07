@@ -79,6 +79,13 @@ export default function TableCandidatePanel({ table, onPicked }) {
     return diff >= -10 && diff <= 30
   }
 
+  const waitMinutes = (takenAt) => {
+    if (!takenAt) return 0
+    const created = new Date(takenAt).getTime()
+    if (!Number.isFinite(created)) return 0
+    return Math.max(0, Math.floor((Date.now() - created) / 60000))
+  }
+
   return (
     <div className="mt-3 -mx-5 px-5 py-3 bg-chicken-cream/50 border-y border-chicken-brown/10">
       <div className="text-[11px] font-bold text-chicken-brown/60 mb-2">
@@ -102,7 +109,7 @@ export default function TableCandidatePanel({ table, onPicked }) {
                       ${waste === 0 ? 'bg-chicken-green text-white'
                         : waste <= 1 ? 'bg-chicken-green/20 text-chicken-green'
                         : 'bg-chicken-brown/10 text-chicken-brown/60'}`}>
-                      {b.guests}/{table.capacity}{waste === 0 && ' ✓'}
+                      {waste === 0 ? '剛好' : `空 ${waste} 位`} · {b.guests}/{table.capacity}
                     </span>
                     {imminent && (
                       <span className="text-[10px] font-bold text-chicken-yellow">🔔 即將到</span>
@@ -136,16 +143,18 @@ export default function TableCandidatePanel({ table, onPicked }) {
           <div className="space-y-1.5">
             {pendingWaitlist.map(w => {
               const waste = table.capacity - w.partySize
+              const minutes = waitMinutes(w.takenAt)
               return (
                 <div key={w.id} className="bg-white rounded-lg p-2 border-2 border-chicken-brown/10">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-black text-chicken-red">#{w.queueNumber}</span>
                     <span className="text-sm font-bold text-chicken-brown truncate flex-1 min-w-0">{w.name}</span>
+                    <span className="text-[10px] font-bold text-chicken-brown/50">等 {minutes} 分</span>
                     <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded
                       ${waste === 0 ? 'bg-chicken-green text-white'
                         : waste <= 1 ? 'bg-chicken-green/20 text-chicken-green'
                         : 'bg-chicken-brown/10 text-chicken-brown/60'}`}>
-                      {w.partySize}/{table.capacity}{waste === 0 && ' ✓'}
+                      {waste === 0 ? '剛好' : `空 ${waste} 位`} · {w.partySize}/{table.capacity}
                     </span>
                     {w.status === 'called' && (
                       <span className="text-[10px] font-bold text-chicken-yellow">已叫號</span>
@@ -165,7 +174,7 @@ export default function TableCandidatePanel({ table, onPicked }) {
       )}
 
       <div className="text-[10px] text-chicken-brown/40 text-center mt-2.5">
-        ✓ 表示完美容量 · 🔔 30 分內到達
+        剛好表示桌型最貼近 · 🔔 30 分內到達
       </div>
     </div>
   )

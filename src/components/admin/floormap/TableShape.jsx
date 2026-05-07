@@ -1,8 +1,8 @@
 // 單張桌位 SVG 元件 — 在 FloorMap 內被 render
 // 用餐時長階段視覺：
-//   0-60 分：正常紅色
-//   60-90 分：紅色 + 黃色光暈（即將結束）
-//   90+ 分：深紅 + 紅色邊框閃動 + ⚠️ 警示
+//   0-(用餐時間-30) 分：正常
+//   接近用餐時間：黃色光暈
+//   超過用餐時間/清桌緩衝：加深與警示
 const STATUS_COLOR = {
   vacant:   { fill: '#10b981', stroke: '#047857' },
   reserved: { fill: '#0ea5e9', stroke: '#0369a1' },
@@ -15,22 +15,28 @@ const STATUS_COLOR = {
 const DINING_STAGE_FILL = {
   normal:   '#f97316',  // 0-60
   late:     '#dc2626',  // 60-90
-  overtime: '#991b1b',  // 90+ 深紅
+  overtime: '#b91c1c',
+  'buffer-overtime': '#991b1b',
 }
 
 function diffMin(d) {
   return Math.floor((Date.now() - new Date(d).getTime()) / 60000)
 }
 
-function stageOf(minutes) {
-  if (minutes >= 90) return 'overtime'
-  if (minutes >= 60) return 'late'
+function stageOf(minutes, settings = {}) {
+  const diningDuration = Number(settings.diningDurationMin) || 90
+  const buffer = Number(settings.cleanupBufferMin) || 10
+  const lateThreshold = Math.max(0, diningDuration - 30)
+  if (minutes >= diningDuration + buffer) return 'buffer-overtime'
+  if (minutes >= diningDuration) return 'overtime'
+  if (minutes >= lateThreshold) return 'late'
   return 'normal'
 }
 
 export default function TableShape({
   table,
   booking,                    // 對應的 reservation（reserved / dining 狀態才有）
+  settings = {},
   isSelected = false,
   isMergeCandidate = false,
   isHighlight = false,
@@ -53,7 +59,7 @@ export default function TableShape({
 
   // === 計算用餐時長階段（僅 dining）===
   const minutes = (status === 'dining' && table.seatedAt) ? diffMin(table.seatedAt) : 0
-  const stage = status === 'dining' ? stageOf(minutes) : null
+  const stage = status === 'dining' ? stageOf(minutes, settings) : null
 
   // 填色：dining 用 stage 對應顏色，其他用基本 status color
   let fill = STATUS_COLOR[status]?.fill || STATUS_COLOR.vacant.fill
@@ -72,7 +78,8 @@ export default function TableShape({
   else if (isAssignSuggestion) { stroke = '#9eb63a'; strokeWidth = 4; className = 'animate-pulse' }
   else if (isJustAssigned) { stroke = '#9eb63a'; strokeWidth = 4 }
   else if (isHighlight) { stroke = '#9eb63a'; strokeWidth = 3; strokeDash = '4 2' }
-  else if (stage === 'overtime') { stroke = '#fef08a'; strokeWidth = 3; className = 'animate-pulse' }
+  else if (stage === 'buffer-overtime') { stroke = '#fef08a'; strokeWidth = 3; className = 'animate-pulse' }
+  else if (stage === 'overtime') { stroke = '#fef08a'; strokeWidth = 3 }
   else if (stage === 'late') { stroke = '#fef08a'; strokeWidth = 2 }
 
   const opacity = isDimmed ? 0.35 : 1
@@ -84,7 +91,7 @@ export default function TableShape({
         <rect x={x - 3} y={y - 3} width={w + 6} height={h + 6} rx={10}
               fill="none" stroke="#fde047" strokeWidth={2} opacity={0.6} />
       )}
-      {stage === 'overtime' && (
+      {(stage === 'overtime' || stage === 'buffer-overtime') && (
         <rect x={x - 4} y={y - 4} width={w + 8} height={h + 8} rx={11}
               fill="none" stroke="#fef08a" strokeWidth={3} opacity={0.85} />
       )}
@@ -116,9 +123,9 @@ export default function TableShape({
       )}
       {status === 'dining' && table.seatedAt && (
         <text x={x + w / 2} y={y + h - 8}
-              fontSize={stage === 'overtime' ? 11 : 10}
+              fontSize={stage === 'overtime' || stage === 'buffer-overtime' ? 11 : 10}
               fill="white" fontWeight={700} textAnchor="middle" pointerEvents="none">
-          {stage === 'overtime' && '⚠ '}{minutes} 分
+          {(stage === 'overtime' || stage === 'buffer-overtime') && '⚠ '}{minutes} 分
         </text>
       )}
       {status === 'cleaning' && (

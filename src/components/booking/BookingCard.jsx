@@ -40,14 +40,17 @@ function useDiningMinutes(seatedAt) {
 }
 
 // 用餐時長階段：影響顏色警示
-function diningStage(minutes) {
-  if (minutes >= 90) return 'overtime'      // 超時
-  if (minutes >= 60) return 'late'          // 即將結束
+function diningStage(minutes, settings = {}) {
+  const diningDuration = Number(settings.diningDurationMin) || 90
+  const buffer = Number(settings.cleanupBufferMin) || 10
+  if (minutes >= diningDuration + buffer) return 'buffer-overtime'
+  if (minutes >= diningDuration) return 'overtime'
+  if (minutes >= Math.max(0, diningDuration - 30)) return 'late'
   return 'normal'
 }
 
 export default function BookingCard({ booking, onAssign, onClick }) {
-  const { tables, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, setStatus, clearTable } = useBooking()
+  const { tables, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, setStatus, clearTable, suggestTable } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -58,7 +61,8 @@ export default function BookingCard({ booking, onAssign, onClick }) {
   const table = booking.assignedTableId ? tables.find(t => t.number === booking.assignedTableId) : null
   const seatedAt = booking.actualArrivalTime || table?.seatedAt
   const minutes = useDiningMinutes(booking.status === 'arrived' ? seatedAt : null)
-  const stage = diningStage(minutes)
+  const stage = diningStage(minutes, settings)
+  const suggestion = booking.status === 'confirmed' && !booking.assignedTableId ? suggestTable(booking.guests) : null
 
   // === 操作 ===
   const handleSeat = async () => {
@@ -122,7 +126,8 @@ export default function BookingCard({ booking, onAssign, onClick }) {
 
   // === 卡片邊框依時長階段變色（僅 arrived 狀態）===
   const cardBorder = booking.status === 'arrived'
-    ? stage === 'overtime' ? 'border-chicken-red border-2 ring-2 ring-chicken-red/20'
+    ? stage === 'buffer-overtime' ? 'border-chicken-red border-2 ring-2 ring-chicken-red/30'
+    : stage === 'overtime' ? 'border-chicken-red border-2 ring-2 ring-chicken-red/20'
     : stage === 'late' ? 'border-chicken-yellow border-2'
     : 'border-orange-200 border-2'
     : booking.status === 'noshow' ? 'border-chicken-red/40 border'
@@ -147,12 +152,14 @@ export default function BookingCard({ booking, onAssign, onClick }) {
             )}
             {booking.status === 'arrived' && (
               <span className={`text-xs font-bold px-2 py-0.5 rounded-full tabular-nums
-                ${stage === 'overtime'
+                ${stage === 'buffer-overtime'
                   ? 'bg-chicken-red text-white animate-pulse'
+                  : stage === 'overtime'
+                  ? 'bg-chicken-red/90 text-white'
                   : stage === 'late'
                   ? 'bg-chicken-yellow text-white'
                   : 'bg-chicken-brown/10 text-chicken-brown'}`}>
-                ⏱ {minutes} 分{stage === 'overtime' ? ' · 超時' : stage === 'late' ? ' · 即將結束' : ''}
+                ⏱ {minutes} 分{stage === 'buffer-overtime' ? ' · 超緩衝' : stage === 'overtime' ? ' · 時間到' : stage === 'late' ? ' · 即將結束' : ''}
               </span>
             )}
           </div>
@@ -172,6 +179,11 @@ export default function BookingCard({ booking, onAssign, onClick }) {
             {booking.lastGuestEditAt && (
               <span className="rounded-full bg-[#06C755]/10 px-2 py-0.5 font-black text-[#06A848]">
                 客人自行修改 {fmtTime(booking.lastGuestEditAt)}
+              </span>
+            )}
+            {suggestion && (
+              <span className="rounded-full bg-chicken-green/10 px-2 py-0.5 font-black text-chicken-green">
+                建議桌 {suggestion.number}
               </span>
             )}
             {booking.cancellationReason?.reason && (

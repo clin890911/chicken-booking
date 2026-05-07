@@ -22,7 +22,7 @@ const TABS = [
 ]
 
 export default function AdminPage() {
-  const [tab, setTab] = useState('ops')
+  const [tab, setTab] = useState('bookings')
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式
   const [pendingAssign, setPendingAssign] = useState(null)
   // pendingSeatWait：候位列表「入座」按鈕觸發；OperationsView 進入候位入座模式

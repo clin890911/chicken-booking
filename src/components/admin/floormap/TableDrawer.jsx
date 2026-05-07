@@ -37,6 +37,7 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
   const {
     setTableStatus, blockTable, unblockTable, walkInSeat,
     seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, setStatus,
+    settings,
   } = useBooking()
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [showBlock, setShowBlock] = useState(false)
@@ -76,6 +77,10 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
   const minutesSeated = () => table.seatedAt
     ? Math.floor((Date.now() - new Date(table.seatedAt).getTime()) / 60000)
     : 0
+  const diningDuration = Number(settings.diningDurationMin) || 90
+  const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
+  const bufferLimit = diningDuration + cleanupBuffer
+  const lateThreshold = Math.max(0, diningDuration - 30)
 
   const handleCheckout = async () => {
     if (!booking) return
@@ -167,7 +172,7 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
             )}
             {table.status === 'dining' && table.seatedAt && (() => {
               const m = diffMin(table.seatedAt)
-              const stage = m >= 90 ? 'overtime' : m >= 60 ? 'late' : 'normal'
+              const stage = m >= bufferLimit ? 'buffer-overtime' : m >= diningDuration ? 'overtime' : m >= lateThreshold ? 'late' : 'normal'
               return (
                 <>
                   <div className="flex justify-between">
@@ -175,7 +180,8 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
                     <span>{fmtTime(table.seatedAt)}</span>
                   </div>
                   <div className={`flex items-center justify-between rounded-xl px-3 py-2 mt-2
-                    ${stage === 'overtime' ? 'bg-chicken-red text-white animate-pulse'
+                    ${stage === 'buffer-overtime' ? 'bg-chicken-red text-white animate-pulse'
+                      : stage === 'overtime' ? 'bg-chicken-red/90 text-white'
                       : stage === 'late' ? 'bg-chicken-yellow/20 text-chicken-yellow'
                       : 'bg-chicken-cream text-chicken-brown'}`}>
                     <span className="text-xs font-bold">已用餐</span>
@@ -183,9 +189,19 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
                       {m} <span className="text-sm">分</span>
                     </span>
                   </div>
+                  {stage === 'late' && (
+                    <div className="text-[11px] text-chicken-yellow font-bold mt-1 text-center">
+                      接近 {diningDuration} 分鐘用餐時間，請留意下一組安排
+                    </div>
+                  )}
                   {stage === 'overtime' && (
                     <div className="text-[11px] text-chicken-red font-bold mt-1 text-center">
-                      ⚠️ 已超過 90 分鐘，可禮貌詢問是否需要結帳
+                      ⚠️ 已達 {diningDuration} 分鐘用餐時間，可禮貌提醒
+                    </div>
+                  )}
+                  {stage === 'buffer-overtime' && (
+                    <div className="text-[11px] text-chicken-red font-bold mt-1 text-center">
+                      ⚠️ 已超過 {bufferLimit} 分鐘（含清桌緩衝），請安排結帳或翻桌
                     </div>
                   )}
                 </>

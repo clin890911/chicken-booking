@@ -6,7 +6,7 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
   const slots = useMemo(() => {
     const list = generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval)
     return list.map(t => {
-      const remaining = calcSlotCapacity(tables, bookings, date, t)
+      const remaining = calcSlotCapacity(tables, bookings, date, t, settings)
       return { time: t, remaining, full: remaining < guests }
     })
   }, [date, settings, tables, bookings, guests])

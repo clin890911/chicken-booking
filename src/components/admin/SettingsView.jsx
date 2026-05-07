@@ -91,6 +91,27 @@ export default function SettingsView() {
             onChange={e => setForm(f => ({ ...f, maxDaysAhead: Number(e.target.value) }))}
             options={[{ value: 7, label: '7 天' }, { value: 14, label: '14 天' }, { value: 30, label: '30 天' }, { value: 60, label: '60 天' }]}
           />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="用餐時間（分鐘）"
+              type="number"
+              min="30"
+              max="240"
+              value={form.diningDurationMin || 90}
+              onChange={e => setForm(f => ({ ...f, diningDurationMin: Number(e.target.value) }))}
+            />
+            <Input
+              label="清桌緩衝（分鐘）"
+              type="number"
+              min="0"
+              max="60"
+              value={form.cleanupBufferMin || 10}
+              onChange={e => setForm(f => ({ ...f, cleanupBufferMin: Number(e.target.value) }))}
+            />
+          </div>
+          <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
+            可訂位容量會以「用餐時間 + 清桌緩衝」計算；目前每筆訂位佔用 {(Number(form.diningDurationMin) || 90) + (Number(form.cleanupBufferMin) || 10)} 分鐘。
+          </div>
           <div className="flex gap-2 items-center">
             <Button onClick={handleSave} className="flex-1">儲存設定</Button>
             {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}

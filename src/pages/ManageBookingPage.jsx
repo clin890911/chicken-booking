@@ -103,7 +103,7 @@ export default function ManageBookingPage() {
     if (!form?.date) return []
     return generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval).map(time => {
       const otherBookings = bookings.filter(b => b.id !== id)
-      const remaining = calcSlotCapacity(tables, otherBookings, form.date, time)
+      const remaining = calcSlotCapacity(tables, otherBookings, form.date, time, settings)
       return {
         time,
         remaining,

@@ -14,7 +14,7 @@ import { useAuth } from '../../contexts/AuthContext'
 // 每個模式有對應的 banner、桌位 highlight、確認 toast
 export default function OperationsView({ pendingAssign, onAssignDone, pendingSeatWait, onSeatWaitDone }) {
   const {
-    tables, bookings, waitlist,
+    tables, bookings, waitlist, settings,
     mergeTables, assignBookingToTable, seatWaitlist, moveTable,
     findSuitableTables, suggestTable,
   } = useBooking()
@@ -230,6 +230,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
             floor={floor}
             tables={tables}
             bookings={bookings}
+            settings={settings}
             selectedTableNumber={selectedTable}
             onSelectTable={handleTableClick}
             mergeMode={mode?.type === 'merge'}

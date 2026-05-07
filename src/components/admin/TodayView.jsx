@@ -14,6 +14,14 @@ const SOURCE_FILTERS = [
   { key: 'line',   label: 'LINE' },
 ]
 
+const STATUS_PRIORITY = {
+  confirmed: 0,
+  reserved: 1,
+  arrived: 2,
+  completed: 3,
+  noshow: 4,
+}
+
 export default function TodayView({ onAssignTable }) {
   const { bookings, settings } = useBooking()
   const today = todayStr()
@@ -33,7 +41,14 @@ export default function TodayView({ onAssignTable }) {
         (b.assignedTableId || '').toLowerCase().includes(q)
       )
     }
-    return list
+    return [...list].sort((a, b) => {
+      const byTime = (a.timeSlot || '').localeCompare(b.timeSlot || '')
+      if (byTime) return byTime
+      const aUnassigned = a.status === 'confirmed' && !a.assignedTableId ? 0 : 1
+      const bUnassigned = b.status === 'confirmed' && !b.assignedTableId ? 0 : 1
+      if (aUnassigned !== bUnassigned) return aUnassigned - bUnassigned
+      return (STATUS_PRIORITY[a.status] ?? 9) - (STATUS_PRIORITY[b.status] ?? 9)
+    })
   }, [bookings, today, source, query, hideCompleted])
 
   const stats = useMemo(() => {

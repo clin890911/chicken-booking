@@ -4,15 +4,16 @@ import { motion } from 'framer-motion'
 import { CalendarCheck, Clock, MapPin, Phone, ShieldCheck, Utensils } from 'lucide-react'
 import { useBooking } from '../contexts/BookingContext'
 
-const INFO = [
-  { icon: Clock, label: '營業時間', value: '11:00 - 19:00' },
-  { icon: ShieldCheck, label: '訂位確認', value: '線上送出立即保留' },
-  { icon: Utensils, label: '用餐時間', value: '90 分鐘，逾時 15 分釋出' },
-]
-
 export default function HomePage() {
   const { settings } = useBooking()
   const banners = settings.heroBanners || []
+  const diningDuration = Number(settings.diningDurationMin) || 90
+  const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
+  const info = [
+    { icon: Clock, label: '營業時間', value: `${settings.openTime || '11:00'} - ${settings.closeTime || '19:00'}` },
+    { icon: ShieldCheck, label: '訂位確認', value: '線上送出立即保留' },
+    { icon: Utensils, label: '用餐時間', value: `${diningDuration} 分鐘，保留 ${cleanupBuffer} 分鐘` },
+  ]
 
   return (
     <div className="min-h-screen bg-chicken-cream">
@@ -40,7 +41,7 @@ export default function HomePage() {
           </p>
 
           <div className="mt-7 grid gap-3 sm:grid-cols-3">
-            {INFO.map(({ icon: Icon, label, value }) => (
+            {info.map(({ icon: Icon, label, value }) => (
               <motion.div key={label} whileHover={{ y: -2 }} className="surface p-3">
                 <Icon className="mb-2 text-chicken-red" size={20} />
                 <div className="text-xs font-bold text-chicken-brown/55">{label}</div>
@@ -54,14 +55,14 @@ export default function HomePage() {
               <CalendarCheck size={20} />
               我要訂位
             </Link>
-            <a href="tel:04-XXXX-XXXX" className="btn-secondary inline-flex items-center justify-center gap-2 py-4 text-base">
+            <a href={`tel:${settings.storePhone || '049-2753377'}`} className="btn-secondary inline-flex items-center justify-center gap-2 py-4 text-base">
               <Phone size={18} />
               來電詢問
             </a>
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3 text-xs font-bold text-chicken-brown/55">
-            <span className="inline-flex items-center gap-1.5"><MapPin size={14} />鹿芝谷主場館</span>
+            <span className="inline-flex items-center gap-1.5"><MapPin size={14} />{settings.storeAddress || '南投縣鹿谷鄉中正路二段377號'}</span>
             <span>超過 12 位可於備註說明</span>
           </div>
         </motion.section>

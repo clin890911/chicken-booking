@@ -16,6 +16,9 @@ const DEFAULT_STORE_ADDRESS = '南投縣鹿谷鄉中正路二段377號'
 const DEFAULT_STORE_MAP_URL = 'https://www.google.com/maps/search/?api=1&query=%E5%8D%97%E6%8A%95%E7%B8%A3%E9%B9%BF%E8%B0%B7%E9%84%89%E4%B8%AD%E6%AD%A3%E8%B7%AF%E4%BA%8C%E6%AE%B5377%E8%99%9F'
 const DEFAULT_STORE_LATITUDE = '23.7523874'
 const DEFAULT_STORE_LONGITUDE = '120.746746'
+const DEFAULT_STORE_PHONE = '049-2753377'
+const DEFAULT_DINING_DURATION_MIN = 90
+const DEFAULT_CLEANUP_BUFFER_MIN = 10
 
 export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
@@ -151,6 +154,8 @@ function buildBookingMessages(booking, store, type) {
 
 function bookingBubble(booking, store, title, type) {
   const statusColor = type === 'cancelled' ? '#8A8178' : '#D72D20'
+  const diningDuration = Number(store.diningDurationMin) || DEFAULT_DINING_DURATION_MIN
+  const cleanupBuffer = Number(store.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN
   const actions = []
   if (booking.manageUrl) {
     actions.push({
@@ -199,7 +204,7 @@ function bookingBubble(booking, store, title, type) {
         kv('人數', `${booking.guests} 位`),
         ...(type === 'cancelled' ? [] : [{ type: 'separator', margin: 'md' }, {
           type: 'text',
-          text: '請於用餐時段前 5 分鐘抵達，逾時 15 分鐘訂位將釋出。',
+          text: `請於用餐時段前 5 分鐘抵達。用餐時間 ${diningDuration} 分鐘，店內保留 ${cleanupBuffer} 分鐘翻桌緩衝。`,
           size: 'xs',
           color: '#8A8178',
           wrap: true,
@@ -238,11 +243,13 @@ function normalizeStore(store = {}) {
   return {
     name: store.name || '雞王刷刷鍋',
     address: store.address || DEFAULT_STORE_ADDRESS,
-    phone: store.phone || '',
+    phone: store.phone || DEFAULT_STORE_PHONE,
     mapUrl: store.mapUrl || DEFAULT_STORE_MAP_URL,
     latitude: store.latitude || DEFAULT_STORE_LATITUDE,
     longitude: store.longitude || DEFAULT_STORE_LONGITUDE,
     lineOfficialUrl: store.lineOfficialUrl || '',
+    diningDurationMin: Number(store.diningDurationMin) || DEFAULT_DINING_DURATION_MIN,
+    cleanupBufferMin: Number(store.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN,
   }
 }
 
