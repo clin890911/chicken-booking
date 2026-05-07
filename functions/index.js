@@ -259,7 +259,15 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       createdAt: FieldValue.serverTimestamp(),
     }
 
-    await db.collection('lineBookingBindings').doc(booking.id).set(record, { merge: true })
+    const batch = db.batch()
+    batch.set(db.collection('lineBookingBindings').doc(booking.id), record, { merge: true })
+    batch.set(db.collection(COLLECTIONS.bookings).doc(booking.id), {
+      lineUserId: line.userId,
+      lineDisplayName: line.displayName || '',
+      linePictureUrl: line.pictureUrl || '',
+      updatedAt: new Date().toISOString(),
+    }, { merge: true })
+    await batch.commit()
     await pushLineMessages(line.userId, buildBookingMessages(booking, record.store, 'confirmed'))
 
     return res.json({ ok: true })
@@ -533,9 +541,9 @@ function normalizeStoreSettings(settings = {}) {
     heroBanners: Array.isArray(settings.heroBanners) ? settings.heroBanners : [],
     lineOfficialUrl: settings.lineOfficialUrl || 'https://lin.ee/8lECi4S',
     lineOfficialName: settings.lineOfficialName || '雞王刷刷鍋 LINE 官方帳號',
-    lineUseLiff: !!settings.lineUseLiff,
-    lineLiffUrl: settings.lineLiffUrl || '',
-    lineLiffId: settings.lineLiffId || '',
+    lineUseLiff: settings.lineUseLiff !== false,
+    lineLiffUrl: settings.lineLiffUrl || 'https://liff.line.me/2009996489-f1SCb75q',
+    lineLiffId: settings.lineLiffId || '2009996489-f1SCb75q',
     lineBindEndpoint: settings.lineBindEndpoint || 'https://linebind-reaor76eyq-uc.a.run.app',
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',

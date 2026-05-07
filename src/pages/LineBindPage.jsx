@@ -5,10 +5,11 @@ import { CheckCircle2, ChevronLeft, Loader2, MessageCircle, ShieldCheck, Triangl
 import { Button, Card } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
-import { bookingLinePayload, decodeLinePayload, lineBindEndpoint, lineLiffId, lineOfficialUrl, loadLiffSdk } from '../services/lineService'
+import { bookingLinePayload, decodeLinePayload, lineBindEndpoint, lineLiffId, lineLiffUrl, lineOfficialUrl, loadLiffSdk } from '../services/lineService'
 import { dayLabel } from '../utils/timeSlots'
 
 const LINE_BIND_STATE_KEY = 'chicken_line_bind_params_v1'
+const LINE_BIND_REDIRECT_KEY = 'chicken_line_bind_redirect_v1'
 
 export default function LineBindPage() {
   const location = useLocation()
@@ -20,7 +21,9 @@ export default function LineBindPage() {
   const manageUrl = bindParams.get('manageUrl') || decodedPayload?.booking?.manageUrl || ''
   const officialUrl = lineOfficialUrl(settings)
   const liffId = lineLiffId(settings)
+  const liffUrl = lineLiffUrl(settings)
   const endpoint = lineBindEndpoint(settings)
+  const shouldUseLiff = (bindParams.get('useLiff') === '1' || settings.lineUseLiff) && !!liffId && !!liffUrl
 
   const [state, setState] = useState('loading')
   const [message, setMessage] = useState('正在準備 LINE 訂位通知...')
@@ -72,6 +75,13 @@ export default function LineBindPage() {
 
       try {
         persistBindParams(bindParams)
+        if (shouldUseLiff && !isLikelyLiffCallback(location.search, location.hash) && !hasRecentlyRedirected(booking.id)) {
+          rememberLiffRedirect(booking.id)
+          setState('loading')
+          setMessage('正在開啟 LINE 授權，完成後官方帳號會傳送訂位資訊。')
+          window.location.href = buildLiffUrl(liffUrl, bindParams)
+          return
+        }
         const liff = await loadLiffSdk()
         await liff.init({ liffId })
         if (!liff.isLoggedIn()) {
@@ -108,7 +118,7 @@ export default function LineBindPage() {
     }
     run()
     return () => { cancelled = true }
-  }, [bindParams, booking, endpoint, liffId, payload, token])
+  }, [bindParams, booking, endpoint, liffId, liffUrl, location.hash, location.search, payload, shouldUseLiff, token])
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#06C755]/10 via-chicken-cream to-white pb-12">
@@ -159,6 +169,11 @@ export default function LineBindPage() {
                 {officialUrl && (
                   <a href={officialUrl} target="_blank" rel="noreferrer" className="btn-primary text-center !bg-[#06C755]">
                     加入 LINE 官方帳號
+                  </a>
+                )}
+                {shouldUseLiff && (
+                  <a href={buildLiffUrl(liffUrl, bindParams)} className="btn-primary text-center">
+                    在 LINE 完成訂位綁定
                   </a>
                 )}
                 {booking && (
@@ -233,7 +248,38 @@ function readPersistedBindParams() {
 function clearPersistedBindParams() {
   try {
     sessionStorage.removeItem(LINE_BIND_STATE_KEY)
+    sessionStorage.removeItem(LINE_BIND_REDIRECT_KEY)
   } catch {}
+}
+
+function isLikelyLiffCallback(search = '', hash = '') {
+  const text = `${search || ''}${hash || ''}`
+  return text.includes('liff.state') || text.includes('access_token') || text.includes('id_token') || text.includes('friendship_status_changed')
+}
+
+function hasRecentlyRedirected(bookingId) {
+  try {
+    const raw = sessionStorage.getItem(LINE_BIND_REDIRECT_KEY)
+    if (!raw) return false
+    const data = JSON.parse(raw)
+    return data.bookingId === bookingId && Date.now() - Number(data.at || 0) < 90 * 1000
+  } catch {
+    return false
+  }
+}
+
+function rememberLiffRedirect(bookingId) {
+  try {
+    sessionStorage.setItem(LINE_BIND_REDIRECT_KEY, JSON.stringify({ bookingId, at: Date.now() }))
+  } catch {}
+}
+
+function buildLiffUrl(base, params) {
+  const url = new URL(base)
+  params.forEach((value, key) => {
+    if (!url.searchParams.get(key)) url.searchParams.set(key, value)
+  })
+  return url.toString()
 }
 
 function normalizePayloadBooking(booking) {

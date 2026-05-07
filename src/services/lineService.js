@@ -1,7 +1,7 @@
 import { dayLabel } from '../utils/timeSlots'
 
-const DEFAULT_LIFF_URL = ''
-const DEFAULT_LIFF_ID = ''
+const DEFAULT_LIFF_URL = 'https://liff.line.me/2009996489-f1SCb75q'
+const DEFAULT_LIFF_ID = '2009996489-f1SCb75q'
 const DEFAULT_BIND_ENDPOINT = 'https://linebind-reaor76eyq-uc.a.run.app'
 const DEFAULT_PUSH_ENDPOINT = 'https://linepushbooking-reaor76eyq-uc.a.run.app'
 const DEFAULT_MANAGE_ENDPOINT = 'https://linegetbooking-reaor76eyq-uc.a.run.app'
@@ -16,14 +16,17 @@ export function lineBindUrl(settings = {}, booking, manageUrl) {
   const configuredLiff = settings.lineLiffUrl || import.meta.env.VITE_LINE_LIFF_URL || DEFAULT_LIFF_URL
   const localBind = `${window.location.origin}/line/bind`
   const targetManageUrl = manageUrl || `${window.location.origin}/manage/${booking.id}?token=${encodeURIComponent(booking.manageToken || '')}`
-  const useLiff = !!settings.lineUseLiff && !!configuredLiff
-  const base = useLiff ? configuredLiff : localBind
-  const url = new URL(base)
+  const url = new URL(localBind)
   url.searchParams.set('bookingId', booking.id)
   url.searchParams.set('token', booking.manageToken || '')
   url.searchParams.set('manageUrl', targetManageUrl)
+  if (settings.lineUseLiff && configuredLiff) url.searchParams.set('useLiff', '1')
   url.searchParams.set('payload', encodeLinePayload(bookingLinePayload(booking, settings, targetManageUrl)))
   return url.toString()
+}
+
+export function lineLiffUrl(settings = {}) {
+  return settings.lineLiffUrl || import.meta.env.VITE_LINE_LIFF_URL || DEFAULT_LIFF_URL
 }
 
 export function lineOfficialUrl(settings = {}) {
