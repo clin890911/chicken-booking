@@ -6,6 +6,7 @@ import { LoadingScreen } from './components/ui'
 import HomePage from './pages/HomePage'
 import BookingPage from './pages/BookingPage'
 import ConfirmPage from './pages/ConfirmPage'
+import ManageBookingPage from './pages/ManageBookingPage'
 import LoginPage from './pages/LoginPage'
 import AdminPage from './pages/AdminPage'
 
@@ -25,6 +26,7 @@ export default function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/book" element={<BookingPage />} />
               <Route path="/confirm/:id" element={<ConfirmPage />} />
+              <Route path="/manage/:id" element={<ManageBookingPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
               <Route path="*" element={<Navigate to="/" replace />} />

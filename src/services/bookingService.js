@@ -1,6 +1,7 @@
 // bookingService：統一封裝訂位 CRUD
 // schema: { id, name, phone, guests, date, timeSlot, notes, source, status,
-//           assignedTableId, lineUserId, createdAt, updatedAt, createdBy }
+//           assignedTableId, lineUserId, manageToken, lastGuestEditAt,
+//           guestEditCount, createdAt, updatedAt, createdBy }
 // 後端：localStorage（v0），未來切到 Firestore 只改本檔
 import * as customerService from './customerService'
 
@@ -23,12 +24,46 @@ function uid() {
   return 'B' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6).toUpperCase()
 }
 
+export function createManageToken() {
+  if (window.crypto?.getRandomValues) {
+    const bytes = new Uint8Array(24)
+    window.crypto.getRandomValues(bytes)
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`.slice(0, 48)
+}
+
+function digits(value) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+export function phoneTail(phone, length = 3) {
+  const d = digits(phone)
+  return d.slice(-length)
+}
+
+export function isGuestEditable(booking, now = new Date()) {
+  if (!booking) return { ok: false, reason: '找不到此訂位' }
+  if (['arrived', 'completed', 'cancelled', 'noshow'].includes(booking.status)) {
+    return { ok: false, reason: '此訂位狀態已無法由客人自行修改' }
+  }
+  if (!booking.date || !booking.timeSlot) return { ok: false, reason: '訂位資料不完整，請聯絡店家' }
+  const dineAt = new Date(`${booking.date}T${booking.timeSlot}:00`)
+  if (Number.isNaN(dineAt.getTime())) return { ok: false, reason: '訂位時間不正確，請聯絡店家' }
+  const cutoff = new Date(dineAt.getTime() - 2 * 60 * 60 * 1000)
+  if (now >= cutoff) return { ok: false, reason: '用餐前 2 小時內請改以電話聯絡店家' }
+  return { ok: true }
+}
+
 // === 讀取 ===
 export function listAll() {
   // 補上新欄位的預設值（向後相容）
   return read().map(b => ({
     assignedTableId: null,
     lineUserId: null,
+    manageToken: null,
+    lastGuestEditAt: null,
+    guestEditCount: 0,
     ...b,
   }))
 }
@@ -43,6 +78,13 @@ export function listByTable(tableNumber) {
 
 export function getById(id) {
   return listAll().find(b => b.id === id) || null
+}
+
+export function ensureManageToken(id) {
+  const booking = getById(id)
+  if (!booking) return null
+  if (booking.manageToken) return booking
+  return update(id, { manageToken: createManageToken() })
 }
 
 // === 新增 ===
@@ -65,6 +107,9 @@ export function create(data) {
     status: data.status || 'confirmed',
     assignedTableId: data.assignedTableId || null,
     lineUserId: data.lineUserId || null,
+    manageToken: data.manageToken || createManageToken(),
+    lastGuestEditAt: data.lastGuestEditAt || null,
+    guestEditCount: Number(data.guestEditCount) || 0,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     createdBy: data.createdBy || 'guest'
@@ -95,6 +140,52 @@ export function update(id, patch) {
   list[idx] = { ...list[idx], ...patch, updatedAt: new Date().toISOString() }
   write(list)
   return list[idx]
+}
+
+export function verifyGuestAccess(id, token, tail) {
+  const booking = ensureManageToken(id)
+  if (!booking) return { ok: false, reason: '找不到此訂位' }
+  if (!token || token !== booking.manageToken) return { ok: false, reason: '管理連結無效，請確認是否使用最新連結' }
+
+  const normalized = digits(tail)
+  if (![3, 4].includes(normalized.length)) return { ok: false, reason: '請輸入手機末 3 或 4 碼' }
+  if (phoneTail(booking.phone, normalized.length) !== normalized) return { ok: false, reason: '電話末碼不符合此訂位' }
+
+  return { ok: true, booking }
+}
+
+export function updateBookingByGuest(id, token, patch) {
+  const booking = ensureManageToken(id)
+  if (!booking) return { ok: false, reason: '找不到此訂位' }
+  if (!token || token !== booking.manageToken) return { ok: false, reason: '管理連結無效' }
+  const editable = isGuestEditable(booking)
+  if (!editable.ok) return editable
+
+  const structuralKeys = ['date', 'timeSlot', 'guests']
+  const shouldUnassign = structuralKeys.some(key => patch[key] !== undefined && String(patch[key]) !== String(booking[key]))
+  const cleanPatch = {
+    ...patch,
+    ...(shouldUnassign ? { assignedTableId: null } : {}),
+    lastGuestEditAt: new Date().toISOString(),
+    guestEditCount: (Number(booking.guestEditCount) || 0) + 1,
+  }
+  const updated = update(id, cleanPatch)
+  return { ok: true, booking: updated, changes: cleanPatch }
+}
+
+export function cancelBookingByGuest(id, token) {
+  const booking = ensureManageToken(id)
+  if (!booking) return { ok: false, reason: '找不到此訂位' }
+  if (!token || token !== booking.manageToken) return { ok: false, reason: '管理連結無效' }
+  const editable = isGuestEditable(booking)
+  if (!editable.ok) return editable
+  const updated = update(id, {
+    status: 'cancelled',
+    assignedTableId: null,
+    lastGuestEditAt: new Date().toISOString(),
+    guestEditCount: (Number(booking.guestEditCount) || 0) + 1,
+  })
+  return { ok: true, booking: updated }
 }
 
 export function remove(id) {

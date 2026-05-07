@@ -9,30 +9,62 @@ export default function ConfirmPage() {
   const { id } = useParams()
   const [b, setB] = useState(null)
   const [copied, setCopied] = useState(false)
+  const [copiedManage, setCopiedManage] = useState(false)
   const [showConfetti, setShowConfetti] = useState(true)
 
   useEffect(() => {
-    setB(bookingService.getById(id))
+    setB(bookingService.ensureManageToken(id))
     const t = setTimeout(() => setShowConfetti(false), 2400)
     return () => clearTimeout(t)
   }, [id])
 
   const confettiPieces = useMemo(() => generateConfetti(18), [])
+  const manageUrl = useMemo(() => {
+    if (!b?.manageToken) return ''
+    return `${window.location.origin}/manage/${b.id}?token=${encodeURIComponent(b.manageToken)}`
+  }, [b])
+  const lineShareUrl = useMemo(() => {
+    if (!b || !manageUrl) return ''
+    const text = [
+      '雞王刷刷鍋訂位成功',
+      `訂位編號：${b.id}`,
+      `日期：${dayLabel(b.date)}`,
+      `時間：${b.timeSlot}`,
+      `人數：${b.guests} 位`,
+      `管理訂位：${manageUrl}`,
+    ].join('\n')
+    return `https://line.me/R/msg/text/?${encodeURIComponent(text)}`
+  }, [b, manageUrl])
+  const lineOfficialUrl = import.meta.env.VITE_LINE_OFFICIAL_URL || ''
+
+  const copyText = async (text, onDone) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      onDone()
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy'); onDone() } catch {}
+      document.body.removeChild(ta)
+    }
+  }
 
   const copyId = async () => {
     if (!b) return
-    try {
-      await navigator.clipboard.writeText(b.id)
+    copyText(b.id, () => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
-    } catch {
-      const ta = document.createElement('textarea')
-      ta.value = b.id
-      document.body.appendChild(ta)
-      ta.select()
-      try { document.execCommand('copy'); setCopied(true); setTimeout(() => setCopied(false), 1800) } catch {}
-      document.body.removeChild(ta)
-    }
+    })
+  }
+
+  const copyManageUrl = async () => {
+    if (!manageUrl) return
+    copyText(manageUrl, () => {
+      setCopiedManage(true)
+      setTimeout(() => setCopiedManage(false), 1800)
+    })
   }
 
   if (!b) {
@@ -103,7 +135,7 @@ export default function ConfirmPage() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.55 }}
             className="text-sm text-chicken-brown/70 mt-1"
           >
-            訂位已建立，請截圖或保存此頁面
+            訂位已建立，請保存此頁或傳到 LINE
           </motion.p>
         </div>
 
@@ -178,8 +210,49 @@ export default function ConfirmPage() {
           className="mt-4 text-center"
         >
           <p className="inline-flex items-center gap-1.5 text-xs font-bold text-chicken-brown/70 bg-white/60 px-3 py-1.5 rounded-full">
-            📸 建議截圖此頁面，到店時出示訂位編號
+            📸 到店時出示訂位編號；需修改可使用下方管理連結
           </p>
+        </motion.div>
+
+        {/* LINE 與訂位管理 */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.58 }}
+          className="mt-5 rounded-2xl border border-[#06C755]/25 bg-[#06C755]/5 p-4"
+        >
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#06C755] text-sm font-black text-white">LINE</div>
+            <div className="flex-1">
+              <h2 className="text-base font-black text-chicken-brown">把訂位保存到 LINE</h2>
+              <p className="mt-1 text-xs leading-5 text-chicken-brown/60">
+                傳送訂位資訊後，可從 LINE 重新打開管理連結修改或取消訂位。
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 grid gap-2">
+            {lineOfficialUrl ? (
+              <a href={lineOfficialUrl} target="_blank" rel="noreferrer" className="btn-secondary w-full text-center">
+                加入 LINE 官方帳號
+              </a>
+            ) : (
+              <button className="btn-secondary w-full opacity-70" disabled>
+                加入 LINE 官方帳號（尚未設定連結）
+              </button>
+            )}
+            <a href={lineShareUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
+              傳送訂位資訊到 LINE
+            </a>
+            <Link to={`/manage/${b.id}?token=${encodeURIComponent(b.manageToken || '')}`} className="btn-yellow w-full text-center">
+              管理 / 修改我的訂位
+            </Link>
+            <button
+              type="button"
+              onClick={copyManageUrl}
+              className="rounded-2xl border border-chicken-brown/15 bg-white px-4 py-3 text-sm font-black text-chicken-brown transition hover:border-chicken-red/40"
+            >
+              {copiedManage ? '已複製管理連結' : '複製訂位管理連結'}
+            </button>
+          </div>
         </motion.div>
 
         {/* 注意事項 */}
@@ -194,7 +267,7 @@ export default function ConfirmPage() {
           <ul className="px-4 py-3 space-y-2 text-sm text-chicken-brown leading-relaxed">
             <Tip icon="⏱">請於用餐時段前 <strong>5 分鐘</strong> 抵達現場</Tip>
             <Tip icon="⌛">逾時 <strong>15 分鐘</strong>，訂位將自動釋出</Tip>
-            <Tip icon="📞">如需取消或更動，請來電通知，避免影響其他客人</Tip>
+            <Tip icon="📞">用餐前 2 小時以前可用管理連結修改或取消；更近時間請來電</Tip>
             <Tip icon="🐔">本店使用 <strong>48 小時冷藏文昌雞</strong>，當日限量供應</Tip>
           </ul>
         </motion.div>
