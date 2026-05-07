@@ -5,6 +5,7 @@ import * as bookingService from '../services/bookingService'
 import { dayLabel } from '../utils/timeSlots'
 import { Card, Button, Badge } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
+import { lineBindUrl } from '../services/lineService'
 
 export default function ConfirmPage() {
   const { id } = useParams()
@@ -26,7 +27,7 @@ export default function ConfirmPage() {
     return `${window.location.origin}/manage/${b.id}?token=${encodeURIComponent(b.manageToken)}`
   }, [b])
   const lineOfficialName = settings.lineOfficialName || 'LINE 官方帳號'
-  const lineReceiveUrl = useMemo(() => b ? lineBookingUrl(settings, b, manageUrl) : '', [b, manageUrl, settings])
+  const lineReceiveUrl = useMemo(() => b ? lineBindUrl(settings, b, manageUrl) : '', [b, manageUrl, settings])
   const calendarUrl = useMemo(() => b ? googleCalendarUrl(b, settings) : '', [b, settings])
   const mapUrl = settings.storeMapUrl || (settings.storeAddress ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(settings.storeAddress)}` : '')
   const telUrl = settings.storePhone ? `tel:${settings.storePhone}` : ''
@@ -373,15 +374,4 @@ function googleCalendarUrl(booking, settings = {}) {
     location: settings.storeAddress || '雞王刷刷鍋',
   })
   return `https://calendar.google.com/calendar/render?${params.toString()}`
-}
-
-function lineBookingUrl(settings = {}, booking, manageUrl) {
-  const base = settings.lineLiffUrl || settings.lineOfficialUrl || import.meta.env.VITE_LINE_OFFICIAL_URL || ''
-  if (!base) return ''
-  if (!settings.lineLiffUrl) return base
-  const url = new URL(base)
-  url.searchParams.set('bookingId', booking.id)
-  url.searchParams.set('token', booking.manageToken || '')
-  url.searchParams.set('manageUrl', manageUrl)
-  return url.toString()
 }

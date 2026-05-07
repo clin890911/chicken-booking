@@ -182,6 +182,19 @@ export default function SettingsView() {
             onChange={e => setForm(f => ({ ...f, lineLiffUrl: e.target.value.trim() }))}
             placeholder="https://liff.line.me/xxxxxxxx"
           />
+          <Input
+            label="LIFF ID（選填）"
+            value={form.lineLiffId || ''}
+            onChange={e => setForm(f => ({ ...f, lineLiffId: e.target.value.trim() }))}
+            placeholder="xxxxxxxxxx-xxxxxxxx"
+          />
+          <Input
+            label="LINE 綁定後端端點（選填）"
+            type="url"
+            value={form.lineBindEndpoint || ''}
+            onChange={e => setForm(f => ({ ...f, lineBindEndpoint: e.target.value.trim() }))}
+            placeholder="https://.../lineBind"
+          />
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             目前會先導向 LINE 官方帳號；若日後填入 LIFF 連結，客人按下「用 LINE 接收訂位資訊」會優先進入 LIFF 綁定頁。
             LINE API Token 仍必須放在後端或 Cloud Functions，不能放前端。
@@ -201,6 +214,12 @@ export default function SettingsView() {
       <SettingsSection title="客人聯絡入口" description="設定確認頁與訂位管理中心的一鍵撥電話、導航資訊。">
         <div className="space-y-3">
           <Input
+            label="店名"
+            value={form.storeName || ''}
+            onChange={e => setForm(f => ({ ...f, storeName: e.target.value }))}
+            placeholder="雞王刷刷鍋"
+          />
+          <Input
             label="店家電話"
             value={form.storePhone || ''}
             onChange={e => setForm(f => ({ ...f, storePhone: e.target.value.trim() }))}
@@ -219,6 +238,20 @@ export default function SettingsView() {
             onChange={e => setForm(f => ({ ...f, storeMapUrl: e.target.value.trim() }))}
             placeholder="https://maps.google.com/..."
           />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="緯度 latitude"
+              value={form.storeLatitude || ''}
+              onChange={e => setForm(f => ({ ...f, storeLatitude: e.target.value.trim() }))}
+              placeholder="24.xxxxxx"
+            />
+            <Input
+              label="經度 longitude"
+              value={form.storeLongitude || ''}
+              onChange={e => setForm(f => ({ ...f, storeLongitude: e.target.value.trim() }))}
+              placeholder="120.xxxxxx"
+            />
+          </div>
           <div className="flex gap-2 items-center">
             <Button onClick={handleSave} className="flex-1">儲存聯絡入口</Button>
             {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}

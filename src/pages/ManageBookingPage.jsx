@@ -21,6 +21,7 @@ import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
 import * as tg from '../services/telegramService'
+import { lineBindUrl } from '../services/lineService'
 import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
 import { calcSlotCapacity } from '../utils/capacity'
 
@@ -381,7 +382,7 @@ function ActionGrid({ setMode, booking, settings }) {
       <ActionCard icon={CalendarDays} title="修改日期 / 時間 / 人數" hint="重新挑選可訂時段" onClick={() => setMode('schedule')} />
       <ActionCard icon={Edit3} title="修改聯絡資訊 / 備註" hint="調整姓名、電話、特殊需求" onClick={() => setMode('details')} />
       <ActionCard icon={Trash2} title="取消訂位" hint="提供原因並釋出座位" danger onClick={() => setMode('cancel')} />
-      <a href={lineBookingUrl(settings, booking)} target="_blank" rel="noreferrer" className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
+      <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
         <MessageCircle className="text-[#06C755]" size={24} />
         <div>
           <div className="font-black text-chicken-brown">用 LINE 接收訂位資訊</div>
@@ -500,7 +501,7 @@ function SuccessPanel({ booking, settings, onBack }) {
       <h2 className="mt-3 text-xl font-black text-chicken-brown">訂位已更新</h2>
       <p className="mt-2 text-sm leading-6 text-chicken-brown/60">同仁端已同步收到新的訂位內容。</p>
       <div className="mt-5 grid gap-2">
-        <a href={lineBookingUrl(settings, booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">用 LINE 接收最新訂位</a>
+        <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">用 LINE 接收最新訂位</a>
         <p className="text-xs font-bold leading-5 text-chicken-brown/55">
           目前會先開啟 LINE 官方帳號；正式 LIFF 推播上線後，官方帳號會自動發送最新訂位與定位。
         </p>
@@ -606,16 +607,4 @@ function statusLabel(status) {
     noshow: '未到',
   }
   return map[status] || status || '已確認'
-}
-
-function lineBookingUrl(settings = {}, booking) {
-  const base = settings.lineLiffUrl || settings.lineOfficialUrl || ''
-  if (!base) return '#'
-  const manageUrl = `${window.location.origin}/manage/${booking.id}?token=${encodeURIComponent(booking.manageToken || '')}`
-  if (!settings.lineLiffUrl) return base
-  const url = new URL(base)
-  url.searchParams.set('bookingId', booking.id)
-  url.searchParams.set('token', booking.manageToken || '')
-  url.searchParams.set('manageUrl', manageUrl)
-  return url.toString()
 }
