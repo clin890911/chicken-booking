@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { CheckCircle2, ChevronLeft, Loader2, MessageCircle, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { Button, Card } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
-import { bookingLinePayload, lineBindEndpoint, lineLiffId, lineOfficialUrl, loadLiffSdk } from '../services/lineService'
+import { bookingLinePayload, decodeLinePayload, lineBindEndpoint, lineLiffId, lineOfficialUrl, loadLiffSdk } from '../services/lineService'
 import { dayLabel } from '../utils/timeSlots'
 
+const LINE_BIND_STATE_KEY = 'chicken_line_bind_params_v1'
+
 export default function LineBindPage() {
-  const [searchParams] = useSearchParams()
+  const location = useLocation()
   const { settings } = useBooking()
-  const bookingId = searchParams.get('bookingId') || ''
-  const token = searchParams.get('token') || ''
-  const manageUrl = searchParams.get('manageUrl') || ''
+  const bindParams = useMemo(() => collectBindParams(location.search, location.hash), [location.search, location.hash])
+  const decodedPayload = useMemo(() => decodeLinePayload(bindParams.get('payload') || ''), [bindParams])
+  const bookingId = bindParams.get('bookingId') || decodedPayload?.booking?.id || ''
+  const token = bindParams.get('token') || decodedPayload?.booking?.token || decodedPayload?.booking?.manageToken || ''
+  const manageUrl = bindParams.get('manageUrl') || decodedPayload?.booking?.manageUrl || ''
   const officialUrl = lineOfficialUrl(settings)
   const liffId = lineLiffId(settings)
   const endpoint = lineBindEndpoint(settings)
@@ -22,15 +26,32 @@ export default function LineBindPage() {
   const [message, setMessage] = useState('正在準備 LINE 訂位通知...')
   const [profile, setProfile] = useState(null)
 
-  const booking = useMemo(() => bookingService.ensureManageToken(bookingId), [bookingId])
-  const payload = useMemo(() => booking ? bookingLinePayload(booking, settings, manageUrl) : null, [booking, manageUrl, settings])
+  const booking = useMemo(() => {
+    const localBooking = bookingId ? bookingService.ensureManageToken(bookingId) : null
+    if (localBooking) return localBooking
+    return normalizePayloadBooking(decodedPayload?.booking)
+  }, [bookingId, decodedPayload])
+  const payload = useMemo(() => {
+    if (decodedPayload?.booking && booking?.id) {
+      return {
+        ...decodedPayload,
+        booking: {
+          ...decodedPayload.booking,
+          id: booking.id,
+          token: booking.manageToken || token,
+          manageUrl: manageUrl || decodedPayload.booking.manageUrl,
+        },
+      }
+    }
+    return booking ? bookingLinePayload(booking, settings, manageUrl) : null
+  }, [booking, decodedPayload, manageUrl, settings, token])
 
   useEffect(() => {
     let cancelled = false
     async function run() {
       if (!booking) {
         setState('error')
-        setMessage('找不到此訂位，請回到訂位成功頁重新開啟。')
+        setMessage('找不到此訂位資料，請回到訂位成功頁重新按一次 LINE 接收按鈕。')
         return
       }
       if (!token || token !== booking.manageToken) {
@@ -50,6 +71,7 @@ export default function LineBindPage() {
       }
 
       try {
+        persistBindParams(bindParams)
         const liff = await loadLiffSdk()
         await liff.init({ liffId })
         if (!liff.isLoggedIn()) {
@@ -75,6 +97,7 @@ export default function LineBindPage() {
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok || data.ok === false) throw new Error(data.error || 'LINE 綁定失敗')
+        clearPersistedBindParams()
         setState('success')
         setMessage('已完成 LINE 訂位通知設定，官方帳號會傳送訂位摘要與定位資訊。')
       } catch (err) {
@@ -85,7 +108,7 @@ export default function LineBindPage() {
     }
     run()
     return () => { cancelled = true }
-  }, [booking, endpoint, liffId, payload, token])
+  }, [bindParams, booking, endpoint, liffId, payload, token])
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#06C755]/10 via-chicken-cream to-white pb-12">
@@ -154,6 +177,78 @@ export default function LineBindPage() {
       </main>
     </div>
   )
+}
+
+function collectBindParams(search = '', hash = '') {
+  const params = new URLSearchParams(search)
+  mergeParams(params, params.get('liff.state'))
+
+  const hashText = hash.startsWith('#') ? hash.slice(1) : hash
+  if (hashText) {
+    mergeParams(params, hashText)
+    const hashQueryIndex = hashText.indexOf('?')
+    if (hashQueryIndex >= 0) mergeParams(params, hashText.slice(hashQueryIndex))
+  }
+
+  if (!params.get('bookingId') && !params.get('payload')) {
+    mergeParams(params, readPersistedBindParams())
+  }
+
+  return params
+}
+
+function mergeParams(target, source) {
+  if (!source) return
+  const decoded = safeDecode(source)
+  const query = decoded.includes('?') ? decoded.slice(decoded.indexOf('?')) : decoded
+  const sourceParams = new URLSearchParams(query.startsWith('?') ? query : `?${query}`)
+  sourceParams.forEach((value, key) => {
+    if (!target.get(key)) target.set(key, value)
+  })
+}
+
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function persistBindParams(params) {
+  if (!params.get('bookingId') && !params.get('payload')) return
+  try {
+    sessionStorage.setItem(LINE_BIND_STATE_KEY, params.toString())
+  } catch {}
+}
+
+function readPersistedBindParams() {
+  try {
+    return sessionStorage.getItem(LINE_BIND_STATE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function clearPersistedBindParams() {
+  try {
+    sessionStorage.removeItem(LINE_BIND_STATE_KEY)
+  } catch {}
+}
+
+function normalizePayloadBooking(booking) {
+  if (!booking?.id) return null
+  return {
+    id: booking.id,
+    manageToken: booking.manageToken || booking.token || '',
+    name: booking.name || '訂位客人',
+    phone: booking.phone || '',
+    guests: Number(booking.guests) || 1,
+    date: booking.date,
+    timeSlot: booking.timeSlot,
+    notes: booking.notes || {},
+    status: booking.status || 'confirmed',
+  }
 }
 
 function StatusIcon({ state }) {
