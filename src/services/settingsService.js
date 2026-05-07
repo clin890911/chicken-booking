@@ -8,6 +8,7 @@ const DEFAULT = {
   heroBanners: [],
   lineOfficialUrl: 'https://lin.ee/8lECi4S',
   lineOfficialName: '雞王刷刷鍋 LINE 官方帳號',
+  lineLiffUrl: '',
   storePhone: '',
   storeAddress: '',
   storeMapUrl: ''

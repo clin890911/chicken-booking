@@ -175,9 +175,16 @@ export default function SettingsView() {
             onChange={e => setForm(f => ({ ...f, lineOfficialUrl: e.target.value.trim() }))}
             placeholder="https://lin.ee/xxxxxxx"
           />
+          <Input
+            label="LIFF 訂位綁定連結（選填）"
+            type="url"
+            value={form.lineLiffUrl || ''}
+            onChange={e => setForm(f => ({ ...f, lineLiffUrl: e.target.value.trim() }))}
+            placeholder="https://liff.line.me/xxxxxxxx"
+          />
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
-            這裡只設定客人可點擊的官方帳號入口，不會儲存 LINE API Token。
-            若未來要自動推播訂位成功/提醒訊息，需要後端或 Cloud Functions 保管 Channel Access Token。
+            目前會先導向 LINE 官方帳號；若日後填入 LIFF 連結，客人按下「用 LINE 接收訂位資訊」會優先進入 LIFF 綁定頁。
+            LINE API Token 仍必須放在後端或 Cloud Functions，不能放前端。
           </div>
           <div className="flex gap-2 items-center">
             <Button onClick={handleSave} className="flex-1">儲存 LINE 設定</Button>

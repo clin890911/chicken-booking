@@ -25,20 +25,8 @@ export default function ConfirmPage() {
     if (!b?.manageToken) return ''
     return `${window.location.origin}/manage/${b.id}?token=${encodeURIComponent(b.manageToken)}`
   }, [b])
-  const lineShareUrl = useMemo(() => {
-    if (!b || !manageUrl) return ''
-    const text = [
-      '雞王刷刷鍋訂位成功',
-      `訂位編號：${b.id}`,
-      `日期：${dayLabel(b.date)}`,
-      `時間：${b.timeSlot}`,
-      `人數：${b.guests} 位`,
-      `管理訂位：${manageUrl}`,
-    ].join('\n')
-    return `https://line.me/R/msg/text/?${encodeURIComponent(text)}`
-  }, [b, manageUrl])
-  const lineOfficialUrl = settings.lineOfficialUrl || import.meta.env.VITE_LINE_OFFICIAL_URL || ''
   const lineOfficialName = settings.lineOfficialName || 'LINE 官方帳號'
+  const lineReceiveUrl = useMemo(() => b ? lineBookingUrl(settings, b, manageUrl) : '', [b, manageUrl, settings])
   const calendarUrl = useMemo(() => b ? googleCalendarUrl(b, settings) : '', [b, settings])
   const mapUrl = settings.storeMapUrl || (settings.storeAddress ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(settings.storeAddress)}` : '')
   const telUrl = settings.storePhone ? `tel:${settings.storePhone}` : ''
@@ -141,7 +129,7 @@ export default function ConfirmPage() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.55 }}
             className="text-sm text-chicken-brown/70 mt-1"
           >
-            訂位已建立，請保存此頁或傳到 LINE
+            訂位已建立，可用 LINE 接收訂位與定位資訊
           </motion.p>
         </div>
 
@@ -228,26 +216,26 @@ export default function ConfirmPage() {
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#06C755] text-sm font-black text-white">LINE</div>
             <div className="flex-1">
-              <h2 className="text-base font-black text-chicken-brown">把訂位保存到 LINE</h2>
+              <h2 className="text-base font-black text-chicken-brown">用 LINE 接收訂位資訊</h2>
               <p className="mt-1 text-xs leading-5 text-chicken-brown/60">
-                傳送訂位資訊後，可從 LINE 重新打開管理連結修改或取消訂位。
+                按下後會開啟雞王官方帳號。完成後即可接收訂位、定位與修改訂位入口。
               </p>
             </div>
           </div>
 
           <div className="mt-3 grid gap-2">
-            {lineOfficialUrl ? (
-              <a href={lineOfficialUrl} target="_blank" rel="noreferrer" className="btn-secondary w-full text-center">
-                加入 {lineOfficialName}
+            {lineReceiveUrl ? (
+              <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
+                用 LINE 接收訂位資訊
               </a>
             ) : (
-              <button className="btn-secondary w-full opacity-70" disabled>
-                加入 LINE 官方帳號（尚未設定連結）
+              <button className="btn-primary w-full opacity-70" disabled>
+                LINE 接收功能尚未設定
               </button>
             )}
-            <a href={lineShareUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
-              傳送訂位資訊到 LINE
-            </a>
+            <div className="rounded-xl bg-white/80 px-3 py-2 text-xs font-bold leading-5 text-chicken-brown/60">
+              目前會先開啟 {lineOfficialName}；正式 LIFF 推播上線後，官方帳號會自動發送訂位摘要、店家定位與修改連結。
+            </div>
             <Link to={`/manage/${b.id}?token=${encodeURIComponent(b.manageToken || '')}`} className="btn-yellow w-full text-center">
               管理 / 修改我的訂位
             </Link>
@@ -385,4 +373,15 @@ function googleCalendarUrl(booking, settings = {}) {
     location: settings.storeAddress || '雞王刷刷鍋',
   })
   return `https://calendar.google.com/calendar/render?${params.toString()}`
+}
+
+function lineBookingUrl(settings = {}, booking, manageUrl) {
+  const base = settings.lineLiffUrl || settings.lineOfficialUrl || import.meta.env.VITE_LINE_OFFICIAL_URL || ''
+  if (!base) return ''
+  if (!settings.lineLiffUrl) return base
+  const url = new URL(base)
+  url.searchParams.set('bookingId', booking.id)
+  url.searchParams.set('token', booking.manageToken || '')
+  url.searchParams.set('manageUrl', manageUrl)
+  return url.toString()
 }
