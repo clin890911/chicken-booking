@@ -62,6 +62,10 @@ export default function ManageBookingPage() {
     let cancelled = false
     async function loadBooking() {
       setLoadingRemote(true)
+      setAccess(null)
+      setTail('')
+      setMode('home')
+      setError('')
       const remote = await guestGetBooking(id, token).catch(err => ({ ok: false, error: err.message }))
       if (cancelled) return
       if (remote.ok && remote.booking) {
@@ -88,7 +92,7 @@ export default function ManageBookingPage() {
     }
     loadBooking()
     return () => { cancelled = true }
-  }, [id, settings, token])
+  }, [id, token])
 
   const maxDate = useMemo(() => {
     const today = new Date(todayStr() + 'T00:00:00')
