@@ -210,6 +210,20 @@ export default function SettingsView() {
             onChange={e => setForm(f => ({ ...f, lineOfficialUrl: e.target.value.trim() }))}
             placeholder="https://lin.ee/xxxxxxx"
           />
+          <label className="flex items-start gap-3 rounded-xl border border-chicken-brown/10 bg-white px-4 py-3 text-sm font-bold text-chicken-brown">
+            <input
+              type="checkbox"
+              checked={!!form.lineUseLiff}
+              onChange={e => setForm(f => ({ ...f, lineUseLiff: e.target.checked }))}
+              className="mt-1"
+            />
+            <span>
+              使用 LIFF 自動綁定
+              <span className="mt-1 block text-xs font-bold leading-5 text-chicken-brown/55">
+                未確認 LIFF 正式可用前請保持關閉；關閉時客人會先進網站中轉頁，不會遇到 LINE 404。
+              </span>
+            </span>
+          </label>
           <Input
             label="LIFF 訂位綁定連結（選填）"
             type="url"
@@ -245,7 +259,7 @@ export default function SettingsView() {
             placeholder="https://.../lineGetBooking"
           />
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
-            目前會先導向 LINE 官方帳號；若日後填入 LIFF 連結，客人按下「用 LINE 接收訂位資訊」會優先進入 LIFF 綁定頁。
+            目前預設會先開啟網站中轉頁，避免未公開或設定錯誤的 LIFF 造成 404。若已確認 LIFF Channel、Endpoint URL、Scope 與官方帳號連動都正常，再勾選「使用 LIFF 自動綁定」。
             LINE API Token 仍必須放在後端或 Cloud Functions，不能放前端。
           </div>
           <div className="flex gap-2 items-center">

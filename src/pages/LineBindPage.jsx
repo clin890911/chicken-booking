@@ -61,7 +61,7 @@ export default function LineBindPage() {
       }
       if (!liffId) {
         setState('setup')
-        setMessage('LINE LIFF 尚未設定。請先加入官方帳號，正式綁定開通後就能自動接收訂位與定位。')
+        setMessage('請先加入雞王 LINE 官方帳號，並保留此頁的管理訂位入口。正式 LIFF 自動綁定開通後，官方帳號會自動傳送訂位與定位。')
         return
       }
       if (!endpoint) {
@@ -171,7 +171,7 @@ export default function LineBindPage() {
           </Card>
 
           <div className="mt-4 rounded-2xl border border-chicken-brown/10 bg-white/75 p-4 text-xs font-bold leading-5 text-chicken-brown/55">
-            正式上線後，這個頁面會在 LINE 內完成身分綁定，並由官方帳號自動發送訂位摘要、店家定位與修改訂位連結。
+            若沒有自動收到 LINE 訂位摘要，請先加入官方帳號並保留此頁的管理訂位入口；LIFF 自動綁定確認可用後，官方帳號會自動發送訂位摘要、店家定位與修改訂位連結。
           </div>
         </motion.div>
       </main>
