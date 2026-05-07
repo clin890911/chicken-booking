@@ -23,6 +23,7 @@ In the admin settings page:
 - LIFF URL
 - LIFF ID
 - LINE bind endpoint URL, for example `https://<region>-<project>.cloudfunctions.net/lineBind`
+- LINE push endpoint URL, for example `https://<region>-<project>.cloudfunctions.net/linePushBooking`
 - Store name
 - Store address
 - Store phone

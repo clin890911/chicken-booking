@@ -20,6 +20,10 @@ export function lineBindEndpoint(settings = {}) {
   return settings.lineBindEndpoint || import.meta.env.VITE_LINE_BIND_ENDPOINT || ''
 }
 
+export function linePushEndpoint(settings = {}) {
+  return settings.linePushEndpoint || import.meta.env.VITE_LINE_PUSH_ENDPOINT || ''
+}
+
 export function lineLiffId(settings = {}) {
   if (settings.lineLiffId) return settings.lineLiffId
   if (import.meta.env.VITE_LINE_LIFF_ID) return import.meta.env.VITE_LINE_LIFF_ID
@@ -75,4 +79,26 @@ export function loadLiffSdk() {
     script.onerror = () => reject(new Error('LIFF SDK 載入失敗'))
     document.head.appendChild(script)
   })
+}
+
+export async function notifyLineBooking(settings = {}, booking, type = 'updated') {
+  const endpoint = linePushEndpoint(settings)
+  if (!endpoint || !booking) return { ok: false, reason: 'not-configured' }
+  const manageUrl = `${window.location.origin}/manage/${booking.id}?token=${encodeURIComponent(booking.manageToken || '')}`
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        ...bookingLinePayload(booking, settings, manageUrl),
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.ok === false) return { ok: false, error: data.error || `HTTP ${res.status}` }
+    return { ok: true }
+  } catch (err) {
+    console.warn('LINE notify failed:', err)
+    return { ok: false, error: err.message }
+  }
 }

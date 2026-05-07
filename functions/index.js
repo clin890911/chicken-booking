@@ -46,7 +46,7 @@ export const lineBind = onRequest({ cors: true, secrets: [LINE_CHANNEL_ACCESS_TO
 export const lineWebhook = onRequest({ secrets: [LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('method-not-allowed')
   const signature = req.get('x-line-signature') || ''
-  if (!verifyLineSignature(JSON.stringify(req.body), signature, LINE_CHANNEL_SECRET.value())) {
+  if (!verifyLineSignature(req.rawBody, signature, lineChannelSecret())) {
     return res.status(401).send('invalid-signature')
   }
 
@@ -58,9 +58,25 @@ export const lineWebhook = onRequest({ secrets: [LINE_CHANNEL_SECRET, LINE_CHANN
 export const linePushBooking = onRequest({ cors: true, secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
-    const { bookingId, type = 'updated' } = req.body || {}
-    if (!bookingId) return res.status(400).json({ ok: false, error: 'missing-booking-id' })
-    const snap = await db.collection('lineBookingBindings').doc(bookingId).get()
+    const { bookingId, booking, store, type = 'updated' } = req.body || {}
+    const targetBookingId = bookingId || booking?.id
+    if (!targetBookingId) return res.status(400).json({ ok: false, error: 'missing-booking-id' })
+
+    if (booking?.id) {
+      const snap = await db.collection('lineBookingBindings').doc(booking.id).get()
+      if (!snap.exists) return res.status(404).json({ ok: false, error: 'binding-not-found' })
+      const existing = snap.data()
+      const nextStore = normalizeStore({ ...existing.store, ...store })
+      await db.collection('lineBookingBindings').doc(booking.id).set({
+        booking,
+        store: nextStore,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true })
+      await pushLineMessages(existing.lineUserId, buildBookingMessages(booking, nextStore, type))
+      return res.json({ ok: true })
+    }
+
+    const snap = await db.collection('lineBookingBindings').doc(targetBookingId).get()
     if (!snap.exists) return res.status(404).json({ ok: false, error: 'binding-not-found' })
     const data = snap.data()
     await pushLineMessages(data.lineUserId, buildBookingMessages(data.booking, data.store, type))
@@ -200,7 +216,7 @@ async function pushLineMessages(to, messages) {
   const res = await fetch(LINE_PUSH_URL, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN.value()}`,
+      Authorization: `Bearer ${lineChannelAccessToken()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ to, messages }),
@@ -212,7 +228,7 @@ async function replyLineMessage(replyToken, messages) {
   const res = await fetch(LINE_REPLY_URL, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN.value()}`,
+      Authorization: `Bearer ${lineChannelAccessToken()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ replyToken, messages }),
@@ -220,9 +236,20 @@ async function replyLineMessage(replyToken, messages) {
   if (!res.ok) throw new Error(`LINE reply failed: ${res.status} ${await res.text()}`)
 }
 
+function lineChannelAccessToken() {
+  return LINE_CHANNEL_ACCESS_TOKEN.value().trim()
+}
+
+function lineChannelSecret() {
+  return LINE_CHANNEL_SECRET.value().trim()
+}
+
 function verifyLineSignature(rawBody, signature, secret) {
   const hmac = crypto.createHmac('sha256', secret)
   hmac.update(rawBody)
   const expected = hmac.digest('base64')
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+  const received = Buffer.from(signature)
+  const expectedBuffer = Buffer.from(expected)
+  if (received.length !== expectedBuffer.length) return false
+  return crypto.timingSafeEqual(received, expectedBuffer)
 }

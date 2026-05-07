@@ -21,7 +21,7 @@ import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
 import * as tg from '../services/telegramService'
-import { lineBindUrl } from '../services/lineService'
+import { lineBindUrl, notifyLineBooking } from '../services/lineService'
 import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
 import { calcSlotCapacity } from '../utils/capacity'
 
@@ -162,6 +162,7 @@ export default function ManageBookingPage() {
       setMode('success')
       setError('')
       safeNotify(() => tg.notifyBookingUpdated(result.booking, { ...result.changes, guestManaged: true }))
+      notifyLineBooking(settings, result.booking, 'updated')
       toast.success('訂位已更新，同仁端也會同步看到')
     } finally {
       setBusy(false)
@@ -190,6 +191,7 @@ export default function ManageBookingPage() {
       setMode('cancelled')
       setError('')
       safeNotify(() => tg.notifyBookingCancelled(result.booking))
+      notifyLineBooking(settings, result.booking, 'cancelled')
       toast.success('訂位已取消')
     } finally {
       setBusy(false)
