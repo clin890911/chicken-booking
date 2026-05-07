@@ -13,7 +13,7 @@ const LINE_CHANNEL_SECRET = defineSecret('LINE_CHANNEL_SECRET')
 const LINE_REPLY_URL = 'https://api.line.me/v2/bot/message/reply'
 const LINE_PUSH_URL = 'https://api.line.me/v2/bot/message/push'
 
-export const lineBind = onRequest({ cors: true, secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
+export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     const { booking, store, line } = req.body || {}
@@ -43,7 +43,7 @@ export const lineBind = onRequest({ cors: true, secrets: [LINE_CHANNEL_ACCESS_TO
   }
 })
 
-export const lineWebhook = onRequest({ secrets: [LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
+export const lineWebhook = onRequest({ invoker: 'public', secrets: [LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('method-not-allowed')
   const signature = req.get('x-line-signature') || ''
   if (!verifyLineSignature(req.rawBody, signature, lineChannelSecret())) {
@@ -55,7 +55,7 @@ export const lineWebhook = onRequest({ secrets: [LINE_CHANNEL_SECRET, LINE_CHANN
   return res.status(200).send('ok')
 })
 
-export const linePushBooking = onRequest({ cors: true, secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
+export const linePushBooking = onRequest({ cors: true, invoker: 'public', secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     const { bookingId, booking, store, type = 'updated' } = req.body || {}
