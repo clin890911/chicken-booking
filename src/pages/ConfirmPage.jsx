@@ -4,9 +4,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import * as bookingService from '../services/bookingService'
 import { dayLabel } from '../utils/timeSlots'
 import { Card, Button, Badge } from '../components/ui'
+import { useBooking } from '../contexts/BookingContext'
 
 export default function ConfirmPage() {
   const { id } = useParams()
+  const { settings } = useBooking()
   const [b, setB] = useState(null)
   const [copied, setCopied] = useState(false)
   const [copiedManage, setCopiedManage] = useState(false)
@@ -35,7 +37,11 @@ export default function ConfirmPage() {
     ].join('\n')
     return `https://line.me/R/msg/text/?${encodeURIComponent(text)}`
   }, [b, manageUrl])
-  const lineOfficialUrl = import.meta.env.VITE_LINE_OFFICIAL_URL || ''
+  const lineOfficialUrl = settings.lineOfficialUrl || import.meta.env.VITE_LINE_OFFICIAL_URL || ''
+  const lineOfficialName = settings.lineOfficialName || 'LINE 官方帳號'
+  const calendarUrl = useMemo(() => b ? googleCalendarUrl(b, settings) : '', [b, settings])
+  const mapUrl = settings.storeMapUrl || (settings.storeAddress ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(settings.storeAddress)}` : '')
+  const telUrl = settings.storePhone ? `tel:${settings.storePhone}` : ''
 
   const copyText = async (text, onDone) => {
     try {
@@ -232,7 +238,7 @@ export default function ConfirmPage() {
           <div className="mt-3 grid gap-2">
             {lineOfficialUrl ? (
               <a href={lineOfficialUrl} target="_blank" rel="noreferrer" className="btn-secondary w-full text-center">
-                加入 LINE 官方帳號
+                加入 {lineOfficialName}
               </a>
             ) : (
               <button className="btn-secondary w-full opacity-70" disabled>
@@ -253,6 +259,39 @@ export default function ConfirmPage() {
               {copiedManage ? '已複製管理連結' : '複製訂位管理連結'}
             </button>
           </div>
+        </motion.div>
+
+        {/* 到店工具 */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.62 }}
+          className="mt-4 grid grid-cols-3 gap-2"
+        >
+          <a href={calendarUrl} target="_blank" rel="noreferrer" className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
+            <div className="text-xl">📅</div>
+            <div className="mt-1 text-xs font-black text-chicken-brown">加到行事曆</div>
+          </a>
+          {mapUrl ? (
+            <a href={mapUrl} target="_blank" rel="noreferrer" className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
+              <div className="text-xl">📍</div>
+              <div className="mt-1 text-xs font-black text-chicken-brown">導航到店</div>
+            </a>
+          ) : (
+            <button disabled className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center opacity-45 shadow-sm">
+              <div className="text-xl">📍</div>
+              <div className="mt-1 text-xs font-black text-chicken-brown">導航到店</div>
+            </button>
+          )}
+          {telUrl ? (
+            <a href={telUrl} className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
+              <div className="text-xl">📞</div>
+              <div className="mt-1 text-xs font-black text-chicken-brown">撥電話</div>
+            </a>
+          ) : (
+            <button disabled className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center opacity-45 shadow-sm">
+              <div className="text-xl">📞</div>
+              <div className="mt-1 text-xs font-black text-chicken-brown">撥電話</div>
+            </button>
+          )}
         </motion.div>
 
         {/* 注意事項 */}
@@ -327,4 +366,23 @@ function generateConfetti(n) {
     })
   }
   return out
+}
+
+function googleCalendarUrl(booking, settings = {}) {
+  const start = new Date(`${booking.date}T${booking.timeSlot}:00`)
+  const end = new Date(start.getTime() + 90 * 60 * 1000)
+  const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: '雞王刷刷鍋訂位',
+    dates: `${fmt(start)}/${fmt(end)}`,
+    details: [
+      `訂位編號：${booking.id}`,
+      `姓名：${booking.name}`,
+      `人數：${booking.guests} 位`,
+      '請於用餐時段前 5 分鐘抵達，逾時 15 分鐘訂位將釋出。',
+    ].join('\n'),
+    location: settings.storeAddress || '雞王刷刷鍋',
+  })
+  return `https://calendar.google.com/calendar/render?${params.toString()}`
 }

@@ -5,7 +5,12 @@ const DEFAULT = {
   closeTime: '19:00',
   slotInterval: 30,
   maxDaysAhead: 30,
-  heroBanners: []
+  heroBanners: [],
+  lineOfficialUrl: 'https://lin.ee/8lECi4S',
+  lineOfficialName: '雞王刷刷鍋 LINE 官方帳號',
+  storePhone: '',
+  storeAddress: '',
+  storeMapUrl: ''
 }
 
 export function getSettings() {

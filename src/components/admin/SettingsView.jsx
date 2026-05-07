@@ -160,6 +160,65 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="LINE 官方帳號" description="設定客人訂位成功後看到的 LINE 加好友入口與保存提醒。" defaultOpen>
+        <div className="space-y-3">
+          <Input
+            label="顯示名稱"
+            value={form.lineOfficialName || ''}
+            onChange={e => setForm(f => ({ ...f, lineOfficialName: e.target.value }))}
+            placeholder="雞王刷刷鍋 LINE 官方帳號"
+          />
+          <Input
+            label="LINE 官方帳號加入連結"
+            type="url"
+            value={form.lineOfficialUrl || ''}
+            onChange={e => setForm(f => ({ ...f, lineOfficialUrl: e.target.value.trim() }))}
+            placeholder="https://lin.ee/xxxxxxx"
+          />
+          <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
+            這裡只設定客人可點擊的官方帳號入口，不會儲存 LINE API Token。
+            若未來要自動推播訂位成功/提醒訊息，需要後端或 Cloud Functions 保管 Channel Access Token。
+          </div>
+          <div className="flex gap-2 items-center">
+            <Button onClick={handleSave} className="flex-1">儲存 LINE 設定</Button>
+            {form.lineOfficialUrl && (
+              <a href={form.lineOfficialUrl} target="_blank" rel="noreferrer" className="btn-secondary whitespace-nowrap">
+                測試開啟
+              </a>
+            )}
+            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="客人聯絡入口" description="設定確認頁與訂位管理中心的一鍵撥電話、導航資訊。">
+        <div className="space-y-3">
+          <Input
+            label="店家電話"
+            value={form.storePhone || ''}
+            onChange={e => setForm(f => ({ ...f, storePhone: e.target.value.trim() }))}
+            placeholder="例：04-1234-5678"
+          />
+          <Input
+            label="店家地址"
+            value={form.storeAddress || ''}
+            onChange={e => setForm(f => ({ ...f, storeAddress: e.target.value }))}
+            placeholder="例：台中市..."
+          />
+          <Input
+            label="Google Maps 導航連結"
+            type="url"
+            value={form.storeMapUrl || ''}
+            onChange={e => setForm(f => ({ ...f, storeMapUrl: e.target.value.trim() }))}
+            placeholder="https://maps.google.com/..."
+          />
+          <div className="flex gap-2 items-center">
+            <Button onClick={handleSave} className="flex-1">儲存聯絡入口</Button>
+            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
+          </div>
+        </div>
+      </SettingsSection>
+
       {/* Telegram 通知 + 備份 */}
       <SettingsSection title="通知與備份" description="Telegram 事件推送與備份狀態。">
         <TelegramSettings embedded />

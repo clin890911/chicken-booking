@@ -169,7 +169,23 @@ export default function BookingCard({ booking, onAssign, onClick }) {
             {booking.actualArrivalTime && (
               <span className="text-chicken-brown/50">到 {fmtTime(booking.actualArrivalTime)}</span>
             )}
+            {booking.lastGuestEditAt && (
+              <span className="rounded-full bg-[#06C755]/10 px-2 py-0.5 font-black text-[#06A848]">
+                客人自行修改 {fmtTime(booking.lastGuestEditAt)}
+              </span>
+            )}
+            {booking.cancellationReason?.reason && (
+              <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-black text-chicken-red">
+                取消原因：{booking.cancellationReason.reason}
+              </span>
+            )}
           </div>
+
+          {booking.lastGuestEditAt && !booking.assignedTableId && booking.status === 'confirmed' && (
+            <div className="mt-2 rounded-lg border border-chicken-yellow/30 bg-chicken-yellow/10 px-3 py-2 text-xs font-bold text-chicken-brown">
+              客人曾修改日期/時間/人數，原桌位已解除，請重新確認桌位指派。
+            </div>
+          )}
 
           {/* 標籤 + 備註 */}
           {(booking.notes?.pet || booking.notes?.child || booking.notes?.mobility || booking.notes?.text) && (

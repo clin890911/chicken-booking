@@ -1,7 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { AlertTriangle, CalendarDays, CheckCircle2, ChevronLeft, Clock, LockKeyhole, ShieldCheck, Trash2, Users } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
+import {
+  AlertTriangle,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  Clock,
+  Edit3,
+  LockKeyhole,
+  MessageCircle,
+  Phone,
+  ShieldCheck,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import { Button, Input, Textarea, Badge } from '../components/ui'
 import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
@@ -16,7 +30,7 @@ const NOTE_OPTIONS = [
   { key: 'mobility', label: '行動不便' },
 ]
 
-const EDITABLE_STATUS = ['confirmed']
+const CANCEL_REASONS = ['行程改變', '人數變更', '時間不方便', '改天再訂', '其他']
 
 const safeNotify = (fn) => {
   try { fn()?.catch?.(e => console.warn('TG notify error:', e)) }
@@ -35,8 +49,11 @@ export default function ManageBookingPage() {
   const [access, setAccess] = useState(null)
   const [booking, setBooking] = useState(null)
   const [form, setForm] = useState(null)
+  const [mode, setMode] = useState('home')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelOther, setCancelOther] = useState('')
 
   useEffect(() => {
     const b = bookingService.ensureManageToken(id)
@@ -56,11 +73,10 @@ export default function ManageBookingPage() {
     return generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval).map(time => {
       const otherBookings = bookings.filter(b => b.id !== id)
       const remaining = calcSlotCapacity(tables, otherBookings, form.date, time)
-      const full = remaining < Number(form.guests || 1)
       return {
         time,
         remaining,
-        full,
+        full: remaining < Number(form.guests || 1),
         period: Number(time.slice(0, 2)) < 15 ? '午餐' : '晚餐',
       }
     })
@@ -71,6 +87,18 @@ export default function ManageBookingPage() {
     晚餐: slots.filter(s => s.period === '晚餐' && !s.full),
   }), [slots])
 
+  const changed = useMemo(() => {
+    if (!booking || !form) return false
+    return ['name', 'phone', 'date', 'timeSlot'].some(key => String(form[key] || '') !== String(booking[key] || '')) ||
+      Number(form.guests) !== Number(booking.guests) ||
+      JSON.stringify(form.notes) !== JSON.stringify({
+        pet: !!booking.notes?.pet,
+        child: !!booking.notes?.child,
+        mobility: !!booking.notes?.mobility,
+        text: booking.notes?.text || '',
+      })
+  }, [booking, form])
+
   const verify = () => {
     const result = bookingService.verifyGuestAccess(id, token, tail)
     setAccess(result)
@@ -78,10 +106,10 @@ export default function ManageBookingPage() {
       setError(result.reason)
       return
     }
-    setError('')
     const latest = bookingService.getById(id)
     setBooking(latest)
     setForm(toForm(latest))
+    setError('')
   }
 
   const set = (key, value) => {
@@ -93,25 +121,23 @@ export default function ManageBookingPage() {
   }
 
   const toggleNote = (key) => {
-    setForm(current => ({
-      ...current,
-      notes: { ...current.notes, [key]: !current.notes[key] },
-    }))
+    setForm(current => ({ ...current, notes: { ...current.notes, [key]: !current.notes[key] } }))
+  }
+
+  const resetForm = () => {
+    setForm(toForm(booking))
+    setMode('home')
+    setError('')
   }
 
   const submit = async () => {
     if (!form || !access?.ok) return
     const errs = validateForm(form)
-    if (errs) {
-      setError(errs)
-      return
-    }
+    if (errs) return setError(errs)
+    if (!changed) return setError('目前沒有修改內容')
 
     const selectedSlot = slots.find(s => s.time === form.timeSlot)
-    if (!selectedSlot || selectedSlot.full) {
-      setError('此時段目前已無足夠座位，請改選其他時段')
-      return
-    }
+    if (!selectedSlot || selectedSlot.full) return setError('此時段目前已無足夠座位，請改選其他時段')
 
     setBusy(true)
     try {
@@ -128,16 +154,14 @@ export default function ManageBookingPage() {
           text: form.notes.text.trim(),
         },
       })
-      if (!result.ok) {
-        setError(result.reason)
-        return
-      }
+      if (!result.ok) return setError(result.reason)
       refresh()
       setBooking(result.booking)
       setForm(toForm(result.booking))
+      setMode('success')
+      setError('')
       safeNotify(() => tg.notifyBookingUpdated(result.booking, { ...result.changes, guestManaged: true }))
       toast.success('訂位已更新，同仁端也會同步看到')
-      setError('')
     } finally {
       setBusy(false)
     }
@@ -145,6 +169,9 @@ export default function ManageBookingPage() {
 
   const cancelBooking = async () => {
     if (!access?.ok) return
+    const reason = cancelReason === '其他' ? cancelOther.trim() : cancelReason
+    if (!reason) return setError('請選擇取消原因')
+
     const ok = await confirm('取消後此訂位會釋出，若要重新安排需重新訂位。確定取消嗎？', {
       title: '取消訂位',
       confirmLabel: '確定取消',
@@ -154,17 +181,15 @@ export default function ManageBookingPage() {
 
     setBusy(true)
     try {
-      const result = bookingService.cancelBookingByGuest(id, token)
-      if (!result.ok) {
-        setError(result.reason)
-        return
-      }
+      const result = bookingService.cancelBookingByGuest(id, token, reason)
+      if (!result.ok) return setError(result.reason)
       refresh()
       setBooking(result.booking)
       setForm(toForm(result.booking))
+      setMode('cancelled')
+      setError('')
       safeNotify(() => tg.notifyBookingCancelled(result.booking))
       toast.success('訂位已取消')
-      setError('')
     } finally {
       setBusy(false)
     }
@@ -185,164 +210,94 @@ export default function ManageBookingPage() {
   return (
     <Shell>
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-        <section className="surface overflow-hidden">
-          <div className="bg-chicken-red px-5 py-4 text-white">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-xs font-bold opacity-85">雞王刷刷鍋</div>
-                <h1 className="mt-1 text-2xl font-black">管理我的訂位</h1>
-              </div>
-              <Badge color={booking.status === 'cancelled' ? 'gray' : 'yellow'} className="bg-white text-chicken-red">
-                {statusLabel(booking.status)}
-              </Badge>
-            </div>
-          </div>
-          <div className="grid gap-3 p-5 sm:grid-cols-3">
-            <SummaryPill icon={CalendarDays} label="日期" value={dayLabel(booking.date)} />
-            <SummaryPill icon={Clock} label="時間" value={booking.timeSlot} />
-            <SummaryPill icon={Users} label="人數" value={`${booking.guests} 位`} />
-          </div>
-        </section>
+        <BookingHero booking={booking} editable={editable} />
 
         {!access?.ok ? (
-          <section className="surface p-5">
-            <div className="mb-4 flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-chicken-red/10 text-chicken-red">
-                <LockKeyhole size={20} />
-              </div>
-              <div>
-                <h2 className="text-lg font-black text-chicken-brown">驗證電話末碼</h2>
-                <p className="mt-1 text-sm leading-6 text-chicken-brown/60">
-                  為保護訂位資料，請輸入訂位電話末 3 或 4 碼後再修改。
-                </p>
-              </div>
-            </div>
-            <div className="space-y-3">
-              <Input
-                label="電話末碼"
-                inputMode="numeric"
-                value={tail}
-                maxLength={4}
-                onChange={e => setTail(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                placeholder="例如 678"
-              />
-              {error && <p className="rounded-xl bg-chicken-red/10 px-3 py-2 text-sm font-bold text-chicken-red">{error}</p>}
-              <Button className="w-full" onClick={verify}>進入訂位管理</Button>
-            </div>
-          </section>
-        ) : !editable.ok || !EDITABLE_STATUS.includes(booking.status) ? (
-          <section className="surface p-5 text-center">
-            <AlertTriangle className="mx-auto mb-3 text-chicken-yellow" size={38} />
-            <h2 className="text-xl font-black text-chicken-brown">此訂位目前無法線上修改</h2>
-            <p className="mt-2 text-sm leading-6 text-chicken-brown/60">{editable.reason || '請改以電話聯絡店家協助處理。'}</p>
-            <Link to="/" className="mt-4 inline-flex text-sm font-bold text-chicken-red underline">回首頁</Link>
-          </section>
+          <VerifyPanel tail={tail} setTail={setTail} verify={verify} error={error} />
+        ) : mode !== 'cancelled' && (!editable.ok || booking.status !== 'confirmed') ? (
+          <LockedPanel reason={editable.reason} booking={booking} />
         ) : (
-          <>
-            <section className="surface space-y-4 p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-chicken-green/10 text-chicken-green">
-                  <ShieldCheck size={20} />
+          <AnimatePresence mode="wait">
+            {mode === 'home' && (
+              <motion.section key="home" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+                <ActionGrid setMode={setMode} booking={booking} settings={settings} />
+                <EditHistory booking={booking} />
+              </motion.section>
+            )}
+            {mode === 'schedule' && (
+              <motion.section key="schedule" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="surface space-y-5 p-5">
+                <SectionHead icon={CalendarDays} title="修改日期、時間與人數" hint="像重新訂位一樣選擇新時段，送出前會再次確認。" />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input label="用餐日期" type="date" min={todayStr()} max={maxDate} value={form.date} onChange={e => set('date', e.target.value)} />
+                  <Input label="用餐人數" type="number" min="1" max="12" value={form.guests} onChange={e => set('guests', e.target.value)} />
+                </div>
+                <SlotGrid groupedSlots={groupedSlots} value={form.timeSlot} onChange={(time) => set('timeSlot', time)} />
+                <BeforeAfter before={booking} after={form} />
+                <FooterActions busy={busy} changed={changed} error={error} onBack={resetForm} onSubmit={submit} />
+              </motion.section>
+            )}
+            {mode === 'details' && (
+              <motion.section key="details" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="surface space-y-5 p-5">
+                <SectionHead icon={Edit3} title="修改聯絡資訊與備註" hint="若只調整姓名、電話或特殊需求，不會解除桌位指派。" />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Input label="姓名" value={form.name} onChange={e => set('name', e.target.value)} />
+                  <Input label="電話" type="tel" inputMode="numeric" value={form.phone} onChange={e => set('phone', e.target.value)} />
                 </div>
                 <div>
-                  <h2 className="text-lg font-black text-chicken-brown">修改訂位內容</h2>
-                  <p className="mt-1 text-sm leading-6 text-chicken-brown/60">
-                    用餐前 2 小時以前可自行調整。若改日期、時間或人數，系統會重新安排桌位。
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input label="姓名" value={form.name} onChange={e => set('name', e.target.value)} />
-                <Input label="電話" type="tel" inputMode="numeric" value={form.phone} onChange={e => set('phone', e.target.value)} />
-                <Input label="用餐日期" type="date" min={todayStr()} max={maxDate} value={form.date} onChange={e => set('date', e.target.value)} />
-                <Input label="用餐人數" type="number" min="1" max="12" value={form.guests} onChange={e => set('guests', e.target.value)} />
-              </div>
-
-              <div>
-                <label className="label">可訂時段</label>
-                <div className="space-y-4">
-                  {Object.entries(groupedSlots).map(([period, items]) => (
-                    items.length > 0 && (
-                      <div key={period}>
-                        <div className="mb-2 flex items-center gap-2">
-                          <span className="text-xs font-black text-chicken-brown/55">{period}</span>
-                          <span className="h-px flex-1 bg-chicken-brown/10" />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                          {items.map(slot => (
-                            <button
-                              key={slot.time}
-                              type="button"
-                              onClick={() => set('timeSlot', slot.time)}
-                              className={`min-h-[58px] rounded-xl border-2 px-3 py-2 text-left transition-all ${
-                                form.timeSlot === slot.time
-                                  ? 'border-chicken-red bg-chicken-red text-white shadow-sm'
-                                  : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'
-                              }`}
-                            >
-                              <div className="font-black tabular-nums">{slot.time}</div>
-                              <div className={`mt-1 text-[11px] font-black ${form.timeSlot === slot.time ? 'text-white/80' : 'text-chicken-green'}`}>
-                                可訂位
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  ))}
-                </div>
-                {groupedSlots.午餐.length + groupedSlots.晚餐.length === 0 && (
-                  <div className="empty-panel mt-2">
-                    <p className="font-bold text-chicken-brown">此日期沒有符合人數的時段</p>
+                  <label className="label">特殊需求</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {NOTE_OPTIONS.map(option => (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => toggleNote(option.key)}
+                        className={`min-h-[46px] rounded-xl border px-2 text-sm font-bold transition-all ${
+                          form.notes[option.key] ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
                   </div>
-                )}
-              </div>
-
-              <div>
-                <label className="label">特殊需求</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {NOTE_OPTIONS.map(option => (
+                </div>
+                <Textarea label="備註" value={form.notes.text} onChange={e => set('notes', { ...form.notes, text: e.target.value })} />
+                <BeforeAfter before={booking} after={form} compact />
+                <FooterActions busy={busy} changed={changed} error={error} onBack={resetForm} onSubmit={submit} />
+              </motion.section>
+            )}
+            {mode === 'cancel' && (
+              <motion.section key="cancel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="surface space-y-5 p-5">
+                <SectionHead icon={Trash2} title="取消訂位" hint="取消後座位會釋出，原因會提供給現場同仁判斷營運狀況。" danger />
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {CANCEL_REASONS.map(reason => (
                     <button
-                      key={option.key}
+                      key={reason}
                       type="button"
-                      onClick={() => toggleNote(option.key)}
-                      className={`min-h-[46px] rounded-xl border px-2 text-sm font-bold transition-all ${
-                        form.notes[option.key]
-                          ? 'border-chicken-red bg-chicken-red text-white'
-                          : 'border-chicken-brown/15 bg-white text-chicken-brown'
+                      onClick={() => setCancelReason(reason)}
+                      className={`rounded-xl border-2 px-4 py-3 text-left text-sm font-black transition-all ${
+                        cancelReason === reason ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown'
                       }`}
                     >
-                      {option.label}
+                      {reason}
                     </button>
                   ))}
                 </div>
-              </div>
-              <Textarea label="備註" value={form.notes.text} onChange={e => set('notes', { ...form.notes, text: e.target.value })} />
-
-              {error && <p className="rounded-xl bg-chicken-red/10 px-3 py-2 text-sm font-bold text-chicken-red">{error}</p>}
-
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                <Button disabled={busy} onClick={submit}>{busy ? '儲存中...' : '儲存修改'}</Button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={cancelBooking}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-chicken-red/20 px-4 py-3 text-sm font-black text-chicken-red transition hover:bg-chicken-red/5 disabled:opacity-50"
-                >
-                  <Trash2 size={16} />
-                  取消訂位
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-chicken-yellow/30 bg-chicken-yellow/10 p-4">
-              <div className="flex items-start gap-2 text-sm leading-6 text-chicken-brown">
-                <CheckCircle2 className="mt-0.5 shrink-0 text-chicken-yellow" size={18} />
-                <p>修改成功後，同仁端會同步更新。若距離用餐時間太近，請直接來電確認現場安排。</p>
-              </div>
-            </section>
-          </>
+                {cancelReason === '其他' && (
+                  <Textarea label="其他原因" value={cancelOther} onChange={e => setCancelOther(e.target.value)} placeholder="請簡短說明取消原因" />
+                )}
+                {error && <ErrorText>{error}</ErrorText>}
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <button type="button" onClick={resetForm} className="btn-secondary">返回</button>
+                  <button type="button" disabled={busy} onClick={cancelBooking} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-chicken-red px-5 py-3 text-sm font-black text-white shadow-sm disabled:opacity-50">
+                    <Trash2 size={16} />
+                    {busy ? '取消中...' : '確認取消訂位'}
+                  </button>
+                </div>
+              </motion.section>
+            )}
+            {mode === 'success' && <SuccessPanel key="success" booking={booking} settings={settings} onBack={() => setMode('home')} />}
+            {mode === 'cancelled' && <CancelledPanel key="cancelled" booking={booking} />}
+          </AnimatePresence>
         )}
       </motion.div>
     </Shell>
@@ -358,12 +313,242 @@ function Shell({ children }) {
             <ChevronLeft size={22} />
           </Link>
           <div>
-            <div className="text-base font-black text-chicken-brown">訂位管理</div>
+            <div className="text-base font-black text-chicken-brown">訂位管理中心</div>
             <div className="text-xs font-bold text-chicken-brown/55">修改、取消與確認訂位狀態</div>
           </div>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
+    </div>
+  )
+}
+
+function BookingHero({ booking, editable }) {
+  return (
+    <section className="surface overflow-hidden">
+      <div className="bg-chicken-red px-5 py-4 text-white">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold opacity-85">雞王刷刷鍋</div>
+            <h1 className="mt-1 text-2xl font-black">管理我的訂位</h1>
+          </div>
+          <Badge color={booking.status === 'cancelled' ? 'gray' : 'yellow'} className="bg-white text-chicken-red">
+            {statusLabel(booking.status)}
+          </Badge>
+        </div>
+      </div>
+      <div className="grid gap-3 p-5 sm:grid-cols-3">
+        <SummaryPill icon={CalendarDays} label="日期" value={dayLabel(booking.date)} />
+        <SummaryPill icon={Clock} label="時間" value={booking.timeSlot} />
+        <SummaryPill icon={Users} label="人數" value={`${booking.guests} 位`} />
+      </div>
+      <div className="border-t border-chicken-brown/10 px-5 py-3 text-xs font-bold text-chicken-brown/55">
+        {editable.ok ? '用餐前 2 小時以前可自行修改或取消。' : editable.reason}
+      </div>
+    </section>
+  )
+}
+
+function VerifyPanel({ tail, setTail, verify, error }) {
+  return (
+    <section className="surface p-5">
+      <SectionHead icon={LockKeyhole} title="驗證電話末碼" hint="為保護訂位資料，請輸入訂位電話末 3 或 4 碼。" />
+      <div className="mt-4 space-y-3">
+        <Input label="電話末碼" inputMode="numeric" value={tail} maxLength={4} onChange={e => setTail(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="例如 678" />
+        {error && <ErrorText>{error}</ErrorText>}
+        <Button className="w-full" onClick={verify}>進入訂位管理</Button>
+      </div>
+    </section>
+  )
+}
+
+function LockedPanel({ reason, booking }) {
+  return (
+    <section className="surface p-5 text-center">
+      <AlertTriangle className="mx-auto mb-3 text-chicken-yellow" size={38} />
+      <h2 className="text-xl font-black text-chicken-brown">此訂位目前無法線上修改</h2>
+      <p className="mt-2 text-sm leading-6 text-chicken-brown/60">{reason || '請改以電話聯絡店家協助處理。'}</p>
+      {booking.status === 'cancelled' && (
+        <Link to="/book" className="mt-4 inline-flex text-sm font-bold text-chicken-red underline">重新訂位</Link>
+      )}
+    </section>
+  )
+}
+
+function ActionGrid({ setMode, booking, settings }) {
+  return (
+    <section className="grid gap-3 sm:grid-cols-3">
+      <ActionCard icon={CalendarDays} title="修改日期 / 時間 / 人數" hint="重新挑選可訂時段" onClick={() => setMode('schedule')} />
+      <ActionCard icon={Edit3} title="修改聯絡資訊 / 備註" hint="調整姓名、電話、特殊需求" onClick={() => setMode('details')} />
+      <ActionCard icon={Trash2} title="取消訂位" hint="提供原因並釋出座位" danger onClick={() => setMode('cancel')} />
+      <a href={lineShareUrl(booking)} target="_blank" rel="noreferrer" className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
+        <MessageCircle className="text-[#06C755]" size={24} />
+        <div>
+          <div className="font-black text-chicken-brown">傳送到 LINE</div>
+          <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">保存訂位資訊給自己或同行朋友</div>
+        </div>
+      </a>
+      {settings.storePhone ? (
+        <a href={`tel:${settings.storePhone}`} className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
+          <Phone className="text-chicken-red" size={24} />
+          <div>
+            <div className="font-black text-chicken-brown">撥電話給店家</div>
+            <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">{settings.storePhone}</div>
+          </div>
+        </a>
+      ) : null}
+    </section>
+  )
+}
+
+function ActionCard({ icon: Icon, title, hint, onClick, danger = false }) {
+  return (
+    <button type="button" onClick={onClick} className={`surface min-h-[118px] p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md ${danger ? 'border-chicken-red/25' : ''}`}>
+      <Icon className={danger ? 'text-chicken-red' : 'text-chicken-brown'} size={24} />
+      <div className="mt-5 font-black text-chicken-brown">{title}</div>
+      <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">{hint}</div>
+    </button>
+  )
+}
+
+function SlotGrid({ groupedSlots, value, onChange }) {
+  const total = groupedSlots.午餐.length + groupedSlots.晚餐.length
+  if (total === 0) {
+    return <div className="empty-panel"><p className="font-bold text-chicken-brown">此日期沒有符合人數的時段</p></div>
+  }
+  return (
+    <div>
+      <label className="label">可訂時段</label>
+      <div className="space-y-4">
+        {Object.entries(groupedSlots).map(([period, items]) => (
+          items.length > 0 && (
+            <div key={period}>
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-xs font-black text-chicken-brown/55">{period}</span>
+                <span className="h-px flex-1 bg-chicken-brown/10" />
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {items.map(slot => (
+                  <button
+                    key={slot.time}
+                    type="button"
+                    onClick={() => onChange(slot.time)}
+                    className={`relative min-h-[58px] rounded-xl border-2 px-3 py-2 text-left transition-all ${
+                      value === slot.time ? 'border-chicken-red bg-chicken-red text-white shadow-sm' : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'
+                    }`}
+                  >
+                    <div className="font-black tabular-nums">{slot.time}</div>
+                    <div className={`mt-1 text-[11px] font-black ${value === slot.time ? 'text-white/80' : 'text-chicken-green'}`}>可訂位</div>
+                    {value === slot.time && <Check className="absolute right-2 top-2" size={16} />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function BeforeAfter({ before, after, compact = false }) {
+  return (
+    <div className="rounded-2xl border border-chicken-brown/10 bg-chicken-cream/50 p-4">
+      <div className="mb-3 text-sm font-black text-chicken-brown">修改前後確認</div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <CompareBox title="目前訂位" data={before} muted />
+        <CompareBox title="修改後" data={after} />
+      </div>
+      {!compact && (
+        <p className="mt-3 text-xs font-bold leading-5 text-chicken-brown/55">
+          若日期、時間或人數有變更，原桌位指派會解除，現場同仁會重新安排。
+        </p>
+      )}
+    </div>
+  )
+}
+
+function CompareBox({ title, data, muted }) {
+  return (
+    <div className={`rounded-xl bg-white p-3 ${muted ? 'opacity-75' : 'ring-2 ring-chicken-red/20'}`}>
+      <div className="mb-2 text-xs font-black text-chicken-brown/45">{title}</div>
+      <div className="space-y-1 text-sm font-bold text-chicken-brown">
+        <div>{dayLabel(data.date)} · {data.timeSlot}</div>
+        <div>{data.guests} 位 · {data.name}</div>
+        <div className="font-mono text-xs text-chicken-brown/60">{data.phone}</div>
+      </div>
+    </div>
+  )
+}
+
+function FooterActions({ busy, changed, error, onBack, onSubmit }) {
+  return (
+    <div className="space-y-3">
+      {error && <ErrorText>{error}</ErrorText>}
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <button type="button" onClick={onBack} className="btn-secondary">返回</button>
+        <Button disabled={busy || !changed} onClick={onSubmit}>{busy ? '儲存中...' : '確認修改'}</Button>
+      </div>
+    </div>
+  )
+}
+
+function SuccessPanel({ booking, settings, onBack }) {
+  return (
+    <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="surface p-6 text-center">
+      <CheckCircle2 className="mx-auto text-chicken-green" size={44} />
+      <h2 className="mt-3 text-xl font-black text-chicken-brown">訂位已更新</h2>
+      <p className="mt-2 text-sm leading-6 text-chicken-brown/60">同仁端已同步收到新的訂位內容。</p>
+      <div className="mt-5 grid gap-2">
+        <a href={lineShareUrl(booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">傳送最新訂位到 LINE</a>
+        {settings.lineOfficialUrl && <a href={settings.lineOfficialUrl} target="_blank" rel="noreferrer" className="btn-secondary text-center">加入 LINE 官方帳號</a>}
+        <button onClick={onBack} className="text-sm font-bold text-chicken-brown/60 underline">回訂位管理中心</button>
+      </div>
+    </motion.section>
+  )
+}
+
+function CancelledPanel({ booking }) {
+  return (
+    <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="surface p-6 text-center">
+      <CheckCircle2 className="mx-auto text-chicken-green" size={44} />
+      <h2 className="mt-3 text-xl font-black text-chicken-brown">訂位已取消</h2>
+      <p className="mt-2 text-sm leading-6 text-chicken-brown/60">取消原因：{booking.cancellationReason?.reason || '未提供'}</p>
+      <Link to="/book" className="btn-primary mt-5 block text-center">重新訂位</Link>
+    </motion.section>
+  )
+}
+
+function EditHistory({ booking }) {
+  const history = Array.isArray(booking.guestEditHistory) ? booking.guestEditHistory.slice(-3).reverse() : []
+  if (history.length === 0) return null
+  return (
+    <section className="surface p-5">
+      <div className="text-sm font-black text-chicken-brown">最近修改紀錄</div>
+      <div className="mt-3 space-y-2">
+        {history.map(item => (
+          <div key={item.id} className="rounded-xl bg-chicken-brown/5 px-3 py-2 text-xs leading-5 text-chicken-brown/65">
+            <span className="font-black text-chicken-brown">{item.type === 'guest_cancel' ? '客人取消' : '客人修改'}</span>
+            <span className="mx-1">·</span>
+            {new Date(item.at).toLocaleString('zh-TW')}
+            {item.reason && <span> · {item.reason}</span>}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function SectionHead({ icon: Icon, title, hint, danger = false }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${danger ? 'bg-chicken-red/10 text-chicken-red' : 'bg-chicken-red/10 text-chicken-red'}`}>
+        <Icon size={20} />
+      </div>
+      <div>
+        <h2 className="text-lg font-black text-chicken-brown">{title}</h2>
+        {hint && <p className="mt-1 text-sm leading-6 text-chicken-brown/60">{hint}</p>}
+      </div>
     </div>
   )
 }
@@ -378,6 +563,10 @@ function SummaryPill({ icon: Icon, label, value }) {
       <div className="mt-1 text-base font-black text-chicken-brown">{value}</div>
     </div>
   )
+}
+
+function ErrorText({ children }) {
+  return <p className="rounded-xl bg-chicken-red/10 px-3 py-2 text-sm font-bold text-chicken-red">{children}</p>
 }
 
 function toForm(booking) {
@@ -415,4 +604,17 @@ function statusLabel(status) {
     noshow: '未到',
   }
   return map[status] || status || '已確認'
+}
+
+function lineShareUrl(booking) {
+  const manageUrl = `${window.location.origin}/manage/${booking.id}?token=${encodeURIComponent(booking.manageToken || '')}`
+  const text = [
+    '雞王刷刷鍋訂位資訊',
+    `訂位編號：${booking.id}`,
+    `日期：${dayLabel(booking.date)}`,
+    `時間：${booking.timeSlot}`,
+    `人數：${booking.guests} 位`,
+    `管理訂位：${manageUrl}`,
+  ].join('\n')
+  return `https://line.me/R/msg/text/?${encodeURIComponent(text)}`
 }

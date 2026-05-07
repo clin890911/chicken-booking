@@ -1,7 +1,7 @@
 // bookingService：統一封裝訂位 CRUD
 // schema: { id, name, phone, guests, date, timeSlot, notes, source, status,
 //           assignedTableId, lineUserId, manageToken, lastGuestEditAt,
-//           guestEditCount, createdAt, updatedAt, createdBy }
+//           guestEditCount, guestEditHistory, cancellationReason, createdAt, updatedAt, createdBy }
 // 後端：localStorage（v0），未來切到 Firestore 只改本檔
 import * as customerService from './customerService'
 
@@ -64,6 +64,8 @@ export function listAll() {
     manageToken: null,
     lastGuestEditAt: null,
     guestEditCount: 0,
+    guestEditHistory: [],
+    cancellationReason: null,
     ...b,
   }))
 }
@@ -110,6 +112,8 @@ export function create(data) {
     manageToken: data.manageToken || createManageToken(),
     lastGuestEditAt: data.lastGuestEditAt || null,
     guestEditCount: Number(data.guestEditCount) || 0,
+    guestEditHistory: Array.isArray(data.guestEditHistory) ? data.guestEditHistory : [],
+    cancellationReason: data.cancellationReason || null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     createdBy: data.createdBy || 'guest'
@@ -163,17 +167,43 @@ export function updateBookingByGuest(id, token, patch) {
 
   const structuralKeys = ['date', 'timeSlot', 'guests']
   const shouldUnassign = structuralKeys.some(key => patch[key] !== undefined && String(patch[key]) !== String(booking[key]))
+  const changedKeys = Object.keys(patch).filter(key => JSON.stringify(patch[key]) !== JSON.stringify(booking[key]))
+  const historyEntry = {
+    id: createManageToken().slice(0, 12),
+    type: 'guest_update',
+    at: new Date().toISOString(),
+    changedKeys,
+    before: {
+      name: booking.name,
+      phone: booking.phone,
+      guests: booking.guests,
+      date: booking.date,
+      timeSlot: booking.timeSlot,
+      notes: booking.notes,
+      assignedTableId: booking.assignedTableId,
+    },
+    after: {
+      name: patch.name ?? booking.name,
+      phone: patch.phone ?? booking.phone,
+      guests: patch.guests ?? booking.guests,
+      date: patch.date ?? booking.date,
+      timeSlot: patch.timeSlot ?? booking.timeSlot,
+      notes: patch.notes ?? booking.notes,
+      assignedTableId: shouldUnassign ? null : booking.assignedTableId,
+    },
+  }
   const cleanPatch = {
     ...patch,
     ...(shouldUnassign ? { assignedTableId: null } : {}),
     lastGuestEditAt: new Date().toISOString(),
     guestEditCount: (Number(booking.guestEditCount) || 0) + 1,
+    guestEditHistory: [...(Array.isArray(booking.guestEditHistory) ? booking.guestEditHistory : []), historyEntry],
   }
   const updated = update(id, cleanPatch)
   return { ok: true, booking: updated, changes: cleanPatch }
 }
 
-export function cancelBookingByGuest(id, token) {
+export function cancelBookingByGuest(id, token, reason = '') {
   const booking = ensureManageToken(id)
   if (!booking) return { ok: false, reason: '找不到此訂位' }
   if (!token || token !== booking.manageToken) return { ok: false, reason: '管理連結無效' }
@@ -182,8 +212,28 @@ export function cancelBookingByGuest(id, token) {
   const updated = update(id, {
     status: 'cancelled',
     assignedTableId: null,
+    cancellationReason: {
+      source: 'guest',
+      reason: String(reason || '').trim() || '未提供',
+      at: new Date().toISOString(),
+    },
     lastGuestEditAt: new Date().toISOString(),
     guestEditCount: (Number(booking.guestEditCount) || 0) + 1,
+    guestEditHistory: [
+      ...(Array.isArray(booking.guestEditHistory) ? booking.guestEditHistory : []),
+      {
+        id: createManageToken().slice(0, 12),
+        type: 'guest_cancel',
+        at: new Date().toISOString(),
+        reason: String(reason || '').trim() || '未提供',
+        before: {
+          guests: booking.guests,
+          date: booking.date,
+          timeSlot: booking.timeSlot,
+          assignedTableId: booking.assignedTableId,
+        },
+      },
+    ],
   })
   return { ok: true, booking: updated }
 }
