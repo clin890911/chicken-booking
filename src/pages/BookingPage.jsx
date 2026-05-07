@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, ShieldCheck, Sparkles, Users } from 'lucide-react'
+import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, Search, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { Input, Textarea } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
@@ -119,6 +119,14 @@ export default function BookingPage() {
               {step === 'availability' ? '選擇人數、日期與時段' : '填寫聯絡資訊'}
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => navigate('/lookup')}
+            className="hidden items-center gap-1.5 rounded-full bg-chicken-red/10 px-3 py-1 text-xs font-black text-chicken-red transition hover:bg-chicken-red/15 sm:flex"
+          >
+            <Search size={13} />
+            查詢訂位
+          </button>
           <div className="hidden rounded-full bg-chicken-red/10 px-3 py-1 text-xs font-black text-chicken-red sm:block">
             立即確認
           </div>
@@ -244,6 +252,10 @@ function HeroPanel() {
         <p className="mt-3 max-w-xl text-sm leading-6 text-chicken-brown/65">
           48 小時冷藏文昌雞，線上訂位立即保留。選好抵達時段後，到店出示訂位編號即可。
         </p>
+        <Link to="/lookup" className="mt-4 inline-flex items-center gap-2 text-sm font-black text-chicken-red underline underline-offset-4 sm:hidden">
+          <Search size={16} />
+          查詢 / 修改已有訂位
+        </Link>
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { CalendarCheck, Clock, MapPin, Phone, ShieldCheck, Utensils } from 'lucide-react'
+import { CalendarCheck, Clock, MapPin, Phone, Search, ShieldCheck, Utensils } from 'lucide-react'
 import { useBooking } from '../contexts/BookingContext'
 
 export default function HomePage() {
@@ -59,6 +59,10 @@ export default function HomePage() {
               <Phone size={18} />
               來電詢問
             </a>
+            <Link to="/lookup" className="btn-secondary inline-flex items-center justify-center gap-2 py-4 text-base">
+              <Search size={18} />
+              查詢訂位
+            </Link>
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3 text-xs font-bold text-chicken-brown/55">

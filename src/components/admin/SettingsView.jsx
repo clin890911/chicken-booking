@@ -8,7 +8,7 @@ import LayoutEditor from './LayoutEditor'
 import TelegramSettings from './TelegramSettings'
 
 export default function SettingsView() {
-  const { settings, updateSettings } = useBooking()
+  const { settings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
   const { user, signOut, can } = useAuth()
   const [form, setForm] = useState(settings)
   const [savedMsg, setSavedMsg] = useState('')
@@ -16,6 +16,7 @@ export default function SettingsView() {
   const [searchResult, setSearchResult] = useState(null)
   const [showDanger, setShowDanger] = useState(false)
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
+  const [cloudBusy, setCloudBusy] = useState(false)
 
   const handleSave = () => {
     updateSettings(form)
@@ -69,6 +70,19 @@ export default function SettingsView() {
     ['chicken_bookings_v1', 'chicken_tables_v2', 'chicken_waitlist_v1', 'chicken_customers_v1', 'chicken_noshow_v1']
       .forEach(k => localStorage.removeItem(k))
     window.location.reload()
+  }
+  const handleCloudSync = async (type) => {
+    setCloudBusy(true)
+    try {
+      if (type === 'push') await migrateLocalToCloud()
+      else await pullCloud()
+      setSavedMsg(type === 'push' ? '✅ 已上傳 Firestore' : '✅ 已從 Firestore 更新')
+      setTimeout(() => setSavedMsg(''), 2000)
+    } catch (err) {
+      setSavedMsg(`⚠️ ${err.message || '同步失敗'}`)
+    } finally {
+      setCloudBusy(false)
+    }
   }
 
   return (
@@ -299,6 +313,27 @@ export default function SettingsView() {
         <TelegramSettings embedded />
       </SettingsSection>
 
+      <SettingsSection title="Firestore 資料同步" description="正式跨裝置資料來源；可手動上傳本機資料或重新拉取雲端資料。" defaultOpen>
+        <div className="space-y-3">
+          <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
+            狀態：<span className="font-black text-chicken-brown">{cloudStatus?.state || 'idle'}</span>
+            {cloudStatus?.lastSyncAt && <span> · 最近同步 {new Date(cloudStatus.lastSyncAt).toLocaleString('zh-TW')}</span>}
+            {cloudStatus?.error && <div className="mt-1 font-bold text-chicken-red">錯誤：{cloudStatus.error}</div>}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Button disabled={cloudBusy} onClick={() => handleCloudSync('push')} className="w-full">
+              {cloudBusy ? '同步中...' : '上傳本機資料到 Firestore'}
+            </Button>
+            <button disabled={cloudBusy} onClick={() => handleCloudSync('pull')} className="btn-secondary">
+              從 Firestore 重新整理
+            </button>
+          </div>
+          <p className="text-xs font-bold leading-5 text-chicken-brown/55">
+            第一次正式上線前，請在主要後台裝置按一次「上傳本機資料到 Firestore」，之後客人查詢與其他裝置會讀取雲端資料。
+          </p>
+        </div>
+      </SettingsSection>
+
       {/* 桌位佈局編輯（拖拉位置、新增/刪除桌、改容量）*/}
       {can('table.config') && (
         <SettingsSection title="桌位佈局" description="拖拉桌位、調整容量與燃料型態。">
@@ -346,7 +381,7 @@ export default function SettingsView() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="資料匯出" description="下載目前瀏覽器 LocalStorage 內的訂位資料。">
+      <SettingsSection title="資料匯出" description="下載目前快取內的訂位資料。">
         <Button onClick={handleExport} variant="secondary" className="w-full">匯出全部訂位 CSV</Button>
       </SettingsSection>
 
@@ -374,7 +409,7 @@ export default function SettingsView() {
       )}
 
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
-        雞王刷刷鍋訂位系統 v0.3 · LocalStorage 模式
+        雞王刷刷鍋訂位系統 v0.4 · Firestore 同步模式
       </p>
 
       <LayoutEditor open={showLayoutEditor} onClose={() => setShowLayoutEditor(false)} />

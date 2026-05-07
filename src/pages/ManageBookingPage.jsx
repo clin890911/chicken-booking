@@ -21,7 +21,8 @@ import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
 import * as tg from '../services/telegramService'
-import { fetchLineBooking, lineBindUrl, notifyLineBooking } from '../services/lineService'
+import { lineBindUrl, notifyLineBooking } from '../services/lineService'
+import { guestCancelBooking, guestGetBooking, guestUpdateBooking } from '../services/cloudDataService'
 import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
 import { calcSlotCapacity } from '../utils/capacity'
 
@@ -61,17 +62,7 @@ export default function ManageBookingPage() {
     let cancelled = false
     async function loadBooking() {
       setLoadingRemote(true)
-      const local = bookingService.ensureManageToken(id)
-      if (local) {
-        if (!cancelled) {
-          setBooking(local)
-          setForm(toForm(local))
-          setLoadingRemote(false)
-        }
-        return
-      }
-
-      const remote = await fetchLineBooking(settings, id, token)
+      const remote = await guestGetBooking(id, token).catch(err => ({ ok: false, error: err.message }))
       if (cancelled) return
       if (remote.ok && remote.booking) {
         const restored = bookingService.upsertFromRemote({
@@ -82,9 +73,16 @@ export default function ManageBookingPage() {
         setForm(toForm(restored))
         setError('')
       } else {
-        setBooking(null)
-        setForm(null)
-        setError(remote.error || '找不到此訂位')
+        const local = bookingService.ensureManageToken(id)
+        if (local && (!token || token === local.manageToken)) {
+          setBooking(local)
+          setForm(toForm(local))
+          setError('')
+        } else {
+          setBooking(null)
+          setForm(null)
+          setError(remote.error || '找不到此訂位')
+        }
       }
       setLoadingRemote(false)
     }
@@ -172,7 +170,7 @@ export default function ManageBookingPage() {
 
     setBusy(true)
     try {
-      const result = bookingService.updateBookingByGuest(id, token, {
+      const patch = {
         name: form.name.trim(),
         phone: form.phone.trim(),
         guests: Number(form.guests),
@@ -184,8 +182,11 @@ export default function ManageBookingPage() {
           mobility: !!form.notes.mobility,
           text: form.notes.text.trim(),
         },
-      })
+      }
+      let result = await guestUpdateBooking(id, token, patch).catch(err => ({ ok: false, reason: err.message }))
+      if (!result.ok) result = bookingService.updateBookingByGuest(id, token, patch)
       if (!result.ok) return setError(result.reason)
+      bookingService.upsertFromRemote({ ...result.booking, manageToken: result.booking.manageToken || token })
       refresh()
       setBooking(result.booking)
       setForm(toForm(result.booking))
@@ -213,8 +214,10 @@ export default function ManageBookingPage() {
 
     setBusy(true)
     try {
-      const result = bookingService.cancelBookingByGuest(id, token, reason)
+      let result = await guestCancelBooking(id, token, reason).catch(err => ({ ok: false, reason: err.message }))
+      if (!result.ok) result = bookingService.cancelBookingByGuest(id, token, reason)
       if (!result.ok) return setError(result.reason)
+      bookingService.upsertFromRemote({ ...result.booking, manageToken: result.booking.manageToken || token })
       refresh()
       setBooking(result.booking)
       setForm(toForm(result.booking))

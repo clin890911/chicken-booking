@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
 import * as bookingService from '../services/bookingService'
 import * as tableService from '../services/tableService'
 import * as settingsService from '../services/settingsService'
@@ -6,6 +6,7 @@ import * as waitlistService from '../services/waitlistService'
 import * as customerService from '../services/customerService'
 import * as seatingService from '../services/seatingService'
 import * as tg from '../services/telegramService'
+import * as cloudData from '../services/cloudDataService'
 
 const BookingContext = createContext(null)
 
@@ -27,6 +28,8 @@ export function BookingProvider({ children }) {
   const [waitlist, setWaitlist] = useState([])
   const [customers, setCustomers] = useState([])
   const [settings, setSettings] = useState(settingsService.getSettings())
+  const [cloudStatus, setCloudStatus] = useState({ state: 'idle', lastSyncAt: null, error: '' })
+  const syncTimerRef = useRef(null)
 
   const refresh = useCallback(() => {
     setBookings(bookingService.listAll())
@@ -36,7 +39,52 @@ export function BookingProvider({ children }) {
     setSettings(settingsService.getSettings())
   }, [])
 
+  const pullCloud = useCallback(async () => {
+    try {
+      const data = await cloudData.pullCloudData()
+      cloudData.applyCloudSnapshot(data)
+      refresh()
+      setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
+      return data
+    } catch (err) {
+      setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-sync-failed' }))
+      return null
+    }
+  }, [refresh])
+
+  const syncCloudSoon = useCallback(() => {
+    window.clearTimeout(syncTimerRef.current)
+    syncTimerRef.current = window.setTimeout(async () => {
+      try {
+        await cloudData.pushCloudData()
+        setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
+      } catch (err) {
+        setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
+      }
+    }, 250)
+  }, [])
+
   useEffect(() => { refresh() }, [refresh])
+
+  useEffect(() => {
+    let cancelled = false
+    async function bootCloud() {
+      setCloudStatus(s => ({ ...s, state: 'syncing' }))
+      try {
+        await cloudData.migrateLocalToCloudOnce()
+      } catch (err) {
+        console.warn('Firestore migration skipped:', err)
+      }
+      if (!cancelled) await pullCloud()
+    }
+    bootCloud()
+    const id = window.setInterval(() => { pullCloud() }, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+      window.clearTimeout(syncTimerRef.current)
+    }
+  }, [pullCloud])
 
   useEffect(() => {
     const onStorage = (e) => {
@@ -51,44 +99,49 @@ export function BookingProvider({ children }) {
   const addBooking = (data) => {
     const b = bookingService.create(data)
     refresh()
+    syncCloudSoon()
     safeNotify(() => tg.notifyBookingCreated(b))
     return b
   }
   const updateBooking = (id, patch) => {
     const b = bookingService.update(id, patch)
     refresh()
+    syncCloudSoon()
     safeNotify(() => tg.notifyBookingUpdated(b, patch))
     return b
   }
   const cycleStatus = (id) => {
     const b = bookingService.cycleStatus(id)
     refresh()
+    syncCloudSoon()
     return b
   }
   const setStatus = (id, status) => {
     const b = bookingService.setStatus(id, status)
     refresh()
+    syncCloudSoon()
     if (b && status === 'noshow') safeNotify(() => tg.notifyBookingNoShow(b))
     return b
   }
 
   // ============ 桌位動作 ============
-  const toggleTable = (number) => { tableService.toggle(number); refresh() }
-  const setTableStatus = (number, status, extra = {}) => { tableService.setStatus(number, status, extra); refresh() }
-  const blockTable = (number, reason) => { tableService.blockTable(number, reason); refresh() }
-  const unblockTable = (number) => { tableService.unblockTable(number); refresh() }
-  const mergeTables = (a, b) => { const r = tableService.mergeTables(a, b); refresh(); return r }
-  const unmergeTable = (number) => { tableService.unmergeTable(number); refresh() }
-  const updateTablePosition = (number, pos) => { tableService.updatePosition(number, pos); refresh() }
-  const bulkSaveTables = (list) => { tableService.bulkWrite(list); refresh() }
-  const addTable = (data) => { const t = tableService.addTable(data); refresh(); return t }
-  const removeTable = (number) => { const r = tableService.removeTable(number); refresh(); return r }
-  const resetTables = () => { tableService.reset(); refresh() }
+  const toggleTable = (number) => { tableService.toggle(number); refresh(); syncCloudSoon() }
+  const setTableStatus = (number, status, extra = {}) => { tableService.setStatus(number, status, extra); refresh(); syncCloudSoon() }
+  const blockTable = (number, reason) => { tableService.blockTable(number, reason); refresh(); syncCloudSoon() }
+  const unblockTable = (number) => { tableService.unblockTable(number); refresh(); syncCloudSoon() }
+  const mergeTables = (a, b) => { const r = tableService.mergeTables(a, b); refresh(); syncCloudSoon(); return r }
+  const unmergeTable = (number) => { tableService.unmergeTable(number); refresh(); syncCloudSoon() }
+  const updateTablePosition = (number, pos) => { tableService.updatePosition(number, pos); refresh(); syncCloudSoon() }
+  const bulkSaveTables = (list) => { tableService.bulkWrite(list); refresh(); syncCloudSoon() }
+  const addTable = (data) => { const t = tableService.addTable(data); refresh(); syncCloudSoon(); return t }
+  const removeTable = (number) => { const r = tableService.removeTable(number); refresh(); syncCloudSoon(); return r }
+  const resetTables = () => { tableService.reset(); refresh(); syncCloudSoon() }
 
   // ============ 整合動作（含通知）============
   const assignBookingToTable = (bookingId, tableNumber) => {
     const r = seatingService.assignBookingToTable(bookingId, tableNumber)
     refresh()
+    syncCloudSoon()
     if (r.ok) {
       const b = bookingService.getById(bookingId)
       if (b) safeNotify(() => tg.notifyBookingAssigned(b, tableNumber))
@@ -98,6 +151,7 @@ export function BookingProvider({ children }) {
   const seatBooking = (bookingId) => {
     const r = seatingService.seatBooking(bookingId)
     refresh()
+    syncCloudSoon()
     if (r.ok) {
       const b = bookingService.getById(bookingId)
       if (b) safeNotify(() => tg.notifyBookingArrived(b))
@@ -111,6 +165,7 @@ export function BookingProvider({ children }) {
     const min = minutesSeated(tbl)
     const r = seatingService.checkoutBooking(bookingId)
     refresh()
+    syncCloudSoon()
     if (r.ok && before) safeNotify(() => tg.notifyBookingCompleted(before, min))
     return r
   }
@@ -120,20 +175,23 @@ export function BookingProvider({ children }) {
     const min = minutesSeated(tbl)
     const r = seatingService.finalizeBooking(bookingId)
     refresh()
+    syncCloudSoon()
     if (r.ok && before) safeNotify(() => tg.notifyBookingCompleted(before, min))
     return r
   }
-  const clearTable = (number) => { seatingService.clearTable(number); refresh() }
+  const clearTable = (number) => { seatingService.clearTable(number); refresh(); syncCloudSoon() }
   const cancelBooking = (bookingId) => {
     const before = bookingService.getById(bookingId)
     const r = seatingService.cancelBooking(bookingId)
     refresh()
+    syncCloudSoon()
     if (r.ok && before) safeNotify(() => tg.notifyBookingCancelled(before))
     return r
   }
   const walkInSeat = (tableNumber, guestData) => {
     const r = seatingService.walkInSeat(tableNumber, guestData)
     refresh()
+    syncCloudSoon()
     if (r.ok) safeNotify(() => tg.notifyWalkInSeated(r.booking))
     return r
   }
@@ -142,6 +200,7 @@ export function BookingProvider({ children }) {
     const fromTable = before?.assignedTableId
     const r = seatingService.moveTable(bookingId, newTableNumber)
     refresh()
+    syncCloudSoon()
     if (r.ok && before) {
       const after = bookingService.getById(bookingId)
       safeNotify(() => tg.notifyTableMoved(after, fromTable, newTableNumber))
@@ -156,34 +215,44 @@ export function BookingProvider({ children }) {
     const w = waitlistService.create(data)
     if (w.phone) customerService.upsert({ phone: w.phone, name: w.name, partySize: w.partySize, source: 'walk-in' })
     refresh()
+    syncCloudSoon()
     safeNotify(() => tg.notifyWaitlistCreated(w))
     return w
   }
-  const callWaitlist = (id) => { waitlistService.call(id); refresh() }
+  const callWaitlist = (id) => { waitlistService.call(id); refresh(); syncCloudSoon() }
   const seatWaitlist = (id, tableNumber) => {
     const before = waitlistService.getById(id)
     const r = seatingService.seatWaitlist(id, tableNumber)
     refresh()
+    syncCloudSoon()
     if (r.ok && before) safeNotify(() => tg.notifyWaitlistSeated(before, tableNumber))
     return r
   }
-  const leaveWaitlist = (id) => { waitlistService.leave(id); refresh() }
+  const leaveWaitlist = (id) => { waitlistService.leave(id); refresh(); syncCloudSoon() }
 
   // ============ 顧客動作（不發 TG，太瑣碎）============
-  const updateCustomer = (phone, patch) => { customerService.update(phone, patch); refresh() }
-  const setCustomerBlacklist = (phone, value, reason) => { customerService.setBlacklist(phone, value, reason); refresh() }
-  const setCustomerVip = (phone, tier) => { customerService.setVipTier(phone, tier); refresh() }
+  const updateCustomer = (phone, patch) => { customerService.update(phone, patch); refresh(); syncCloudSoon() }
+  const setCustomerBlacklist = (phone, value, reason) => { customerService.setBlacklist(phone, value, reason); refresh(); syncCloudSoon() }
+  const setCustomerVip = (phone, tier) => { customerService.setVipTier(phone, tier); refresh(); syncCloudSoon() }
 
   // ============ 設定 ============
   const updateSettings = (patch) => {
     const s = settingsService.saveSettings(patch)
     setSettings(s)
+    syncCloudSoon()
     return s
   }
 
+  const migrateLocalToCloud = async () => {
+    setCloudStatus(s => ({ ...s, state: 'syncing' }))
+    const result = await cloudData.pushCloudData()
+    setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
+    return result
+  }
+
   const value = {
-    bookings, tables, waitlist, customers, settings,
-    refresh,
+    bookings, tables, waitlist, customers, settings, cloudStatus,
+    refresh, pullCloud, migrateLocalToCloud,
     addBooking, updateBooking, cycleStatus, setStatus,
     toggleTable, setTableStatus, blockTable, unblockTable, mergeTables, unmergeTable, updateTablePosition,
     bulkSaveTables, addTable, removeTable, resetTables,

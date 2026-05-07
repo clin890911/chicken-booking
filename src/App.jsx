@@ -7,6 +7,7 @@ import HomePage from './pages/HomePage'
 import BookingPage from './pages/BookingPage'
 import ConfirmPage from './pages/ConfirmPage'
 import ManageBookingPage from './pages/ManageBookingPage'
+import LookupBookingPage from './pages/LookupBookingPage'
 import LineBindPage from './pages/LineBindPage'
 import LoginPage from './pages/LoginPage'
 import AdminPage from './pages/AdminPage'
@@ -27,6 +28,7 @@ export default function App() {
               <Route path="/" element={<HomePage />} />
               <Route path="/book" element={<BookingPage />} />
               <Route path="/confirm/:id" element={<ConfirmPage />} />
+              <Route path="/lookup" element={<LookupBookingPage />} />
               <Route path="/manage/:id" element={<ManageBookingPage />} />
               <Route path="/line/bind" element={<LineBindPage />} />
               <Route path="/login" element={<LoginPage />} />
