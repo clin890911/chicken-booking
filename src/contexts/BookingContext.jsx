@@ -72,7 +72,7 @@ export function BookingProvider({ children }) {
     window.clearTimeout(syncTimerRef.current)
     syncTimerRef.current = window.setTimeout(async () => {
       try {
-        await cloudData.pushCloudData()
+        await cloudData.pushChangedData()
         setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
       } catch (err) {
         setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
@@ -267,6 +267,7 @@ export function BookingProvider({ children }) {
   const migrateLocalToCloud = async () => {
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     const result = await cloudData.pushCloudData()
+    cloudData.markLocalAsSynced()
     setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
     return result
   }
