@@ -23,4 +23,14 @@ if (isFirebaseConfigured) {
   googleProvider = new GoogleAuthProvider()
 }
 
+// 取得目前登入者的 Firebase ID Token（給呼叫受驗證的 admin Cloud Functions 用）
+export async function getIdToken(forceRefresh = false) {
+  if (!auth?.currentUser) return null
+  try {
+    return await auth.currentUser.getIdToken(forceRefresh)
+  } catch {
+    return null
+  }
+}
+
 export { auth, db, googleProvider, signInWithPopup, signOut, onAuthStateChanged }

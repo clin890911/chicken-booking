@@ -1,11 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, Search, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { Input, Textarea } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
-import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
-import { bookingOccupancyLabel, calcSlotCapacity } from '../utils/capacity'
+import { guestGetAvailability, guestCreateBooking } from '../services/cloudDataService'
+import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
+import { bookingOccupancyLabel } from '../utils/capacity'
+
+// 台灣電話：09 開頭手機（10 碼）或市話（8–10 碼），與後端 validateNewBooking 一致
+const isValidTwPhone = (raw) => {
+  const d = String(raw || '').replace(/\D/g, '')
+  return /^09\d{8}$/.test(d) || /^\d{8,10}$/.test(d)
+}
 
 const NOTE_OPTIONS = [
   { key: 'pet', label: '攜帶寵物' },
@@ -18,7 +25,8 @@ const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
 
 export default function BookingPage() {
   const navigate = useNavigate()
-  const { bookings, tables, settings, addBooking } = useBooking()
+  // 客人端不再依賴 useBooking 的全量資料（已不同步），settings 僅作為初始顯示預設。
+  const { settings: localSettings } = useBooking()
 
   const [step, setStep] = useState('availability')
   const [data, setData] = useState({
@@ -32,9 +40,36 @@ export default function BookingPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState({})
 
+  // 可訂時段與公開店家設定，全部由後端 guestGetAvailability 提供（不含任何顧客個資）。
+  const [settings, setSettings] = useState(localSettings)
+  const [serverSlots, setServerSlots] = useState([])
+  const [slotsLoading, setSlotsLoading] = useState(true)
+  const [slotsError, setSlotsError] = useState('')
+
+  const loadAvailability = async (date) => {
+    setSlotsLoading(true)
+    setSlotsError('')
+    try {
+      const res = await guestGetAvailability(date)
+      setServerSlots(Array.isArray(res.slots) ? res.slots : [])
+      if (res.settings) setSettings(s => ({ ...s, ...res.settings }))
+    } catch (err) {
+      setServerSlots([])
+      setSlotsError(err.message || '無法載入可訂時段，請稍後再試')
+    } finally {
+      setSlotsLoading(false)
+    }
+  }
+
+  // 切換日期時重新向後端查詢該日可訂時段
+  useEffect(() => {
+    loadAvailability(data.date)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.date])
+
   const dates = useMemo(() => {
     const today = new Date(todayStr() + 'T00:00:00')
-    return Array.from({ length: settings.maxDaysAhead }, (_, i) => {
+    return Array.from({ length: settings.maxDaysAhead || 30 }, (_, i) => {
       const d = addDays(today, i)
       const value = formatDate(d)
       return {
@@ -47,16 +82,13 @@ export default function BookingPage() {
   }, [settings.maxDaysAhead])
 
   const slots = useMemo(() => {
-    return generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval).map(time => {
-      const remaining = calcSlotCapacity(tables, bookings, data.date, time, settings)
-      return {
-        time,
-        remaining,
-        full: remaining < data.guests,
-        period: Number(time.slice(0, 2)) < 15 ? '午餐' : '晚餐',
-      }
-    })
-  }, [bookings, data.date, data.guests, settings, tables])
+    return serverSlots.map(({ time, remaining }) => ({
+      time,
+      remaining,
+      full: remaining < data.guests,
+      period: Number(time.slice(0, 2)) < 15 ? '午餐' : '晚餐',
+    }))
+  }, [serverSlots, data.guests])
 
   const groupedSlots = useMemo(() => {
     const available = slots.filter(s => !s.full)
@@ -67,7 +99,7 @@ export default function BookingPage() {
   }, [slots])
 
   const selectedReady = data.guests > 0 && data.date && data.timeSlot
-  const canSubmit = data.name.trim() && /^[\d\-+\s]{7,}$/.test(data.phone.trim())
+  const canSubmit = data.name.trim() && isValidTwPhone(data.phone)
 
   const set = (key, value) => setData(d => ({ ...d, [key]: value }))
   const setGuests = (next) => setData(d => ({ ...d, guests: Math.max(1, Math.min(12, next)), timeSlot: '' }))
@@ -84,19 +116,34 @@ export default function BookingPage() {
     const errs = {}
     if (!data.name.trim()) errs.name = '請填姓名'
     if (!data.phone.trim()) errs.phone = '請填電話'
-    else if (!/^[\d\-+\s]{7,}$/.test(data.phone.trim())) errs.phone = '電話格式不正確'
+    else if (!isValidTwPhone(data.phone)) errs.phone = '電話格式不正確，請輸入正確的台灣電話號碼'
     setError(errs)
     if (Object.keys(errs).length > 0) return
 
     setBusy(true)
     try {
-      const booking = addBooking({
-        ...data,
-        source: 'online',
-        status: 'confirmed',
-        createdBy: 'guest',
+      const res = await guestCreateBooking({
+        name: data.name.trim(),
+        phone: data.phone.trim(),
+        guests: data.guests,
+        date: data.date,
+        timeSlot: data.timeSlot,
+        notes: data.notes,
       })
-      navigate(`/confirm/${booking.id}`)
+      const booking = res.booking
+      // 後端回傳完整訂位（含 manageToken），用 route state 帶到確認頁，
+      // 客人端不需也無法存取本機全量資料。
+      navigate(`/confirm/${booking.id}`, { state: { booking } })
+    } catch (err) {
+      // 409：時段剛被訂滿或重複下單 → 退回選時段步驟並重新載入可訂時段
+      if (err.status === 409) {
+        setError({ submit: err.message })
+        setStep('availability')
+        loadAvailability(data.date)
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      } else {
+        setError({ submit: err.message || '訂位失敗，請稍後再試' })
+      }
     } finally {
       setBusy(false)
     }
@@ -147,7 +194,20 @@ export default function BookingPage() {
               <HeroPanel />
               <PartyPanel guests={data.guests} onSetGuests={setGuests} />
               <CalendarPicker dates={dates} value={data.date} onChange={setDate} />
-              <TimeGrid groupedSlots={groupedSlots} value={data.timeSlot} guests={data.guests} settings={settings} onChange={(time) => set('timeSlot', time)} />
+              {error.submit && (
+                <div className="surface border border-chicken-red/30 bg-chicken-red/5 p-4 text-sm font-bold text-chicken-red">
+                  {error.submit}
+                </div>
+              )}
+              <TimeGrid
+                groupedSlots={groupedSlots}
+                value={data.timeSlot}
+                guests={data.guests}
+                settings={settings}
+                loading={slotsLoading}
+                error={slotsError}
+                onChange={(time) => set('timeSlot', time)}
+              />
             </motion.section>
           ) : (
             <motion.section
@@ -165,6 +225,12 @@ export default function BookingPage() {
                   送出後會立即建立訂位紀錄。到店時出示訂位編號即可。
                 </p>
               </div>
+
+              {error.submit && (
+                <div className="surface border border-chicken-red/30 bg-chicken-red/5 p-4 text-sm font-bold text-chicken-red">
+                  {error.submit}
+                </div>
+              )}
 
               <div className="surface space-y-4 p-5">
                 <Input label="姓名" value={data.name} onChange={e => set('name', e.target.value)} placeholder="王小姐" error={error.name} />
@@ -428,13 +494,24 @@ function CalendarPicker({ dates, value, onChange }) {
   )
 }
 
-function TimeGrid({ groupedSlots, value, guests, settings, onChange }) {
+function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onChange }) {
   const total = groupedSlots.午餐.length + groupedSlots.晚餐.length
 
   return (
     <section className="surface p-5">
       <SectionTitle icon={Clock} title="選擇抵達時間" hint={bookingOccupancyLabel(settings)} />
-      {total === 0 ? (
+      {loading ? (
+        <div className="empty-panel mt-4">
+          <div className="mb-2 text-3xl">⏳</div>
+          <p className="font-bold text-chicken-brown">正在查詢可訂時段...</p>
+        </div>
+      ) : error ? (
+        <div className="empty-panel mt-4">
+          <div className="mb-2 text-3xl">⚠️</div>
+          <p className="font-bold text-chicken-brown">{error}</p>
+          <p className="mt-1 text-sm text-chicken-brown/60">請稍後再試，或來電由專人為您訂位。</p>
+        </div>
+      ) : total === 0 ? (
         <div className="empty-panel mt-4">
           <div className="text-3xl mb-2">⏳</div>
           <p className="font-bold text-chicken-brown">這天目前沒有可訂時段</p>

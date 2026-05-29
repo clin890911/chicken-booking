@@ -7,6 +7,7 @@ import * as customerService from '../services/customerService'
 import * as seatingService from '../services/seatingService'
 import * as tg from '../services/telegramService'
 import * as cloudData from '../services/cloudDataService'
+import { useAuth } from './AuthContext'
 
 const BookingContext = createContext(null)
 
@@ -23,6 +24,12 @@ const minutesSeated = (table) => {
 }
 
 export function BookingProvider({ children }) {
+  // 只有登入的員工才會啟動「全量雲端同步」。
+  // 客人端（公開頁）一律不碰 admin 同步，避免把所有顧客個資灌進客人的瀏覽器，
+  // 也避免未授權的全量讀寫（真正的把關在後端 requireStaff）。
+  const { user, getToken } = useAuth() || {}
+  const isStaff = !!user
+
   const [bookings, setBookings] = useState([])
   const [tables, setTables] = useState([])
   const [waitlist, setWaitlist] = useState([])
@@ -30,6 +37,14 @@ export function BookingProvider({ children }) {
   const [settings, setSettings] = useState(settingsService.getSettings())
   const [cloudStatus, setCloudStatus] = useState({ state: 'idle', lastSyncAt: null, error: '' })
   const syncTimerRef = useRef(null)
+  const isStaffRef = useRef(isStaff)
+  isStaffRef.current = isStaff
+
+  // 把員工 ID Token 提供者注入 cloudDataService（admin 端點需要 Bearer token）。
+  useEffect(() => {
+    cloudData.setAuthTokenProvider(getToken || null)
+    return () => cloudData.setAuthTokenProvider(null)
+  }, [getToken])
 
   const refresh = useCallback(() => {
     setBookings(bookingService.listAll())
@@ -53,6 +68,7 @@ export function BookingProvider({ children }) {
   }, [refresh])
 
   const syncCloudSoon = useCallback(() => {
+    if (!isStaffRef.current) return // 非員工不推送
     window.clearTimeout(syncTimerRef.current)
     syncTimerRef.current = window.setTimeout(async () => {
       try {
@@ -67,6 +83,11 @@ export function BookingProvider({ children }) {
   useEffect(() => { refresh() }, [refresh])
 
   useEffect(() => {
+    // 客人端（未登入）不啟動全量同步：只用本機資料，避免他人個資外洩。
+    if (!isStaff) {
+      setCloudStatus({ state: 'idle', lastSyncAt: null, error: '' })
+      return
+    }
     let cancelled = false
     async function bootCloud() {
       setCloudStatus(s => ({ ...s, state: 'syncing' }))
@@ -84,7 +105,7 @@ export function BookingProvider({ children }) {
       window.clearInterval(id)
       window.clearTimeout(syncTimerRef.current)
     }
-  }, [pullCloud])
+  }, [pullCloud, isStaff])
 
   useEffect(() => {
     const onStorage = (e) => {

@@ -1,4 +1,4 @@
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useLocation, Link } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import * as bookingService from '../services/bookingService'
@@ -9,6 +9,7 @@ import { lineBindUrl } from '../services/lineService'
 
 export default function ConfirmPage() {
   const { id } = useParams()
+  const location = useLocation()
   const { settings } = useBooking()
   const diningDuration = Number(settings.diningDurationMin) || 90
   const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
@@ -18,10 +19,18 @@ export default function ConfirmPage() {
   const [showConfetti, setShowConfetti] = useState(true)
 
   useEffect(() => {
-    setB(bookingService.ensureManageToken(id))
+    // 客人線上訂位：後端 guestCreateBooking 已回傳完整訂位（含 manageToken），
+    // 透過 route state 帶入，客人端不需也無法讀本機全量資料。
+    const fromState = location.state?.booking
+    if (fromState && fromState.id === id) {
+      setB(fromState)
+    } else {
+      // 後台建立的訂位（員工已同步至本機）走 localStorage fallback。
+      setB(bookingService.ensureManageToken(id))
+    }
     const t = setTimeout(() => setShowConfetti(false), 2400)
     return () => clearTimeout(t)
-  }, [id])
+  }, [id, location.state])
 
   const confettiPieces = useMemo(() => generateConfetti(18), [])
   const manageUrl = useMemo(() => {

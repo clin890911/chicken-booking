@@ -1,0 +1,18 @@
+rules_version = '2';
+
+// 雞王訂位系統 Firestore 安全規則
+//
+// 設計原則：所有資料存取一律經由 Cloud Functions（使用 Admin SDK，會繞過這些規則）。
+// 前端（客人端與後台）都不直接讀寫 Firestore，而是呼叫受驗證的 Cloud Functions：
+//   - 後台：adminPullData / adminPushData（requireStaff 驗 Firebase ID Token + 員工白名單）
+//   - 客人：guestGetAvailability / guestCreateBooking / guestLookup/Get/Update/CancelBooking
+//
+// 因此這裡對所有「客戶端直連」一律拒絕，作為縱深防禦：
+// 即使有人拿到 Firebase 設定（apiKey 等公開資訊），也無法繞過 Functions 直接讀寫資料庫。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

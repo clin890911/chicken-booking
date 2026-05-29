@@ -1,4 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import {
+  auth, googleProvider, isFirebaseConfigured,
+  signInWithPopup, signOut as fbSignOut, onAuthStateChanged, getIdToken,
+} from '../services/firebase'
 
 const STORAGE_KEY = 'chicken_auth_v1'
 
@@ -68,11 +72,39 @@ const PERMISSIONS = {
 
 const AuthContext = createContext(null)
 
+function buildUser(email, displayName) {
+  const e = (email || '').trim().toLowerCase()
+  const role = ROLE_MAP[e] || DEFAULT_ROLE
+  return {
+    email: e,
+    displayName: displayName || e.split('@')[0],
+    role,
+    roleLabel: ROLE_LABELS[role] || role,
+    loggedAt: new Date().toISOString(),
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // 正式模式：交由 Firebase Auth 維護登入狀態（onAuthStateChanged）。
+    if (isFirebaseConfigured) {
+      const unsub = onAuthStateChanged(auth, (fbUser) => {
+        const email = (fbUser?.email || '').toLowerCase()
+        // 前端白名單只負責 UI；真正的權限由後端 requireStaff 二次把關。
+        if (fbUser && ALLOWED_EMAILS.includes(email)) {
+          setUser(buildUser(email, fbUser.displayName))
+        } else {
+          if (fbUser) fbSignOut(auth).catch(() => {})
+          setUser(null)
+        }
+        setLoading(false)
+      })
+      return unsub
+    }
+    // 本機開發 fallback：沒有 Firebase 設定時用 localStorage 模擬登入。
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (raw) setUser(JSON.parse(raw))
@@ -80,26 +112,33 @@ export function AuthProvider({ children }) {
     setLoading(false)
   }, [])
 
-  // 模擬 Google 登入：輸入 email，限定白名單，自動帶角色
+  // 正式模式用 Google 彈窗登入；開發模式 fallback 用 email 模擬。
   const signIn = async (email) => {
+    if (isFirebaseConfigured) {
+      const result = await signInWithPopup(auth, googleProvider)
+      const e = (result.user?.email || '').toLowerCase()
+      if (!ALLOWED_EMAILS.includes(e)) {
+        await fbSignOut(auth).catch(() => {})
+        throw new Error('此 Google 帳號未授權，請聯絡店長加入白名單')
+      }
+      // onAuthStateChanged 會接手設定 user
+      return buildUser(e, result.user?.displayName)
+    }
     const e = (email || '').trim().toLowerCase()
     if (!e) throw new Error('請輸入 email')
     if (!ALLOWED_EMAILS.includes(e)) throw new Error('此帳號未授權，請聯絡店長加入白名單')
-    const role = ROLE_MAP[e] || DEFAULT_ROLE
-    const u = {
-      email: e,
-      displayName: e.split('@')[0],
-      role,
-      roleLabel: ROLE_LABELS[role] || role,
-      loggedAt: new Date().toISOString(),
-    }
+    const u = buildUser(e)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(u))
     setUser(u)
     return u
   }
 
   const signOut = () => {
-    localStorage.removeItem(STORAGE_KEY)
+    if (isFirebaseConfigured) {
+      fbSignOut(auth).catch(() => {})
+    } else {
+      localStorage.removeItem(STORAGE_KEY)
+    }
     setUser(null)
   }
 
@@ -113,6 +152,8 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       user, loading, signIn, signOut, can,
+      getToken: getIdToken,
+      usingFirebase: isFirebaseConfigured,
       allowedEmails: ALLOWED_EMAILS,
       roleLabels: ROLE_LABELS,
     }}>

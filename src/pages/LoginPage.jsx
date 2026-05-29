@@ -4,24 +4,28 @@ import { useAuth } from '../contexts/AuthContext'
 import { Input, Button, Card } from '../components/ui'
 
 export default function LoginPage() {
-  const { signIn, allowedEmails } = useAuth()
+  const { signIn, usingFirebase } = useAuth()
   const nav = useNavigate()
-  const [email, setEmail] = useState('berrylin0911@gmail.com')
+  const [email, setEmail] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const doSignIn = async (value) => {
     setErr('')
     setBusy(true)
     try {
-      await signIn(email)
+      await signIn(value)
       nav('/admin', { replace: true })
     } catch (ex) {
-      setErr(ex.message)
+      setErr(ex.message || '登入失敗，請再試一次')
     } finally {
       setBusy(false)
     }
+  }
+
+  const handleSubmit = (e) => {
+    e.preventDefault()
+    doSignIn(email)
   }
 
   return (
@@ -34,28 +38,34 @@ export default function LoginPage() {
         </div>
 
         <Card>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              label="Email"
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="your@email.com"
-              error={err}
-            />
-            <Button type="submit" disabled={busy} className="w-full">
-              {busy ? '登入中...' : '🔑 模擬 Google 登入'}
-            </Button>
-          </form>
-
-          <div className="mt-4 pt-4 border-t border-chicken-brown/10 text-xs text-chicken-brown/60">
-            <p className="font-bold mb-1">💡 開發模式</p>
-            <p>目前用 localStorage 模擬登入，未來接 Firebase Auth。</p>
-            <p className="mt-1">已授權 email：</p>
-            <ul className="mt-0.5 space-y-0.5">
-              {allowedEmails.map(e => <li key={e} className="font-mono">· {e}</li>)}
-            </ul>
-          </div>
+          {usingFirebase ? (
+            <div className="space-y-4">
+              <p className="text-sm text-chicken-brown/70 leading-6">
+                請使用授權的 Google 帳號登入。僅限店長加入白名單的同仁帳號可進入後台。
+              </p>
+              <Button onClick={() => doSignIn()} disabled={busy} className="w-full">
+                {busy ? '登入中...' : '使用 Google 登入'}
+              </Button>
+              {err && <p className="text-sm text-chicken-red font-bold">{err}</p>}
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <Input
+                label="Email（開發模式）"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="your@email.com"
+                error={err}
+              />
+              <Button type="submit" disabled={busy} className="w-full">
+                {busy ? '登入中...' : '🔑 模擬登入（僅本機開發）'}
+              </Button>
+              <p className="text-xs text-chicken-brown/50">
+                未設定 Firebase，目前為本機開發模式。正式環境會改用 Google 登入。
+              </p>
+            </form>
+          )}
         </Card>
 
         <Link to="/" className="block text-center text-xs text-chicken-brown/50 underline mt-4">回首頁</Link>

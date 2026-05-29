@@ -15,6 +15,25 @@ function endpoint(name) {
   return `${base}/${name}`
 }
 
+// === 員工身分 Token 提供者 ===
+// admin 端點（pull/push）需要帶 Firebase ID Token。
+// AuthContext / BookingContext 在啟動時呼叫 setAuthTokenProvider 注入取 token 的函式，
+// 避免本檔案直接依賴 React context（這是純 service 模組）。
+let _tokenProvider = null
+export function setAuthTokenProvider(fn) {
+  _tokenProvider = typeof fn === 'function' ? fn : null
+}
+
+async function authHeader() {
+  if (!_tokenProvider) return {}
+  try {
+    const token = await _tokenProvider()
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  } catch {
+    return {}
+  }
+}
+
 function readJson(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
@@ -62,18 +81,25 @@ async function requestJson(url, options = {}) {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok || data.ok === false) {
-    throw new Error(data.error || data.reason || `request-failed-${res.status}`)
+    const err = new Error(data.error || data.reason || `request-failed-${res.status}`)
+    err.status = res.status
+    err.code = data.error || data.reason || ''
+    throw err
   }
   return data
 }
 
 export async function pullCloudData() {
-  return requestJson(endpoint('adminPullData'), { method: 'GET' })
+  return requestJson(endpoint('adminPullData'), {
+    method: 'GET',
+    headers: await authHeader(),
+  })
 }
 
 export async function pushCloudData(dataset = localDataset()) {
   return requestJson(endpoint('adminPushData'), {
     method: 'POST',
+    headers: await authHeader(),
     body: JSON.stringify({ dataset }),
   })
 }
@@ -83,6 +109,20 @@ export async function migrateLocalToCloudOnce() {
   const result = await pushCloudData(localDataset())
   localStorage.setItem(KEYS.migration, '1')
   return result
+}
+
+export async function guestGetAvailability(date) {
+  return requestJson(endpoint('guestGetAvailability'), {
+    method: 'POST',
+    body: JSON.stringify({ date }),
+  })
+}
+
+export async function guestCreateBooking(payload) {
+  return requestJson(endpoint('guestCreateBooking'), {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function guestLookupBooking(payload) {

@@ -1,12 +1,37 @@
 import crypto from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, FieldValue } from 'firebase-admin/firestore'
+import { getAuth } from 'firebase-admin/auth'
 import { onRequest } from 'firebase-functions/v2/https'
 import { defineSecret } from 'firebase-functions/params'
 
 initializeApp()
 
 const db = getFirestore()
+
+// 員工白名單（後端唯一真相，設定於 functions/.env 的 ADMIN_EMAILS，逗號分隔）。
+// 沒設定時退回單一預設管理員，避免部署後完全無法登入。
+const STAFF_EMAILS = String(process.env.ADMIN_EMAILS || 'berrylin0911@gmail.com')
+  .split(',')
+  .map(s => s.trim().toLowerCase())
+  .filter(Boolean)
+
+// 驗證請求帶有有效的 Firebase ID Token，且 email 在員工白名單內。
+// 失敗時丟出帶 status 的錯誤，由各端點轉成 401/403。
+async function requireStaff(req) {
+  const header = req.get('authorization') || req.get('Authorization') || ''
+  const match = header.match(/^Bearer\s+(.+)$/i)
+  if (!match) throw errorWithStatus('missing-auth-token', 401)
+  let decoded
+  try {
+    decoded = await getAuth().verifyIdToken(match[1])
+  } catch {
+    throw errorWithStatus('invalid-auth-token', 401)
+  }
+  const email = String(decoded.email || '').toLowerCase()
+  if (!email || !STAFF_EMAILS.includes(email)) throw errorWithStatus('not-authorized', 403)
+  return { uid: decoded.uid, email }
+}
 const LINE_CHANNEL_ACCESS_TOKEN = defineSecret('LINE_CHANNEL_ACCESS_TOKEN')
 const LINE_CHANNEL_SECRET = defineSecret('LINE_CHANNEL_SECRET')
 
@@ -32,6 +57,11 @@ const COLLECTIONS = {
 export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
+    await requireStaff(req)
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
+  }
+  try {
     const [bookings, tables, waitlist, customers, settingsSnap] = await Promise.all([
       listCollection(COLLECTIONS.bookings),
       listCollection(COLLECTIONS.tables),
@@ -55,6 +85,11 @@ export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
 
 export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  try {
+    await requireStaff(req)
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
+  }
   try {
     const { dataset = {} } = req.body || {}
     const batch = db.batch()
@@ -113,6 +148,119 @@ export const guestLookupBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
   } catch (err) {
     console.error('guestLookupBooking failed:', err)
     return res.status(500).json({ ok: false, error: err.message || 'guest-lookup-failed' })
+  }
+})
+
+// 客人端「可訂時段查詢」：只回傳每個時段的剩餘人數與公開店家設定，
+// 不含任何顧客個資（取代過去客人瀏覽器全量下載整個資料庫的做法）。
+export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+  if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  try {
+    const input = req.method === 'GET' ? req.query : req.body || {}
+    const date = normalizeDateInput(input.date)
+    const settingsSnap = await db.collection('settings').doc('main').get()
+    const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+
+    let slots = []
+    if (date) {
+      const [tables, bookingsSnap] = await Promise.all([
+        listCollection(COLLECTIONS.tables),
+        db.collection(COLLECTIONS.bookings).where('date', '==', date).get(),
+      ])
+      const bookings = bookingsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      slots = generateSlotsServer(settings).map(time => ({
+        time,
+        remaining: calcSlotCapacityServer(tables, bookings, date, time, settings),
+      }))
+    }
+
+    return res.json({ ok: true, date, slots, settings: publicStoreSettings(settings) })
+  } catch (err) {
+    console.error('guestGetAvailability failed:', err)
+    return res.status(500).json({ ok: false, error: err.message || 'availability-failed' })
+  }
+})
+
+// 客人端「建立訂位」：含完整輸入驗證 + Firestore 交易內的原子容量檢查，
+// 確保不會超賣（兩組客人同時搶最後座位只會成立到容量上限）。
+export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  try {
+    const settingsSnap = await db.collection('settings').doc('main').get()
+    const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+
+    const clean = validateNewBooking(req.body || {}, settings)
+    if (!clean.ok) return res.status(400).json({ ok: false, error: clean.error })
+    const data = clean.value
+
+    const bookingId = 'B' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(2).toString('hex').toUpperCase()
+    const manageToken = createServerToken()
+    const now = new Date().toISOString()
+    const bookingsRef = db.collection(COLLECTIONS.bookings)
+
+    const booking = await db.runTransaction(async (tx) => {
+      const [tablesSnap, dateSnap] = await Promise.all([
+        tx.get(db.collection(COLLECTIONS.tables)),
+        tx.get(bookingsRef.where('date', '==', data.date)),
+      ])
+      const tables = tablesSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      const dayBookings = dateSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+
+      // 防重複：同電話 + 同日 + 同時段已有有效訂位 → 視為重複送出
+      const dup = dayBookings.find(b =>
+        digits(b.phone) === data.phoneDigits &&
+        b.timeSlot === data.timeSlot &&
+        !['cancelled', 'noshow'].includes(b.status))
+      if (dup) throw errorWithStatus('您已有相同時段的訂位，無需重複預訂', 409)
+
+      const remaining = calcSlotCapacityServer(tables, dayBookings, data.date, data.timeSlot, settings)
+      if (remaining < data.guests) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
+
+      const record = {
+        id: bookingId,
+        name: data.name,
+        phone: data.phone,
+        phoneDigits: data.phoneDigits,
+        guests: data.guests,
+        date: data.date,
+        timeSlot: data.timeSlot,
+        notes: data.notes,
+        source: 'online',
+        status: 'confirmed',
+        assignedTableId: null,
+        lineUserId: null,
+        manageToken,
+        lastGuestEditAt: null,
+        guestEditCount: 0,
+        guestEditHistory: [],
+        cancellationReason: null,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: 'guest',
+      }
+      tx.set(bookingsRef.doc(bookingId), record)
+      return record
+    })
+
+    // 顧客檔 upsert（交易外，best-effort，不影響訂位成立）
+    try {
+      await db.collection(COLLECTIONS.customers).doc(booking.phoneDigits).set({
+        phone: booking.phone,
+        phoneDigits: booking.phoneDigits,
+        name: booking.name,
+        lastPartySize: booking.guests,
+        lastSource: 'online',
+        updatedAt: now,
+      }, { merge: true })
+    } catch (e) {
+      console.warn('customer upsert skipped:', e?.message)
+    }
+
+    return res.json({ ok: true, booking })
+  } catch (err) {
+    const code = err.status || 500
+    if (code >= 500) console.error('guestCreateBooking failed:', err)
+    return res.status(code).json({ ok: false, error: err.message || 'guest-create-failed' })
   }
 })
 
@@ -682,6 +830,93 @@ function toMinutes(time = '00:00') {
   const [h, m] = String(time).split(':').map(Number)
   if (!Number.isFinite(h) || !Number.isFinite(m)) return 0
   return h * 60 + m
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+
+// 依店家設定產生抵達時段（與前端 generateTimeSlots 對齊）
+function generateSlotsServer(settings = {}) {
+  const start = toMinutes(settings.openTime || '11:00')
+  const end = toMinutes(settings.closeTime || '19:00')
+  const interval = Math.max(5, Number(settings.slotInterval) || 30)
+  const out = []
+  for (let cur = start; cur <= end; cur += interval) {
+    out.push(`${pad2(Math.floor(cur / 60))}:${pad2(cur % 60)}`)
+  }
+  return out
+}
+
+function todayServerStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+// 驗證並正規化日期字串（YYYY-MM-DD），不合法回空字串
+function normalizeDateInput(value) {
+  const s = String(value || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return ''
+  const d = new Date(`${s}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return ''
+  return s
+}
+
+// 客人端可見的店家設定子集（不外流任何顧客資料）
+function publicStoreSettings(settings = {}) {
+  return {
+    openTime: settings.openTime,
+    closeTime: settings.closeTime,
+    slotInterval: settings.slotInterval,
+    maxDaysAhead: settings.maxDaysAhead,
+    diningDurationMin: settings.diningDurationMin,
+    cleanupBufferMin: settings.cleanupBufferMin,
+    storeName: settings.storeName,
+    storePhone: settings.storePhone,
+    storeAddress: settings.storeAddress,
+    storeMapUrl: settings.storeMapUrl,
+    lineOfficialUrl: settings.lineOfficialUrl,
+    lineOfficialName: settings.lineOfficialName,
+  }
+}
+
+// 新訂位輸入驗證 + 清洗（後端唯一把關，繞過前端也擋得住）
+function validateNewBooking(body = {}, settings = {}) {
+  const name = String(body.name || '').trim()
+  if (name.length < 1 || name.length > 40) return { ok: false, error: '請填寫姓名' }
+
+  const phoneDigits = digits(body.phone)
+  // 台灣手機 09 開頭 10 碼；或一般市話 8–10 碼
+  const validPhone = /^09\d{8}$/.test(phoneDigits) || /^\d{8,10}$/.test(phoneDigits)
+  if (!validPhone) return { ok: false, error: '電話格式不正確，請輸入正確的台灣電話號碼' }
+
+  const guests = Number(body.guests)
+  if (!Number.isInteger(guests) || guests < 1 || guests > 12) {
+    return { ok: false, error: '人數需為 1–12 位，更多人數請來電' }
+  }
+
+  const date = normalizeDateInput(body.date)
+  if (!date) return { ok: false, error: '日期格式不正確' }
+  const today = todayServerStr()
+  if (date < today) return { ok: false, error: '無法預訂過去的日期' }
+  const maxAhead = Number(settings.maxDaysAhead) || 30
+  const maxDate = new Date(`${today}T00:00:00`)
+  maxDate.setDate(maxDate.getDate() + maxAhead)
+  if (new Date(`${date}T00:00:00`) > maxDate) return { ok: false, error: '超出可預訂的日期範圍' }
+
+  const timeSlot = String(body.timeSlot || '').trim()
+  if (!generateSlotsServer(settings).includes(timeSlot)) {
+    return { ok: false, error: '請選擇有效的訂位時段' }
+  }
+
+  const notes = {
+    pet: !!body.notes?.pet,
+    child: !!body.notes?.child,
+    mobility: !!body.notes?.mobility,
+    text: String(body.notes?.text || '').trim().slice(0, 500),
+  }
+
+  return { ok: true, value: { name, phone: String(body.phone).trim(), phoneDigits, guests, date, timeSlot, notes } }
 }
 
 function calcSlotCapacityServer(tables, bookings, date, timeSlot, settings = {}) {
