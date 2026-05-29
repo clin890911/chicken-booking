@@ -35,6 +35,11 @@ async function requireStaff(req) {
 const LINE_CHANNEL_ACCESS_TOKEN = defineSecret('LINE_CHANNEL_ACCESS_TOKEN')
 const LINE_CHANNEL_SECRET = defineSecret('LINE_CHANNEL_SECRET')
 
+// 內場通知用 Telegram bot（取代過去前端持有 bot token 的做法，P0-4）。
+// token 與 chat id 皆以 Secret Manager 管理，不進前端 bundle。
+const TELEGRAM_BOT_TOKEN = defineSecret('TELEGRAM_BOT_TOKEN')
+const TELEGRAM_CHAT_ID = defineSecret('TELEGRAM_CHAT_ID')
+
 const LINE_REPLY_URL = 'https://api.line.me/v2/bot/message/reply'
 const LINE_PUSH_URL = 'https://api.line.me/v2/bot/message/push'
 const DEFAULT_STORE_ADDRESS = '南投縣鹿谷鄉中正路二段377號'
@@ -183,7 +188,7 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
 
 // 客人端「建立訂位」：含完整輸入驗證 + Firestore 交易內的原子容量檢查，
 // 確保不會超賣（兩組客人同時搶最後座位只會成立到容量上限）。
-export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     const settingsSnap = await db.collection('settings').doc('main').get()
@@ -256,6 +261,10 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       console.warn('customer upsert skipped:', e?.message)
     }
 
+    // 內場通知（best-effort，失敗不影響訂位成立）。在回應前 await，
+    // 否則 Cloud Function 回應後可能被凍結導致通知未送出。
+    await notifyTelegram(tgBookingMessage('🆕 <b>新線上訂位</b>', booking, { event: 'booking_created', booking }))
+
     return res.json({ ok: true, booking })
   } catch (err) {
     const code = err.status || 500
@@ -277,7 +286,7 @@ export const guestGetBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public' 
   }
 })
 
-export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     const { bookingId, token, patch = {} } = req.body || {}
@@ -330,7 +339,14 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       }, { merge: true })
     }
     await batch.commit()
-    return res.json({ ok: true, booking: { ...booking, ...updatePatch } })
+    const updated = { ...booking, ...updatePatch }
+    await notifyTelegram(tgBookingMessage(
+      `✏️ <b>客人自助修改訂位</b> · ${booking.id}`,
+      updated,
+      { event: 'guest_updated', booking: updated, changedKeys },
+      changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
+    ))
+    return res.json({ ok: true, booking: updated })
   } catch (err) {
     const code = err.status || 500
     console.error('guestUpdateBooking failed:', err)
@@ -338,7 +354,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
   }
 })
 
-export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     const { bookingId, token, reason = '' } = req.body || {}
@@ -380,7 +396,14 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       }, { merge: true })
     }
     await batch.commit()
-    return res.json({ ok: true, booking: { ...booking, ...updatePatch } })
+    const cancelled = { ...booking, ...updatePatch }
+    await notifyTelegram(tgBookingMessage(
+      '❌ <b>客人自助取消訂位</b>',
+      cancelled,
+      { event: 'guest_cancelled', booking: cancelled },
+      `取消原因：${escapeTg(updatePatch.cancellationReason.reason)}`,
+    ))
+    return res.json({ ok: true, booking: cancelled })
   } catch (err) {
     const code = err.status || 500
     console.error('guestCancelBooking failed:', err)
@@ -976,4 +999,65 @@ function verifyLineSignature(rawBody, signature, secret) {
   const expectedBuffer = Buffer.from(expected)
   if (received.length !== expectedBuffer.length) return false
   return crypto.timingSafeEqual(received, expectedBuffer)
+}
+
+// ============== Telegram 內場通知（P0-4：bot token 不再進前端）==============
+function escapeTg(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+const TG_SOURCE_LABEL = {
+  online: '🌐 線上',
+  phone: '📞 電話',
+  walkin: '🚶 現場',
+  group: '👥 團體',
+  line: '💚 LINE',
+}
+
+// 組裝一則訂位通知：標題 + 訂位摘要（+ 可選補充行）+ 完整 JSON 備份
+function tgBookingMessage(title, booking, payload, extraLine = '') {
+  const lines = [
+    title,
+    `📅 ${booking.date} ${booking.timeSlot}`,
+    `👤 ${escapeTg(booking.name)}  ${booking.guests} 位`,
+    `📱 <code>${escapeTg(booking.phone)}</code>`,
+  ]
+  if (booking.assignedTableId) lines.push(`🪑 ${escapeTg(booking.assignedTableId)}`)
+  if (TG_SOURCE_LABEL[booking.source]) lines.push(TG_SOURCE_LABEL[booking.source])
+  if (booking.notes?.text) lines.push(`📝 ${escapeTg(booking.notes.text)}`)
+  const flags = []
+  if (booking.notes?.pet) flags.push('🐾 寵物')
+  if (booking.notes?.child) flags.push('👶 兒童')
+  if (booking.notes?.mobility) flags.push('♿ 行動不便')
+  if (flags.length) lines.push(flags.join(' · '))
+  if (extraLine) lines.push(extraLine)
+  const json = JSON.stringify(payload, null, 0)
+  return `${lines.join('\n')}\n\n<pre>${escapeTg(json)}</pre>`
+}
+
+// 送出 Telegram 訊息。沒設定 secret 時靜默略過；失敗只記 log，絕不影響主流程。
+async function notifyTelegram(text) {
+  let token = ''
+  let chatId = ''
+  try { token = (TELEGRAM_BOT_TOKEN.value() || '').trim() } catch { token = '' }
+  try { chatId = (TELEGRAM_CHAT_ID.value() || '').trim() } catch { chatId = '' }
+  if (!token || !chatId) return
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    })
+    if (!res.ok) console.warn('Telegram notify failed:', res.status, await res.text())
+  } catch (err) {
+    console.warn('Telegram notify error:', err?.message)
+  }
 }
