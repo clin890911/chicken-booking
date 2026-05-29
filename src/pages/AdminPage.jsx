@@ -34,14 +34,15 @@ export default function AdminPage() {
   // === 新訂位偵測（推 toast）===
   const prevIdsRef = useRef(null)
   useEffect(() => {
+    // 偵測「任何日期」的新確認訂位（先前只看當天，會漏掉客人預訂未來日期的位）
     const today = todayStr()
-    const todayBookings = bookings.filter(b => b.date === today && b.status === 'confirmed')
-    const ids = new Set(todayBookings.map(b => b.id))
+    const confirmed = bookings.filter(b => b.status === 'confirmed')
+    const ids = new Set(confirmed.map(b => b.id))
     if (prevIdsRef.current !== null) {
-      // 找出新增的（不在上次集合內）
-      const added = todayBookings.filter(b => !prevIdsRef.current.has(b.id))
+      const added = confirmed.filter(b => !prevIdsRef.current.has(b.id))
       added.forEach(b => {
-        toast.info(`📋 新訂位：${b.name} ${b.guests} 位 · ${b.timeSlot}`, { duration: 6000 })
+        const dateHint = b.date === today ? '' : `${b.date} · `
+        toast.info(`📋 新訂位：${b.name} ${b.guests} 位 · ${dateHint}${b.timeSlot}`, { duration: 6000 })
       })
     }
     prevIdsRef.current = ids

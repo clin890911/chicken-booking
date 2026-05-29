@@ -20,7 +20,6 @@ import { Button, Input, Textarea, Badge } from '../components/ui'
 import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
-import * as tg from '../services/telegramService'
 import { lineBindUrl, notifyLineBooking } from '../services/lineService'
 import { guestCancelBooking, guestGetBooking, guestUpdateBooking } from '../services/cloudDataService'
 import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
@@ -33,11 +32,6 @@ const NOTE_OPTIONS = [
 ]
 
 const CANCEL_REASONS = ['行程改變', '人數變更', '時間不方便', '改天再訂', '其他']
-
-const safeNotify = (fn) => {
-  try { fn()?.catch?.(e => console.warn('TG notify error:', e)) }
-  catch (e) { console.warn('TG notify error:', e) }
-}
 
 export default function ManageBookingPage() {
   const { id } = useParams()
@@ -196,7 +190,7 @@ export default function ManageBookingPage() {
       setForm(toForm(result.booking))
       setMode('success')
       setError('')
-      safeNotify(() => tg.notifyBookingUpdated(result.booking, { ...result.changes, guestManaged: true }))
+      // Telegram 由後端 guestUpdateBooking 經 outbox 送出（前端 token 在 prod 為空，原呼叫為 no-op）
       notifyLineBooking(settings, result.booking, 'updated')
       toast.success('訂位已更新，同仁端也會同步看到')
     } finally {
@@ -227,7 +221,7 @@ export default function ManageBookingPage() {
       setForm(toForm(result.booking))
       setMode('cancelled')
       setError('')
-      safeNotify(() => tg.notifyBookingCancelled(result.booking))
+      // Telegram 由後端 guestCancelBooking 經 outbox 送出（前端 token 在 prod 為空，原呼叫為 no-op）
       notifyLineBooking(settings, result.booking, 'cancelled')
       toast.success('訂位已取消')
     } finally {

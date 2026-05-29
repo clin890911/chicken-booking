@@ -100,10 +100,17 @@ export function BookingProvider({ children }) {
     }
     bootCloud()
     const id = window.setInterval(() => { pullCloud() }, 5000)
+    // 分頁回前景 / 網路恢復時立即補抓，避免鎖屏或斷線造成的同步空窗。
+    const onVisible = () => { if (document.visibilityState === 'visible') pullCloud() }
+    const onOnline = () => { pullCloud() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('online', onOnline)
     return () => {
       cancelled = true
       window.clearInterval(id)
       window.clearTimeout(syncTimerRef.current)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', onOnline)
     }
   }, [pullCloud, isStaff])
 

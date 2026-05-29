@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, FieldValue } from 'firebase-admin/firestore'
 import { getAuth } from 'firebase-admin/auth'
 import { onRequest } from 'firebase-functions/v2/https'
+import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { defineSecret } from 'firebase-functions/params'
 
 initializeApp()
@@ -261,9 +262,13 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       console.warn('customer upsert skipped:', e?.message)
     }
 
-    // 內場通知（best-effort，失敗不影響訂位成立）。在回應前 await，
-    // 否則 Cloud Function 回應後可能被凍結導致通知未送出。
-    await notifyTelegram(tgBookingMessage('🆕 <b>新線上訂位</b>', booking, { event: 'booking_created', booking }))
+    // 內場通知改走 outbox：寫一筆 → 立即試送，失敗由 retryNotifications 自動補送。
+    await enqueueAndTrySend({
+      channel: 'telegram',
+      event: 'created',
+      bookingId: booking.id,
+      payload: { text: tgBookingMessage('🆕 <b>新線上訂位</b>', booking, { event: 'booking_created', booking }) },
+    })
 
     return res.json({ ok: true, booking })
   } catch (err) {
@@ -340,12 +345,19 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     }
     await batch.commit()
     const updated = { ...booking, ...updatePatch }
-    await notifyTelegram(tgBookingMessage(
-      `✏️ <b>客人自助修改訂位</b> · ${booking.id}`,
-      updated,
-      { event: 'guest_updated', booking: updated, changedKeys },
-      changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
-    ))
+    await enqueueAndTrySend({
+      channel: 'telegram',
+      event: 'updated',
+      bookingId: booking.id,
+      payload: {
+        text: tgBookingMessage(
+          `✏️ <b>客人自助修改訂位</b> · ${booking.id}`,
+          updated,
+          { event: 'guest_updated', booking: updated, changedKeys },
+          changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
+        ),
+      },
+    })
     return res.json({ ok: true, booking: updated })
   } catch (err) {
     const code = err.status || 500
@@ -394,12 +406,19 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     }
     await batch.commit()
     const cancelled = { ...booking, ...updatePatch }
-    await notifyTelegram(tgBookingMessage(
-      '❌ <b>客人自助取消訂位</b>',
-      cancelled,
-      { event: 'guest_cancelled', booking: cancelled },
-      `取消原因：${escapeTg(updatePatch.cancellationReason.reason)}`,
-    ))
+    await enqueueAndTrySend({
+      channel: 'telegram',
+      event: 'cancelled',
+      bookingId: booking.id,
+      payload: {
+        text: tgBookingMessage(
+          '❌ <b>客人自助取消訂位</b>',
+          cancelled,
+          { event: 'guest_cancelled', booking: cancelled },
+          `取消原因：${escapeTg(updatePatch.cancellationReason.reason)}`,
+        ),
+      },
+    })
     return res.json({ ok: true, booking: cancelled })
   } catch (err) {
     const code = err.status || 500
@@ -416,8 +435,11 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       return res.status(400).json({ ok: false, error: 'missing-required-fields' })
     }
 
-    const bindingRef = db.collection('lineBookingBindings').doc(booking.id)
-    const bookingRef = db.collection(COLLECTIONS.bookings).doc(booking.id)
+    // 權威重讀：以 bookings 為準並驗證 manageToken（safeTokenEqual），不再整包信任 client 傳來的 booking。
+    const authBooking = await getBookingByToken(booking.id, booking.token)
+
+    const bindingRef = db.collection('lineBookingBindings').doc(authBooking.id)
+    const bookingRef = db.collection(COLLECTIONS.bookings).doc(authBooking.id)
     const existingSnap = await bindingRef.get()
     const existing = existingSnap.exists ? existingSnap.data() : null
     const now = new Date().toISOString()
@@ -427,14 +449,15 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       && Number.isFinite(lastPushMs)
       && Date.now() - lastPushMs < LINE_BIND_PUSH_DEDUPE_MS
 
+    const nextStore = normalizeStore(store)
     const record = {
-      bookingId: booking.id,
-      manageToken: booking.token,
+      bookingId: authBooking.id,
+      manageToken: authBooking.manageToken,
       lineUserId: line.userId,
       lineDisplayName: line.displayName || '',
       linePictureUrl: line.pictureUrl || '',
-      booking,
-      store: normalizeStore(store),
+      booking: authBooking,
+      store: nextStore,
       updatedAt: FieldValue.serverTimestamp(),
       createdAt: existing?.createdAt || FieldValue.serverTimestamp(),
       lastBindAttemptAt: now,
@@ -451,13 +474,19 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
     }, { merge: true })
     await batch.commit()
     if (!recentlyPushed) {
-      await pushLineMessages(line.userId, buildBookingMessages(booking, record.store, 'confirmed'))
+      await enqueueAndTrySend({
+        channel: 'line',
+        event: 'created',
+        bookingId: authBooking.id,
+        payload: { to: line.userId, messages: buildBookingMessages(authBooking, nextStore, 'confirmed') },
+      })
     }
 
     return res.json({ ok: true, skippedPush: recentlyPushed })
   } catch (err) {
-    console.error('lineBind failed:', err)
-    return res.status(500).json({ ok: false, error: err.message || 'line-bind-failed' })
+    const code = err.status || 500
+    if (code >= 500) console.error('lineBind failed:', err)
+    return res.status(code).json({ ok: false, error: err.message || 'line-bind-failed' })
   }
 })
 
@@ -478,30 +507,33 @@ export const linePushBooking = onRequest({ cors: true, invoker: 'public', secret
   try {
     const { bookingId, booking, store, type = 'updated' } = req.body || {}
     const targetBookingId = bookingId || booking?.id
+    const token = booking?.token || req.body?.token || ''
     if (!targetBookingId) return res.status(400).json({ ok: false, error: 'missing-booking-id' })
+    if (!token) return res.status(400).json({ ok: false, error: 'missing-token' })
 
-    if (booking?.id) {
-      const snap = await db.collection('lineBookingBindings').doc(booking.id).get()
-      if (!snap.exists) return res.status(404).json({ ok: false, error: 'binding-not-found' })
-      const existing = snap.data()
-      const nextStore = normalizeStore({ ...existing.store, ...store })
-      await db.collection('lineBookingBindings').doc(booking.id).set({
-        booking,
-        store: nextStore,
-        updatedAt: FieldValue.serverTimestamp(),
-      }, { merge: true })
-      await pushLineMessages(existing.lineUserId, buildBookingMessages(booking, nextStore, type))
-      return res.json({ ok: true })
-    }
+    // 權威驗證：token 必須對應 bookings 中的 manageToken；以 server booking 為推播內容。
+    const authBooking = await getBookingByToken(targetBookingId, token)
 
     const snap = await db.collection('lineBookingBindings').doc(targetBookingId).get()
     if (!snap.exists) return res.status(404).json({ ok: false, error: 'binding-not-found' })
-    const data = snap.data()
-    await pushLineMessages(data.lineUserId, buildBookingMessages(data.booking, data.store, type))
+    const existing = snap.data()
+    const nextStore = normalizeStore({ ...existing.store, ...store })
+    await db.collection('lineBookingBindings').doc(targetBookingId).set({
+      booking: authBooking,
+      store: nextStore,
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true })
+    await enqueueAndTrySend({
+      channel: 'line',
+      event: type,
+      bookingId: targetBookingId,
+      payload: { to: existing.lineUserId, messages: buildBookingMessages(authBooking, nextStore, type) },
+    })
     return res.json({ ok: true })
   } catch (err) {
-    console.error('linePushBooking failed:', err)
-    return res.status(500).json({ ok: false, error: err.message || 'line-push-failed' })
+    const code = err.status || 500
+    if (code >= 500) console.error('linePushBooking failed:', err)
+    return res.status(code).json({ ok: false, error: err.message || 'line-push-failed' })
   }
 })
 
@@ -976,18 +1008,6 @@ function calcSlotCapacityServer(tables, bookings, date, timeSlot, settings = {})
   return Math.max(0, totalSeats - reserved)
 }
 
-async function pushLineMessages(to, messages) {
-  const res = await fetch(LINE_PUSH_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${lineChannelAccessToken()}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ to, messages }),
-  })
-  if (!res.ok) throw new Error(`LINE push failed: ${res.status} ${await res.text()}`)
-}
-
 async function replyLineMessage(replyToken, messages) {
   const res = await fetch(LINE_REPLY_URL, {
     method: 'POST',
@@ -1055,26 +1075,159 @@ function tgBookingMessage(title, booking, payload, extraLine = '') {
   return `${lines.join('\n')}\n\n<pre>${escapeTg(json)}</pre>`
 }
 
-// 送出 Telegram 訊息。沒設定 secret 時靜默略過；失敗只記 log，絕不影響主流程。
-async function notifyTelegram(text) {
+// ============== 通知 outbox（可靠送達：先寫一筆 → 立即試送 → 失敗排程重試）==============
+// 退避序列：第 1 次失敗等 1 分鐘、再 5/15/30/60/120 分鐘；用完 6 次轉 dead-letter。
+const NOTIFICATION_BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000, 120 * 60_000]
+const NOTIFICATION_MAX_ATTEMPTS = 6
+const NOTIFY_TIMEOUT_MS = 3500
+
+// 送 Telegram（AbortController 逾時保護），回 { ok, error }
+async function tgSend(text) {
   let token = ''
   let chatId = ''
   try { token = (TELEGRAM_BOT_TOKEN.value() || '').trim() } catch { token = '' }
   try { chatId = (TELEGRAM_CHAT_ID.value() || '').trim() } catch { chatId = '' }
-  if (!token || !chatId) return
+  if (!token || !chatId) return { ok: false, error: 'telegram-not-configured' }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS)
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text,
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-      }),
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+      signal: controller.signal,
     })
-    if (!res.ok) console.warn('Telegram notify failed:', res.status, await res.text())
+    if (!res.ok) return { ok: false, error: `telegram-${res.status}: ${(await res.text()).slice(0, 300)}` }
+    return { ok: true }
   } catch (err) {
-    console.warn('Telegram notify error:', err?.message)
+    return { ok: false, error: err?.name === 'AbortError' ? 'telegram-timeout' : (err?.message || 'telegram-error') }
+  } finally {
+    clearTimeout(timer)
   }
 }
+
+// 送 LINE push（AbortController 逾時保護），回 { ok, error }
+async function lineSend(to, messages) {
+  if (!to || !Array.isArray(messages) || !messages.length) return { ok: false, error: 'line-bad-payload' }
+  let token = ''
+  try { token = lineChannelAccessToken() } catch { token = '' }
+  if (!token) return { ok: false, error: 'line-not-configured' }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS)
+  try {
+    const res = await fetch(LINE_PUSH_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, messages }),
+      signal: controller.signal,
+    })
+    if (!res.ok) return { ok: false, error: `line-${res.status}: ${(await res.text()).slice(0, 300)}` }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err?.name === 'AbortError' ? 'line-timeout' : (err?.message || 'line-error') }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 依 channel 實際送出一筆 outbox payload
+async function deliverNotification(data) {
+  if (data.channel === 'telegram') return tgSend(data.payload?.text || '')
+  if (data.channel === 'line') return lineSend(data.payload?.to, data.payload?.messages || [])
+  return { ok: false, error: `unknown-channel-${data.channel}` }
+}
+
+// 寫一筆 pending outbox 文件，回 { ref, record }
+async function enqueueNotification(doc) {
+  const now = new Date().toISOString()
+  const ref = db.collection('notifications').doc()
+  const record = {
+    channel: doc.channel,
+    event: doc.event || 'unknown',
+    status: 'pending',
+    payload: doc.payload || {},
+    bookingId: doc.bookingId || null,
+    attempts: 0,
+    maxAttempts: NOTIFICATION_MAX_ATTEMPTS,
+    nextAttemptAt: now,
+    lastError: null,
+    createdAt: now,
+    sentAt: null,
+  }
+  await ref.set(record)
+  return { ref, record }
+}
+
+// 嘗試送出一筆 outbox 文件並更新狀態（成功→sent；失敗→排程重試或 dead-letter）
+async function sendOutboxDoc(ref, data) {
+  const result = await deliverNotification(data)
+  const now = new Date().toISOString()
+  if (result.ok) {
+    await ref.set({ status: 'sent', sentAt: now, lastError: null, nextAttemptAt: null }, { merge: true })
+    return result
+  }
+  const attempts = (Number(data.attempts) || 0) + 1
+  const maxAttempts = Number(data.maxAttempts) || NOTIFICATION_MAX_ATTEMPTS
+  if (attempts >= maxAttempts) {
+    await ref.set({ status: 'failed', attempts, lastError: result.error, nextAttemptAt: null, failedAt: now }, { merge: true })
+    console.error('NOTIFICATION_DEAD_LETTER', { id: ref.id, channel: data.channel, event: data.event, error: result.error })
+  } else {
+    const backoff = NOTIFICATION_BACKOFF_MS[Math.min(attempts - 1, NOTIFICATION_BACKOFF_MS.length - 1)]
+    const nextAttemptAt = new Date(Date.now() + backoff).toISOString()
+    await ref.set({ status: 'pending', attempts, lastError: result.error, nextAttemptAt }, { merge: true })
+  }
+  return result
+}
+
+// 寫入 + 立即試送（主流程呼叫；逾時由 AbortController 保護，失敗交給排程重試，絕不影響主流程）
+async function enqueueAndTrySend(doc) {
+  try {
+    const { ref, record } = await enqueueNotification(doc)
+    await sendOutboxDoc(ref, record)
+  } catch (err) {
+    console.error('enqueueAndTrySend failed:', err?.message)
+  }
+}
+
+// 每 2 分鐘補送 pending 通知（在程式碼內過濾 nextAttemptAt，避免複合索引）
+export const retryNotifications = onSchedule(
+  {
+    schedule: 'every 2 minutes',
+    timeZone: 'Asia/Taipei',
+    secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN],
+  },
+  async () => {
+    const nowMs = Date.now()
+    const snap = await db.collection('notifications').where('status', '==', 'pending').limit(100).get()
+    const due = snap.docs.filter(d => {
+      const at = d.data().nextAttemptAt
+      return !at || new Date(at).getTime() <= nowMs
+    })
+    for (const d of due) {
+      await sendOutboxDoc(d.ref, d.data())
+    }
+    if (due.length) console.log(`retryNotifications: processed ${due.length} pending notifications`)
+  },
+)
+
+// 每日 09:00（台北）自我檢測：發測試 Telegram + 彙報 dead-letter 數量
+export const notificationHeartbeat = onSchedule(
+  {
+    schedule: '0 9 * * *',
+    timeZone: 'Asia/Taipei',
+    secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID],
+  },
+  async () => {
+    const failedSnap = await db.collection('notifications').where('status', '==', 'failed').limit(50).get()
+    const failedCount = failedSnap.size
+    const lines = [
+      '💓 <b>通知系統每日健康檢查</b>',
+      `🕘 ${new Date().toISOString()}`,
+      failedCount
+        ? `⚠️ 有 <b>${failedCount}</b> 筆通知重試用盡（dead-letter），請至 notifications 檢查`
+        : '✅ 無 dead-letter，通知管線正常',
+    ]
+    const result = await tgSend(lines.join('\n'))
+    if (!result.ok) console.error('NOTIFICATION_HEARTBEAT_FAILED', result.error)
+  },
+)
