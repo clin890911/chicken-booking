@@ -233,8 +233,26 @@ export default function BookingPage() {
               )}
 
               <div className="surface space-y-4 p-5">
-                <Input label="姓名" value={data.name} onChange={e => set('name', e.target.value)} placeholder="王小姐" error={error.name} />
-                <Input label="電話" type="tel" inputMode="numeric" value={data.phone} onChange={e => set('phone', e.target.value)} placeholder="0912345678" error={error.phone} />
+                <Input
+                  label="姓名"
+                  value={data.name}
+                  onChange={e => { set('name', e.target.value); if (error.name) setError(p => ({ ...p, name: undefined })) }}
+                  placeholder="王小姐"
+                  error={error.name}
+                />
+                <Input
+                  label="電話"
+                  type="tel"
+                  inputMode="numeric"
+                  value={data.phone}
+                  onChange={e => { set('phone', e.target.value); if (error.phone) setError(p => ({ ...p, phone: undefined })) }}
+                  onBlur={() => {
+                    const v = data.phone.trim()
+                    if (v && !isValidTwPhone(v)) setError(p => ({ ...p, phone: '電話格式不正確，請輸入正確的台灣電話號碼' }))
+                  }}
+                  placeholder="0912345678"
+                  error={error.phone}
+                />
 
                 <div>
                   <label className="label">特殊需求（可複選）</label>
@@ -464,6 +482,8 @@ function CalendarPicker({ dates, value, onChange }) {
               type="button"
               onClick={() => !disabled && onChange(cell.date)}
               disabled={disabled}
+              aria-pressed={active}
+              aria-label={`${dayLabel(cell.date)}${cell.isToday ? '（今天）' : ''}${disabled ? '，暫不可預訂' : '，可預訂'}`}
               whileTap={!disabled ? { scale: 0.95 } : undefined}
               className={`relative min-h-[58px] border-b border-r border-chicken-brown/10 p-1 text-center transition-all sm:min-h-[72px] ${
                 active ? 'bg-chicken-red text-white' :
@@ -501,12 +521,12 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
     <section className="surface p-5">
       <SectionTitle icon={Clock} title="選擇抵達時間" hint={bookingOccupancyLabel(settings)} />
       {loading ? (
-        <div className="empty-panel mt-4">
+        <div className="empty-panel mt-4" role="status" aria-live="polite">
           <div className="mb-2 text-3xl">⏳</div>
           <p className="font-bold text-chicken-brown">正在查詢可訂時段...</p>
         </div>
       ) : error ? (
-        <div className="empty-panel mt-4">
+        <div className="empty-panel mt-4" role="alert">
           <div className="mb-2 text-3xl">⚠️</div>
           <p className="font-bold text-chicken-brown">{error}</p>
           <p className="mt-1 text-sm text-chicken-brown/60">請稍後再試，或來電由專人為您訂位。</p>
@@ -535,6 +555,8 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
                         layout
                         key={slot.time}
                         onClick={() => onChange(slot.time)}
+                        aria-pressed={active}
+                        aria-label={`${slot.time} 抵達，${scarce ? '少量名額' : '可訂位'}`}
                         whileTap={{ scale: 0.97 }}
                         className={`relative min-h-[74px] rounded-xl border-2 px-3 py-3 text-left transition-all ${
                           active

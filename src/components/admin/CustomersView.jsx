@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Card, Input, Modal, Textarea, Select, EmptyState } from '../ui'
+import { useConfirm } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { getNoshowCount } from '../../services/bookingService'
 
@@ -22,6 +23,9 @@ export default function CustomersView() {
   const [filter, setFilter] = useState('all')      // all | repeat | vip | blacklist
   const [editing, setEditing] = useState(null)
   const [editForm, setEditForm] = useState({ notes: '', allergies: '', vipTier: 'none' })
+  const [blacklisting, setBlacklisting] = useState(null) // { phone, name } 加黑名單對象
+  const [blacklistReason, setBlacklistReason] = useState('多次 no-show')
+  const confirm = useConfirm()
 
   const list = useMemo(() => {
     let out = customers
@@ -142,12 +146,13 @@ export default function CustomersView() {
                   <div className="flex flex-col gap-1 flex-shrink-0">
                     <button onClick={() => openEdit(c)} className="text-xs px-3 py-1 bg-chicken-cream rounded-lg font-bold text-chicken-brown">編輯</button>
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         if (c.blacklisted) {
-                          if (confirm(`解除 ${c.name} 黑名單？`)) setCustomerBlacklist(c.phone, false)
+                          const ok = await confirm(`解除 ${c.name} 黑名單？`, { title: '解除黑名單', confirmLabel: '解除' })
+                          if (ok) setCustomerBlacklist(c.phone, false)
                         } else {
-                          const reason = prompt('黑名單原因？', '多次 no-show')
-                          if (reason !== null) setCustomerBlacklist(c.phone, true, reason)
+                          setBlacklistReason('多次 no-show')
+                          setBlacklisting({ phone: c.phone, name: c.name })
                         }
                       }}
                       className={`text-xs px-3 py-1 rounded-lg font-bold ${
@@ -198,6 +203,30 @@ export default function CustomersView() {
             onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
           />
         </div>
+      </Modal>
+
+      {/* 加黑名單 Modal（取代原生 prompt） */}
+      <Modal open={!!blacklisting} onClose={() => setBlacklisting(null)}
+             title={blacklisting ? `將 ${blacklisting.name} 加入黑名單` : ''}
+             footer={
+               <>
+                 <button onClick={() => setBlacklisting(null)} className="btn-secondary px-4 py-2">取消</button>
+                 <button
+                   onClick={() => {
+                     if (blacklisting) setCustomerBlacklist(blacklisting.phone, true, blacklistReason.trim())
+                     setBlacklisting(null)
+                   }}
+                   className="btn-primary px-4 py-2"
+                 >加入黑名單</button>
+               </>
+             }
+      >
+        <Input
+          label="黑名單原因"
+          value={blacklistReason}
+          onChange={e => setBlacklistReason(e.target.value)}
+          placeholder="例：多次 no-show"
+        />
       </Modal>
     </div>
   )

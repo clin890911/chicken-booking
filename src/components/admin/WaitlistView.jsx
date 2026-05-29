@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Card, Modal, Input, Select, EmptyState } from '../ui'
+import { useToast, useConfirm } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 
 // 完整候位管理頁
@@ -27,6 +28,8 @@ function diffMin(d) {
 
 export default function WaitlistView({ onSeatWaitlist }) {
   const { waitlist, addWaitlist, callWaitlist, leaveWaitlist } = useBooking()
+  const toast = useToast()
+  const confirm = useConfirm()
   const [showAdd, setShowAdd] = useState(false)
   const [filter, setFilter] = useState('active')   // active | all
   const [form, setForm] = useState({ name: '', phone: '', partySize: 2, notes: '' })
@@ -52,13 +55,12 @@ export default function WaitlistView({ onSeatWaitlist }) {
   }, [sorted])
 
   const handleAdd = () => {
-    if (!form.partySize || form.partySize < 1) return alert('請填人數')
+    if (!form.partySize || form.partySize < 1) return toast.warning('請填人數')
     const w = addWaitlist(form)
     setShowAdd(false)
     setForm({ name: '', phone: '', partySize: 2, notes: '' })
     if (w?.queueNumber) {
-      // 簡易確認（v1 改為 LINE 通知）
-      setTimeout(() => alert(`✅ 已取號 #${w.queueNumber}\n預估等待 ${w.estimatedMin} 分`), 50)
+      toast.success(`已取號 #${w.queueNumber}，預估等待 ${w.estimatedMin} 分`)
     }
   }
 
@@ -135,7 +137,7 @@ export default function WaitlistView({ onSeatWaitlist }) {
                     >叫號</button>
                   )}
                   <button
-                    onClick={() => { if (confirm('棄號？')) leaveWaitlist(w.id) }}
+                    onClick={async () => { if (await confirm('確定棄號？', { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
                     className="px-3 bg-chicken-brown/5 text-chicken-brown/60 rounded-lg text-sm"
                   >棄號</button>
                 </div>

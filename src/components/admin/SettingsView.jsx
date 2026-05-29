@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Card, Input, Button, Select, Modal } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
+import { useToast, useConfirm } from '../ui/Toast'
 import { searchNoshow, exportCSV } from '../../services/bookingService'
 import TableGrid from './TableGrid'
 import LayoutEditor from './LayoutEditor'
@@ -10,6 +11,8 @@ import TelegramSettings from './TelegramSettings'
 export default function SettingsView() {
   const { settings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
   const { user, signOut, can } = useAuth()
+  const toast = useToast()
+  const confirm = useConfirm()
   const [form, setForm] = useState(settings)
   const [savedMsg, setSavedMsg] = useState('')
   const [searchPhone, setSearchPhone] = useState('')
@@ -30,7 +33,7 @@ export default function SettingsView() {
       const images = await Promise.all(list.map(file => readBannerFile(file)))
       setForm(f => ({ ...f, heroBanners: [...(f.heroBanners || []), ...images] }))
     } catch (err) {
-      alert(err.message || '圖片讀取失敗')
+      toast.error(err.message || '圖片讀取失敗')
     }
   }
   const saveBanners = () => {
@@ -404,7 +407,7 @@ export default function SettingsView() {
           <div>已登入：<span className="font-mono font-bold text-chicken-brown">{user?.email}</span></div>
           <div className="text-xs text-chicken-brown/60 mt-1">角色：<span className="font-bold">{user?.roleLabel || '—'}</span></div>
         </div>
-        <Button onClick={() => { if (confirm('確定登出？')) signOut() }} variant="secondary" className="w-full">登出</Button>
+        <Button onClick={async () => { if (await confirm('確定登出？', { title: '登出', confirmLabel: '登出' })) signOut() }} variant="secondary" className="w-full">登出</Button>
       </SettingsSection>
 
       {can('settings.update') && (

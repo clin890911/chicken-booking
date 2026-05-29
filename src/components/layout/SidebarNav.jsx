@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion'
 import { useAuth } from '../../contexts/AuthContext'
+import { useConfirm } from '../ui/Toast'
 
 // iPad / 桌面版側邊導航。手機版用 BottomNav。
 // 視窗 < 1024px 隱藏（自動退回 BottomNav）
 export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
   const { user, signOut } = useAuth()
+  const confirm = useConfirm()
 
   return (
     <aside className="hidden lg:flex flex-col w-20 xl:w-56 bg-white border-r border-chicken-brown/10 sticky top-0 h-screen">
@@ -70,7 +72,7 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
           </div>
         </div>
         <button
-          onClick={() => { if (confirm('確定登出？')) signOut() }}
+          onClick={async () => { if (await confirm('確定登出？', { title: '登出', confirmLabel: '登出' })) signOut() }}
           className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-chicken-brown/60 hover:bg-chicken-cream"
         >
           <span>🚪</span>

@@ -795,13 +795,25 @@ function errorWithStatus(message, status) {
   return err
 }
 
+// 常數時間比對管理 token，避免以回應時間差異側錄 token（timing attack）。
+function safeTokenEqual(a, b) {
+  const bufA = Buffer.from(String(a || ''), 'utf8')
+  const bufB = Buffer.from(String(b || ''), 'utf8')
+  if (bufA.length !== bufB.length) return false
+  try {
+    return crypto.timingSafeEqual(bufA, bufB)
+  } catch {
+    return false
+  }
+}
+
 async function getBookingByToken(bookingId, token) {
   const id = String(bookingId || '').trim()
   if (!id || !token) throw errorWithStatus('缺少訂位編號或管理 token', 400)
   const snap = await db.collection(COLLECTIONS.bookings).doc(id).get()
   if (!snap.exists) throw errorWithStatus('找不到此訂位', 404)
   const booking = { id: snap.id, ...snap.data() }
-  if (!booking.manageToken || booking.manageToken !== token) throw errorWithStatus('管理連結無效', 403)
+  if (!booking.manageToken || !safeTokenEqual(booking.manageToken, token)) throw errorWithStatus('管理連結無效', 403)
   return booking
 }
 

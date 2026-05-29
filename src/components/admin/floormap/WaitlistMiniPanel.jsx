@@ -1,18 +1,21 @@
 import { useState } from 'react'
 import { Modal, Input, Select } from '../../ui'
+import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 
 // 候位側欄（精簡版，現場營運頁右側顯示）
 // 完整候位管理在獨立的 WaitlistView
 export default function WaitlistMiniPanel({ onSeatWaitlist }) {
   const { waitlist, addWaitlist, callWaitlist, leaveWaitlist } = useBooking()
+  const toast = useToast()
+  const confirm = useConfirm()
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ name: '', phone: '', partySize: 2, notes: '' })
 
   const active = waitlist.filter(w => w.status === 'waiting' || w.status === 'called')
 
   const handleAdd = () => {
-    if (!form.partySize || form.partySize < 1) return alert('請填人數')
+    if (!form.partySize || form.partySize < 1) return toast.warning('請填人數')
     addWaitlist(form)
     setShowAdd(false)
     setForm({ name: '', phone: '', partySize: 2, notes: '' })
@@ -66,7 +69,7 @@ export default function WaitlistMiniPanel({ onSeatWaitlist }) {
                   </button>
                 )}
                 <button
-                  onClick={() => { if (confirm('棄號？')) leaveWaitlist(w.id) }}
+                  onClick={async () => { if (await confirm('確定棄號？', { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
                   className="text-[11px] px-2 py-1 bg-chicken-brown/10 text-chicken-brown/60 rounded-md"
                 >
                   ✕
