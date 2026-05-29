@@ -324,7 +324,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       phoneDigits: digits(next.phone),
       lastGuestEditAt: now,
       guestEditCount: (Number(booking.guestEditCount) || 0) + 1,
-      guestEditHistory: [...(Array.isArray(booking.guestEditHistory) ? booking.guestEditHistory : []), historyEntry],
+      guestEditHistory: appendGuestHistory(booking.guestEditHistory, historyEntry),
       updatedAt: now,
     }
 
@@ -373,16 +373,13 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       },
       lastGuestEditAt: now,
       guestEditCount: (Number(booking.guestEditCount) || 0) + 1,
-      guestEditHistory: [
-        ...(Array.isArray(booking.guestEditHistory) ? booking.guestEditHistory : []),
-        {
-          id: createServerToken().slice(0, 12),
-          type: 'guest_cancel',
-          at: now,
-          reason: String(reason || '').trim() || '未提供',
-          before: pickBookingHistory(booking),
-        },
-      ],
+      guestEditHistory: appendGuestHistory(booking.guestEditHistory, {
+        id: createServerToken().slice(0, 12),
+        type: 'guest_cancel',
+        at: now,
+        reason: String(reason || '').trim() || '未提供',
+        before: pickBookingHistory(booking),
+      }),
       updatedAt: now,
     }
     const batch = db.batch()
@@ -847,6 +844,14 @@ function pickBookingHistory(booking) {
     notes: booking.notes || {},
     assignedTableId: booking.assignedTableId || null,
   }
+}
+
+// P1-5：guestEditHistory 內嵌在 booking 文件、只增不減，長期會逼近
+// Firestore 單文件 1MB 上限。保留最近 N 筆即可（自助修改本就受次數/時間限制）。
+const MAX_GUEST_EDIT_HISTORY = 20
+function appendGuestHistory(existing, entry) {
+  const arr = Array.isArray(existing) ? existing : []
+  return [...arr, entry].slice(-MAX_GUEST_EDIT_HISTORY)
 }
 
 function toMinutes(time = '00:00') {
