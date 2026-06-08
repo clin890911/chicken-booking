@@ -1,88 +1,84 @@
-// 雞王刷刷鍋桌位定義
-// 33 張四人桌 (A1-A33) + 19 張六人桌 (B1-B19) = 52 張，總座位 246 (+ 134 預留)
-// 平面圖按鹿芝谷主場館 1F / 2F 配置：
-//   1F = 7 張 6P (B1-B7) + 10 張 4P (A1-A10) = 17 桌
-//   2F = 12 張 6P (B8-B19) + 23 張 4P (A11-A33) = 35 桌
+// 雞王刷刷鍋桌位定義（依「雞王座號圖」PDF 配置，2026-06 更新）
+// 1F：四人桌 6 張（101,102,103,111,112,113）+ 六人桌 6 張（105–110）＝ 12 桌，60 人
+// 2F：四人桌 27 張（221–233 共 12 張 + 251–267 共 15 張）
+//     + 六人桌 13 張（201–215 區）＝ 40 桌，186 人
+// 全店合計 52 桌、246 人。
 //
-// 座標系統：viewBox 1200x800，每張桌的 x/y/w/h 為左上角座標
-//   4P: 80×75（約對應實體 120×100 cm）
-//   6P: 80×100（約對應實體 180×100 cm）
+// 注意：PDF 桌號有跳號（無 104／2F 無 204,214,224,254,264），屬正常。
+// 桌號的「四人/六人」分布：依 PDF 圖上「灰底＝六人桌、白底＝四人桌」逐桌判讀（像素取樣確認）：
+//   1F 六人桌(6)：101,102,103,108,109,110
+//   2F 六人桌(13)：201,202,203,205,206,207,208,209,213,215,258,259,260
+//   其餘為四人桌。可於後台「桌位編輯器」逐桌調整。
 //
-// fuel: 'natural-gas' | 'tank' | null（1F 無管線設備區別、2F 北區+南左為天然氣、南右為瓦斯桶）
+// 座標系統：viewBox 1200x800，x/y/w/h 為左上角座標
+//   4P: 80×75 ｜ 6P: 80×100
+// fuel: 'natural-gas' | 'tank' | null（PDF 未標示燃料別，預設 null，可後台調整）
 
 const TABLE_4P_W = 80
 const TABLE_4P_H = 75
 const TABLE_6P_W = 80
 const TABLE_6P_H = 100
 
-// === 1F：西側靠牆 4 張 6P + 中間混合 + 東側散桌 ===
+// 小工具：依人數自動帶入寬高
+const mk = (number, capacity, floor, x, y, fuel = null) => ({
+  number, capacity, floor, x, y,
+  w: capacity === 6 ? TABLE_6P_W : TABLE_4P_W,
+  h: capacity === 6 ? TABLE_6P_H : TABLE_4P_H,
+  fuel,
+})
+
+// === 1F：六人桌 101,102,103,108,109,110；四人桌 105,106,107,111,112,113 ===
 const FLOOR_1F = [
-  // 西側 6P 直排（B1-B4）
-  { number: 'B1', capacity: 6, floor: '1F', x: 140, y: 140, w: TABLE_6P_W, h: TABLE_6P_H, fuel: null },
-  { number: 'B2', capacity: 6, floor: '1F', x: 140, y: 280, w: TABLE_6P_W, h: TABLE_6P_H, fuel: null },
-  { number: 'B3', capacity: 6, floor: '1F', x: 140, y: 420, w: TABLE_6P_W, h: TABLE_6P_H, fuel: null },
-  { number: 'B4', capacity: 6, floor: '1F', x: 140, y: 560, w: TABLE_6P_W, h: TABLE_6P_H, fuel: null },
-  // 中央左欄 4P（A1-A4）
-  { number: 'A1', capacity: 4, floor: '1F', x: 260, y: 150, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  { number: 'A2', capacity: 4, floor: '1F', x: 260, y: 290, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  { number: 'A3', capacity: 4, floor: '1F', x: 260, y: 430, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  { number: 'A4', capacity: 4, floor: '1F', x: 260, y: 580, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  // 中央右欄 6P（B5-B7）
-  { number: 'B5', capacity: 6, floor: '1F', x: 380, y: 140, w: TABLE_6P_W, h: TABLE_6P_H, fuel: null },
-  { number: 'B6', capacity: 6, floor: '1F', x: 380, y: 280, w: TABLE_6P_W, h: TABLE_6P_H, fuel: null },
-  { number: 'B7', capacity: 6, floor: '1F', x: 380, y: 420, w: TABLE_6P_W, h: TABLE_6P_H, fuel: null },
-  // 中右 + 東側 4P（A5-A10）
-  { number: 'A5', capacity: 4, floor: '1F', x: 380, y: 580, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  { number: 'A6', capacity: 4, floor: '1F', x: 500, y: 150, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  { number: 'A7', capacity: 4, floor: '1F', x: 500, y: 290, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  { number: 'A8', capacity: 4, floor: '1F', x: 500, y: 430, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  { number: 'A9', capacity: 4, floor: '1F', x: 500, y: 580, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
-  { number: 'A10', capacity: 4, floor: '1F', x: 620, y: 580, w: TABLE_4P_W, h: TABLE_4P_H, fuel: null },
+  // 左側直排（6P）
+  mk('103', 6, '1F', 120, 150),
+  mk('102', 6, '1F', 120, 300),
+  mk('101', 6, '1F', 120, 450),
+  // 中央兩列：左 4P、右 6P
+  mk('107', 4, '1F', 360, 312), mk('110', 6, '1F', 452, 300),
+  mk('106', 4, '1F', 360, 462), mk('109', 6, '1F', 452, 450),
+  mk('105', 4, '1F', 360, 612), mk('108', 6, '1F', 452, 600),
+  // 右側直排（4P）
+  mk('113', 4, '1F', 640, 330),
+  mk('112', 4, '1F', 640, 480),
+  mk('111', 4, '1F', 640, 622),
 ]
 
-// === 2F：北區 14 桌（天然氣）+ 南左 10 桌（天然氣）+ 南右 11 桌（瓦斯桶）===
+// === 2F：上區（201–215，多為 6P，210/211/212 為 4P）+ 右欄 4P（221–233）+ 下左（251–267，258/259/260 為 6P）===
 const FLOOR_2F = [
-  // --- 北區第 1 排 6P × 5（B8-B12）天然氣 ---
-  { number: 'B8',  capacity: 6, floor: '2F', x: 200, y: 110, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'natural-gas' },
-  { number: 'B9',  capacity: 6, floor: '2F', x: 320, y: 110, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'natural-gas' },
-  { number: 'B10', capacity: 6, floor: '2F', x: 440, y: 110, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'natural-gas' },
-  { number: 'B11', capacity: 6, floor: '2F', x: 600, y: 110, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'natural-gas' },
-  { number: 'B12', capacity: 6, floor: '2F', x: 720, y: 110, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'natural-gas' },
-  // --- 北區第 2 排 4P × 6（A11-A16）天然氣 ---
-  { number: 'A11', capacity: 4, floor: '2F', x: 200, y: 240, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A12', capacity: 4, floor: '2F', x: 320, y: 240, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A13', capacity: 4, floor: '2F', x: 440, y: 240, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A14', capacity: 4, floor: '2F', x: 600, y: 240, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A15', capacity: 4, floor: '2F', x: 720, y: 240, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A16', capacity: 4, floor: '2F', x: 840, y: 240, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  // --- 北區第 3 排 6P × 3（B13-B15）天然氣 ---
-  { number: 'B13', capacity: 6, floor: '2F', x: 200, y: 350, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'natural-gas' },
-  { number: 'B14', capacity: 6, floor: '2F', x: 320, y: 350, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'natural-gas' },
-  { number: 'B15', capacity: 6, floor: '2F', x: 440, y: 350, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'natural-gas' },
-  // --- 南左區 4P × 10（A17-A26）天然氣 ---
-  { number: 'A17', capacity: 4, floor: '2F', x: 120, y: 540, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A18', capacity: 4, floor: '2F', x: 240, y: 540, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A19', capacity: 4, floor: '2F', x: 360, y: 540, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A20', capacity: 4, floor: '2F', x: 480, y: 540, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A21', capacity: 4, floor: '2F', x: 600, y: 540, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A22', capacity: 4, floor: '2F', x: 120, y: 660, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A23', capacity: 4, floor: '2F', x: 240, y: 660, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A24', capacity: 4, floor: '2F', x: 360, y: 660, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A25', capacity: 4, floor: '2F', x: 480, y: 660, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  { number: 'A26', capacity: 4, floor: '2F', x: 600, y: 660, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'natural-gas' },
-  // --- 南右區（瓦斯桶）4P × 7 + 6P × 4 = 11 桌 ---
-  { number: 'A27', capacity: 4, floor: '2F', x: 800, y: 420, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'tank' },
-  { number: 'A28', capacity: 4, floor: '2F', x: 920, y: 420, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'tank' },
-  { number: 'A29', capacity: 4, floor: '2F', x: 1040, y: 420, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'tank' },
-  { number: 'B16', capacity: 6, floor: '2F', x: 800, y: 540, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'tank' },
-  { number: 'A30', capacity: 4, floor: '2F', x: 920, y: 540, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'tank' },
-  { number: 'A31', capacity: 4, floor: '2F', x: 1040, y: 540, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'tank' },
-  { number: 'B17', capacity: 6, floor: '2F', x: 800, y: 670, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'tank' },
-  { number: 'B18', capacity: 6, floor: '2F', x: 920, y: 670, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'tank' },
-  { number: 'B19', capacity: 6, floor: '2F', x: 1040, y: 670, w: TABLE_6P_W, h: TABLE_6P_H, fuel: 'tank' },
-  { number: 'A32', capacity: 4, floor: '2F', x: 720, y: 420, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'tank' },
-  { number: 'A33', capacity: 4, floor: '2F', x: 720, y: 540, w: TABLE_4P_W, h: TABLE_4P_H, fuel: 'tank' },
+  // 上區（201–209,213,215＝6P；210,211,212＝4P）
+  mk('201', 6, '2F', 360, 150), mk('203', 6, '2F', 452, 150), mk('207', 6, '2F', 600, 150), mk('210', 4, '2F', 692, 162), mk('213', 6, '2F', 845, 165),
+  mk('202', 6, '2F', 360, 290), mk('205', 6, '2F', 452, 290), mk('208', 6, '2F', 600, 290), mk('211', 4, '2F', 692, 302), mk('215', 6, '2F', 845, 305),
+  mk('206', 6, '2F', 360, 430),                                mk('209', 6, '2F', 600, 430), mk('212', 4, '2F', 692, 442),
+  // 右欄 4P（221–233）：4 列 × 3 欄
+  mk('221', 4, '2F', 940, 170), mk('226', 4, '2F', 1020, 170), mk('230', 4, '2F', 1100, 170),
+  mk('222', 4, '2F', 940, 290), mk('227', 4, '2F', 1020, 290), mk('231', 4, '2F', 1100, 290),
+  mk('223', 4, '2F', 940, 410), mk('228', 4, '2F', 1020, 410), mk('232', 4, '2F', 1100, 410),
+  mk('225', 4, '2F', 940, 530), mk('229', 4, '2F', 1020, 530), mk('233', 4, '2F', 1100, 530),
+  // 下左（258,259,260＝6P；其餘 4P）
+  mk('251', 4, '2F', 120, 537), mk('255', 4, '2F', 240, 537), mk('258', 6, '2F', 332, 525), mk('261', 4, '2F', 470, 537), mk('265', 4, '2F', 562, 537),
+  mk('252', 4, '2F', 120, 622), mk('256', 4, '2F', 240, 622), mk('259', 6, '2F', 332, 610), mk('262', 4, '2F', 470, 622), mk('266', 4, '2F', 562, 622),
+  mk('253', 4, '2F', 120, 707), mk('257', 4, '2F', 240, 707), mk('260', 6, '2F', 332, 695), mk('263', 4, '2F', 470, 707), mk('267', 4, '2F', 562, 707),
 ]
+
+// 非桌位設施（純標示，不可點選）。type: 'label' | 'rect' | 'stairs'；vtext=直書
+export const FIXTURES = {
+  '1F': [
+    { type: 'label', x: 300, y: 235, text: '醬料台' },
+    { type: 'label', x: 380, y: 150, text: '出菜口' },
+    { type: 'label', x: 560, y: 150, text: '結帳口' },
+    { type: 'rect', x: 735, y: 300, w: 24, h: 230, text: '冷藏自選冰箱', vtext: true },
+    { type: 'stairs', x: 735, y: 560, w: 60, h: 90, text: '上樓 ↑' },
+    { type: 'rect', x: 120, y: 610, w: 80, h: 60, text: '領位台' },
+    { type: 'label', x: 120, y: 735, text: '玻璃門入口' },
+  ],
+  '2F': [
+    { type: 'rect', x: 560, y: 40, w: 150, h: 26, text: '冷藏自選冰箱' },
+    { type: 'rect', x: 780, y: 40, w: 160, h: 50, text: '洗手間' },
+    { type: 'rect', x: 88, y: 120, w: 24, h: 150, text: '結帳口／出菜口', vtext: true },
+    { type: 'stairs', x: 430, y: 55, w: 60, h: 80, text: '下樓 ↓' },
+    { type: 'label', x: 430, y: 470, text: '醬料台' },
+  ],
+}
 
 // 合併 + 預設運營狀態欄位
 export const INITIAL_TABLES = [...FLOOR_1F, ...FLOOR_2F].map(t => ({
@@ -98,7 +94,7 @@ export const INITIAL_TABLES = [...FLOOR_1F, ...FLOOR_2F].map(t => ({
 }))
 
 export const TOTAL_CAPACITY = INITIAL_TABLES.reduce((sum, t) => sum + t.capacity, 0)
-// 33*4 + 19*6 = 132 + 114 = 246
+// 1F: 6*4 + 6*6 = 60 ｜ 2F: 27*4 + 13*6 = 186 ｜ 合計 246
 
 export const FLOOR_VIEWBOX = { width: 1200, height: 800 }
 

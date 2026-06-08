@@ -4,7 +4,7 @@ const DEFAULT_FUNCTION_BASE = 'https://us-central1-chicken-booking-tw.cloudfunct
 
 const KEYS = {
   bookings: 'chicken_bookings_v1',
-  tables: 'chicken_tables_v2',
+  tables: 'chicken_tables_v3',
   waitlist: 'chicken_waitlist_v1',
   customers: 'chicken_customers_v1',
   migration: 'chicken_firestore_migrated_v1',

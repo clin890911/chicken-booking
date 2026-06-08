@@ -3,17 +3,17 @@
 //           status, currentBookingId, seatedAt, mergedWith, blockReason, updatedAt }
 import { INITIAL_TABLES } from '../data/tables'
 
-const STORAGE_KEY = 'chicken_tables_v2'   // v2: 加上 floor/coord/status
-const LEGACY_KEY = 'chicken_tables_v1'
+const STORAGE_KEY = 'chicken_tables_v3'   // v3: 改為「雞王座號圖」桌號（101–113 / 201–267）
+const LEGACY_KEYS = ['chicken_tables_v2', 'chicken_tables_v1']
 
 function read() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
-      // 第一次載入：寫入新版預設
+      // 第一次載入（或升級到新桌號圖）：寫入新版預設
       localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_TABLES))
-      // 清掉舊版（避免混淆）
-      try { localStorage.removeItem(LEGACY_KEY) } catch {}
+      // 清掉舊版桌號（A1–B19），避免與新桌號（101–267）混淆
+      try { LEGACY_KEYS.forEach(k => localStorage.removeItem(k)) } catch {}
       return INITIAL_TABLES.slice()
     }
     const parsed = JSON.parse(raw)

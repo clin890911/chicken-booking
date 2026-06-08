@@ -71,7 +71,7 @@ export default function SettingsView() {
     URL.revokeObjectURL(url)
   }
   const handleResetAll = () => {
-    ['chicken_bookings_v1', 'chicken_tables_v2', 'chicken_waitlist_v1', 'chicken_customers_v1', 'chicken_noshow_v1']
+    ['chicken_bookings_v1', 'chicken_tables_v3', 'chicken_tables_v2', 'chicken_waitlist_v1', 'chicken_customers_v1', 'chicken_noshow_v1']
       .forEach(k => localStorage.removeItem(k))
     window.location.reload()
   }
