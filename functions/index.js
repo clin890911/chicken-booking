@@ -183,10 +183,14 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
         db.collection(COLLECTIONS.bookings).where('date', '==', date).get(),
       ])
       const bookings = bookingsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      slots = generateSlotsServer(settings).map(time => ({
-        time,
-        remaining: calcSlotCapacityServer(tables, bookings, date, time, settings),
-      }))
+      const nowMs = Date.now()
+      slots = generateSlotsServer(settings)
+        // 濾掉「已過的時段」：今天已過的抵達時段不再顯示為可訂（其他日期的時段都在未來，不受影響）。
+        .filter(time => slotEpochMs(date, time) > nowMs)
+        .map(time => ({
+          time,
+          remaining: calcSlotCapacityServer(tables, bookings, date, time, settings),
+        }))
     }
 
     return res.json({ ok: true, date, slots, settings: publicStoreSettings(settings) })
@@ -926,16 +930,17 @@ async function getBookingByToken(bookingId, token) {
   return booking
 }
 
-function guestEditable(booking, now = new Date()) {
+function guestEditable(booking, nowMs = Date.now()) {
   if (!booking) return { ok: false, reason: '找不到此訂位' }
   if (['arrived', 'completed', 'cancelled', 'noshow'].includes(booking.status)) {
     return { ok: false, reason: '此訂位狀態已無法由客人自行修改' }
   }
   if (!booking.date || !booking.timeSlot) return { ok: false, reason: '訂位資料不完整，請聯絡店家' }
-  const dineAt = new Date(`${booking.date}T${booking.timeSlot}:00`)
-  if (Number.isNaN(dineAt.getTime())) return { ok: false, reason: '訂位時間不正確，請聯絡店家' }
-  const cutoff = new Date(dineAt.getTime() - 2 * 60 * 60 * 1000)
-  if (now >= cutoff) return { ok: false, reason: '用餐前 2 小時內請改以電話聯絡店家' }
+  // 以店家時區（台灣 +08:00）計算用餐絕對時間，避免 UTC 伺服器把牆鐘時間誤判而差 8 小時。
+  const dineAtMs = slotEpochMs(booking.date, booking.timeSlot)
+  if (Number.isNaN(dineAtMs)) return { ok: false, reason: '訂位時間不正確，請聯絡店家' }
+  const cutoffMs = dineAtMs - 2 * 60 * 60 * 1000
+  if (nowMs >= cutoffMs) return { ok: false, reason: '用餐前 2 小時內請改以電話聯絡店家' }
   return { ok: true }
 }
 
@@ -997,9 +1002,25 @@ function generateSlotsServer(settings = {}) {
   return out
 }
 
+// 店家時區：台灣固定 UTC+8、無日光節約。Cloud Functions 預設以 UTC 執行，
+// 所有「營業時間/今天/時段是否已過」的牆鐘判斷都必須用台灣時間，否則會差 8 小時。
+const STORE_TZ = 'Asia/Taipei'
+const STORE_UTC_OFFSET = '+08:00'
+
 function todayServerStr() {
-  const d = new Date()
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+  // 以店家時區計算「今天」（YYYY-MM-DD），避免 UTC 伺服器在台灣午夜前後算錯日期。
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: STORE_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+// 把「店家時區的某日某時段」（如 2026-06-08 18:00）轉成絕對時間戳（ms），
+// 用來與 Date.now() 比較「該時段是否已過」。台灣固定 +08:00，故可直接帶偏移。
+function slotEpochMs(dateStr, timeSlot) {
+  return Date.parse(`${dateStr}T${timeSlot}:00${STORE_UTC_OFFSET}`)
 }
 
 // 驗證並正規化日期字串（YYYY-MM-DD），不合法回空字串
@@ -1056,6 +1077,10 @@ function validateNewBooking(body = {}, settings = {}) {
   const timeSlot = String(body.timeSlot || '').trim()
   if (!generateSlotsServer(settings).includes(timeSlot)) {
     return { ok: false, error: '請選擇有效的訂位時段' }
+  }
+  // 後端硬擋「已過的時段」：避免繞過前端、或在時段剛過的邊界仍下訂今天已過的時間。
+  if (slotEpochMs(date, timeSlot) <= Date.now()) {
+    return { ok: false, error: '此時段已過，請選擇較晚的時段' }
   }
 
   const notes = {
