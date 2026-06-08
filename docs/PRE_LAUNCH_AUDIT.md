@@ -56,7 +56,7 @@
 
 ---
 
-## 4. 本輪發現與處理（F-A ～ F-I）
+## 4. 本輪發現與處理（F-A ～ F-J）
 
 | ID | 嚴重度 | 描述 | 處理 | 驗證 |
 |---|---|---|---|---|
@@ -69,6 +69,7 @@
 | **F-G** | 🟡 | **`adminPullData` 每 5s 整份拉取**：隨資料成長讀取量線性上升 | **暫緩（見下）** | — |
 | **F-H** | 🟡 | 雜項 UX/安全小修 | **部分已修** | 程式碼/建置 |
 | **F-I** | 🔴 | **顧客填完聯絡資訊送出後白屏**：`ConfirmPage` 在 render（useMemo）呼叫 `googleCalendarUrl`，對異常 `date`/`timeSlot` 做 `new Date(...).toISOString()` 會丟 `RangeError`；且**全 app 無 ErrorBoundary**，任一 render 例外即整棵 React tree 卸載 → 整頁空白 | **已修＋瀏覽器實測** | ✅ 已測 |
+| **F-J** | 🔴 | **晚上仍顯示「今天已過的時段」**：`guestGetAvailability` 不過濾過去時段、`validateNewBooking` 只擋過去「日期」不擋過去「時段」；且 Cloud Functions 跑 UTC 但營業是台灣時間 → 晚上 9 點仍能訂今天 18:00 | **已修＋emulator 實測** | ✅ 已測 |
 
 ### F-A 刪除同步（已修＋已測）
 - 前端 `cloudDataService.js`：`pushChangedData` 新增刪除偵測（`lastSynced` 有、`cur` 無者 → `dataset.deletedIds`）；新增 `pendingDeletes` 集合，`applyCloudSnapshot` 對待刪文件不從雲端復原。
@@ -118,6 +119,20 @@
   2. 安全網：以臨時丟錯驗證 ErrorBoundary → 顯示友善卡片而非白屏（截圖確認），驗後移除測試碼。
   3. Happy path（合法資料）：確認頁正常、「加到行事曆」啟用並連到 Google Calendar；`npm run build` 通過。
 
+### F-J 晚上仍顯示今天已過時段（已修＋emulator 實測）🔴
+- **症狀**：台灣 6/8 晚上 9 點（營業 11:00–19:00），訂位前台仍顯示今天可訂時段、甚至能下訂今天 18:00。
+- **根因**：
+  1. `generateSlotsServer` 產生整天所有抵達時段，`guestGetAvailability` 不論幾點都原樣回傳，**完全沒有「過去時段」過濾**。
+  2. `validateNewBooking` 只擋「過去日期」（`date < today`），不擋「今天但時段已過」，所以繞過前端也能成立今天已過的訂位。
+  3. **時區**：Cloud Functions 預設以 UTC 執行，但營業時間是台灣時間（UTC+8）；若用伺服器 UTC 牆鐘判斷會差 8 小時。
+- **修復（`functions/index.js`）**：
+  - 新增 `STORE_TZ='Asia/Taipei'`、`STORE_UTC_OFFSET='+08:00'` 與 `slotEpochMs(date,time)=Date.parse(\`${date}T${time}:00+08:00\`)`（台灣固定 UTC+8 無日光節約，可直接帶偏移）。
+  - `guestGetAvailability`：以 `slotEpochMs(date,time) > Date.now()` 濾掉已過時段（其他日期都在未來，不受影響）。
+  - `validateNewBooking`：新增硬擋 `slotEpochMs(date,timeSlot) <= now` → 400「此時段已過，請選擇較晚的時段」。
+  - `todayServerStr()` 改用 `Intl.DateTimeFormat(Asia/Taipei)`；`guestEditable` 的「用餐前 2 小時」截止改用 `slotEpochMs`（修正原本差 8 小時）。
+  - 前端不需改：客人端時段全由後端 `guestGetAvailability` 提供，回傳空陣列時前台本就顯示「這天目前沒有可訂時段」。
+- **驗證（emulator + 重寫測試 `/tmp/booking_time_test.mjs`，9/9 ✅）**：測試環境台灣時間正好 21:26（對應回報情境）。以全天營業驗證「今天只回未過時段、00:00 被濾、23:30 仍可訂、下訂已過時段被擋、明天正常」；再以**真實營業時間 11:00–19:00** 確認 21:26 時今天可訂時段=**0（空）**、明天=17。
+
 ---
 
 ## 5. Emulator 測試矩陣結果（34/34 ✅）
@@ -142,6 +157,7 @@
 - [x] F-A/F-B/F-E/F-F 已修並 emulator 驗證
 - [x] F-C/F-D/F-H 已修（建置驗證）
 - [x] **F-I 顧客白屏已修並瀏覽器實測**（新增全域 ErrorBoundary + ConfirmPage 日期運算加固）
+- [x] **F-J 過去時段過濾已修並 emulator 實測**（台灣時區、晚上不再顯示/下訂今天已過時段）
 - [ ] **【人工必檢】正式環境已設定 6 個 `VITE_FIREBASE_*`**（缺則後台同步靜默失敗；後台會出現紅色「雲端同步未啟用」橫幅）
 - [ ] **【人工必檢】Secret Manager 已設 `LINE_CHANNEL_*`、`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`**
 - [ ] **【人工必檢】`ADMIN_EMAILS`（functions/.env）已設員工白名單**
