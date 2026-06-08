@@ -161,7 +161,7 @@ export default function LineBindPage() {
                   <MessageCircle size={24} />
                 </div>
                 <div>
-                  <div className="text-xs font-bold opacity-85">雞王刷刷鍋</div>
+                  <div className="text-xs font-bold opacity-85">雞王涮涮鍋</div>
                   <h1 className="text-xl font-black">用 LINE 接收訂位資訊</h1>
                 </div>
               </div>

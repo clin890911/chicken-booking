@@ -94,7 +94,7 @@ export function bookingLinePayload(booking, settings = {}, manageUrl = '') {
       manageUrl,
     },
     store: {
-      name: settings.storeName || '雞王刷刷鍋',
+      name: settings.storeName || '雞王涮涮鍋',
       address: settings.storeAddress || DEFAULT_STORE_ADDRESS,
       phone: settings.storePhone || DEFAULT_STORE_PHONE,
       mapUrl: settings.storeMapUrl || DEFAULT_STORE_MAP_URL,

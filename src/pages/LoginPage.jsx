@@ -34,7 +34,7 @@ export default function LoginPage() {
         <div className="text-center mb-6">
           <div className="text-6xl mb-2">🔐</div>
           <h1 className="text-2xl font-black text-chicken-brown">同仁登入</h1>
-          <p className="text-sm text-chicken-brown/60 mt-1">雞王刷刷鍋管理後台</p>
+          <p className="text-sm text-chicken-brown/60 mt-1">雞王涮涮鍋管理後台</p>
         </div>
 
         <Card>

@@ -16,14 +16,14 @@ import {
   Trash2,
   Users,
 } from 'lucide-react'
-import { Button, Input, Textarea, Badge } from '../components/ui'
+import { Button, Input, Textarea, Badge, SlotSkeleton } from '../components/ui'
 import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
 import { lineBindUrl, notifyLineBooking } from '../services/lineService'
-import { guestCancelBooking, guestGetBooking, guestUpdateBooking } from '../services/cloudDataService'
-import { addDays, dayLabel, formatDate, generateTimeSlots, todayStr } from '../utils/timeSlots'
-import { calcSlotCapacity } from '../utils/capacity'
+import { guestCancelBooking, guestGetAvailability, guestGetBooking, guestUpdateBooking } from '../services/cloudDataService'
+import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
+import { isValidTwPhone } from '../utils/validation'
 
 const NOTE_OPTIONS = [
   { key: 'pet', label: '攜帶寵物' },
@@ -37,7 +37,7 @@ export default function ManageBookingPage() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token') || ''
-  const { bookings, tables, settings, refresh } = useBooking()
+  const { settings, refresh } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -95,19 +95,41 @@ export default function ManageBookingPage() {
 
   const editable = useMemo(() => bookingService.isGuestEditable(booking), [booking])
 
+  // 改期可訂時段：與訂位頁同一來源（後端 guestGetAvailability 即時可訂），
+  // 避免改用本機桌位／空訂位算出「每格都可訂」的假象，也自動濾掉今天已過的時段。
+  const [serverSlots, setServerSlots] = useState([])
+  const [slotsLoading, setSlotsLoading] = useState(false)
+  const [slotsError, setSlotsError] = useState('')
+
+  useEffect(() => {
+    if (mode !== 'schedule' || !form?.date) return
+    let cancelled = false
+    setSlotsLoading(true)
+    setSlotsError('')
+    guestGetAvailability(form.date)
+      .then(res => { if (!cancelled) setServerSlots(Array.isArray(res.slots) ? res.slots : []) })
+      .catch(err => { if (!cancelled) { setServerSlots([]); setSlotsError(err.message || '無法載入可訂時段，請稍後再試') } })
+      .finally(() => { if (!cancelled) setSlotsLoading(false) })
+    return () => { cancelled = true }
+  }, [mode, form?.date])
+
   const slots = useMemo(() => {
-    if (!form?.date) return []
-    return generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval).map(time => {
-      const otherBookings = bookings.filter(b => b.id !== id)
-      const remaining = calcSlotCapacity(tables, otherBookings, form.date, time, settings)
-      return {
-        time,
-        remaining,
-        full: remaining < Number(form.guests || 1),
-        period: Number(time.slice(0, 2)) < 15 ? '午餐' : '晚餐',
-      }
-    })
-  }, [bookings, form?.date, form?.guests, id, settings, tables])
+    return serverSlots
+      .filter(s => s && typeof s.time === 'string' && /^\d{2}:\d{2}/.test(s.time))
+      .map(({ time, remaining }) => {
+        let rem = Number(remaining) || 0
+        // 同一天的原時段：把本訂位自己佔的座位加回（自己改自己，不該被自己擋住）。
+        if (booking && form?.date === booking.date && time === booking.timeSlot) {
+          rem += Number(booking.guests) || 0
+        }
+        return {
+          time,
+          remaining: rem,
+          full: rem < Number(form?.guests || 1),
+          period: Number(time.slice(0, 2)) < 15 ? '午餐' : '晚餐',
+        }
+      })
+  }, [serverSlots, form?.guests, form?.date, booking])
 
   const groupedSlots = useMemo(() => ({
     午餐: slots.filter(s => s.period === '午餐' && !s.full),
@@ -181,9 +203,10 @@ export default function ManageBookingPage() {
           text: form.notes.text.trim(),
         },
       }
-      let result = await guestUpdateBooking(id, token, patch).catch(err => ({ ok: false, reason: err.message }))
-      if (!result.ok) result = bookingService.updateBookingByGuest(id, token, patch)
-      if (!result.ok) return setError(result.reason)
+      // 雲端為唯一真實來源：失敗就誠實報錯，不退回「只改本機」的假成功
+      // （客人端本機資料對店家無意義，會造成「以為改好、店家卻沒收到」）。
+      const result = await guestUpdateBooking(id, token, patch).catch(err => ({ ok: false, reason: err.message }))
+      if (!result.ok) return setError(result.reason || '更新失敗，請稍後再試，或來電由專人協助')
       bookingService.upsertFromRemote({ ...result.booking, manageToken: result.booking.manageToken || token })
       refresh()
       setBooking(result.booking)
@@ -212,9 +235,9 @@ export default function ManageBookingPage() {
 
     setBusy(true)
     try {
-      let result = await guestCancelBooking(id, token, reason).catch(err => ({ ok: false, reason: err.message }))
-      if (!result.ok) result = bookingService.cancelBookingByGuest(id, token, reason)
-      if (!result.ok) return setError(result.reason)
+      // 同 submit：雲端失敗就誠實報錯，不退回本機假成功。
+      const result = await guestCancelBooking(id, token, reason).catch(err => ({ ok: false, reason: err.message }))
+      if (!result.ok) return setError(result.reason || '取消失敗，請稍後再試，或來電由專人協助')
       bookingService.upsertFromRemote({ ...result.booking, manageToken: result.booking.manageToken || token })
       refresh()
       setBooking(result.booking)
@@ -278,7 +301,7 @@ export default function ManageBookingPage() {
                   <Input label="用餐日期" type="date" min={todayStr()} max={maxDate} value={form.date} onChange={e => set('date', e.target.value)} />
                   <Input label="用餐人數" type="number" min="1" max="12" value={form.guests} onChange={e => set('guests', e.target.value)} />
                 </div>
-                <SlotGrid groupedSlots={groupedSlots} value={form.timeSlot} onChange={(time) => set('timeSlot', time)} />
+                <SlotGrid groupedSlots={groupedSlots} value={form.timeSlot} loading={slotsLoading} error={slotsError} onChange={(time) => set('timeSlot', time)} />
                 <BeforeAfter before={booking} after={form} />
                 <FooterActions busy={busy} changed={changed} error={error} onBack={resetForm} onSubmit={submit} />
               </motion.section>
@@ -376,7 +399,7 @@ function BookingHero({ booking, editable }) {
       <div className="bg-chicken-red px-5 py-4 text-white">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-xs font-bold opacity-85">雞王刷刷鍋</div>
+            <div className="text-xs font-bold opacity-85">雞王涮涮鍋</div>
             <h1 className="mt-1 text-2xl font-black">管理我的訂位</h1>
           </div>
           <Badge color={booking.status === 'cancelled' ? 'gray' : 'yellow'} className="bg-white text-chicken-red">
@@ -431,8 +454,8 @@ function ActionGrid({ setMode, booking, settings }) {
       <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
         <MessageCircle className="text-[#06C755]" size={24} />
         <div>
-          <div className="font-black text-chicken-brown">用 LINE 接收訂位資訊</div>
-          <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">開啟官方帳號，接收定位與修改入口</div>
+          <div className="font-black text-chicken-brown">加入 LINE 官方帳號</div>
+          <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">先加好友，未來接收提醒、定位與修改入口</div>
         </div>
       </a>
       {settings.storePhone ? (
@@ -458,10 +481,26 @@ function ActionCard({ icon: Icon, title, hint, onClick, danger = false }) {
   )
 }
 
-function SlotGrid({ groupedSlots, value, onChange }) {
+function SlotGrid({ groupedSlots, value, loading, error, onChange }) {
   const total = groupedSlots.午餐.length + groupedSlots.晚餐.length
+  if (loading) {
+    return (
+      <div>
+        <label className="label">可訂時段</label>
+        <SlotSkeleton />
+      </div>
+    )
+  }
+  if (error) {
+    return (
+      <div className="empty-panel" role="alert">
+        <p className="font-bold text-chicken-brown">{error}</p>
+        <p className="mt-1 text-sm text-chicken-brown/60">請稍後再試，或來電由專人為您改期。</p>
+      </div>
+    )
+  }
   if (total === 0) {
-    return <div className="empty-panel"><p className="font-bold text-chicken-brown">此日期沒有符合人數的時段</p></div>
+    return <div className="empty-panel"><p className="font-bold text-chicken-brown">此日期沒有符合人數的可訂時段</p><p className="mt-1 text-sm text-chicken-brown/60">請改選其他日期，或來電詢問。</p></div>
   }
   return (
     <div>
@@ -547,9 +586,9 @@ function SuccessPanel({ booking, settings, onBack }) {
       <h2 className="mt-3 text-xl font-black text-chicken-brown">訂位已更新</h2>
       <p className="mt-2 text-sm leading-6 text-chicken-brown/60">同仁端已同步收到新的訂位內容。</p>
       <div className="mt-5 grid gap-2">
-        <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">用 LINE 接收最新訂位</a>
+        <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">加入 LINE 官方帳號</a>
         <p className="text-xs font-bold leading-5 text-chicken-brown/55">
-          目前會先開啟 LINE 官方帳號；正式 LIFF 推播上線後，官方帳號會自動發送最新訂位與定位。
+          目前按鈕會先開啟 LINE 官方帳號加好友；正式 LIFF 推播上線後，才會自動發送最新訂位與定位。
         </p>
         <button onClick={onBack} className="text-sm font-bold text-chicken-brown/60 underline">回訂位管理中心</button>
       </div>
@@ -636,7 +675,7 @@ function toForm(booking) {
 
 function validateForm(form) {
   if (!form.name.trim()) return '請填寫姓名'
-  if (!/^[\d\-+\s]{7,}$/.test(form.phone.trim())) return '電話格式不正確'
+  if (!isValidTwPhone(form.phone)) return '電話格式不正確，請輸入正確的台灣電話號碼'
   if (!form.date) return '請選擇用餐日期'
   if (!form.timeSlot) return '請選擇可訂時段'
   const guests = Number(form.guests)

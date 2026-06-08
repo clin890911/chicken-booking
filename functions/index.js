@@ -600,7 +600,7 @@ async function handleLineEvent(event) {
   if (event.type === 'follow' && event.replyToken) {
     await replyLineMessage(event.replyToken, [{
       type: 'text',
-      text: '歡迎加入雞王刷刷鍋！完成線上訂位後，可用官方帳號接收訂位資訊、定位與修改連結。',
+      text: '歡迎加入雞王涮涮鍋！完成線上訂位後，可用官方帳號接收訂位資訊、定位與修改連結。',
     }])
   }
 }
@@ -615,7 +615,7 @@ function buildBookingMessages(booking, store, type) {
   const messages = [
     {
       type: 'flex',
-      altText: `雞王刷刷鍋${title}`,
+      altText: `雞王涮涮鍋${title}`,
       contents: bookingBubble(booking, store, title, type),
     },
   ]
@@ -660,7 +660,7 @@ function bookingBubble(booking, store, title, type) {
       backgroundColor: statusColor,
       paddingAll: '16px',
       contents: [
-        { type: 'text', text: store.name || '雞王刷刷鍋', color: '#FFFFFF', weight: 'bold', size: 'sm' },
+        { type: 'text', text: store.name || '雞王涮涮鍋', color: '#FFFFFF', weight: 'bold', size: 'sm' },
         { type: 'text', text: title, color: '#FFFFFF', weight: 'bold', size: 'xl', margin: 'sm' },
       ],
     },
@@ -704,8 +704,8 @@ function locationMessage(store) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
   return {
     type: 'location',
-    title: store.name || '雞王刷刷鍋',
-    address: store.address || store.name || '雞王刷刷鍋',
+    title: store.name || '雞王涮涮鍋',
+    address: store.address || store.name || '雞王涮涮鍋',
     latitude: lat,
     longitude: lng,
   }
@@ -713,7 +713,7 @@ function locationMessage(store) {
 
 function normalizeStore(store = {}) {
   return {
-    name: store.name || '雞王刷刷鍋',
+    name: store.name || '雞王涮涮鍋',
     address: store.address || DEFAULT_STORE_ADDRESS,
     phone: store.phone || DEFAULT_STORE_PHONE,
     mapUrl: store.mapUrl || DEFAULT_STORE_MAP_URL,
@@ -799,14 +799,14 @@ function normalizeStoreSettings(settings = {}) {
     cleanupBufferMin: Number(settings.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN,
     heroBanners: Array.isArray(settings.heroBanners) ? settings.heroBanners : [],
     lineOfficialUrl: settings.lineOfficialUrl || 'https://lin.ee/8lECi4S',
-    lineOfficialName: settings.lineOfficialName || '雞王刷刷鍋 LINE 官方帳號',
+    lineOfficialName: settings.lineOfficialName || '雞王涮涮鍋 LINE 官方帳號',
     lineUseLiff: settings.lineUseLiff !== false,
     lineLiffUrl: settings.lineLiffUrl || 'https://liff.line.me/2009996489-f1SCb75q',
     lineLiffId: settings.lineLiffId || '2009996489-f1SCb75q',
     lineBindEndpoint: settings.lineBindEndpoint || 'https://linebind-reaor76eyq-uc.a.run.app',
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
-    storeName: settings.storeName || '雞王刷刷鍋',
+    storeName: settings.storeName || '雞王涮涮鍋',
     storePhone: settings.storePhone || DEFAULT_STORE_PHONE,
     storeAddress: settings.storeAddress || DEFAULT_STORE_ADDRESS,
     storeMapUrl: settings.storeMapUrl || DEFAULT_STORE_MAP_URL,

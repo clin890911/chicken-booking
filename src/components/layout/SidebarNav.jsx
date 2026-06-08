@@ -16,7 +16,7 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
           王
         </div>
         <div className="hidden xl:block min-w-0">
-          <div className="text-sm font-black text-chicken-brown leading-tight">雞王刷刷鍋</div>
+          <div className="text-sm font-black text-chicken-brown leading-tight">雞王涮涮鍋</div>
           <div className="text-[10px] text-chicken-brown/50 leading-tight">Master of Chicken</div>
         </div>
       </div>

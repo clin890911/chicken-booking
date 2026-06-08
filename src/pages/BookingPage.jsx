@@ -2,17 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, Search, ShieldCheck, Sparkles, Users } from 'lucide-react'
-import { Input, Textarea } from '../components/ui'
+import { Input, Textarea, SlotSkeleton } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import { guestGetAvailability, guestCreateBooking } from '../services/cloudDataService'
 import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
 import { bookingOccupancyLabel } from '../utils/capacity'
-
-// 台灣電話：09 開頭手機（10 碼）或市話（8–10 碼），與後端 validateNewBooking 一致
-const isValidTwPhone = (raw) => {
-  const d = String(raw || '').replace(/\D/g, '')
-  return /^09\d{8}$/.test(d) || /^\d{8,10}$/.test(d)
-}
+import { isValidTwPhone } from '../utils/validation'
 
 const NOTE_OPTIONS = [
   { key: 'pet', label: '攜帶寵物' },
@@ -66,6 +61,32 @@ export default function BookingPage() {
     loadAvailability(data.date)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.date])
+
+  // 「找最近可訂日」：當天沒有符合人數的時段時，往後逐日查詢，找到第一個有空位的日期就跳過去，
+  // 避免客人一天一天手動點。最多掃描到可預訂範圍上限為止。
+  const [findingNext, setFindingNext] = useState(false)
+  const [findNextMsg, setFindNextMsg] = useState('')
+  const findNextAvailable = async () => {
+    setFindingNext(true)
+    setFindNextMsg('')
+    try {
+      const lastDate = dates[dates.length - 1]?.value
+      const start = new Date(data.date + 'T00:00:00')
+      const maxAhead = settings.maxDaysAhead || 30
+      for (let i = 1; i <= maxAhead; i++) {
+        const d = formatDate(addDays(start, i))
+        if (lastDate && d > lastDate) break // 超出可預訂範圍
+        try {
+          const res = await guestGetAvailability(d)
+          const hasRoom = (res.slots || []).some(s => Number(s.remaining) >= data.guests)
+          if (hasRoom) { setDate(d); window.scrollTo({ top: 0, behavior: 'smooth' }); return }
+        } catch { /* 這天查詢失敗就略過，繼續往後找 */ }
+      }
+      setFindNextMsg('接下來的可預訂日期都沒有符合人數的時段，請來電由專人協助安排。')
+    } finally {
+      setFindingNext(false)
+    }
+  }
 
   const dates = useMemo(() => {
     const today = new Date(todayStr() + 'T00:00:00')
@@ -134,9 +155,11 @@ export default function BookingPage() {
         notes: data.notes,
       })
       const booking = res.booking
-      // 後端回傳完整訂位（含 manageToken），用 route state 帶到確認頁，
-      // 客人端不需也無法存取本機全量資料。
-      navigate(`/confirm/${booking.id}`, { state: { booking } })
+      // 後端回傳完整訂位（含 manageToken），用 route state 帶到確認頁。
+      // 同時把 token 放進網址：重新整理或把連結傳到另一支手機時，確認頁可用 id+token 向後端補抓，
+      // 不會再因 route state 消失而「找不到此訂位」。
+      const tokenQuery = booking.manageToken ? `?token=${encodeURIComponent(booking.manageToken)}` : ''
+      navigate(`/confirm/${booking.id}${tokenQuery}`, { state: { booking } })
     } catch (err) {
       // 409：時段剛被訂滿或重複下單 → 退回選時段步驟並重新載入可訂時段
       if (err.status === 409) {
@@ -210,6 +233,9 @@ export default function BookingPage() {
                 loading={slotsLoading}
                 error={slotsError}
                 onChange={(time) => set('timeSlot', time)}
+                onFindNext={findNextAvailable}
+                findingNext={findingNext}
+                findNextMsg={findNextMsg}
               />
             </motion.section>
           ) : (
@@ -337,7 +363,7 @@ function HeroPanel() {
         </div>
         <h1 className="text-3xl font-black leading-tight text-chicken-brown">找一張適合您的餐桌</h1>
         <p className="mt-3 max-w-xl text-sm leading-6 text-chicken-brown/65">
-          48 小時冷藏文昌雞，線上訂位立即保留。選好抵達時段後，到店出示訂位編號即可。
+          48 小時冷藏文昌雞。送出後立即建立訂位紀錄，到店由現場為您安排座位，出示訂位編號即可。
         </p>
         <Link to="/lookup" className="mt-4 inline-flex items-center gap-2 text-sm font-black text-chicken-red underline underline-offset-4 sm:hidden">
           <Search size={16} />
@@ -353,7 +379,7 @@ function PartyPanel({ guests, onSetGuests }) {
     <section className="surface p-5">
       <SectionTitle icon={Users} title="幾位用餐？" hint="最多 12 位，更多人數可於備註說明" />
       <div className="mt-4 flex items-center gap-3">
-        <button className="btn-secondary flex h-12 w-12 items-center justify-center !p-0" onClick={() => onSetGuests(guests - 1)} aria-label="減少人數">
+        <button className="btn-secondary flex h-12 w-12 items-center justify-center !p-0 disabled:opacity-40 disabled:cursor-not-allowed" onClick={() => onSetGuests(guests - 1)} disabled={guests <= 1} aria-label="減少人數">
           <Minus size={18} />
         </button>
         <motion.div
@@ -365,7 +391,7 @@ function PartyPanel({ guests, onSetGuests }) {
           <span className="text-3xl font-black tabular-nums text-chicken-brown">{guests}</span>
           <span className="ml-1 text-sm font-bold text-chicken-brown/55">位</span>
         </motion.div>
-        <button className="btn-secondary flex h-12 w-12 items-center justify-center !p-0" onClick={() => onSetGuests(guests + 1)} aria-label="增加人數">
+        <button className="btn-secondary flex h-12 w-12 items-center justify-center !p-0 disabled:opacity-40 disabled:cursor-not-allowed" onClick={() => onSetGuests(guests + 1)} disabled={guests >= 12} aria-label="增加人數">
           <Plus size={18} />
         </button>
       </div>
@@ -517,17 +543,14 @@ function CalendarPicker({ dates, value, onChange }) {
   )
 }
 
-function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onChange }) {
+function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onChange, onFindNext, findingNext, findNextMsg }) {
   const total = groupedSlots.午餐.length + groupedSlots.晚餐.length
 
   return (
     <section className="surface p-5">
       <SectionTitle icon={Clock} title="選擇抵達時間" hint={bookingOccupancyLabel(settings)} />
       {loading ? (
-        <div className="empty-panel mt-4" role="status" aria-live="polite">
-          <div className="mb-2 text-3xl">⏳</div>
-          <p className="font-bold text-chicken-brown">正在查詢可訂時段...</p>
-        </div>
+        <SlotSkeleton />
       ) : error ? (
         <div className="empty-panel mt-4" role="alert">
           <div className="mb-2 text-3xl">⚠️</div>
@@ -536,9 +559,18 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
         </div>
       ) : total === 0 ? (
         <div className="empty-panel mt-4">
-          <div className="text-3xl mb-2">⏳</div>
+          <div className="text-3xl mb-2">📅</div>
           <p className="font-bold text-chicken-brown">這天目前沒有可訂時段</p>
-          <p className="mt-1 text-sm text-chicken-brown/60">請改選其他日期，或來電詢問現場座位。</p>
+          <p className="mt-1 text-sm text-chicken-brown/60">可以讓系統幫你找最近一個還有空位的日期。</p>
+          <button
+            type="button"
+            onClick={onFindNext}
+            disabled={findingNext}
+            className="btn-primary mx-auto mt-4 inline-flex items-center gap-2 disabled:opacity-60"
+          >
+            {findingNext ? '搜尋中...' : `幫我找最近可訂日（${guests} 位）`}
+          </button>
+          {findNextMsg && <p className="mt-3 text-sm font-bold text-chicken-red">{findNextMsg}</p>}
         </div>
       ) : (
         <div className="mt-4 space-y-5">
@@ -668,7 +700,7 @@ function SummaryRows({ data, settings }) {
       <SummaryLine label="人數" value={`${data.guests} 位`} />
       <SummaryLine label="日期" value={data.date ? dayLabel(data.date) : '尚未選擇'} />
       <SummaryLine label="時間" value={data.timeSlot || '尚未選擇'} />
-      <SummaryLine label="確認" value="送出立即保留" />
+      <SummaryLine label="確認" value="送出即建立訂位" />
       <SummaryLine label="電話" value={settings.storePhone || '049-2753377'} icon={Phone} />
     </div>
   )

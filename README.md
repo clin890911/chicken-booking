@@ -1,4 +1,4 @@
-# 🐔 雞王刷刷鍋訂位系統 chicken-booking
+# 🐔 雞王涮涮鍋訂位系統 chicken-booking
 
 Master of Chicken 訂位 + 現場座位管理系統。React + Vite + Tailwind CSS。
 
@@ -101,5 +101,4 @@ VITE_ROLE_MAP={"berrylin0911@gmail.com":"manager","floor1@example.com":"floor","
 
 ## 相關專案
 
-- 設計參考：`seat-map-v0.html`（v0 純 HTML 原型，保留作為 UX 參考）
 - 姐妹站：菇神 `gs1688.com.tw`、鹿芝谷 `deervalley.com.tw`

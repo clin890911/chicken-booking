@@ -11,7 +11,7 @@ export default function HomePage() {
   const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
   const info = [
     { icon: Clock, label: '營業時間', value: `${settings.openTime || '11:00'} - ${settings.closeTime || '19:00'}` },
-    { icon: ShieldCheck, label: '訂位確認', value: '線上送出立即保留' },
+    { icon: ShieldCheck, label: '訂位確認', value: '送出即建立紀錄' },
     { icon: Utensils, label: '用餐時間', value: `${diningDuration} 分鐘，保留 ${cleanupBuffer} 分鐘` },
   ]
 
@@ -32,7 +32,7 @@ export default function HomePage() {
           <h1 className="text-4xl font-black leading-tight text-chicken-brown sm:text-5xl">
             <span className="inline-flex items-center gap-3">
               <img src="/brand/master-of-chicken-logo.jpg" alt="Master of Chicken" className="h-14 w-14 rounded-full bg-white object-contain p-1.5 shadow-sm" />
-              雞王刷刷鍋
+              雞王涮涮鍋
             </span>
           </h1>
           <p className="mt-2 text-base font-bold text-chicken-red">Master of Chicken</p>
@@ -126,7 +126,7 @@ function HeroCarousel({ banners }) {
           <motion.img
             key={slide.id || slide.image}
             src={slide.image}
-            alt={slide.title || '雞王刷刷鍋'}
+            alt={slide.title || '雞王涮涮鍋'}
             className={`h-full w-full bg-white ${slide.fit === 'contain' ? 'object-contain p-6' : 'object-cover'}`}
             initial={{ opacity: 0, scale: 1.03 }}
             animate={{ opacity: 1, scale: 1 }}

@@ -63,7 +63,7 @@ export default function LookupBookingPage() {
       <main className="mx-auto max-w-3xl px-4 py-5">
         <motion.section initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="surface overflow-hidden">
           <div className="bg-chicken-red px-5 py-5 text-white">
-            <div className="text-xs font-bold opacity-85">雞王刷刷鍋</div>
+            <div className="text-xs font-bold opacity-85">雞王涮涮鍋</div>
             <h1 className="mt-1 text-2xl font-black">找回我的訂位</h1>
             <p className="mt-2 text-sm font-bold leading-6 opacity-85">
               可用訂位姓氏與電話，或訂位編號與電話末碼查詢。查到後仍需電話驗證才能修改。
