@@ -38,6 +38,16 @@ export default function WaitlistView({ onSeatWaitlist }) {
     return [...waitlist].sort((a, b) => (b.takenAt || '').localeCompare(a.takenAt || ''))
   }, [waitlist])
 
+  // 每個活躍候位「前面還有幾組」（依取號先後，越早取號越前面）
+  const aheadOf = useMemo(() => {
+    const active = waitlist
+      .filter(w => w.status === 'waiting' || w.status === 'called')
+      .sort((a, b) => (a.takenAt || '').localeCompare(b.takenAt || ''))
+    const m = {}
+    active.forEach((w, idx) => { m[w.id] = idx })
+    return m
+  }, [waitlist])
+
   const list = useMemo(() => {
     if (filter === 'active') return sorted.filter(w => w.status === 'waiting' || w.status === 'called')
     return sorted
@@ -114,6 +124,11 @@ export default function WaitlistView({ onSeatWaitlist }) {
                   <div className="text-xs text-chicken-brown/60 mt-1">
                     {w.phone || '—'} · 取號 {fmtTime(w.takenAt)}
                     {(w.status === 'waiting' || w.status === 'called') && <span> · 已等 {diffMin(w.takenAt)} 分</span>}
+                    {(w.status === 'waiting' || w.status === 'called') && (
+                      aheadOf[w.id] > 0
+                        ? <span className="ml-1 font-bold text-chicken-brown"> · 前面還有 {aheadOf[w.id]} 組</span>
+                        : <span className="ml-1 font-bold text-chicken-green"> · 🔔 輪到了，可安排入座</span>
+                    )}
                     {w.assignedTableNumber && <span className="ml-1 text-chicken-green font-bold">· 入座 {w.assignedTableNumber}</span>}
                   </div>
                   {w.notes && <div className="text-xs text-chicken-brown/60 italic mt-0.5">「{w.notes}」</div>}
@@ -137,8 +152,8 @@ export default function WaitlistView({ onSeatWaitlist }) {
                     >叫號</button>
                   )}
                   <button
-                    onClick={async () => { if (await confirm('確定棄號？', { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
-                    className="px-3 bg-chicken-brown/5 text-chicken-brown/60 rounded-lg text-sm"
+                    onClick={async () => { if (await confirm(`確定讓 ${w.name || `#${w.queueNumber}`} 棄號？此動作會將其移出候位。`, { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
+                    className="px-3 bg-white border border-chicken-red/40 text-chicken-red rounded-lg text-sm font-bold hover:bg-chicken-red/5"
                   >棄號</button>
                 </div>
               )}

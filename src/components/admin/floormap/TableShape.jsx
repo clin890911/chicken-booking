@@ -3,20 +3,21 @@
 //   0-(用餐時間-30) 分：正常
 //   接近用餐時間：黃色光暈
 //   超過用餐時間/清桌緩衝：加深與警示
+// 填色加深以確保白字可讀（對比 ≥3:1）；色相語義維持：綠=可入座 / 藍=已預訂 / 橙=用餐 / 琥珀=清桌 / 灰=不可用
 const STATUS_COLOR = {
-  vacant:   { fill: '#10b981', stroke: '#047857' },
-  reserved: { fill: '#0ea5e9', stroke: '#0369a1' },
+  vacant:   { fill: '#059669', stroke: '#047857' },   // 加深綠：白字可讀、可入座最顯眼
+  reserved: { fill: '#0284c7', stroke: '#075985' },   // 沉穩鋼藍：尚不能入座，不與可入座綠爭視覺
   dining:   { fill: '#f97316', stroke: '#c2410c' },
-  cleaning: { fill: '#f59e0b', stroke: '#b45309' },
-  blocked:  { fill: '#94a3b8', stroke: '#64748b' },
+  cleaning: { fill: '#d97706', stroke: '#b45309' },   // 加深琥珀：白字可讀
+  blocked:  { fill: '#6b7280', stroke: '#4b5563' },   // 加深灰
 }
 
-// dining 階段顏色（依時長變深）
+// dining 階段顏色：normal/late 為橘系（仍在用餐，警示但非超時），超時才轉紅
 const DINING_STAGE_FILL = {
-  normal:   '#f97316',  // 0-60
-  late:     '#dc2626',  // 60-90
-  overtime: '#b91c1c',
-  'buffer-overtime': '#991b1b',
+  normal:   '#f97316',  // 0 ~ (用餐時間-30)：橘
+  late:     '#ea580c',  // 接近時限（還有時間）：深橘提醒，不用紅避免假性超時
+  overtime: '#dc2626',  // 已達用餐時間：紅
+  'buffer-overtime': '#b91c1c',  // 超過清桌緩衝：深紅
 }
 
 function diffMin(d) {
@@ -78,22 +79,23 @@ export default function TableShape({
   else if (isAssignSuggestion) { stroke = '#9eb63a'; strokeWidth = 4; className = 'animate-pulse' }
   else if (isJustAssigned) { stroke = '#9eb63a'; strokeWidth = 4 }
   else if (isHighlight) { stroke = '#9eb63a'; strokeWidth = 3; strokeDash = '4 2' }
-  else if (stage === 'buffer-overtime') { stroke = '#fef08a'; strokeWidth = 3; className = 'animate-pulse' }
-  else if (stage === 'overtime') { stroke = '#fef08a'; strokeWidth = 3 }
-  else if (stage === 'late') { stroke = '#fef08a'; strokeWidth = 2 }
+  else if (stage === 'buffer-overtime') { stroke = '#7f1d1d'; strokeWidth = 3; className = 'animate-pulse' }
+  else if (stage === 'overtime') { stroke = '#7f1d1d'; strokeWidth = 3 }
+  else if (stage === 'late') { stroke = '#9a3412'; strokeWidth = 2 }
 
   const opacity = isDimmed ? 0.35 : 1
 
   return (
     <g onClick={onClick} style={{ cursor: 'pointer', opacity }} className={className}>
-      {/* 即將結束：黃色光暈 */}
+      {/* 即將結束：橘色光暈（還有時間，提醒留意） */}
       {stage === 'late' && (
         <rect x={x - 3} y={y - 3} width={w + 6} height={h + 6} rx={10}
-              fill="none" stroke="#fde047" strokeWidth={2} opacity={0.6} />
+              fill="none" stroke="#fb923c" strokeWidth={2} opacity={0.7} />
       )}
+      {/* 已超時：紅色光暈（需立即處理） */}
       {(stage === 'overtime' || stage === 'buffer-overtime') && (
         <rect x={x - 4} y={y - 4} width={w + 8} height={h + 8} rx={11}
-              fill="none" stroke="#fef08a" strokeWidth={3} opacity={0.85} />
+              fill="none" stroke="#dc2626" strokeWidth={3} opacity={0.85} />
       )}
       {isJustAssigned && (
         <rect x={x - 5} y={y - 5} width={w + 10} height={h + 10} rx={12}

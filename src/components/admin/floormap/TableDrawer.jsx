@@ -14,12 +14,13 @@ const STATUS_LABELS = {
   cleaning: '等待清桌',
   blocked: '不可用',
 }
+// 與桌位地圖 (TableShape) 同色語義：綠=可入座 / 藍=已預訂 / 橙=用餐 / 琥珀=清桌 / 灰=不可用
 const STATUS_PILL_BG = {
-  vacant: 'bg-emerald-500',
-  reserved: 'bg-yellow-500',
-  dining: 'bg-red-500',
-  cleaning: 'bg-orange-500',
-  blocked: 'bg-slate-400',
+  vacant: 'bg-emerald-600',
+  reserved: 'bg-sky-600',
+  dining: 'bg-orange-500',
+  cleaning: 'bg-amber-600',
+  blocked: 'bg-slate-500',
 }
 
 function fmtTime(d) {
@@ -182,7 +183,7 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
                   <div className={`flex items-center justify-between rounded-xl px-3 py-2 mt-2
                     ${stage === 'buffer-overtime' ? 'bg-chicken-red text-white animate-pulse'
                       : stage === 'overtime' ? 'bg-chicken-red/90 text-white'
-                      : stage === 'late' ? 'bg-chicken-yellow/20 text-chicken-yellow'
+                      : stage === 'late' ? 'bg-orange-100 text-orange-700'
                       : 'bg-chicken-cream text-chicken-brown'}`}>
                     <span className="text-xs font-bold">已用餐</span>
                     <span className="text-2xl font-black tabular-nums">
@@ -190,7 +191,7 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
                     </span>
                   </div>
                   {stage === 'late' && (
-                    <div className="text-[11px] text-chicken-yellow font-bold mt-1 text-center">
+                    <div className="text-[11px] text-orange-700 font-bold mt-1 text-center">
                       接近 {diningDuration} 分鐘用餐時間，請留意下一組安排
                     </div>
                   )}
@@ -261,8 +262,8 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
             <>
               <button onClick={handleSeat} className="btn-primary w-full">✅ 客人到了 — 入座</button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={handleCancel} className="btn-secondary text-sm">取消訂位</button>
                 <button onClick={onStartMerge} className="btn-secondary text-sm">⇆ 併桌</button>
+                <button onClick={handleCancel} className="text-sm rounded-2xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
               </div>
             </>
           )}

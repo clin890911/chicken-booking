@@ -24,7 +24,7 @@ export default function CustomersView() {
   const [editing, setEditing] = useState(null)
   const [editForm, setEditForm] = useState({ notes: '', allergies: '', vipTier: 'none' })
   const [blacklisting, setBlacklisting] = useState(null) // { phone, name } 加黑名單對象
-  const [blacklistReason, setBlacklistReason] = useState('多次 no-show')
+  const [blacklistReason, setBlacklistReason] = useState('') // 必填，不預填避免不假思索標記
   const confirm = useConfirm()
 
   const list = useMemo(() => {
@@ -151,16 +151,16 @@ export default function CustomersView() {
                           const ok = await confirm(`解除 ${c.name} 黑名單？`, { title: '解除黑名單', confirmLabel: '解除' })
                           if (ok) setCustomerBlacklist(c.phone, false)
                         } else {
-                          setBlacklistReason('多次 no-show')
+                          setBlacklistReason('')
                           setBlacklisting({ phone: c.phone, name: c.name })
                         }
                       }}
                       className={`text-xs px-3 py-1 rounded-lg font-bold ${
                         c.blacklisted
-                          ? 'bg-chicken-brown/10 text-chicken-brown'
-                          : 'bg-chicken-red/10 text-chicken-red'
+                          ? 'bg-chicken-brown/10 text-chicken-brown hover:bg-chicken-brown/15'
+                          : 'bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5'
                       }`}
-                    >{c.blacklisted ? '解除黑名單' : '加黑名單'}</button>
+                    >{c.blacklisted ? '✅ 解除黑名單' : '🚫 加黑名單'}</button>
                   </div>
                 </div>
               </Card>
@@ -207,25 +207,31 @@ export default function CustomersView() {
 
       {/* 加黑名單 Modal（取代原生 prompt） */}
       <Modal open={!!blacklisting} onClose={() => setBlacklisting(null)}
-             title={blacklisting ? `將 ${blacklisting.name} 加入黑名單` : ''}
+             title={blacklisting ? `⚠️ 將 ${blacklisting.name} 加入黑名單` : ''}
              footer={
                <>
                  <button onClick={() => setBlacklisting(null)} className="btn-secondary px-4 py-2">取消</button>
                  <button
+                   disabled={!blacklistReason.trim()}
                    onClick={() => {
+                     if (!blacklistReason.trim()) return
                      if (blacklisting) setCustomerBlacklist(blacklisting.phone, true, blacklistReason.trim())
                      setBlacklisting(null)
                    }}
-                   className="btn-primary px-4 py-2"
-                 >加入黑名單</button>
+                   className={`px-4 py-2 rounded-2xl font-bold text-white shadow-md
+                     ${blacklistReason.trim() ? 'bg-chicken-red' : 'bg-chicken-red/40 cursor-not-allowed'}`}
+                 >🚫 確認加入黑名單</button>
                </>
              }
       >
+        <p className="text-xs text-chicken-brown/60 mb-2 leading-relaxed">
+          黑名單會影響此顧客後續訂位，請務必填寫原因以利日後查核。
+        </p>
         <Input
-          label="黑名單原因"
+          label="黑名單原因（必填）"
           value={blacklistReason}
           onChange={e => setBlacklistReason(e.target.value)}
-          placeholder="例：多次 no-show"
+          placeholder="例：多次 no-show、惡意騷擾、損壞設備"
         />
       </Modal>
     </div>
