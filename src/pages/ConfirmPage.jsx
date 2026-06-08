@@ -1,4 +1,4 @@
-import { useParams, useLocation, Link } from 'react-router-dom'
+import { useParams, useLocation, useSearchParams, Link } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import * as bookingService from '../services/bookingService'
@@ -6,31 +6,55 @@ import { dayLabel } from '../utils/timeSlots'
 import { Card, Button, Badge } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import { lineBindUrl } from '../services/lineService'
+import { guestGetBooking } from '../services/cloudDataService'
 
 export default function ConfirmPage() {
   const { id } = useParams()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const urlToken = searchParams.get('token') || ''
   const { settings } = useBooking()
   const diningDuration = Number(settings.diningDurationMin) || 90
   const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
   const [b, setB] = useState(null)
+  const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
   const [copiedManage, setCopiedManage] = useState(false)
   const [showConfetti, setShowConfetti] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     // 客人線上訂位：後端 guestCreateBooking 已回傳完整訂位（含 manageToken），
-    // 透過 route state 帶入，客人端不需也無法讀本機全量資料。
-    const fromState = location.state?.booking
-    if (fromState && fromState.id === id) {
-      setB(fromState)
-    } else {
+    // 透過 route state 帶入。但若重新整理、或把確認頁網址傳到另一支手機開，
+    // route state 與本機資料都會消失 → 改用網址帶的 token 向後端補抓，避免「找不到此訂位」。
+    async function load() {
+      setLoading(true)
+      const fromState = location.state?.booking
+      if (fromState && fromState.id === id) {
+        if (!cancelled) { setB(fromState); setLoading(false) }
+        return
+      }
       // 後台建立的訂位（員工已同步至本機）走 localStorage fallback。
-      setB(bookingService.ensureManageToken(id))
+      const local = bookingService.ensureManageToken(id)
+      if (local) {
+        if (!cancelled) { setB(local); setLoading(false) }
+        return
+      }
+      const token = urlToken || fromState?.manageToken || ''
+      if (token) {
+        const remote = await guestGetBooking(id, token).catch(() => null)
+        if (!cancelled && remote?.ok && remote.booking) {
+          setB({ ...remote.booking, manageToken: remote.booking.manageToken || token })
+          setLoading(false)
+          return
+        }
+      }
+      if (!cancelled) { setB(null); setLoading(false) }
     }
+    load()
     const t = setTimeout(() => setShowConfetti(false), 2400)
-    return () => clearTimeout(t)
-  }, [id, location.state])
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [id, location.state, urlToken])
 
   const confettiPieces = useMemo(() => generateConfetti(18), [])
   const manageUrl = useMemo(() => {
@@ -78,12 +102,25 @@ export default function ConfirmPage() {
     })
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-chicken-cream">
+        <Card className="text-center max-w-sm">
+          <div className="text-5xl mb-2 animate-bounce">🐔</div>
+          <p className="font-bold text-chicken-brown/70">正在讀取訂位...</p>
+        </Card>
+      </div>
+    )
+  }
+
   if (!b) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-chicken-cream">
         <Card className="text-center max-w-sm">
           <div className="text-5xl mb-2">🤔</div>
           <p className="font-bold text-chicken-brown">找不到此訂位</p>
+          <p className="text-sm text-chicken-brown/60 mt-2">連結可能已失效，或需要從原本訂位的裝置開啟。可改用「查詢訂位」找回。</p>
+          <Link to="/lookup" className="text-chicken-red text-sm mt-3 inline-block underline">查詢我的訂位</Link>
           <Link to="/book" className="text-chicken-red text-sm mt-3 inline-block underline">重新訂位</Link>
         </Card>
       </div>
@@ -146,7 +183,7 @@ export default function ConfirmPage() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.55 }}
             className="text-sm text-chicken-brown/70 mt-1"
           >
-            訂位已建立，可用 LINE 接收訂位與定位資訊
+            訂位已建立，到店出示訂位編號即可
           </motion.p>
         </div>
 
@@ -158,7 +195,7 @@ export default function ConfirmPage() {
           <div className="bg-chicken-red text-white px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="leading-tight">
-                <div className="text-xs opacity-90">雞王刷刷鍋 · 訂位券</div>
+                <div className="text-xs opacity-90">雞王涮涮鍋 · 訂位券</div>
                 <div className="font-black text-sm">Master of Chicken</div>
               </div>
             </div>
@@ -233,9 +270,9 @@ export default function ConfirmPage() {
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#06C755] text-sm font-black text-white">LINE</div>
             <div className="flex-1">
-              <h2 className="text-base font-black text-chicken-brown">用 LINE 接收訂位資訊</h2>
+              <h2 className="text-base font-black text-chicken-brown">加入雞王 LINE 官方帳號</h2>
               <p className="mt-1 text-xs leading-5 text-chicken-brown/60">
-                按下後會開啟雞王官方帳號。完成後即可接收訂位、定位與修改訂位入口。
+                先加好友，之後即可由官方帳號接收訂位提醒、店家定位與修改連結。
               </p>
             </div>
           </div>
@@ -243,15 +280,15 @@ export default function ConfirmPage() {
           <div className="mt-3 grid gap-2">
             {lineReceiveUrl ? (
               <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
-                用 LINE 接收訂位資訊
+                加入 LINE 官方帳號
               </a>
             ) : (
               <button className="btn-primary w-full opacity-70" disabled>
-                LINE 接收功能尚未設定
+                LINE 官方帳號尚未設定
               </button>
             )}
             <div className="rounded-xl bg-white/80 px-3 py-2 text-xs font-bold leading-5 text-chicken-brown/60">
-              目前會先開啟 {lineOfficialName}；正式 LIFF 推播上線後，官方帳號會自動發送訂位摘要、店家定位與修改連結。
+              目前按鈕會先開啟 {lineOfficialName} 加好友；正式 LIFF 推播上線後，官方帳號才會自動發送訂位摘要與修改連結。在那之前，請以本頁訂位編號與下方管理連結為準。
             </div>
             <Link to={`/manage/${b.id}?token=${encodeURIComponent(b.manageToken || '')}`} className="btn-yellow w-full text-center">
               管理 / 修改我的訂位
@@ -391,7 +428,7 @@ function googleCalendarUrl(booking, settings = {}) {
   const fmt = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
   const params = new URLSearchParams({
     action: 'TEMPLATE',
-    text: '雞王刷刷鍋訂位',
+    text: '雞王涮涮鍋訂位',
     dates: `${fmt(start)}/${fmt(end)}`,
     details: [
       `訂位編號：${booking.id}`,
@@ -399,7 +436,7 @@ function googleCalendarUrl(booking, settings = {}) {
       `人數：${booking.guests} 位`,
       `請於用餐時段前 5 分鐘抵達。用餐時間 ${diningDuration} 分鐘，店內保留 ${cleanupBuffer} 分鐘翻桌緩衝。`,
     ].join('\n'),
-    location: settings.storeAddress || '雞王刷刷鍋',
+    location: settings.storeAddress || '雞王涮涮鍋',
   })
   return `https://calendar.google.com/calendar/render?${params.toString()}`
 }

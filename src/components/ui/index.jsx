@@ -87,6 +87,24 @@ export function LoadingScreen({ label = '載入中...' }) {
   )
 }
 
+// 查詢可訂時段時的載入骨架（比 emoji 轉圈更穩定、不跳版）
+export function SlotSkeleton({ rows = 2, cols = 3 }) {
+  return (
+    <div className="mt-4 space-y-4" role="status" aria-live="polite" aria-label="正在查詢可訂時段">
+      {Array.from({ length: rows }).map((_, r) => (
+        <div key={r}>
+          <div className="mb-2 h-3 w-12 rounded bg-chicken-brown/10" />
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {Array.from({ length: cols }).map((_, c) => (
+              <div key={c} className="min-h-[58px] animate-pulse rounded-xl border-2 border-chicken-brown/10 bg-chicken-brown/[0.06]" />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function EmptyState({ icon = '🍽️', title, hint, action }) {
   return (
     <div className="empty-panel">

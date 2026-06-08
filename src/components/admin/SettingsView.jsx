@@ -205,7 +205,7 @@ export default function SettingsView() {
             label="顯示名稱"
             value={form.lineOfficialName || ''}
             onChange={e => setForm(f => ({ ...f, lineOfficialName: e.target.value }))}
-            placeholder="雞王刷刷鍋 LINE 官方帳號"
+            placeholder="雞王涮涮鍋 LINE 官方帳號"
           />
           <Input
             label="LINE 官方帳號加入連結"
@@ -284,7 +284,7 @@ export default function SettingsView() {
             label="店名"
             value={form.storeName || ''}
             onChange={e => setForm(f => ({ ...f, storeName: e.target.value }))}
-            placeholder="雞王刷刷鍋"
+            placeholder="雞王涮涮鍋"
           />
           <Input
             label="店家電話"
@@ -427,7 +427,7 @@ export default function SettingsView() {
       )}
 
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
-        雞王刷刷鍋訂位系統 v0.4 · Firestore 同步模式
+        雞王涮涮鍋訂位系統 v0.4 · Firestore 同步模式
       </p>
 
       <LayoutEditor open={showLayoutEditor} onClose={() => setShowLayoutEditor(false)} />
@@ -445,7 +445,7 @@ function readBannerFile(file) {
     reader.onload = () => resolve({
       id: crypto.randomUUID?.() || `${Date.now()}-${file.name}`,
       title: file.name.replace(/\.[^.]+$/, ''),
-      subtitle: '雞王刷刷鍋',
+      subtitle: '雞王涮涮鍋',
       image: reader.result,
     })
     reader.onerror = reject
