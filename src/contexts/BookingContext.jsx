@@ -108,6 +108,13 @@ export function BookingProvider({ children }) {
       } catch (err) {
         console.warn('Firestore migration skipped:', err)
       }
+      // 一次性把雲端舊桌號（A1–B19）換成「雞王座號圖」新桌號（101–267）。
+      // 必須在 pullCloud 之前，否則首拉會用雲端舊桌位覆寫。
+      try {
+        await cloudData.migrateTableLayoutOnce()
+      } catch (err) {
+        console.warn('Table layout migration skipped:', err)
+      }
       if (!cancelled) await pullCloud()
     }
     bootCloud()

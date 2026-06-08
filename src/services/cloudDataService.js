@@ -1,4 +1,5 @@
 import { getSettings, saveSettings } from './settingsService'
+import { INITIAL_TABLES } from '../data/tables'
 
 const DEFAULT_FUNCTION_BASE = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
 
@@ -235,6 +236,36 @@ export async function migrateLocalToCloudOnce() {
   const result = await pushCloudData(localDataset())
   localStorage.setItem(KEYS.migration, '1')
   return result
+}
+
+// 一次性桌位佈局遷移：把雲端的舊桌號（如 A1–B19）刪除、改成「雞王座號圖」新桌號（101–267）。
+// 必須在首次 pull 之前執行，否則首拉會用雲端舊桌位覆寫本機新桌位（見 applyCloudSnapshot 首拉分支）。
+const TABLE_LAYOUT_VERSION = 'kingchicken-2026-06'
+const LAYOUT_FLAG = 'chicken_table_layout_version'
+
+export async function migrateTableLayoutOnce() {
+  if (localStorage.getItem(LAYOUT_FLAG) === TABLE_LAYOUT_VERSION) return { ok: true, skipped: true }
+  // 先看雲端目前有哪些桌（用來算出要刪除的舊桌號）
+  let cloudTables = []
+  try {
+    const data = await pullCloudData()
+    cloudTables = Array.isArray(data.tables) ? data.tables : []
+  } catch (err) {
+    // 連不上雲端就先不標記，下次載入再試（避免錯過遷移）
+    return { ok: false, reason: err?.message || 'pull-failed' }
+  }
+  const newNumbers = new Set(INITIAL_TABLES.map(t => t.number))
+  const oldNumbers = cloudTables
+    .map(t => t.number)
+    .filter(n => n && !newNumbers.has(n))
+  // 本機先換成新桌位
+  writeJson(KEYS.tables, INITIAL_TABLES)
+  // 推送：寫入全部新桌 + 刪除雲端舊桌（沿用 adminPushData 的 deletedIds 機制）
+  const payload = { tables: INITIAL_TABLES }
+  if (oldNumbers.length) payload.deletedIds = { tables: oldNumbers }
+  await pushCloudData(payload)
+  localStorage.setItem(LAYOUT_FLAG, TABLE_LAYOUT_VERSION)
+  return { ok: true, migrated: true, removed: oldNumbers.length }
 }
 
 export async function guestGetAvailability(date) {
