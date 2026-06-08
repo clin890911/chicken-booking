@@ -58,6 +58,21 @@ const COLLECTIONS = {
   tables: 'tables',
   waitlist: 'waitlist',
   customers: 'customers',
+  agencies: 'agencies',
+  guides: 'guides',
+  groupReservations: 'groupReservations',
+}
+
+// 差異同步集合 → 文件主鍵。adminPull/Push 以此泛型迴圈遍歷，未來加集合只改這一處
+// （根治「舊後端寫死四集合、靜默丟棄新集合」造成的前端誤判已同步→資料蒸發）。
+const SYNC_COLLECTION_IDKEYS = {
+  bookings: 'id',
+  tables: 'number',
+  waitlist: 'id',
+  customers: 'phone',
+  agencies: 'id',
+  guides: 'id',
+  groupReservations: 'id',
 }
 
 export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
@@ -68,21 +83,19 @@ export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
     return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
   }
   try {
-    const [bookings, tables, waitlist, customers, settingsSnap] = await Promise.all([
-      listCollection(COLLECTIONS.bookings),
-      listCollection(COLLECTIONS.tables),
-      listCollection(COLLECTIONS.waitlist),
-      listCollection(COLLECTIONS.customers),
+    const names = Object.keys(SYNC_COLLECTION_IDKEYS)
+    const [lists, settingsSnap] = await Promise.all([
+      Promise.all(names.map(n => listCollection(n))),
       db.collection('settings').doc('main').get(),
     ])
-    return res.json({
-      ok: true,
-      bookings: bookings.sort(sortBookings),
-      tables: tables.sort((a, b) => String(a.number || '').localeCompare(String(b.number || ''))),
-      waitlist: waitlist.sort((a, b) => String(a.takenAt || '').localeCompare(String(b.takenAt || ''))),
-      customers,
-      settings: normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {}),
-    })
+    const out = { ok: true, serverCollections: names }
+    names.forEach((n, i) => { out[n] = lists[i] })
+    // 穩定排序（與舊版輸出一致）
+    if (out.bookings) out.bookings.sort(sortBookings)
+    if (out.tables) out.tables.sort((a, b) => String(a.number || '').localeCompare(String(b.number || '')))
+    if (out.waitlist) out.waitlist.sort((a, b) => String(a.takenAt || '').localeCompare(String(b.takenAt || '')))
+    out.settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+    return res.json(out)
   } catch (err) {
     console.error('adminPullData failed:', err)
     return res.status(500).json({ ok: false, error: err.message || 'admin-pull-failed' })
@@ -98,19 +111,17 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
   }
   try {
     const { dataset = {} } = req.body || {}
-    const ops = [
-      ...upsertOps(COLLECTIONS.bookings, dataset.bookings || [], 'id'),
-      ...upsertOps(COLLECTIONS.tables, dataset.tables || [], 'number'),
-      ...upsertOps(COLLECTIONS.waitlist, dataset.waitlist || [], 'id'),
-      ...upsertOps(COLLECTIONS.customers, dataset.customers || [], 'phone'),
-    ]
+    // 泛型遍歷所有同步集合做 merge-upsert（接受「部分資料集」，未帶的集合略過）。
+    const ops = []
+    for (const [name, idKey] of Object.entries(SYNC_COLLECTION_IDKEYS)) {
+      ops.push(...upsertOps(name, dataset[name] || [], idKey))
+    }
     // 差異同步的刪除路徑：前端把「本機已刪」的文件 id 放在 dataset.deletedIds，
-    // 後端逐集合刪除，避免硬刪除的桌位/候位/顧客在下一輪拉取時復活（修 F-A）。
+    // 後端逐集合刪除，避免硬刪除的文件在下一輪拉取時復活（修 F-A）。
     const deletedIds = dataset.deletedIds || {}
-    ops.push(...deleteOps(COLLECTIONS.bookings, deletedIds.bookings))
-    ops.push(...deleteOps(COLLECTIONS.tables, deletedIds.tables))
-    ops.push(...deleteOps(COLLECTIONS.waitlist, deletedIds.waitlist))
-    ops.push(...deleteOps(COLLECTIONS.customers, deletedIds.customers))
+    for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
+      ops.push(...deleteOps(name, deletedIds[name]))
+    }
     if (dataset.settings) {
       ops.push({ ref: db.collection('settings').doc('main'), data: {
         ...normalizeStoreSettings(dataset.settings),
@@ -124,6 +135,65 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
   } catch (err) {
     console.error('adminPushData failed:', err)
     return res.status(500).json({ ok: false, error: err.message || 'admin-push-failed' })
+  }
+})
+
+// 團體預排桌位的原子把關：多裝置可能在 5 秒同步空窗內把同一桌圈進不同團，純前端檢查不可靠。
+// 此端點在交易內讀取同日所有團、做「梯次時間窗重疊 + 桌號相同」衝突檢查，無衝突才寫入該團單。
+// 前端建/改團、變更圈桌時呼叫；衝突回 409 並附明細。
+export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  try {
+    await requireStaff(req)
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
+  }
+  try {
+    const { group } = req.body || {}
+    if (!group?.id || !group?.date) return res.status(400).json({ ok: false, error: '缺少團單 id 或日期' })
+
+    const settingsSnap = await db.collection('settings').doc('main').get()
+    const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+    const durationMin = (Number(settings.diningDurationMin) || DEFAULT_DINING_DURATION_MIN) + (Number(settings.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN)
+
+    const groupsRef = db.collection(COLLECTIONS.groupReservations)
+    const saved = await db.runTransaction(async (tx) => {
+      const daySnap = await tx.get(groupsRef.where('date', '==', group.date))
+      const others = daySnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(g => g.id !== group.id && !CAPACITY_EXCLUDED_STATUSES.includes(g.status))
+
+      const conflicts = []
+      for (const b of group.batches || []) {
+        const s = toMinutes(b.timeSlot)
+        const e = s + durationMin
+        const wanted = new Set((b.tableNumbers || []).map(String))
+        if (!wanted.size) continue
+        for (const og of others) {
+          for (const ob of og.batches || []) {
+            const os = toMinutes(ob.timeSlot)
+            const oe = os + durationMin
+            if (!(s < oe && os < e)) continue // 時間窗不重疊 → 同桌可重用
+            for (const n of ob.tableNumbers || []) {
+              if (wanted.has(String(n))) {
+                conflicts.push({ table: String(n), withGroupId: og.id, withAgency: og.agencyName || '', batch: b.label })
+              }
+            }
+          }
+        }
+      }
+      if (conflicts.length) throw errorWithStatus(`桌位衝突：${conflicts.map(c => c.table).join('、')} 已被其他團佔用`, 409)
+
+      const record = { ...group, updatedAt: new Date().toISOString() }
+      tx.set(groupsRef.doc(group.id), record, { merge: true })
+      return record
+    })
+
+    return res.json({ ok: true, group: saved })
+  } catch (err) {
+    const code = err.status || 500
+    if (code >= 500) console.error('groupReserveTables failed:', err)
+    return res.status(code).json({ ok: false, error: err.message || 'group-reserve-failed' })
   }
 })
 
@@ -178,18 +248,21 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
 
     let slots = []
     if (date) {
-      const [tables, bookingsSnap] = await Promise.all([
+      const [tables, bookingsSnap, groupsSnap] = await Promise.all([
         listCollection(COLLECTIONS.tables),
         db.collection(COLLECTIONS.bookings).where('date', '==', date).get(),
+        db.collection(COLLECTIONS.groupReservations).where('date', '==', date).get(),
       ])
       const bookings = bookingsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      const groupReservations = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       const nowMs = Date.now()
       slots = generateSlotsServer(settings)
         // 濾掉「已過的時段」：今天已過的抵達時段不再顯示為可訂（其他日期的時段都在未來，不受影響）。
         .filter(time => slotEpochMs(date, time) > nowMs)
         .map(time => ({
           time,
-          remaining: calcSlotCapacityServer(tables, bookings, date, time, settings),
+          // 團體預排佔位一併扣除（只回傳數值 remaining，絕不外洩 groupReservations 明細）。
+          remaining: calcSlotCapacityServer(tables, bookings, date, time, settings, groupReservations),
         }))
     }
 
@@ -219,12 +292,15 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     const bookingsRef = db.collection(COLLECTIONS.bookings)
 
     const booking = await db.runTransaction(async (tx) => {
-      const [tablesSnap, dateSnap] = await Promise.all([
+      // ★ Firestore 交易：所有 read 必須在所有 write 之前。團體佔位讀取與既有兩個 get 並列。
+      const [tablesSnap, dateSnap, groupsSnap] = await Promise.all([
         tx.get(db.collection(COLLECTIONS.tables)),
         tx.get(bookingsRef.where('date', '==', data.date)),
+        tx.get(db.collection(COLLECTIONS.groupReservations).where('date', '==', data.date)),
       ])
       const tables = tablesSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       const dayBookings = dateSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      const dayGroups = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
 
       // 防重複：同電話 + 同日 + 同時段已有有效訂位 → 視為重複送出
       const dup = dayBookings.find(b =>
@@ -233,7 +309,7 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         !['cancelled', 'noshow'].includes(b.status))
       if (dup) throw errorWithStatus('您已有相同時段的訂位，無需重複預訂', 409)
 
-      const remaining = calcSlotCapacityServer(tables, dayBookings, data.date, data.timeSlot, settings)
+      const remaining = calcSlotCapacityServer(tables, dayBookings, data.date, data.timeSlot, settings, dayGroups)
       if (remaining < data.guests) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
 
       const record = {
@@ -343,13 +419,15 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       // F-E：容量檢查與寫入放進同一交易，與 guestCreateBooking 對齊，避免兩筆並發改期
       // 同時通過容量檢查造成超賣（TOCTOU）。
       await db.runTransaction(async (tx) => {
-        const [tablesSnap, dateSnap] = await Promise.all([
+        const [tablesSnap, dateSnap, groupsSnap] = await Promise.all([
           tx.get(db.collection(COLLECTIONS.tables)),
           tx.get(db.collection(COLLECTIONS.bookings).where('date', '==', next.date)),
+          tx.get(db.collection(COLLECTIONS.groupReservations).where('date', '==', next.date)),
         ])
         const tables = tablesSnap.docs.map(d => ({ id: d.id, ...d.data() }))
         const dayBookings = dateSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(b => b.id !== booking.id)
-        const remaining = calcSlotCapacityServer(tables, dayBookings, next.date, next.timeSlot, settings)
+        const dayGroups = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+        const remaining = calcSlotCapacityServer(tables, dayBookings, next.date, next.timeSlot, settings, dayGroups)
         if (remaining < Number(next.guests || 1)) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
         tx.set(bookingRef, updatePatch, { merge: true })
         if (booking.assignedTableId) {
@@ -1093,7 +1171,34 @@ function validateNewBooking(body = {}, settings = {}) {
   return { ok: true, value: { name, phone: String(body.phone).trim(), phoneDigits, guests, date, timeSlot, notes } }
 }
 
-function calcSlotCapacityServer(tables, bookings, date, timeSlot, settings = {}) {
+// 容量排除的狀態：與前端 utils/capacity.js 的 CAPACITY_EXCLUDED_STATUSES 必須一致。
+const CAPACITY_EXCLUDED_STATUSES = ['cancelled', 'noshow', 'completed']
+
+// 團體某日佔用的「相異桌號」（兩梯重用同桌只算一次）。
+function groupTableNumbersServer(group) {
+  const seen = new Set()
+  ;(group?.batches || []).forEach(b => (b.tableNumbers || []).forEach(n => { if (n) seen.add(String(n)) }))
+  return [...seen]
+}
+
+// 團體合併時間窗：[最早梯次開始, 最晚梯次開始 + 佔位時長]。無有效梯次回 null。
+function groupOccupancyWindowServer(group, durationMin) {
+  const starts = (group?.batches || [])
+    .map(b => toMinutes(b.timeSlot))
+    .filter(n => Number.isFinite(n) && n > 0)
+  if (!starts.length) return null
+  return { start: Math.min(...starts), end: Math.max(...starts) + durationMin }
+}
+
+// 團體對全店座位池的佔用 = 相異桌號 capacity 合計（整桌專屬保留，嚴格口徑）。
+function groupHeldSeatsServer(group, tableCapByNumber) {
+  return groupTableNumbersServer(group).reduce((sum, n) => sum + (Number(tableCapByNumber[n]) || 0), 0)
+}
+
+// 與前端 calcSlotCapacity 位元級一致：散客逐筆 sum(guests)、團體整桌 sum(座位)。
+// ★ 為何團體用「整桌座位」、booking 用「逐筆 guests」：團體預排是整桌專屬保留，
+//   圈走的桌不論坐幾人都不給線上散客；兩梯重用同桌只算一次，避免雙扣。
+function calcSlotCapacityServer(tables, bookings, date, timeSlot, settings = {}, groupReservations = []) {
   const durationMin = (Number(settings.diningDurationMin) || DEFAULT_DINING_DURATION_MIN) + (Number(settings.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN)
   const targetMinutes = toMinutes(timeSlot)
   const totalSeats = tables
@@ -1101,13 +1206,24 @@ function calcSlotCapacityServer(tables, bookings, date, timeSlot, settings = {})
     .reduce((sum, t) => sum + (Number(t.capacity) || 0), 0)
   const reserved = bookings
     .filter(b => {
-      if (b.date !== date || !b.timeSlot || ['cancelled', 'noshow', 'completed'].includes(b.status)) return false
+      if (b.date !== date || !b.timeSlot || CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return false
       const start = toMinutes(b.timeSlot)
       const end = start + durationMin
       return start < targetMinutes + durationMin && targetMinutes < end
     })
     .reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
-  return Math.max(0, totalSeats - reserved)
+
+  const tableCapByNumber = {}
+  tables.forEach(t => { tableCapByNumber[t.number] = Number(t.capacity) || 0 })
+  const groupHeld = (groupReservations || [])
+    .filter(g => g.date === date && !CAPACITY_EXCLUDED_STATUSES.includes(g.status))
+    .reduce((sum, g) => {
+      const win = groupOccupancyWindowServer(g, durationMin)
+      if (!win || !(win.start < targetMinutes + durationMin && targetMinutes < win.end)) return sum
+      return sum + groupHeldSeatsServer(g, tableCapByNumber)
+    }, 0)
+
+  return Math.max(0, totalSeats - reserved - groupHeld)
 }
 
 async function replyLineMessage(replyToken, messages) {

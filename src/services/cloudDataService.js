@@ -8,6 +8,9 @@ const KEYS = {
   tables: 'chicken_tables_v3',
   waitlist: 'chicken_waitlist_v1',
   customers: 'chicken_customers_v1',
+  agencies: 'chicken_agencies_v1',
+  guides: 'chicken_guides_v1',
+  groupReservations: 'chicken_group_reservations_v1',
   migration: 'chicken_firestore_migrated_v1',
 }
 
@@ -60,6 +63,9 @@ export function localDataset() {
     tables: readJson(KEYS.tables, []),
     waitlist: readJson(KEYS.waitlist, []),
     customers: Object.values(readJson(KEYS.customers, {})),
+    agencies: readJson(KEYS.agencies, []),
+    guides: readJson(KEYS.guides, []),
+    groupReservations: readJson(KEYS.groupReservations, []),
     settings: getSettings(),
   }
 }
@@ -72,12 +78,15 @@ export function localDataset() {
 // 解法：用 lastSynced 記錄「上次與雲端確認一致」的每筆文件內容（JSON 字串），
 //   - 推送時只送與 lastSynced 不同的文件（dirty），後端本就逐筆 merge-upsert；
 //   - 拉取時改為合併：dirty 文件保留本機版本，其餘採雲端最新值。
-const DIFF_COLLECTIONS = ['bookings', 'tables', 'waitlist', 'customers']
-const COLLECTION_ID_KEY = { bookings: 'id', tables: 'number', waitlist: 'id', customers: 'phone' }
-let lastSynced = { bookings: {}, tables: {}, waitlist: {}, customers: {}, settings: null }
+const DIFF_COLLECTIONS = ['bookings', 'tables', 'waitlist', 'customers', 'agencies', 'guides', 'groupReservations']
+const COLLECTION_ID_KEY = { bookings: 'id', tables: 'number', waitlist: 'id', customers: 'phone', agencies: 'id', guides: 'id', groupReservations: 'id' }
+// lastSynced / pendingDeletes 由 DIFF_COLLECTIONS 動態生成，避免「加集合卻漏補字面量」→
+// push 時對未知集合存取 undefined[id] 拋 TypeError，進而中斷所有集合同步（含 bookings）。
+const emptyColMap = () => Object.fromEntries(DIFF_COLLECTIONS.map(c => [c, {}]))
+let lastSynced = { ...emptyColMap(), settings: null }
 // 本機已刪、尚未經雲端確認刪除的文件 id。用來在「刪除後、下一輪推送成功前」的
 // 拉取視窗內，阻止 applyCloudSnapshot 把仍存在於雲端的文件復原回本機（修 F-A）。
-const pendingDeletes = { bookings: new Set(), tables: new Set(), waitlist: new Set(), customers: new Set() }
+const pendingDeletes = Object.fromEntries(DIFF_COLLECTIONS.map(c => [c, new Set()]))
 let initialized = false
 
 function stable(doc) { return JSON.stringify(doc ?? null) }
@@ -120,10 +129,12 @@ export function markLocalAsSynced() {
 export function applyCloudSnapshot(data = {}) {
   // 首次拉取：以雲端為準整份覆寫，並 seed lastSynced（之後才做合併）。
   if (!initialized) {
-    if (Array.isArray(data.bookings)) writeJson(KEYS.bookings, data.bookings)
-    if (Array.isArray(data.tables) && data.tables.length > 0) writeJson(KEYS.tables, data.tables)
-    if (Array.isArray(data.waitlist)) writeJson(KEYS.waitlist, data.waitlist)
-    if (Array.isArray(data.customers)) writeJson(KEYS.customers, customersArrayToMap(data.customers))
+    for (const col of DIFF_COLLECTIONS) {
+      const arr = data[col]
+      if (!Array.isArray(arr)) continue
+      if (col === 'tables' && arr.length === 0) continue // 不因雲端空白清掉桌位
+      writeArrayOf(col, arr) // customers 由 writeArrayOf 轉成 phone-map，其餘為普通陣列
+    }
     if (data.settings) saveSettings(data.settings)
     seedLastSyncedFromLocal()
     initialized = true
@@ -266,6 +277,15 @@ export async function migrateTableLayoutOnce() {
   await pushCloudData(payload)
   localStorage.setItem(LAYOUT_FLAG, TABLE_LAYOUT_VERSION)
   return { ok: true, migrated: true, removed: oldNumbers.length }
+}
+
+// 團體預排桌位原子把關（員工端，需帶 Bearer token）。回 { ok, group } 或丟出含 409 的錯誤。
+export async function groupReserveTables(group) {
+  return requestJson(endpoint('groupReserveTables'), {
+    method: 'POST',
+    headers: await authHeader(),
+    body: JSON.stringify({ group }),
+  })
 }
 
 export async function guestGetAvailability(date) {

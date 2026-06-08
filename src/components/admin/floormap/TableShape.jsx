@@ -43,7 +43,9 @@ export default function TableShape({
   isHighlight = false,
   isDimmed = false,
   isAssignSuggestion = false,  // 指派模式：被推薦的最佳桌（綠閃）
-  isJustAssigned = false,      // 剛指派完的桌（綠閃 2 秒後熄）
+  isPendingConfirm = false,    // 二步確認：待確認的桌（醒目高亮）
+  isJustAssigned = false,      // 剛指派完的桌（綠閃後熄）
+  planState = null,            // 規劃模式：'selected' | 'blocked' | 'available'（藍紫色系，與今日即時圖區隔）
   onClick,
 }) {
   const { x, y, w, h, capacity, status, mergedWith, isActive, fuel, number } = table
@@ -54,6 +56,37 @@ export default function TableShape({
         <rect x={x} y={y} width={w} height={h} rx={6}
               fill="#e5e0d8" stroke="#3a2e26" strokeWidth={1} strokeDasharray="3 3"/>
         <text x={x + w / 2} y={y + h / 2 + 4} fontSize={11} fill="#8a7e72" textAnchor="middle" pointerEvents="none">{number}</text>
+      </g>
+    )
+  }
+
+  // === 規劃模式（日期維度預排）===
+  // 完全不吃今日即時狀態（status/seatedAt/booking），改用藍紫色系，與今日即時圖明確區隔。
+  if (planState) {
+    const P = {
+      selected:  { fill: '#4f46e5', stroke: '#3730a3', text: '#ffffff', label: '已選' },
+      blocked:   { fill: '#94a3b8', stroke: '#64748b', text: '#ffffff', label: '已被佔' },
+      available: { fill: '#e2e8f0', stroke: '#94a3b8', text: '#334155', label: '可選' },
+    }[planState] || { fill: '#e2e8f0', stroke: '#94a3b8', text: '#334155', label: '可選' }
+    const stroke = isSelected ? '#4f46e5' : P.stroke
+    const strokeWidth = isSelected ? 3 : 1.5
+    return (
+      <g onClick={onClick} style={{ cursor: planState === 'blocked' ? 'not-allowed' : 'pointer' }}>
+        <rect x={x} y={y} width={w} height={h} rx={8}
+              fill={P.fill} stroke={stroke} strokeWidth={strokeWidth}
+              strokeDasharray={planState === 'blocked' ? '4 3' : null} />
+        <text x={x + w / 2} y={y + (h <= 80 ? 24 : 28)}
+              fontSize={h <= 80 ? 14 : 16} fontWeight={800} fill={P.text} textAnchor="middle" pointerEvents="none">
+          {number}
+        </text>
+        <text x={x + w / 2} y={y + (h <= 80 ? 42 : 48)}
+              fontSize={10} fontWeight={600} fill={P.text} opacity={0.95} textAnchor="middle" pointerEvents="none">
+          {capacity} 人
+        </text>
+        <text x={x + w / 2} y={y + h - 8}
+              fontSize={9} fontWeight={700} fill={P.text} opacity={0.9} textAnchor="middle" pointerEvents="none">
+          {planState === 'selected' ? '✓ 已選' : P.label}
+        </text>
       </g>
     )
   }
@@ -76,6 +109,7 @@ export default function TableShape({
 
   if (isSelected) { stroke = '#e60012'; strokeWidth = 3 }
   else if (isMergeCandidate) { stroke = '#f29100'; strokeWidth = 3; strokeDash = '5 3' }
+  else if (isPendingConfirm) { stroke = '#d97706'; strokeWidth = 4; className = 'animate-pulse' }
   else if (isAssignSuggestion) { stroke = '#9eb63a'; strokeWidth = 4; className = 'animate-pulse' }
   else if (isJustAssigned) { stroke = '#9eb63a'; strokeWidth = 4 }
   else if (isHighlight) { stroke = '#9eb63a'; strokeWidth = 3; strokeDash = '4 2' }
@@ -97,6 +131,11 @@ export default function TableShape({
         <rect x={x - 4} y={y - 4} width={w + 8} height={h + 8} rx={11}
               fill="none" stroke="#dc2626" strokeWidth={3} opacity={0.85} />
       )}
+      {/* 二步確認：待確認桌的醒目琥珀光暈 */}
+      {isPendingConfirm && (
+        <rect x={x - 5} y={y - 5} width={w + 10} height={h + 10} rx={12}
+              fill="none" stroke="#d97706" strokeWidth={3} opacity={0.85} />
+      )}
       {isJustAssigned && (
         <rect x={x - 5} y={y - 5} width={w + 10} height={h + 10} rx={12}
               fill="none" stroke="#9eb63a" strokeWidth={3} opacity={0.7} />
@@ -112,7 +151,7 @@ export default function TableShape({
       </text>
       {/* 容量 */}
       <text x={x + w / 2} y={y + (h <= 80 ? 42 : 48)}
-            fontSize={10} fill="white" opacity={0.9} textAnchor="middle" pointerEvents="none">
+            fontSize={10} fontWeight={600} fill="white" opacity={0.95} textAnchor="middle" pointerEvents="none">
         {capacity} 人
       </text>
 
@@ -132,13 +171,13 @@ export default function TableShape({
       )}
       {status === 'cleaning' && (
         <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fill="white" textAnchor="middle" pointerEvents="none">
+              fontSize={9} fontWeight={600} fill="white" textAnchor="middle" pointerEvents="none">
           清桌中
         </text>
       )}
       {status === 'vacant' && (
         <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fill="white" textAnchor="middle" pointerEvents="none">
+              fontSize={9} fontWeight={600} fill="white" textAnchor="middle" pointerEvents="none">
           可入座
         </text>
       )}

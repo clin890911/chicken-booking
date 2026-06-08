@@ -48,6 +48,7 @@ const PERMISSIONS = {
     'table.read', 'table.update', 'table.block', 'table.merge', 'table.config',
     'waitlist.read', 'waitlist.create', 'waitlist.update', 'waitlist.delete',
     'customer.read', 'customer.update', 'customer.blacklist',
+    'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
     'settings.read', 'settings.update',
     'staff.manage',
   ]),
@@ -56,17 +57,20 @@ const PERMISSIONS = {
     'table.read', 'table.update', 'table.block', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
+    'group.read', // 外場可看今日團體並帶位入座（入座本身走 table.update）
   ]),
   host: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',
     'table.read',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
+    'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
   ]),
   kitchen: new Set([
     'booking.read',
     'table.read',
     'waitlist.read',
+    'group.read',
   ]),
 }
 

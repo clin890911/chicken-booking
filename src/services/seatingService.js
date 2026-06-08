@@ -4,6 +4,7 @@ import * as tableService from './tableService'
 import * as bookingService from './bookingService'
 import * as waitlistService from './waitlistService'
 import * as customerService from './customerService'
+import * as groupService from './groupReservationService'
 
 // === 訂位 → 指派桌 ===
 // 客人線上訂位（assignedTableId: null）→ 到店時店長指派一張空桌
@@ -185,4 +186,79 @@ export function findSuitableTables(partySize) {
 export function suggestTable(partySize) {
   const list = findSuitableTables(partySize)
   return list[0] || null
+}
+
+// =====================================================================
+// 團體梯次入座流程（兩段用餐：第二梯可接續坐同一批桌）
+// 重要：團體生命週期內永不建立 booking 文件；桌位以 currentRef 連到 group/batch。
+// =====================================================================
+
+// 團體梯次到店入座：把該梯次圈的桌全部設 dining 並連到 group/batch；團 status→arrived。
+export function seatGroupBatch(groupId, batchId) {
+  const group = groupService.getById(groupId)
+  if (!group) return { ok: false, error: '團單不存在' }
+  const batch = (group.batches || []).find(b => b.id === batchId)
+  if (!batch) return { ok: false, error: '梯次不存在' }
+  const tables = batch.tableNumbers || []
+  if (!tables.length) return { ok: false, error: '此梯次尚未圈桌' }
+  // 桌況檢查：必須 vacant 或 cleaning（接續同團前梯剛離席的桌）
+  for (const n of tables) {
+    const t = tableService.getByNumber(n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    const sameGroupSeated = t.currentRef?.groupId === groupId
+    if (!['vacant', 'cleaning'].includes(t.status) && !sameGroupSeated) {
+      return { ok: false, error: `桌位 ${n} 目前為 ${t.status}，無法入座` }
+    }
+  }
+  tables.forEach(n => tableService.seatTableForGroup(n, groupId, batchId))
+  if (group.status !== 'arrived') groupService.setStatus(groupId, 'arrived')
+  return { ok: true, tableNumbers: tables }
+}
+
+// 團體梯次離席：把該梯次的桌 dining→cleaning（仍佔位、保留 currentRef 供接第二梯）。
+export function checkoutGroupBatch(groupId, batchId) {
+  const group = groupService.getById(groupId)
+  if (!group) return { ok: false, error: '團單不存在' }
+  const batch = (group.batches || []).find(b => b.id === batchId)
+  if (!batch) return { ok: false, error: '梯次不存在' }
+  ;(batch.tableNumbers || []).forEach(n => {
+    const t = tableService.getByNumber(n)
+    if (t && t.status === 'dining' && t.currentRef?.groupId === groupId && t.currentRef?.batchId === batchId) {
+      tableService.checkoutTable(n)
+    }
+  })
+  return { ok: true }
+}
+
+// 單桌「清桌完成 → 接第二梯入座」：先清空此桌，再把指定梯次坐進來（複合一鍵）。
+export function seatNextBatchOnTable(tableNumber, groupId, batchId) {
+  const t = tableService.getByNumber(tableNumber)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  tableService.clearTable(tableNumber)
+  tableService.seatTableForGroup(tableNumber, groupId, batchId)
+  const group = groupService.getById(groupId)
+  if (group && group.status !== 'arrived') groupService.setStatus(groupId, 'arrived')
+  return { ok: true }
+}
+
+// 團體整團完成：清空所有 currentRef 指向此團的桌、團 status→completed。
+export function finalizeGroup(groupId) {
+  const group = groupService.getById(groupId)
+  if (!group) return { ok: false, error: '團單不存在' }
+  tableService.listAll().forEach(t => {
+    if (t.currentRef?.groupId === groupId) tableService.clearTable(t.number)
+  })
+  groupService.setStatus(groupId, 'completed')
+  return { ok: true }
+}
+
+// 取消團體：清空所有相關桌、團 status→cancelled。
+export function cancelGroup(groupId) {
+  const group = groupService.getById(groupId)
+  if (!group) return { ok: false, error: '團單不存在' }
+  tableService.listAll().forEach(t => {
+    if (t.currentRef?.groupId === groupId) tableService.clearTable(t.number)
+  })
+  groupService.setStatus(groupId, 'cancelled')
+  return { ok: true }
 }

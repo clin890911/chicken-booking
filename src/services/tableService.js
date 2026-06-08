@@ -22,6 +22,7 @@ function read() {
       isActive: true,
       status: 'vacant',
       currentBookingId: null,
+      currentRef: null,      // 團體梯次入座時 = { type:'group', groupId, batchId }
       seatedAt: null,
       mergedWith: null,
       blockReason: null,
@@ -80,6 +81,17 @@ export function seatTable(number, bookingId) {
   return patchOne(number, {
     status: 'dining',
     currentBookingId: bookingId,
+    currentRef: null,
+    seatedAt: new Date().toISOString(),
+  })
+}
+
+// 團體梯次入座：標記 dining + 連到 group/batch（currentBookingId 清空，避免與散客 booking 混淆）
+export function seatTableForGroup(number, groupId, batchId) {
+  return patchOne(number, {
+    status: 'dining',
+    currentBookingId: null,
+    currentRef: { type: 'group', groupId, batchId },
     seatedAt: new Date().toISOString(),
   })
 }
@@ -89,6 +101,7 @@ export function reserveTable(number, bookingId) {
   return patchOne(number, {
     status: 'reserved',
     currentBookingId: bookingId,
+    currentRef: null,
     seatedAt: null,
   })
 }
@@ -101,11 +114,12 @@ export function checkoutTable(number) {
   })
 }
 
-// 清桌完成：cleaning → vacant + 解除 booking 綁定
+// 清桌完成：cleaning → vacant + 解除 booking / group 綁定
 export function clearTable(number) {
   return patchOne(number, {
     status: 'vacant',
     currentBookingId: null,
+    currentRef: null,
     seatedAt: null,
   })
 }
