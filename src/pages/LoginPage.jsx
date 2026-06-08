@@ -61,8 +61,9 @@ export default function LoginPage() {
               <Button type="submit" disabled={busy} className="w-full">
                 {busy ? '登入中...' : '🔑 模擬登入（僅本機開發）'}
               </Button>
-              <p className="text-xs text-chicken-brown/50">
-                未設定 Firebase，目前為本機開發模式。正式環境會改用 Google 登入。
+              <p className="text-xs text-chicken-red bg-red-50 border border-chicken-red/40 rounded-lg px-3 py-2 leading-5">
+                ⚠️ 未設定 Firebase，目前為本機開發模式，登入後資料<b>不會上傳雲端</b>。
+                正式環境請設定 VITE_FIREBASE_* 後重新部署，登入會改用 Google。
               </p>
             </form>
           )}

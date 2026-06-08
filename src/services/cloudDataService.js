@@ -74,6 +74,9 @@ export function localDataset() {
 const DIFF_COLLECTIONS = ['bookings', 'tables', 'waitlist', 'customers']
 const COLLECTION_ID_KEY = { bookings: 'id', tables: 'number', waitlist: 'id', customers: 'phone' }
 let lastSynced = { bookings: {}, tables: {}, waitlist: {}, customers: {}, settings: null }
+// 本機已刪、尚未經雲端確認刪除的文件 id。用來在「刪除後、下一輪推送成功前」的
+// 拉取視窗內，阻止 applyCloudSnapshot 把仍存在於雲端的文件復原回本機（修 F-A）。
+const pendingDeletes = { bookings: new Set(), tables: new Set(), waitlist: new Set(), customers: new Set() }
 let initialized = false
 
 function stable(doc) { return JSON.stringify(doc ?? null) }
@@ -133,14 +136,17 @@ export function applyCloudSnapshot(data = {}) {
     const localMap = indexDocs(col, localArrayOf(col))
     const cloudMap = indexDocs(col, cloudArr)
     const merged = { ...cloudMap }
+    // 本機剛刪、尚未經雲端確認的文件：不從雲端版本復原（修 F-A 刪除復活）。
+    pendingDeletes[col].forEach(id => { delete merged[id] })
     for (const [id, doc] of Object.entries(localMap)) {
       const dirty = lastSynced[col][id] !== stable(doc)
       if (dirty) merged[id] = doc                       // 保留待推送的本機變更
       else if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id]) // 已同步 → 採雲端值
     }
-    // 雲端有、本機沒有的文件（其他裝置新增）一併納入並記為已同步
+    // 雲端有、本機沒有的文件（其他裝置新增）一併納入並記為已同步；
+    // 但本機正在刪除的文件不納入、也不記為已同步。
     for (const [id, doc] of Object.entries(cloudMap)) {
-      if (!localMap[id]) lastSynced[col][id] = stable(doc)
+      if (!localMap[id] && !pendingDeletes[col].has(id)) lastSynced[col][id] = stable(doc)
     }
     writeArrayOf(col, Object.values(merged))
   }
@@ -188,6 +194,7 @@ export async function pushCloudData(dataset = localDataset()) {
 export async function pushChangedData() {
   const ds = localDataset()
   const changed = {}
+  const deletedIds = {}
   let hasChange = false
   for (const col of DIFF_COLLECTIONS) {
     const cur = indexDocs(col, ds[col])
@@ -196,16 +203,28 @@ export async function pushChangedData() {
       if (lastSynced[col][id] !== stable(doc)) list.push(doc)
     }
     if (list.length) { changed[col] = list; hasChange = true }
+    // 刪除偵測：上次同步有、現在本機沒有的文件視為「本機已刪」，請後端一併刪除。
+    const removed = Object.keys(lastSynced[col]).filter(id => !(id in cur))
+    if (removed.length) {
+      deletedIds[col] = removed
+      removed.forEach(id => pendingDeletes[col].add(id))
+      hasChange = true
+    }
   }
   const settingsChanged = stable(ds.settings) !== lastSynced.settings
   if (settingsChanged) { changed.settings = ds.settings; hasChange = true }
   if (!hasChange) return { ok: true, skipped: true }
 
-  const result = await pushCloudData(changed)
-  // 推送成功後，把已上傳的文件記為「與雲端一致」。
+  const payload = { ...changed }
+  if (Object.keys(deletedIds).length) payload.deletedIds = deletedIds
+  const result = await pushCloudData(payload)
+  // 推送成功後，把已上傳的文件記為「與雲端一致」、把已刪除的文件移出基準與待刪集合。
   for (const col of DIFF_COLLECTIONS) {
-    if (!changed[col]) continue
-    changed[col].forEach(doc => { lastSynced[col][idOf(col, doc)] = stable(doc) })
+    if (changed[col]) changed[col].forEach(doc => { lastSynced[col][idOf(col, doc)] = stable(doc) })
+    if (deletedIds[col]) deletedIds[col].forEach(id => {
+      delete lastSynced[col][id]
+      pendingDeletes[col].delete(id)
+    })
   }
   if (settingsChanged) lastSynced.settings = stable(ds.settings)
   return result

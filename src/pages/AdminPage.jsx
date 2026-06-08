@@ -27,7 +27,7 @@ export default function AdminPage() {
   const [pendingAssign, setPendingAssign] = useState(null)
   // pendingSeatWait：候位列表「入座」按鈕觸發；OperationsView 進入候位入座模式
   const [pendingSeatWait, setPendingSeatWait] = useState(null)
-  const { user } = useAuth()
+  const { user, usingFirebase } = useAuth()
   const { bookings, waitlist } = useBooking()
   const toast = useToast()
 
@@ -126,6 +126,15 @@ export default function AdminPage() {
         </div>
 
         <main className="flex-1 px-3 sm:px-6 py-4 pb-32 lg:pb-6 overflow-x-hidden max-w-[1600px] w-full mx-auto">
+          {!usingFirebase && (
+            <div className="mb-4 rounded-xl border-2 border-chicken-red bg-red-50 px-4 py-3">
+              <p className="text-sm font-black text-chicken-red">⚠️ 雲端同步未啟用</p>
+              <p className="text-xs text-chicken-red/80 mt-1 leading-5">
+                未偵測到 Firebase 設定（VITE_FIREBASE_*），系統以本機開發模式運行：資料只存在這台裝置、
+                <b>不會上傳雲端、也不會與其他裝置同步</b>。若這是正式上線環境，請設定環境變數後重新部署。
+              </p>
+            </div>
+          )}
           <AnimatePresence mode="wait">
             <motion.div
               key={tab}

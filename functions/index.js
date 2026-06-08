@@ -98,21 +98,28 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
   }
   try {
     const { dataset = {} } = req.body || {}
-    const batch = db.batch()
-    upsertCollectionBatch(batch, COLLECTIONS.bookings, dataset.bookings || [], 'id')
-    upsertCollectionBatch(batch, COLLECTIONS.tables, dataset.tables || [], 'number')
-    upsertCollectionBatch(batch, COLLECTIONS.waitlist, dataset.waitlist || [], 'id')
-    upsertCollectionBatch(batch, COLLECTIONS.customers, dataset.customers || [], 'phone')
+    const ops = [
+      ...upsertOps(COLLECTIONS.bookings, dataset.bookings || [], 'id'),
+      ...upsertOps(COLLECTIONS.tables, dataset.tables || [], 'number'),
+      ...upsertOps(COLLECTIONS.waitlist, dataset.waitlist || [], 'id'),
+      ...upsertOps(COLLECTIONS.customers, dataset.customers || [], 'phone'),
+    ]
+    // 差異同步的刪除路徑：前端把「本機已刪」的文件 id 放在 dataset.deletedIds，
+    // 後端逐集合刪除，避免硬刪除的桌位/候位/顧客在下一輪拉取時復活（修 F-A）。
+    const deletedIds = dataset.deletedIds || {}
+    ops.push(...deleteOps(COLLECTIONS.bookings, deletedIds.bookings))
+    ops.push(...deleteOps(COLLECTIONS.tables, deletedIds.tables))
+    ops.push(...deleteOps(COLLECTIONS.waitlist, deletedIds.waitlist))
+    ops.push(...deleteOps(COLLECTIONS.customers, deletedIds.customers))
     if (dataset.settings) {
-      batch.set(db.collection('settings').doc('main'), {
+      ops.push({ ref: db.collection('settings').doc('main'), data: {
         ...normalizeStoreSettings(dataset.settings),
         updatedAt: new Date().toISOString(),
-      }, { merge: true })
+      } })
     }
-    batch.set(db.collection('system').doc('sync'), {
-      lastAdminPushAt: new Date().toISOString(),
-    }, { merge: true })
-    await batch.commit()
+    ops.push({ ref: db.collection('system').doc('sync'), data: { lastAdminPushAt: new Date().toISOString() } })
+    // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
+    await commitInChunks(ops)
     return res.json({ ok: true })
   } catch (err) {
     console.error('adminPushData failed:', err)
@@ -123,6 +130,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
 export const guestLookupBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
+    await enforceRateLimit(req, 'guestLookupBooking')
     const input = req.body || {}
     const mode = String(input.mode || 'identity')
     let matches = []
@@ -152,8 +160,9 @@ export const guestLookupBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
 
     return res.json({ ok: true, items })
   } catch (err) {
-    console.error('guestLookupBooking failed:', err)
-    return res.status(500).json({ ok: false, error: err.message || 'guest-lookup-failed' })
+    const code = err.status || 500
+    if (code >= 500) console.error('guestLookupBooking failed:', err)
+    return res.status(code).json({ ok: false, error: err.message || 'guest-lookup-failed' })
   }
 })
 
@@ -192,6 +201,7 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
 export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
+    await enforceRateLimit(req, 'guestCreateBooking')
     const settingsSnap = await db.collection('settings').doc('main').get()
     const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
 
@@ -304,15 +314,6 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     const next = sanitizeGuestPatch(booking, patch)
     const structural = ['date', 'timeSlot', 'guests'].some(key => String(next[key]) !== String(booking[key]))
 
-    if (structural) {
-      const [tables, bookings] = await Promise.all([
-        listCollection(COLLECTIONS.tables),
-        listCollection(COLLECTIONS.bookings),
-      ])
-      const remaining = calcSlotCapacityServer(tables, bookings.filter(b => b.id !== booking.id), next.date, next.timeSlot, settings)
-      if (remaining < Number(next.guests || 1)) return res.status(409).json({ ok: false, error: '此時段目前已無足夠座位，請改選其他時段' })
-    }
-
     const now = new Date().toISOString()
     const changedKeys = Object.keys(next).filter(key => JSON.stringify(next[key]) !== JSON.stringify(booking[key]))
     const historyEntry = {
@@ -333,17 +334,32 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       updatedAt: now,
     }
 
-    const batch = db.batch()
-    batch.set(db.collection(COLLECTIONS.bookings).doc(booking.id), updatePatch, { merge: true })
-    if (structural && booking.assignedTableId) {
-      batch.set(db.collection(COLLECTIONS.tables).doc(booking.assignedTableId), {
-        status: 'vacant',
-        currentBookingId: null,
-        seatedAt: null,
-        updatedAt: now,
-      }, { merge: true })
+    const bookingRef = db.collection(COLLECTIONS.bookings).doc(booking.id)
+    if (structural) {
+      // F-E：容量檢查與寫入放進同一交易，與 guestCreateBooking 對齊，避免兩筆並發改期
+      // 同時通過容量檢查造成超賣（TOCTOU）。
+      await db.runTransaction(async (tx) => {
+        const [tablesSnap, dateSnap] = await Promise.all([
+          tx.get(db.collection(COLLECTIONS.tables)),
+          tx.get(db.collection(COLLECTIONS.bookings).where('date', '==', next.date)),
+        ])
+        const tables = tablesSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+        const dayBookings = dateSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(b => b.id !== booking.id)
+        const remaining = calcSlotCapacityServer(tables, dayBookings, next.date, next.timeSlot, settings)
+        if (remaining < Number(next.guests || 1)) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
+        tx.set(bookingRef, updatePatch, { merge: true })
+        if (booking.assignedTableId) {
+          tx.set(db.collection(COLLECTIONS.tables).doc(booking.assignedTableId), {
+            status: 'vacant',
+            currentBookingId: null,
+            seatedAt: null,
+            updatedAt: now,
+          }, { merge: true })
+        }
+      })
+    } else {
+      await bookingRef.set(updatePatch, { merge: true })
     }
-    await batch.commit()
     const updated = { ...booking, ...updatePatch }
     await enqueueAndTrySend({
       channel: 'telegram',
@@ -710,7 +726,9 @@ async function listCollection(name) {
   return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
 }
 
-function upsertCollectionBatch(batch, name, items = [], idKey = 'id') {
+// 把一個集合的 upsert 轉成寫入操作清單（供分批提交，修 F-F）。
+function upsertOps(name, items = [], idKey = 'id') {
+  const ops = []
   items.forEach(item => {
     const id = String(item?.[idKey] || item?.id || '').trim()
     if (!id) return
@@ -719,8 +737,29 @@ function upsertCollectionBatch(batch, name, items = [], idKey = 'id') {
       : name === COLLECTIONS.customers
       ? { ...item, phoneDigits: digits(item.phone), updatedAt: item.updatedAt || new Date().toISOString() }
       : { ...item, updatedAt: item.updatedAt || new Date().toISOString() }
-    batch.set(db.collection(name).doc(id), normalized, { merge: true })
+    ops.push({ ref: db.collection(name).doc(id), data: normalized })
   })
+  return ops
+}
+
+function deleteOps(name, ids = []) {
+  if (!Array.isArray(ids)) return []
+  return ids
+    .map(rawId => String(rawId || '').trim())
+    .filter(Boolean)
+    .map(id => ({ ref: db.collection(name).doc(id), delete: true }))
+}
+
+// 分批提交寫入操作，單批不超過 chunkSize（< Firestore 500 上限）。
+async function commitInChunks(ops, chunkSize = 450) {
+  for (let i = 0; i < ops.length; i += chunkSize) {
+    const batch = db.batch()
+    ops.slice(i, i + chunkSize).forEach(op => {
+      if (op.delete) batch.delete(op.ref)
+      else batch.set(op.ref, op.data, { merge: true })
+    })
+    await batch.commit()
+  }
 }
 
 function normalizeBookingForFirestore(booking = {}) {
@@ -825,6 +864,44 @@ function errorWithStatus(message, status) {
   const err = new Error(message)
   err.status = status
   return err
+}
+
+// === 公開端點每-IP 節流（F-B）===
+// 公開端點無 App Check，易被：(1) 對 guestLookupBooking 暴力嘗試姓氏+電話批量擷取
+// manageToken；(2) 灌爆 guestCreateBooking 造成費用型 DoS。以 Firestore 交易做每-IP
+// 滑動視窗計數緩解。App Check（reCAPTCHA v3）是更強的後續防線，需在 Console/前端配置。
+const RATE_LIMITS = {
+  guestLookupBooking: { limit: 30, windowMs: 10 * 60 * 1000 },
+  guestCreateBooking: { limit: 20, windowMs: 10 * 60 * 1000 },
+}
+
+function clientIp(req) {
+  const xff = String(req.get('x-forwarded-for') || '').split(',')[0].trim()
+  return xff || req.ip || 'unknown'
+}
+
+// 超限時丟出 429；節流器自身錯誤時「放行」(fail-open)，避免節流機制本身造成服務中斷。
+async function enforceRateLimit(req, name) {
+  const cfg = RATE_LIMITS[name]
+  if (!cfg) return
+  const ipHash = crypto.createHash('sha256').update(clientIp(req)).digest('hex').slice(0, 32)
+  const ref = db.collection('rateLimits').doc(`${name}_${ipHash}`)
+  const now = Date.now()
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref)
+      const cur = snap.exists ? snap.data() : null
+      if (!cur || now - (cur.windowStart || 0) > cfg.windowMs) {
+        tx.set(ref, { windowStart: now, count: 1, updatedAt: new Date(now).toISOString() })
+        return
+      }
+      if ((cur.count || 0) >= cfg.limit) throw errorWithStatus('請求過於頻繁，請稍候再試', 429)
+      tx.update(ref, { count: (cur.count || 0) + 1, updatedAt: new Date(now).toISOString() })
+    })
+  } catch (err) {
+    if (err.status === 429) throw err
+    console.warn(`rate-limit check skipped for ${name}:`, err?.message)
+  }
 }
 
 // 常數時間比對管理 token，避免以回應時間差異側錄 token（timing attack）。

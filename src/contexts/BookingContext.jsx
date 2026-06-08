@@ -8,6 +8,7 @@ import * as seatingService from '../services/seatingService'
 import * as tg from '../services/telegramService'
 import * as cloudData from '../services/cloudDataService'
 import { useAuth } from './AuthContext'
+import { useToast } from '../components/ui/Toast'
 
 const BookingContext = createContext(null)
 
@@ -29,6 +30,11 @@ export function BookingProvider({ children }) {
   // 也避免未授權的全量讀寫（真正的把關在後端 requireStaff）。
   const { user, getToken } = useAuth() || {}
   const isStaff = !!user
+  const toast = useToast()
+  const toastRef = useRef(toast)
+  toastRef.current = toast
+  // 節流：雲端推送失敗的 toast 最多每 8 秒一則，避免離線時連續操作洗版。
+  const lastPushErrorToastRef = useRef(0)
 
   const [bookings, setBookings] = useState([])
   const [tables, setTables] = useState([])
@@ -76,6 +82,12 @@ export function BookingProvider({ children }) {
         setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
       } catch (err) {
         setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
+        // F-D：把推送失敗主動回饋給觸發操作的店員，避免「以為存檔成功、實際沒上雲」。
+        const now = Date.now()
+        if (now - lastPushErrorToastRef.current > 8000) {
+          lastPushErrorToastRef.current = now
+          toastRef.current?.error?.('雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
+        }
       }
     }, 250)
   }, [])

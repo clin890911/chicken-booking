@@ -41,7 +41,8 @@ export default function SettingsView() {
     setSavedMsg('✅ 首頁廣告已儲存')
     setTimeout(() => setSavedMsg(''), 2000)
   }
-  const removeBanner = (id) => {
+  const removeBanner = async (id) => {
+    if (!(await confirm('確定刪除這張首頁廣告？', { title: '刪除廣告', confirmLabel: '刪除' }))) return
     setForm(f => ({ ...f, heroBanners: (f.heroBanners || []).filter(b => b.id !== id) }))
   }
   const moveBanner = (id, dir) => {

@@ -38,8 +38,13 @@ export default function ConfirmPage() {
     return `${window.location.origin}/manage/${b.id}?token=${encodeURIComponent(b.manageToken)}`
   }, [b])
   const lineOfficialName = settings.lineOfficialName || 'LINE 官方帳號'
-  const lineReceiveUrl = useMemo(() => b ? lineBindUrl(settings, b, manageUrl) : '', [b, manageUrl, settings])
-  const calendarUrl = useMemo(() => b ? googleCalendarUrl(b, settings) : '', [b, settings])
+  // 這兩個 URL 在 render 階段計算；任何例外（如異常日期）都不該讓整頁白屏，故 try/catch 後退成空字串。
+  const lineReceiveUrl = useMemo(() => {
+    try { return b ? lineBindUrl(settings, b, manageUrl) : '' } catch { return '' }
+  }, [b, manageUrl, settings])
+  const calendarUrl = useMemo(() => {
+    try { return b ? googleCalendarUrl(b, settings) : '' } catch { return '' }
+  }, [b, settings])
   const mapUrl = settings.storeMapUrl || (settings.storeAddress ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(settings.storeAddress)}` : '')
   const telUrl = settings.storePhone ? `tel:${settings.storePhone}` : ''
 
@@ -266,10 +271,17 @@ export default function ConfirmPage() {
           initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.62 }}
           className="mt-4 grid grid-cols-3 gap-2"
         >
-          <a href={calendarUrl} target="_blank" rel="noreferrer" className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
-            <div className="text-xl">📅</div>
-            <div className="mt-1 text-xs font-black text-chicken-brown">加到行事曆</div>
-          </a>
+          {calendarUrl ? (
+            <a href={calendarUrl} target="_blank" rel="noreferrer" className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
+              <div className="text-xl">📅</div>
+              <div className="mt-1 text-xs font-black text-chicken-brown">加到行事曆</div>
+            </a>
+          ) : (
+            <button disabled className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center opacity-45 shadow-sm">
+              <div className="text-xl">📅</div>
+              <div className="mt-1 text-xs font-black text-chicken-brown">加到行事曆</div>
+            </button>
+          )}
           {mapUrl ? (
             <a href={mapUrl} target="_blank" rel="noreferrer" className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
               <div className="text-xl">📍</div>
@@ -370,6 +382,9 @@ function generateConfetti(n) {
 
 function googleCalendarUrl(booking, settings = {}) {
   const start = new Date(`${booking.date}T${booking.timeSlot}:00`)
+  // 日期/時段異常時 start 會是 Invalid Date，後續 toISOString() 會丟 RangeError 並讓整頁白屏。
+  // 這裡先擋掉：回傳空字串，呼叫端會改顯示停用的「加到行事曆」按鈕。
+  if (Number.isNaN(start.getTime())) return ''
   const diningDuration = Number(settings.diningDurationMin) || 90
   const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
   const end = new Date(start.getTime() + diningDuration * 60 * 1000)
