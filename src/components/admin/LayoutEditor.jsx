@@ -240,12 +240,19 @@ export default function LayoutEditor({ open, onClose }) {
                 {isDirty && <span className="ml-2 px-1.5 py-0.5 bg-chicken-yellow text-chicken-brown rounded text-[10px] font-black">未儲存</span>}
               </p>
             </div>
-            <button onClick={handleReset} className="px-3 py-1.5 text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg">↺ 重設預設</button>
-            <button onClick={handleCancel} className="px-3 py-1.5 text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg">取消</button>
+            <button onClick={handleReset} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg">↺ 重設預設</button>
+            <button onClick={handleCancel} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg flex items-center gap-1.5">
+              {isDirty ? (
+                <>
+                  返回
+                  <span className="px-1.5 py-0.5 bg-chicken-yellow text-chicken-brown rounded text-[10px] font-black">有未儲存</span>
+                </>
+              ) : '返回'}
+            </button>
             <button onClick={handleSave} disabled={!isDirty}
-                    className={`px-4 py-1.5 text-xs font-bold rounded-lg
+                    className={`px-4 py-1.5 min-h-[44px] text-xs font-bold rounded-lg
                       ${isDirty ? 'bg-chicken-green text-white hover:opacity-90' : 'bg-white/10 text-white/40 cursor-not-allowed'}`}>
-              💾 儲存變更
+              💾 儲存並返回
             </button>
           </header>
 

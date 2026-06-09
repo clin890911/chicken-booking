@@ -28,6 +28,9 @@ function withDefaults(value = {}) {
   const merged = { ...DEFAULT, ...value }
   return {
     ...merged,
+    // heroBanners 複製一份新陣列，避免回傳值與 DEFAULT.heroBanners 共用同一參考、
+    // 被呼叫端 mutate 後污染後續 getSettings()。
+    heroBanners: Array.isArray(merged.heroBanners) ? merged.heroBanners.slice() : [],
     diningDurationMin: Number(merged.diningDurationMin) || DEFAULT.diningDurationMin,
     cleanupBufferMin: Number(merged.cleanupBufferMin) || DEFAULT.cleanupBufferMin,
     lineOfficialUrl: merged.lineOfficialUrl || DEFAULT.lineOfficialUrl,

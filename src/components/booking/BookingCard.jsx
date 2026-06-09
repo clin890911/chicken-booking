@@ -59,6 +59,9 @@ export default function BookingCard({ booking, onAssign, onClick }) {
   const status = STATUS_MAP[booking.status] || STATUS_MAP.pending
   const noshowCount = getNoshowCount(booking.phone)
 
+  // B12：手機上低頻操作收進「⋯ 更多」展開選單
+  const [showMore, setShowMore] = useState(false)
+
   // 對應桌位（如有指派）
   const table = booking.assignedTableId ? tables.find(t => t.number === booking.assignedTableId) : null
   const seatedAt = booking.actualArrivalTime || table?.seatedAt
@@ -135,8 +138,15 @@ export default function BookingCard({ booking, onAssign, onClick }) {
     : booking.status === 'noshow' ? 'border-chicken-red/40 border'
     : 'border-chicken-brown/10 border'
 
+  // === B11：超時卡片背景 tint（僅 arrived 狀態，依 stage）===
+  const cardBg = booking.status === 'arrived'
+    ? stage === 'buffer-overtime' ? 'bg-chicken-red/10'
+    : stage === 'overtime' ? 'bg-orange-500/10'
+    : 'bg-white'
+    : 'bg-white'
+
   return (
-    <div className={`bg-white rounded-xl shadow-sm hover:shadow-md transition-all p-3.5 ${cardBorder}`}>
+    <div className={`rounded-xl shadow-sm hover:shadow-md transition-all p-3.5 ${cardBg} ${cardBorder}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           {/* 主資訊 */}
@@ -166,32 +176,35 @@ export default function BookingCard({ booking, onAssign, onClick }) {
             )}
           </div>
 
-          {/* 副資訊 */}
+          {/* 副資訊 — B16：依優先級分層（警示紅 → 操作線索綠/黃 → 基礎灰）*/}
           <div className="text-xs text-chicken-brown/70 mt-1 flex items-center gap-2 flex-wrap">
-            <span>{booking.phone || '—'}</span>
-            {SOURCE_MAP[booking.source] && (
-              <span className="text-chicken-brown/50">{SOURCE_MAP[booking.source]}</span>
-            )}
+            {/* 1. 警示（紅）優先 */}
             {noshowCount > 0 && (
               <span className="text-chicken-red font-bold">⚠️ no-show ×{noshowCount}</span>
             )}
-            {booking.actualArrivalTime && (
-              <span className="text-chicken-brown/50">到 {fmtTime(booking.actualArrivalTime)}</span>
+            {booking.cancellationReason?.reason && (
+              <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-black text-chicken-red">
+                取消原因：{booking.cancellationReason.reason}
+              </span>
+            )}
+            {/* 2. 操作線索（綠/黃）居中 */}
+            {suggestion && (
+              <span className="rounded-full border border-chicken-green/40 bg-chicken-green/10 px-2 py-0.5 font-black text-chicken-green">
+                建議桌 {suggestion.number}
+              </span>
             )}
             {booking.lastGuestEditAt && (
               <span className="rounded-full bg-[#06C755]/10 px-2 py-0.5 font-black text-[#06A848]">
                 客人自行修改 {fmtTime(booking.lastGuestEditAt)}
               </span>
             )}
-            {suggestion && (
-              <span className="rounded-full bg-chicken-green/10 px-2 py-0.5 font-black text-chicken-green">
-                建議桌 {suggestion.number}
-              </span>
+            {/* 3. 基礎資訊（灰）在後 */}
+            <span>{booking.phone || '—'}</span>
+            {SOURCE_MAP[booking.source] && (
+              <span className="text-chicken-brown/50">{SOURCE_MAP[booking.source]}</span>
             )}
-            {booking.cancellationReason?.reason && (
-              <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-black text-chicken-red">
-                取消原因：{booking.cancellationReason.reason}
-              </span>
+            {booking.actualArrivalTime && (
+              <span className="text-chicken-brown/50">到 {fmtTime(booking.actualArrivalTime)}</span>
             )}
           </div>
 
@@ -220,43 +233,50 @@ export default function BookingCard({ booking, onAssign, onClick }) {
             {booking.status === 'confirmed' && !booking.assignedTableId && (
               <button
                 onClick={(e) => { e.stopPropagation(); onAssign?.(booking) }}
-                className="text-xs px-3.5 py-1.5 bg-chicken-red text-white rounded-lg font-bold hover:opacity-90"
+                className="text-sm px-3.5 min-h-[44px] bg-chicken-red text-white rounded-lg font-bold hover:opacity-90"
               >指派桌位</button>
             )}
             {booking.status === 'confirmed' && booking.assignedTableId && (
               <button
                 onClick={(e) => { e.stopPropagation(); handleSeat() }}
-                className="text-xs px-3.5 py-1.5 bg-chicken-green text-white rounded-lg font-bold hover:opacity-90"
+                className="text-sm px-3.5 min-h-[44px] bg-chicken-green text-white rounded-lg font-bold hover:opacity-90"
               >客人到了</button>
             )}
+            {/* A5：主操作「客人已離席」顯眼、次操作「直接釋出」降權較小，避免誤點 */}
             {booking.status === 'arrived' && (
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleCheckout() }}
-                  className="text-xs px-3.5 py-1.5 bg-orange-500 text-white rounded-lg font-bold hover:opacity-90"
-                >已離席（待清桌）</button>
+                  className="text-sm px-4 min-h-[44px] bg-orange-500 text-white rounded-lg font-bold hover:opacity-90"
+                >🚪 客人已離席</button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleFinalize() }}
-                  className="text-xs px-3.5 py-1.5 bg-chicken-green text-white rounded-lg font-bold hover:opacity-90"
-                >已離席+清桌</button>
+                  className="text-xs px-3 min-h-[44px] bg-white border border-chicken-green/40 text-chicken-green rounded-lg font-bold hover:bg-chicken-green/5"
+                >直接釋出（已清桌）</button>
               </>
             )}
+            {/* B12：低頻操作（標No-show/取消訂位）手機收進「⋯ 更多」，桌面(sm:)直接全列 */}
             {(booking.status === 'confirmed' || booking.status === 'pending') && (
               <>
                 <button
+                  onClick={(e) => { e.stopPropagation(); setShowMore(s => !s) }}
+                  className="sm:hidden text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown/70 rounded-lg font-bold hover:border-chicken-brown/30"
+                  aria-expanded={showMore}
+                >⋯ 更多</button>
+                <button
                   onClick={(e) => { e.stopPropagation(); handleNoshow() }}
-                  className="text-xs px-3 py-1.5 bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5"
+                  className={`${showMore ? 'flex' : 'hidden'} sm:inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5`}
                 >標 No-show</button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleCancel() }}
-                  className="text-xs px-3 py-1.5 bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5"
+                  className={`${showMore ? 'flex' : 'hidden'} sm:inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5`}
                 >✕ 取消訂位</button>
               </>
             )}
             {booking.status === 'noshow' && (
               <button
                 onClick={(e) => { e.stopPropagation(); handleRestore() }}
-                className="text-xs px-3 py-1.5 bg-white border border-chicken-brown/15 text-chicken-brown rounded-lg font-bold hover:border-chicken-green hover:text-chicken-green"
+                className="text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown rounded-lg font-bold hover:border-chicken-green hover:text-chicken-green"
               >↩ 恢復為待到</button>
             )}
           </div>

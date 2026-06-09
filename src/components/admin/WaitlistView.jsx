@@ -12,9 +12,9 @@ const STATUS_LABELS = {
   left: '已離開',
 }
 const STATUS_COLOR = {
-  waiting: 'bg-chicken-brown/10 text-chicken-brown',
-  called: 'bg-chicken-yellow/15 text-chicken-yellow',
-  seated: 'bg-chicken-green/15 text-chicken-green',
+  waiting: 'bg-amber-100 text-amber-800',
+  called: 'bg-amber-100 text-amber-800',
+  seated: 'bg-emerald-100 text-emerald-800',
   left: 'bg-chicken-brown/5 text-chicken-brown/40',
 }
 
@@ -64,9 +64,22 @@ export default function WaitlistView({ onSeatWaitlist }) {
     }
   }, [sorted])
 
+  // C2：取號預估 —— 以目前活躍候位組數 × 每組平均佔用估時，給門口一個透明、合理的等待估計
+  const activeCount = useMemo(
+    () => waitlist.filter(w => w.status === 'waiting' || w.status === 'called').length,
+    [waitlist],
+  )
+  const AVG_MIN_PER_GROUP = 12       // 每組平均間隔（合理估計）
+  const estPartyExtra = (size) => (Number(size) > 4 ? 8 : 0)   // 大桌較難排，略加估時
+  const estimatedWaitMin = useMemo(() => {
+    const base = activeCount * AVG_MIN_PER_GROUP + estPartyExtra(form.partySize)
+    return Math.max(5, base)
+  }, [activeCount, form.partySize])
+
   const handleAdd = () => {
-    if (!form.partySize || form.partySize < 1) return toast.warning('請填人數')
-    const w = addWaitlist(form)
+    const size = Number(form.partySize)
+    if (!size || size < 1 || size > 12) return toast.warning('人數需介於 1～12 位')
+    const w = addWaitlist({ ...form, partySize: size, estimatedMin: estimatedWaitMin })
     setShowAdd(false)
     setForm({ name: '', phone: '', partySize: 2, notes: '' })
     if (w?.queueNumber) {
@@ -76,11 +89,11 @@ export default function WaitlistView({ onSeatWaitlist }) {
 
   return (
     <div className="space-y-3">
-      {/* 統計 */}
+      {/* 統計（順序：等待中→已叫號→已入座→已離開；已叫號 >0 時加邊框+微閃醒目） */}
       <div className="grid grid-cols-4 gap-2">
-        <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-brown">{stats.waiting}</div><div className="text-[11px] text-chicken-brown/60">等待中</div></Card>
-        <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-yellow">{stats.called}</div><div className="text-[11px] text-chicken-brown/60">已叫號</div></Card>
-        <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-green">{stats.seated}</div><div className="text-[11px] text-chicken-brown/60">已入座</div></Card>
+        <Card className="!p-3 text-center"><div className="text-2xl font-black text-amber-700">{stats.waiting}</div><div className="text-[11px] text-chicken-brown/60">等待中</div></Card>
+        <Card className={`!p-3 text-center ${stats.called > 0 ? 'border-amber-400 !border-2 bg-amber-50 animate-pulse' : ''}`}><div className="text-2xl font-black text-amber-700">{stats.called}</div><div className="text-[11px] text-chicken-brown/60">已叫號</div></Card>
+        <Card className="!p-3 text-center"><div className="text-2xl font-black text-emerald-600">{stats.seated}</div><div className="text-[11px] text-chicken-brown/60">已入座</div></Card>
         <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-brown/40">{stats.left}</div><div className="text-[11px] text-chicken-brown/60">已離開</div></Card>
       </div>
 
@@ -113,6 +126,11 @@ export default function WaitlistView({ onSeatWaitlist }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="text-xl font-black text-chicken-red">#{w.queueNumber}</span>
+                    {(w.status === 'waiting' || w.status === 'called') && (
+                      <span className="self-center rounded-full bg-chicken-brown/10 px-2 py-0.5 text-[11px] font-bold text-chicken-brown">
+                        第 {aheadOf[w.id] + 1} 名
+                      </span>
+                    )}
                     <span className="text-base font-bold">{w.name}</span>
                     <span className="text-sm text-chicken-brown/60">{w.partySize} 位</span>
                     {(w.status === 'waiting' || w.status === 'called') && (
@@ -143,17 +161,17 @@ export default function WaitlistView({ onSeatWaitlist }) {
                 <div className="flex gap-2 mt-3">
                   <button
                     onClick={() => onSeatWaitlist?.(w)}
-                    className="flex-1 bg-chicken-green hover:opacity-90 text-white font-bold py-2 rounded-lg text-sm"
+                    className="flex-1 min-h-[44px] bg-chicken-green hover:opacity-90 text-white font-bold py-2 rounded-lg text-sm"
                   >入座</button>
                   {w.status === 'waiting' && (
                     <button
                       onClick={() => callWaitlist(w.id)}
-                      className="flex-1 bg-chicken-yellow hover:opacity-90 text-white font-bold py-2 rounded-lg text-sm"
+                      className="flex-1 min-h-[44px] bg-chicken-yellow hover:opacity-90 text-white font-bold py-2 rounded-lg text-sm"
                     >叫號</button>
                   )}
                   <button
                     onClick={async () => { if (await confirm(`確定讓 ${w.name || `#${w.queueNumber}`} 棄號？此動作會將其移出候位。`, { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
-                    className="px-3 bg-white border border-chicken-red/40 text-chicken-red rounded-lg text-sm font-bold hover:bg-chicken-red/5"
+                    className="px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-lg text-sm font-bold hover:bg-chicken-red/5"
                   >棄號</button>
                 </div>
               )}
@@ -173,11 +191,15 @@ export default function WaitlistView({ onSeatWaitlist }) {
           <Input label="姓名" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="王小姐" />
           <Input label="電話" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="0912345678" />
           <Select
-            label="人數"
+            label="人數（1～12 位）"
             value={form.partySize}
             onChange={e => setForm(f => ({ ...f, partySize: Number(e.target.value) }))}
             options={Array.from({ length: 12 }, (_, i) => ({ value: i + 1, label: `${i + 1} 位` }))}
           />
+          <div className="rounded-xl border border-chicken-brown/10 bg-chicken-cream/60 px-3 py-2 text-sm text-chicken-brown/70">
+            預估約 <span className="font-bold text-amber-700">{estimatedWaitMin} 分</span>
+            <span className="text-xs text-chicken-brown/50">（目前 {activeCount} 組候位中）</span>
+          </div>
           <Input label="備註（選填）" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="例：靠窗、過敏" />
         </div>
       </Modal>

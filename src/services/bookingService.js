@@ -4,9 +4,20 @@
 //           guestEditCount, guestEditHistory, cancellationReason, createdAt, updatedAt, createdBy }
 // 後端：localStorage（v0），未來切到 Firestore 只改本檔
 import * as customerService from './customerService'
+import * as tableService from './tableService'
 
 const STORAGE_KEY = 'chicken_bookings_v1'
 const NOSHOW_KEY = 'chicken_noshow_v1'
+
+// 客人自助改/取消訂位、若會解除桌位指派，必須一併釋放原本佔用的桌，
+// 否則桌會留在 reserved 卻指向已不存在的綁定（孤兒桌）。只有當該桌確實由這筆訂位佔用時才釋放。
+function releaseTableIfHeldBy(tableNumber, bookingId) {
+  if (!tableNumber || !bookingId) return
+  const t = tableService.getByNumber(tableNumber)
+  if (t && t.currentBookingId === bookingId) {
+    tableService.clearTable(tableNumber)
+  }
+}
 
 function read() {
   try {
@@ -232,6 +243,8 @@ export function updateBookingByGuest(id, token, patch) {
     guestEditHistory: [...(Array.isArray(booking.guestEditHistory) ? booking.guestEditHistory : []), historyEntry],
   }
   const updated = update(id, cleanPatch)
+  // 結構性改動（日期/時段/人數）會解除桌位 → 一併釋放原桌，避免孤兒 reserved 桌
+  if (shouldUnassign) releaseTableIfHeldBy(booking.assignedTableId, id)
   return { ok: true, booking: updated, changes: cleanPatch }
 }
 
@@ -267,6 +280,8 @@ export function cancelBookingByGuest(id, token, reason = '') {
       },
     ],
   })
+  // 客人取消 → 釋放原本佔用的桌（避免孤兒 reserved 桌）
+  releaseTableIfHeldBy(booking.assignedTableId, id)
   return { ok: true, booking: updated }
 }
 
@@ -337,6 +352,15 @@ export function recordNoshow(booking) {
 export function getNoshowCount(phone) {
   if (!phone) return 0
   return readNoshow()[phone]?.count || 0
+}
+
+// No-show 風險分級：0 無 / 1 低(1次) / 2 中(2次) / 3 高(≥3次)
+export function noshowRisk(phone) {
+  const n = getNoshowCount(phone)
+  if (n >= 3) return 3
+  if (n === 2) return 2
+  if (n === 1) return 1
+  return 0
 }
 
 export function searchNoshow(phone) {

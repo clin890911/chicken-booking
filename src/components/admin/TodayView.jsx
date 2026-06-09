@@ -72,6 +72,16 @@ export default function TodayView({ onAssignTable }) {
     return Object.entries(map).filter(([, list]) => list.length > 0)
   }, [filtered, settings])
 
+  // B10：時段「接近滿」門檻——取各時段最高人數，且需達合理絕對量（避免冷門日誤報）
+  const slotPeakGuests = useMemo(() => {
+    let peak = 0
+    grouped.forEach(([, list]) => {
+      const g = list.reduce((s, b) => s + Number(b.guests || 0), 0)
+      if (g > peak) peak = g
+    })
+    return peak
+  }, [grouped])
+
   return (
     <div className="space-y-4">
       {/* 統計 */}
@@ -122,13 +132,23 @@ export default function TodayView({ onAssignTable }) {
           <EmptyState icon="🍽️" title="今日尚無訂位" hint="客人線上訂位後會出現在這裡" />
         )
       ) : (
-        grouped.map(([slot, list]) => (
+        grouped.map(([slot, list]) => {
+          const slotGuests = list.reduce((s, b) => s + Number(b.guests || 0), 0)
+          // 接近滿：達當日尖峰且絕對人數 ≥ 8（合理門檻，避免冷門日誤報）
+          const nearFull = slotPeakGuests >= 8 && slotGuests >= slotPeakGuests
+          return (
           <div key={slot}>
             <div className="flex items-center gap-2 mb-2 px-1">
               <span className="text-base font-black text-chicken-red tabular-nums">{slot}</span>
               <div className="flex-1 h-px bg-chicken-brown/10" />
-              <span className="text-xs text-chicken-brown/60">
-                {list.length} 組 / {list.reduce((s, b) => s + Number(b.guests || 0), 0)} 位
+              {nearFull && (
+                <span className="text-xs font-bold px-2 py-1 rounded-full bg-chicken-red/10 text-chicken-red whitespace-nowrap">
+                  🔴 接近滿
+                </span>
+              )}
+              <span className={`text-sm font-bold px-2.5 py-1 rounded-full tabular-nums whitespace-nowrap
+                ${nearFull ? 'bg-chicken-red/10 text-chicken-red' : 'bg-chicken-brown/10 text-chicken-brown/80'}`}>
+                {list.length} 組 / {slotGuests} 位
               </span>
             </div>
             <div className="space-y-2">
@@ -137,7 +157,8 @@ export default function TodayView({ onAssignTable }) {
               ))}
             </div>
           </div>
-        ))
+          )
+        })
       )}
     </div>
   )

@@ -73,7 +73,7 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
         </div>
         <button
           onClick={async () => { if (await confirm('確定登出？', { title: '登出', confirmLabel: '登出' })) signOut() }}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-chicken-brown/60 hover:bg-chicken-cream"
+          className="w-full flex items-center gap-2 min-h-[44px] px-3 py-2 rounded-lg text-xs text-chicken-brown/60 hover:bg-chicken-cream"
         >
           <span>🚪</span>
           <span className="hidden xl:inline">登出</span>

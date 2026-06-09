@@ -17,6 +17,14 @@ export default function TelegramSettings({ embedded = false }) {
   const hasToken = tg.hasToken()
   const configured = tg.isConfigured()
 
+  // 最後通知時間（若有資料才顯示）；由通知送出時寫入的 localStorage 取出
+  const lastSentLabel = (() => {
+    const raw = localStorage.getItem('chicken_telegram_last_sent')
+    if (!raw) return null
+    const d = new Date(raw)
+    return isNaN(d.getTime()) ? null : d.toLocaleString('zh-TW')
+  })()
+
   const handleSaveChatId = () => {
     const id = chatId.trim()
     if (!id) return toast.error('請輸入 chat_id 或按自動偵測')
@@ -56,10 +64,21 @@ export default function TelegramSettings({ embedded = false }) {
     }
   }
 
-  const handleToggle = (on) => {
+  const applyEnabled = (on) => {
     tg.setEnabled(on)
     setEnabledLocal(on)
-    toast.info(on ? '通知已開啟' : '通知已關閉（變更不會推送）')
+    reload()
+  }
+
+  const handleToggle = (on) => {
+    const prev = !on
+    applyEnabled(on)
+    // 可復原：尤其關閉時，避免誤關後新事件靜默不推送
+    toast.action(
+      on ? '✅ 通知已開啟' : '🔕 通知已關閉，新事件不會推送',
+      { label: '↩ 復原', onClick: () => applyEnabled(prev) },
+      { type: on ? 'success' : 'warning' },
+    )
   }
 
   const handleClear = () => {
@@ -166,6 +185,7 @@ export default function TelegramSettings({ embedded = false }) {
                 onClick={handleTest}
                 disabled={!configured || busy}
                 variant="secondary"
+                className="min-h-[44px]"
               >
                 📤 送出測試訊息
               </Button>
@@ -173,6 +193,7 @@ export default function TelegramSettings({ embedded = false }) {
                 onClick={handleSendDigest}
                 disabled={!configured || busy}
                 variant="secondary"
+                className="min-h-[44px]"
               >
                 📊 立即送每日彙總
               </Button>
@@ -181,12 +202,17 @@ export default function TelegramSettings({ embedded = false }) {
             {/* 狀態 */}
             <div className="px-3 py-2 bg-chicken-brown/5 rounded-lg text-xs text-chicken-brown/70 leading-relaxed">
               <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${configured && enabled ? 'bg-chicken-green' : 'bg-chicken-brown/30'}`}></span>
+                <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${configured && enabled ? 'bg-chicken-green' : 'bg-chicken-brown/30'}`}></span>
                 <b>{configured && enabled ? '已連接、通知已啟用' : configured ? '已連接、通知已停用' : '未連接'}</b>
               </div>
               <div className="text-[11px] text-chicken-brown/50 mt-1">
                 Token：{hasToken ? '✓ 已設' : '✗ 未設'} · ChatID：{tg.getChatId() || '✗ 未設'}
               </div>
+              {lastSentLabel && (
+                <div className="text-[11px] text-chicken-brown/50 mt-0.5">
+                  最後通知時間：{lastSentLabel}
+                </div>
+              )}
             </div>
           </div>
         </>

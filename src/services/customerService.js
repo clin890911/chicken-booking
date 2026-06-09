@@ -1,7 +1,7 @@
 // customerService：顧客檔案
 // 用 phone 當主鍵，自動去重；訂位/候位建立時自動 upsert
 // schema: { phone, name, lineUserId, visits, lastVisit, totalGuests, totalSpend,
-//           notes, allergies, blacklisted, vipTier, source, createdAt, updatedAt }
+//           notes, allergies, blacklisted, vipTier, archived, source, createdAt, updatedAt }
 const STORAGE_KEY = 'chicken_customers_v1'
 
 function read() {
@@ -17,8 +17,9 @@ function write(map) {
 }
 
 function normalize(phone) {
-  // 簡易標準化：去除空白與符號
-  return (phone || '').replace(/[\s\-+]/g, '')
+  // 以「只留數字」當主鍵，與 utils/validation.isValidTwPhone 一致；
+  // 確保同一電話不論輸入時帶空白/連字號/括號/點號都對應同一顧客檔（正確去重）。
+  return String(phone || '').replace(/\D/g, '')
 }
 
 export function listAll() {
@@ -35,8 +36,11 @@ export function getByPhone(phone) {
 export function search(query) {
   const q = (query || '').trim().toLowerCase()
   if (!q) return []
+  // normalize 去掉所有非數字，純文字查詢會變空字串；空字串不可拿去做 phone.includes（會 match 全部），
+  // 故只有查詢含數字時才比對電話，否則僅以姓名比對。
+  const digits = normalize(q)
   return listAll().filter(c =>
-    normalize(c.phone).includes(normalize(q)) ||
+    (digits !== '' && normalize(c.phone).includes(digits)) ||
     (c.name || '').toLowerCase().includes(q)
   )
 }
@@ -70,6 +74,7 @@ export function upsert({ phone, name, lineUserId, partySize, source, notes }) {
       allergies: '',
       blacklisted: false,
       vipTier: 'none', // none | bronze | silver | gold
+      archived: false,
       source: source || 'walk-in',
       createdAt: now,
       updatedAt: now,
@@ -106,6 +111,15 @@ export function setBlacklist(phone, value, reason = '') {
 export function setVipTier(phone, tier) {
   if (!['none', 'bronze', 'silver', 'gold'].includes(tier)) return null
   return update(phone, { vipTier: tier })
+}
+
+// 歸檔（死帳 / 黑名單可歸檔，預設列表會隱藏）
+export function archive(phone) {
+  return update(phone, { archived: true })
+}
+
+export function unarchive(phone) {
+  return update(phone, { archived: false })
 }
 
 // 統計
