@@ -352,8 +352,9 @@ export default function GroupPlanningView() {
               <Button variant="secondary" onClick={() => setSheetOpen(true)}>🖨 回傳單</Button>
               <button
                 onClick={async () => {
+                  const idToDelete = selectedId // 快照：避免確認期間切換選取而刪錯團單
                   const ok = await confirm('刪除後無法復原，確定要刪除這筆團單嗎？', { title: '刪除團單', confirmLabel: '刪除', danger: true })
-                  if (ok) { removeGroupReservation(selectedId); setSelectedId(null); toast.info('已刪除團單') }
+                  if (ok && idToDelete === selectedId) { removeGroupReservation(idToDelete); setSelectedId(null); toast.info('已刪除團單') }
                 }}
                 className="px-3 py-2 rounded-xl text-sm font-bold text-chicken-red border-2 border-chicken-red/30">刪除</button>
             </div>

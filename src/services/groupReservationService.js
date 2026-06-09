@@ -190,7 +190,7 @@ export function tableConflictsForBatch({ date, timeSlot, settings = {}, excludeG
 
   // 2) 一般訂位已指派桌（同日、時間窗重疊、未取消/未到/未完成）
   ;(bookings || []).forEach(b => {
-    if (b.date !== date || !b.assignedTableId) return
+    if (b.date !== date || !b.assignedTableId || !b.timeSlot) return // 無時段者跳過，避免 0 分窗誤判
     if (CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return
     if (!overlaps(toMinutes(b.timeSlot))) return
     const n = String(b.assignedTableId)

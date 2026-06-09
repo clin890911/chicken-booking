@@ -168,7 +168,7 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         .filter(g => g.id !== group.id && !CAPACITY_EXCLUDED_STATUSES.includes(g.status))
       const assignedBookings = bookingsSnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(b => b.assignedTableId && !CAPACITY_EXCLUDED_STATUSES.includes(b.status))
+        .filter(b => b.assignedTableId && b.timeSlot && !CAPACITY_EXCLUDED_STATUSES.includes(b.status))
 
       const conflicts = []
       for (const b of group.batches || []) {
