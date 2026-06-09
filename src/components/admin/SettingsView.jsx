@@ -676,8 +676,8 @@ function SeatingsEditor({ form, setForm }) {
       {seatings.map(s => (
         <div key={s.id} className="flex items-end gap-2 flex-wrap rounded-xl border border-chicken-brown/10 bg-white p-2">
           <Input label="名稱" value={s.name} onChange={e => patch(s.id, { name: e.target.value })} className="flex-1 min-w-[120px]" />
-          <Input label="開始" type="time" value={s.start} onChange={e => patch(s.id, { start: e.target.value })} className="w-28" />
-          <Input label="結束" type="time" value={s.end} onChange={e => patch(s.id, { end: e.target.value })} className="w-28" />
+          <Input label="開始" type="time" value={s.start} onChange={e => patch(s.id, { start: e.target.value })} className="w-40" />
+          <Input label="結束" type="time" value={s.end} onChange={e => patch(s.id, { end: e.target.value })} className="w-40" />
           <button onClick={() => remove(s.id)} className="min-h-[44px] px-3 text-sm font-bold text-chicken-red border-2 border-chicken-red/30 rounded-xl">刪除</button>
         </div>
       ))}
