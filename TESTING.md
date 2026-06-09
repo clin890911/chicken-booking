@@ -44,7 +44,9 @@ Vitest 全綠長這樣：
 | E2E 檔 | 主線 | 步驟 |
 |---|---|---|
 | `e2e/customer-booking.spec.js` | 用戶端訂位 | 選時段 → 填姓名/電話 → 送出 → 進確認頁；另測電話格式錯誤擋送出 |
+| `e2e/customer-manage.spec.js` | 用戶端查詢/修改 | 開管理連結 → 驗證電話末碼 → 改時段更新成功 / 取消訂位成功 |
 | `e2e/admin-assign.spec.js` | 管理端指派 | 同仁登入 → 今日列表看到訂位 → 指派桌位（A6 二步確認）→ 指派成功 |
+| `e2e/waitlist-seat.spec.js` | 管理端候位 | 登入 → 取號 → 叫號 → 入座（A6 二步確認）→ 入座成功 |
 
 > 客人端訂位走後端 `guestGetAvailability` / `guestCreateBooking`，E2E 以 `page.route` mock 這兩個端點的回應，故不需後端即可跑、且結果穩定。
 
@@ -88,7 +90,7 @@ Vitest 全綠長這樣：
 ## 目前「不」涵蓋的範圍（已知取捨）
 
 - **React 元件渲染 / 互動**：未做 component test（畫面層改動請用 preview 或實機驗證）。
-- **端到端瀏覽器測試（E2E）**：未導入 Playwright（成本高、較脆弱）。日後若要，建議針對「用戶端完整訂位流程」與「管理端指派→入座」兩條主線各加一條 E2E。
+- **E2E 廣度**：已用 Playwright 涵蓋四條主線——用戶端訂位、用戶端查詢/修改、管理端指派、管理端候位入座（見上）。團體預排（旅行社）等其他流程尚未加 E2E，可日後依同樣模式（mock `guest*`/`admin*` 端點 + 驅動 UI）擴充。
 - **網路 / Firebase / Telegram / LINE**：`firebase.js`、`cloudDataService.js`、`telegramService.js`、`lineService.js` 屬外部整合，不在單元測試範圍（測了也只是測 mock）。
 - **後端 `functions/`**：本套件為前端領域邏輯；後端 Cloud Functions 若有邏輯需另立測試。
 
