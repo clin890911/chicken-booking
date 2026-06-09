@@ -207,6 +207,21 @@ export function isBlankGroup(g) {
     (g.counts?.total || 0) === 0 && groupTableNumbers(g).length === 0
 }
 
+// 一次性清除既有殘留的空白草稿（無旅行社、0 人、未圈桌）。
+// 草稿優先（記憶體草稿，填好才寫入）改版後不會再產生空白；此函式用於清掉舊版殘留。
+// 回傳清除筆數；本機刪除後由呼叫端 syncCloudSoon 觸發雲端泛型差異刪除。
+export function purgeBlankGroups() {
+  const list = read()
+  const kept = list.filter(g => !isBlankGroup({
+    ...g,
+    counts: normalizeCounts(g.counts),
+    batches: Array.isArray(g.batches) ? g.batches : [],
+  }))
+  const removed = list.length - kept.length
+  if (removed) write(kept)
+  return removed
+}
+
 // 儲存前驗證（純函式，供 UI 與測試共用）。回傳錯誤訊息字串；null = 通過。
 // capByNum: { 桌號: 容量 } 用來計算各梯/全團保留席數。
 export function validateGroupForSave(group, capByNum = {}) {
