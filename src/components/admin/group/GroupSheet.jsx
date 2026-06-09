@@ -69,6 +69,21 @@ export default function GroupSheet({ group, tables = [], store = {}, onClose }) 
   const sameTablesAllBatches = batches.length > 1 &&
     batches.every(b => JSON.stringify([...(b.tableNumbers || [])].sort()) === JSON.stringify([...(batches[0].tableNumbers || [])].sort()))
 
+  // 桌號（主資訊）：依數字排序；桌數多時自動縮字級避免溢出
+  const tablesStr = [...groupNums].sort((a, b) => Number(a) - Number(b)).join('、') || '尚未圈桌'
+  const tableFont = tablesStr.length > 26 ? 18 : tablesStr.length > 16 ? 24 : 30
+
+  // 次要資訊（極簡版收進頁尾一行小字；只列非空/非零者）
+  const extras = []
+  if (c.vegetarian) extras.push(`素食 ${c.vegetarian}`)
+  if (c.child) extras.push(`兒童 ${c.child}`)
+  if (c.mobility) extras.push(`行動不便 ${c.mobility}`)
+  if (c.wheelchair) extras.push(`輪椅 ${c.wheelchair}`)
+  if (group.allergyText) extras.push(`過敏：${group.allergyText}`)
+  if (group.tableSideNeeds) extras.push(`桌邊：${group.tableSideNeeds}`)
+  if (group.busInfo) extras.push(`遊覽車：${group.busInfo}`)
+  const extrasText = extras.length ? extras.join('　·　') : '無特殊需求'
+
   const exportPng = () => {
     const svg = svgRef.current
     if (!svg) return
@@ -166,25 +181,9 @@ export default function GroupSheet({ group, tables = [], store = {}, onClose }) 
     )
   }
 
-  const statChip = (x, y, label, value, accent) => (
-    <g>
-      <rect x={x} y={y} width={118} height={46} rx={10} fill="#ffffff" stroke={C.line} />
-      <rect x={x} y={y} width={5} height={46} rx={2.5} fill={accent} />
-      <text x={x + 16} y={y + 19} fontSize={11} fill={C.brownSoft}>{label}</text>
-      <text x={x + 16} y={y + 39} fontSize={20} fontWeight="800" fill={C.brown}>{value}</text>
-    </g>
-  )
-
-  const infoCell = (x, y, label, value) => (
-    <g>
-      <text x={x} y={y} fontSize={11.5} fill={C.brownSoft}>{label}</text>
-      <text x={x} y={y + 22} fontSize={16} fontWeight="800" fill={C.brown}>{value || '—'}</text>
-    </g>
-  )
-
-  // 座位圖區域配置
-  const mapTop = 470
-  const mapBottom = 1052
+  // 座位圖區域配置（極簡版：上移 + 放大成主視覺）
+  const mapTop = 356
+  const mapBottom = 1006
   const mapH = mapBottom - mapTop
   const floorCards = floorsUsed.length === 0
     ? null
@@ -239,41 +238,34 @@ export default function GroupSheet({ group, tables = [], store = {}, onClose }) 
             <text x={662} y={51} fontSize={15} fontWeight="800" fill="#ffffff" textAnchor="middle">團體座位確認單</text>
             <text x={758} y={84} fontSize={13} fontWeight="700" fill={C.brown} textAnchor="end">用餐日期 {group.date}</text>
 
-            {/* === 基本資訊 === */}
-            <rect x={M} y={126} width={SHEET_W - 2 * M} height={78} rx={12} fill="#ffffff" stroke={C.line} />
-            <line x1={M + 340} y1={140} x2={M + 340} y2={190} stroke={C.line} />
-            {infoCell(M + 22, 152, '旅行社', group.agencyName)}
-            {infoCell(M + 360, 152, '導遊', `${group.guideName || '—'}${group.guidePhone ? `  ${group.guidePhone}` : ''}`)}
-            {infoCell(M + 22, 188, '梯次', batches.map(b => `${b.label} ${b.timeSlot}`).join('　'))}
-            {infoCell(M + 360, 188, '保留桌數', `${groupNums.size} 桌 · ${heldSeats} 席`)}
-
-            {/* === 人數結構 === */}
-            <rect x={M} y={218} width={196} height={118} rx={14} fill={C.red} filter="url(#cardShadow)" />
-            <text x={M + 98} y={246} fontSize={13} fontWeight="700" fill="#ffffff" opacity={0.9} textAnchor="middle">用餐總人數</text>
-            <text x={M + 98} y={306} fontSize={58} fontWeight="800" fill="#ffffff" textAnchor="middle">{c.total || 0}</text>
-            <text x={M + 98} y={326} fontSize={13} fontWeight="700" fill="#ffffff" opacity={0.9} textAnchor="middle">位貴賓</text>
-
-            <text x={252} y={234} fontSize={12.5} fontWeight="700" fill={C.brownSoft}>用餐人數結構</text>
-            {statChip(252, 244, '素食', c.vegetarian || 0, C.green)}
-            {statChip(378, 244, '兒童', c.child || 0, C.yellow)}
-            {statChip(504, 244, '行動不便', c.mobility || 0, '#b45309')}
-            {statChip(630, 244, '輪椅', c.wheelchair || 0, '#7c3aed')}
-            <rect x={252} y={300} width={SHEET_W - M - 252} height={36} rx={8} fill={C.cream} />
-            <text x={266} y={316} fontSize={12} fill={C.brown}>過敏：<tspan fontWeight="700">{group.allergyText || '無'}</tspan></text>
-            <text x={266} y={331} fontSize={12} fill={C.brown}>桌邊需求：<tspan fontWeight="700">{group.tableSideNeeds || '無'}</tspan>{group.busInfo ? `　遊覽車：${group.busInfo}` : ''}</text>
-
-            {/* === 座位圖（主視覺）=== */}
-            <circle cx={M + 6} cy={362} r={6} fill={C.red} />
-            <text x={M + 20} y={368} fontSize={19} fontWeight="800" fill={C.brown}>您的專屬座位區</text>
+            {/* === 關鍵資訊（極簡：旅行社 / 導遊 / 梯次） === */}
+            <text x={M} y={148} fontSize={11.5} fill={C.brownSoft}>旅行社</text>
+            <text x={M} y={173} fontSize={21} fontWeight="800" fill={C.brown}>{group.agencyName || '—'}</text>
+            <text x={M + 400} y={148} fontSize={11.5} fill={C.brownSoft}>導遊</text>
+            <text x={M + 400} y={173} fontSize={21} fontWeight="800" fill={C.brown}>{group.guideName || '—'}{group.guidePhone ? `　${group.guidePhone}` : ''}</text>
+            <text x={M} y={206} fontSize={11.5} fill={C.brownSoft}>梯次</text>
+            <text x={M} y={229} fontSize={18} fontWeight="800" fill={C.brown}>{batches.map(b => `${b.label} ${b.timeSlot}`).join('　／　') || '—'}</text>
             {sameTablesAllBatches && (
-              <text x={M + 200} y={368} fontSize={12} fontWeight="700" fill={C.yellow}>※ 兩梯次共用同一批桌位</text>
+              <text x={M + 360} y={228} fontSize={12} fontWeight="700" fill={C.yellow}>※ 兩梯次共用同一批桌位</text>
             )}
-            {/* 圖例 */}
+
+            {/* === 桌號（主資訊帶） === */}
+            <rect x={M} y={250} width={SHEET_W - 2 * M} height={78} rx={14} fill={C.cream} stroke={C.line} />
+            <text x={M + 22} y={278} fontSize={12.5} fontWeight="700" fill={C.red}>您的桌位</text>
+            <text x={M + 22} y={311} fontSize={tableFont} fontWeight="800" fill={C.brown}>{tablesStr}</text>
+            <line x1={SHEET_W - M - 214} y1={266} x2={SHEET_W - M - 214} y2={312} stroke={C.line} />
+            <text x={SHEET_W - M - 22} y={277} fontSize={12.5} fill={C.brownSoft} textAnchor="end">用餐總人數</text>
+            <text x={SHEET_W - M - 22} y={308} fontSize={25} fontWeight="800" fill={C.red} textAnchor="end">
+              {c.total || 0}<tspan fontSize={13} fill={C.brownSoft} fontWeight="700">　位 · {groupNums.size} 桌 {heldSeats} 席</tspan>
+            </text>
+
+            {/* === 座位圖（主視覺） === */}
+            <text x={M} y={348} fontSize={14} fontWeight="800" fill={C.brown}>座位圖</text>
             <g>
-              <rect x={SHEET_W - M - 168} y={352} width={16} height={16} rx={4} fill={C.red} />
-              <text x={SHEET_W - M - 148} y={365} fontSize={12} fontWeight="700" fill={C.brown}>您的桌位</text>
-              <rect x={SHEET_W - M - 78} y={352} width={16} height={16} rx={4} fill={C.ctx} stroke={C.ctxStroke} />
-              <text x={SHEET_W - M - 58} y={365} fontSize={12} fontWeight="700" fill={C.brownSoft}>其他桌</text>
+              <rect x={SHEET_W - M - 168} y={336} width={15} height={15} rx={4} fill={C.red} />
+              <text x={SHEET_W - M - 148} y={348} fontSize={11.5} fontWeight="700" fill={C.brown}>您的桌位</text>
+              <rect x={SHEET_W - M - 78} y={336} width={15} height={15} rx={4} fill={C.ctx} stroke={C.ctxStroke} />
+              <text x={SHEET_W - M - 58} y={348} fontSize={11.5} fontWeight="700" fill={C.brownSoft}>其他桌</text>
             </g>
 
             {floorCards || (
@@ -283,12 +275,13 @@ export default function GroupSheet({ group, tables = [], store = {}, onClose }) 
               </g>
             )}
 
-            {/* === Footer === */}
-            <line x1={M} y1={1066} x2={SHEET_W - M} y2={1066} stroke={C.line} />
-            <text x={M} y={1086} fontSize={11.5} fontWeight="700" fill={C.brown}>溫馨提醒</text>
-            <text x={M} y={1102} fontSize={11} fill={C.brownSoft}>請於用餐時段前 5–10 分鐘抵達，由領位台引導入座；如需調整人數或時間，請提前與門市聯繫。</text>
-            <text x={SHEET_W - M} y={1086} fontSize={11} fontWeight="700" fill={C.brown} textAnchor="end">{store.storePhone || store.phone || '049-2753377'}</text>
-            <text x={SHEET_W - M} y={1102} fontSize={10.5} fill={C.brownSoft} textAnchor="end">{store.storeAddress || store.address || '南投縣鹿谷鄉中正路二段377號'}</text>
+            {/* === Footer（次要資訊收於此一行小字） === */}
+            <line x1={M} y1={1020} x2={SHEET_W - M} y2={1020} stroke={C.line} />
+            <text x={M} y={1041} fontSize={11} fill={C.brownSoft}>特殊需求　<tspan fontWeight="700" fill={C.brown}>{extrasText}</tspan></text>
+            <text x={M} y={1078} fontSize={11.5} fontWeight="700" fill={C.brown}>溫馨提醒</text>
+            <text x={M} y={1094} fontSize={10.5} fill={C.brownSoft}>請於用餐時段前 5–10 分鐘抵達，由領位台引導入座；如需調整人數或時間，請提前與門市聯繫。</text>
+            <text x={SHEET_W - M} y={1078} fontSize={11} fontWeight="700" fill={C.brown} textAnchor="end">{store.storePhone || store.phone || '049-2753377'}</text>
+            <text x={SHEET_W - M} y={1094} fontSize={10} fill={C.brownSoft} textAnchor="end">{store.storeAddress || store.address || '南投縣鹿谷鄉中正路二段377號'}</text>
           </svg>
         </div>
       </div>
