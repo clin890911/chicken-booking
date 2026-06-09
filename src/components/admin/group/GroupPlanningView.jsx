@@ -1,6 +1,6 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
-import { useToast } from '../../ui/Toast'
+import { useToast, useConfirm } from '../../ui/Toast'
 import { Button, Input, Select, Textarea } from '../../ui'
 import DatePicker from '../../booking/DatePicker'
 import FloorMap from '../floormap/FloorMap'
@@ -21,11 +21,12 @@ const COUNT_FIELDS = [
 // 圈桌存檔走 reserveGroupTables（線上時後端交易做多裝置原子衝突把關）。
 export default function GroupPlanningView() {
   const {
-    groupReservations, agencies, guides, tables, settings,
+    groupReservations, agencies, guides, tables, bookings, settings,
     addGroupReservation, reserveGroupTables, setGroupStatus, removeGroupReservation,
     addAgency, addGuide,
   } = useBooking()
   const toast = useToast()
+  const confirm = useConfirm()
 
   const [date, setDate] = useState(todayStr())
   const [selectedId, setSelectedId] = useState(null)
@@ -33,9 +34,12 @@ export default function GroupPlanningView() {
   const [activeBatchId, setActiveBatchId] = useState(null)
   const [floor, setFloor] = useState('1F')
   const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [quickAgency, setQuickAgency] = useState(null) // { name, phone }
   const [quickGuide, setQuickGuide] = useState(null)
+  const creatingRef = useRef(false) // 同步鎖：擋住 setState 尚未 re-render 前的連點
+  const savingRef = useRef(false)
 
   const slots = useMemo(() => generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval), [settings])
   const dayGroups = useMemo(
@@ -59,21 +63,25 @@ export default function GroupPlanningView() {
   const activeBatch = draft?.batches?.find(b => b.id === activeBatchId) || null
   const selectedTables = activeBatch?.tableNumbers || []
 
-  // 規劃用：被他團佔用 / 被當日單桌訂位指派 的桌（不可選）
+  const capByNum = useMemo(() => {
+    const m = {}; tables.forEach(t => { m[t.number] = t.capacity }); return m
+  }, [tables])
+  const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (capByNum[n] || 0), 0)
+
+  // 規劃用：被他團佔用 / 被當日一般訂位指派 的桌（不可選）
   const blockedTables = useMemo(() => {
     if (!activeBatch) return []
     const conflictMap = groupReservationService.tableConflictsForBatch({
-      date, timeSlot: activeBatch.timeSlot, settings, excludeGroupId: selectedId,
+      date, timeSlot: activeBatch.timeSlot, settings, excludeGroupId: selectedId, bookings,
     })
     const blocked = new Set(Object.keys(conflictMap))
     return [...blocked].filter(n => !selectedTables.includes(n))
-  }, [activeBatch, date, settings, selectedId, selectedTables])
+  }, [activeBatch, date, settings, selectedId, selectedTables, bookings])
 
-  const heldSeats = useMemo(() => {
-    if (!draft) return 0
-    const cap = {}; tables.forEach(t => { cap[t.number] = t.capacity })
-    return groupTableNumbers(draft).reduce((s, n) => s + (cap[n] || 0), 0)
-  }, [draft, tables])
+  const heldSeats = useMemo(
+    () => (draft ? groupTableNumbers(draft).reduce((s, n) => s + (capByNum[n] || 0), 0) : 0),
+    [draft, capByNum],
+  )
 
   // === draft 編輯 helpers ===
   const patchDraft = (patch) => setDraft(d => ({ ...d, ...patch }))
@@ -106,12 +114,36 @@ export default function GroupPlanningView() {
 
   // === 動作 ===
   const createNew = () => {
-    const g = addGroupReservation({ date, batches: [{ label: '第一梯', timeSlot: slots[0] || '11:00', tableNumbers: [], guests: 0 }], counts: {} })
-    setSelectedId(g.id)
+    if (creatingRef.current) return // 同步鎖：擋連點（setState 尚未 re-render 前）
+    // 已有未完成空白草稿 → 直接選取並提示，不再產生新空白團單
+    const blank = dayGroups.find(groupReservationService.isBlankGroup)
+    if (blank) {
+      setSelectedId(blank.id)
+      toast.info('已有一筆未完成的空白團單，請先完成或刪除')
+      return
+    }
+    creatingRef.current = true
+    setCreating(true)
+    try {
+      const g = addGroupReservation({ date, batches: [{ label: '第一梯', timeSlot: slots[0] || '11:00', tableNumbers: [], guests: 0 }], counts: {} })
+      setSelectedId(g.id)
+    } finally {
+      // 短暫鎖定，避免 addGroupReservation→refresh→re-render 前的快速重按
+      setTimeout(() => { creatingRef.current = false; setCreating(false) }, 500)
+    }
   }
 
   const save = async () => {
     if (!draft) return
+    if (savingRef.current) return // 防連點
+    const err0 = groupReservationService.validateGroupForSave(draft, capByNum)
+    if (err0) return toast.error(err0)
+    // 多梯次（兩段用餐）總人數可大於保留席數（輪替），但明確提示確認
+    const total = Number(draft.counts?.total) || 0
+    if ((draft.batches || []).length > 1 && total > heldSeats) {
+      toast.info(`提醒：總人數 ${total} 大於保留席數 ${heldSeats}，將以多梯次輪替（請確認梯次安排）`)
+    }
+    savingRef.current = true
     setBusy(true)
     try {
       await reserveGroupTables(selectedId, {
@@ -131,9 +163,10 @@ export default function GroupPlanningView() {
       })
       toast.success('✅ 團單已儲存')
     } catch (err) {
-      if (err?.status === 409) toast.error('桌位衝突：' + (err.message || '已被其他團佔用，請重新圈桌'))
+      if (err?.status === 409) toast.error('桌位衝突：' + (err.message || '已被其他團或現場訂位佔用，請重新圈桌'))
       else toast.error('儲存失敗：' + (err?.message || '未知錯誤'))
     } finally {
+      savingRef.current = false
       setBusy(false)
     }
   }
@@ -168,7 +201,7 @@ export default function GroupPlanningView() {
       <div className="bg-white rounded-xl border border-chicken-brown/10 p-3">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="text-sm font-bold text-chicken-brown">預排日期：{dayLabel(date)}</div>
-          <Button onClick={createNew}>➕ 新增團單</Button>
+          <Button onClick={createNew} disabled={creating}>➕ 新增團單</Button>
         </div>
         <DatePicker value={date} onChange={d => { setDate(d); setSelectedId(null) }} maxDaysAhead={Math.max(60, settings.maxDaysAhead || 30)} />
       </div>
@@ -278,8 +311,15 @@ export default function GroupPlanningView() {
                 <div>
                   <div className="text-sm font-black text-indigo-700">📐 規劃模式 · {dayLabel(date)}（非今日即時）</div>
                   <div className="text-xs text-indigo-600/80">
-                    {activeBatch ? `圈桌中：${activeBatch.label} ${activeBatch.timeSlot} · 已選 ${selectedTables.length} 桌 · 全團保留 ${heldSeats} 席` : '請於上方選一個梯次'}
+                    {activeBatch ? `圈桌中：${activeBatch.label} ${activeBatch.timeSlot}` : '請於上方選一個梯次'}
                   </div>
+                  {activeBatch && (
+                    <div className="text-xs font-bold text-indigo-700 mt-0.5">
+                      已選 {selectedTables.length ? selectedTables.join('、') : '（尚未圈桌）'}
+                      {selectedTables.length ? `，合計 ${seatsOf(selectedTables)} 席` : ''}
+                      <span className="font-normal text-indigo-600/70"> · 全團保留 {heldSeats} 席</span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-1.5">
                   {['1F', '2F'].map(f => (
@@ -310,7 +350,11 @@ export default function GroupPlanningView() {
             <div className="bg-white rounded-xl border border-chicken-brown/10 p-3 flex flex-wrap gap-2 items-center">
               <Button onClick={save} disabled={busy} className="flex-1 min-w-[160px]">{busy ? '儲存中…' : '💾 儲存團單（含衝突檢查）'}</Button>
               <Button variant="secondary" onClick={() => setSheetOpen(true)}>🖨 回傳單</Button>
-              <button onClick={() => { if (confirm('刪除此團單？')) { removeGroupReservation(selectedId); setSelectedId(null) } }}
+              <button
+                onClick={async () => {
+                  const ok = await confirm('刪除後無法復原，確定要刪除這筆團單嗎？', { title: '刪除團單', confirmLabel: '刪除', danger: true })
+                  if (ok) { removeGroupReservation(selectedId); setSelectedId(null); toast.info('已刪除團單') }
+                }}
                 className="px-3 py-2 rounded-xl text-sm font-bold text-chicken-red border-2 border-chicken-red/30">刪除</button>
             </div>
           </div>

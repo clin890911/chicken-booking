@@ -158,10 +158,17 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
 
     const groupsRef = db.collection(COLLECTIONS.groupReservations)
     const saved = await db.runTransaction(async (tx) => {
-      const daySnap = await tx.get(groupsRef.where('date', '==', group.date))
+      // ★ 所有 read 必須在所有 write 之前：同日「其他團」+「一般訂位已指派桌」一起讀。
+      const [daySnap, bookingsSnap] = await Promise.all([
+        tx.get(groupsRef.where('date', '==', group.date)),
+        tx.get(db.collection(COLLECTIONS.bookings).where('date', '==', group.date)),
+      ])
       const others = daySnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .filter(g => g.id !== group.id && !CAPACITY_EXCLUDED_STATUSES.includes(g.status))
+      const assignedBookings = bookingsSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(b => b.assignedTableId && !CAPACITY_EXCLUDED_STATUSES.includes(b.status))
 
       const conflicts = []
       for (const b of group.batches || []) {
@@ -169,6 +176,7 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         const e = s + durationMin
         const wanted = new Set((b.tableNumbers || []).map(String))
         if (!wanted.size) continue
+        // 與其他團衝突
         for (const og of others) {
           for (const ob of og.batches || []) {
             const os = toMinutes(ob.timeSlot)
@@ -181,8 +189,20 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
             }
           }
         }
+        // 與一般訂位已指派桌衝突
+        for (const bk of assignedBookings) {
+          const bs = toMinutes(bk.timeSlot)
+          const be = bs + durationMin
+          if (!(s < be && bs < e)) continue
+          if (wanted.has(String(bk.assignedTableId))) {
+            conflicts.push({ table: String(bk.assignedTableId), withBookingId: bk.id, batch: b.label })
+          }
+        }
       }
-      if (conflicts.length) throw errorWithStatus(`桌位衝突：${conflicts.map(c => c.table).join('、')} 已被其他團佔用`, 409)
+      if (conflicts.length) {
+        const tablesList = [...new Set(conflicts.map(c => c.table))].join('、')
+        throw errorWithStatus(`桌位衝突：${tablesList} 已被其他團或現場訂位佔用`, 409)
+      }
 
       const record = { ...group, updatedAt: new Date().toISOString() }
       tx.set(groupsRef.doc(group.id), record, { merge: true })

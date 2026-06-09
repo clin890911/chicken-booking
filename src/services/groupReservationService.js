@@ -165,27 +165,69 @@ export function setBatchTables(id, batchId, tableNumbers) {
   return update(id, { batches })
 }
 
-// === 平面圖規劃：他團桌位衝突偵測（前端即時提示；後端 groupReserveTables 為原子真相）===
-// 回傳 { tableNumber: { groupId, agencyName, label } }，列出在同日、時間窗與 candidateTimeSlot 重疊、
-// 被「其他團」佔用的桌號。excludeGroupId 為正在編輯的本團。
-export function tableConflictsForBatch({ date, timeSlot, settings = {}, excludeGroupId = null }) {
+// === 平面圖規劃：桌位衝突偵測（前端即時提示；後端 groupReserveTables 為原子真相）===
+// 回傳 { tableNumber: { type, ... } }，列出在同日、時間窗與 candidateTimeSlot 重疊而不可選的桌號：
+//   - type:'group'   其他團佔用（{ groupId, agencyName, label }）
+//   - type:'booking' 一般訂位已指派桌（{ bookingId, name }）
+// excludeGroupId 為正在編輯的本團；bookings 由呼叫端（含 context）傳入做一般訂位衝突檢查。
+export function tableConflictsForBatch({ date, timeSlot, settings = {}, excludeGroupId = null, bookings = [] }) {
   const durationMin = occupancyMinutes(settings)
   const candStart = toMinutes(timeSlot)
   const candEnd = candStart + durationMin
+  const overlaps = (s) => s < candEnd && candStart < s + durationMin
   const conflicts = {}
+
+  // 1) 其他團佔用
   listActiveByDate(date).forEach(g => {
     if (g.id === excludeGroupId) return
     g.batches.forEach(b => {
-      const s = toMinutes(b.timeSlot)
-      const e = s + durationMin
-      const overlap = s < candEnd && candStart < e
-      if (!overlap) return
+      if (!overlaps(toMinutes(b.timeSlot))) return
       ;(b.tableNumbers || []).forEach(n => {
-        if (!conflicts[n]) conflicts[n] = { groupId: g.id, agencyName: g.agencyName, label: b.label }
+        if (!conflicts[n]) conflicts[n] = { type: 'group', groupId: g.id, agencyName: g.agencyName, label: b.label }
       })
     })
   })
+
+  // 2) 一般訂位已指派桌（同日、時間窗重疊、未取消/未到/未完成）
+  ;(bookings || []).forEach(b => {
+    if (b.date !== date || !b.assignedTableId) return
+    if (CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return
+    if (!overlaps(toMinutes(b.timeSlot))) return
+    const n = String(b.assignedTableId)
+    if (!conflicts[n]) conflicts[n] = { type: 'booking', bookingId: b.id, name: b.name }
+  })
+
   return conflicts
+}
+
+// 是否為「未完成的空白草稿」：無旅行社、總人數 0、未圈任何桌。
+// 用於防止連點「新增團單」產生多筆空白團單（已有空白草稿則改為選取它）。
+export function isBlankGroup(g) {
+  return !!g && !g.agencyId && !(g.agencyName || '').trim() &&
+    (g.counts?.total || 0) === 0 && groupTableNumbers(g).length === 0
+}
+
+// 儲存前驗證（純函式，供 UI 與測試共用）。回傳錯誤訊息字串；null = 通過。
+// capByNum: { 桌號: 容量 } 用來計算各梯/全團保留席數。
+export function validateGroupForSave(group, capByNum = {}) {
+  if (!group) return '尚未選取團單'
+  if (!group.agencyId && !(group.agencyName || '').trim()) return '請選擇或新增旅行社'
+  const total = Number(group.counts?.total) || 0
+  if (total <= 0) return '請填寫總人數（需大於 0）'
+  const batches = group.batches || []
+  if (!batches.length) return '請至少新增一個梯次'
+  const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (Number(capByNum[n]) || 0), 0)
+  for (const b of batches) {
+    if ((Number(b.guests) || 0) <= 0) return `「${b.label}」用餐人數需大於 0`
+    if (!(b.tableNumbers || []).length) return `「${b.label}」請至少圈一桌`
+    const seats = seatsOf(b.tableNumbers)
+    if ((Number(b.guests) || 0) > seats) return `「${b.label}」人數 ${b.guests} 超過該梯保留席數 ${seats}，請再多圈桌`
+  }
+  const held = seatsOf(groupTableNumbers(group))
+  if (held <= 0) return '請至少圈一桌'
+  // 單梯：總人數不可超過保留席數（坐不下）。多梯次（兩段用餐）允許輪替，由 UI 端提示。
+  if (batches.length === 1 && total > held) return `總人數 ${total} 超過保留席數 ${held}，請多圈桌或調整人數`
+  return null
 }
 
 // 某日已被任何團佔用的桌號集合（給今日疊加顯示用）
