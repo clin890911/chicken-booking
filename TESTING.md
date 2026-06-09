@@ -5,16 +5,19 @@
 ## 快速開始
 
 ```bash
-npm test            # 跑一次全部測試（CI / 上線前用這個）
+npm test            # 單元/整合測試（Vitest，快、CI / 上線前必跑）
 npm run test:watch  # 開發時即時重跑（改檔自動跑）
 npm run test:coverage   # 產生覆蓋率報告（coverage/ 目錄）
+npm run test:e2e    # E2E（Playwright，真實瀏覽器跑用戶端訂位 / 管理端指派主線）
 ```
 
-全綠長這樣：
+> 兩層測試：**Vitest** 守邏輯層（快、每次改動都跑）；**Playwright E2E** 守兩條最重要的使用者主線（真實瀏覽器、較慢、上線前跑一次）。
+
+Vitest 全綠長這樣：
 
 ```
- Test Files  10 passed (10)
-      Tests  NNN passed (NNN)
+ Test Files  11 passed (11)
+      Tests  537 passed (537)
 ```
 
 ## 測什麼
@@ -34,12 +37,24 @@ npm run test:coverage   # 產生覆蓋率報告（coverage/ 目錄）
 | `tests/services/waitlistService.test.js` | 候位 | 取號序號、叫號/入座/棄號、預估等待 |
 | `tests/integration/flows.test.js` | **跨流程端到端** | 線上訂位→指派→入座→釋出、候位→入座、no-show、客人改時間解除指派、取消回補容量 |
 
+## E2E 主線（Playwright，真實瀏覽器）
+
+`npm run test:e2e`（會自動起 / 重用 `npm run dev` 的本機站台）。涵蓋兩條最重要的使用者主線；**所有 E2E 都攔截後端 `admin*` / `guest*` 端點回假資料，絕不打正式 Cloud Functions、不碰 production 資料**。
+
+| E2E 檔 | 主線 | 步驟 |
+|---|---|---|
+| `e2e/customer-booking.spec.js` | 用戶端訂位 | 選時段 → 填姓名/電話 → 送出 → 進確認頁；另測電話格式錯誤擋送出 |
+| `e2e/admin-assign.spec.js` | 管理端指派 | 同仁登入 → 今日列表看到訂位 → 指派桌位（A6 二步確認）→ 指派成功 |
+
+> 客人端訂位走後端 `guestGetAvailability` / `guestCreateBooking`，E2E 以 `page.route` mock 這兩個端點的回應，故不需後端即可跑、且結果穩定。
+
 ## 上線前檢查清單（每次部署前照做）
 
-1. `npm test` → **必須全綠**。有紅燈先修到綠再上。
-2. `npm run build` → 必須成功（無編譯錯誤）。
-3. 若這次有改 UI，另外用 preview / 實機快速點一輪受影響頁面（測試只涵蓋邏輯層，不含畫面渲染與互動）。
-4. 部署後，到線上站確認 bundle 已更新（見 `README` / Zeabur 後台）。
+1. `npm test` → **必須全綠**（Vitest 邏輯層）。有紅燈先修到綠再上。
+2. `npm run test:e2e` → **必須全綠**（用戶端訂位 + 管理端指派主線）。
+3. `npm run build` → 必須成功（無編譯錯誤）。
+4. 若這次有改 UI 細節，另外用 preview / 實機快速點一輪受影響頁面（自動測試不涵蓋每個畫面細節）。
+5. 部署後，到線上站確認 bundle 已更新（見 `README` / Zeabur 後台）。
 
 ## 加新功能時怎麼維護
 
