@@ -1,10 +1,19 @@
 import { useMemo } from 'react'
 import { Card } from '../ui'
+import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { totalActiveSeats } from '../../utils/capacity'
 
 export default function TableGrid() {
   const { tables, toggleTable } = useBooking()
+  const toast = useToast()
+
+  // 點擊切換啟用/停用 + 反饋（以點擊前狀態判斷切換後結果）
+  const handleToggle = (t) => {
+    toggleTable(t.number)
+    if (t.isActive) toast.warning(`已停用 ${t.number}`)
+    else toast.success(`已啟用 ${t.number}`)
+  }
 
   const stats = useMemo(() => {
     const four = tables.filter(t => t.capacity === 4)
@@ -43,8 +52,8 @@ export default function TableGrid() {
           {fourSeaters.map(t => (
             <button
               key={t.number}
-              onClick={() => toggleTable(t.number)}
-              className={`aspect-square rounded-lg border-2 flex flex-col items-center justify-center text-xs font-bold transition-all ${
+              onClick={() => handleToggle(t)}
+              className={`aspect-square min-h-[44px] rounded-lg border-2 flex flex-col items-center justify-center text-xs font-bold transition-all active:scale-95 ${
                 t.isActive
                   ? 'border-chicken-green bg-chicken-green/15 text-chicken-brown'
                   : 'border-chicken-brown/20 bg-chicken-brown/5 text-chicken-brown/30 line-through'
@@ -63,8 +72,8 @@ export default function TableGrid() {
           {sixSeaters.map(t => (
             <button
               key={t.number}
-              onClick={() => toggleTable(t.number)}
-              className={`aspect-square rounded-lg border-2 flex flex-col items-center justify-center text-xs font-bold transition-all ${
+              onClick={() => handleToggle(t)}
+              className={`aspect-square min-h-[44px] rounded-lg border-2 flex flex-col items-center justify-center text-xs font-bold transition-all active:scale-95 ${
                 t.isActive
                   ? 'border-chicken-yellow bg-chicken-yellow/15 text-chicken-brown'
                   : 'border-chicken-brown/20 bg-chicken-brown/5 text-chicken-brown/30 line-through'

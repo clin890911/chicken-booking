@@ -1,15 +1,35 @@
-import { useState } from 'react'
-import { Card, Input, Button, Select, Modal } from '../ui'
+import { useState, useEffect, useMemo } from 'react'
+import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast, useConfirm } from '../ui/Toast'
 import { searchNoshow, exportCSV } from '../../services/bookingService'
+import { generateTimeSlots, todayStr } from '../../utils/timeSlots'
 import TableGrid from './TableGrid'
 import LayoutEditor from './LayoutEditor'
 import TelegramSettings from './TelegramSettings'
 
+// 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
+const SETTINGS_DEFAULTS = {
+  openTime: '11:00',
+  closeTime: '19:00',
+  slotInterval: 30,
+  maxDaysAhead: 30,
+  diningDurationMin: 90,
+  cleanupBufferMin: 10,
+}
+// 會影響容量／可訂時段的欄位，改動時需提醒既有訂位受影響
+const CAPACITY_FIELDS = ['diningDurationMin', 'cleanupBufferMin', 'openTime', 'closeTime', 'slotInterval']
+const FIELD_LABELS = {
+  diningDurationMin: '用餐時間',
+  cleanupBufferMin: '清桌緩衝',
+  openTime: '開始時間',
+  closeTime: '結束時間',
+  slotInterval: '時段間隔',
+}
+
 export default function SettingsView() {
-  const { settings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
+  const { settings, bookings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
   const { user, signOut, can } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
@@ -17,14 +37,65 @@ export default function SettingsView() {
   const [savedMsg, setSavedMsg] = useState('')
   const [searchPhone, setSearchPhone] = useState('')
   const [searchResult, setSearchResult] = useState(null)
-  const [showDanger, setShowDanger] = useState(false)
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
   const [cloudBusy, setCloudBusy] = useState(false)
 
-  const handleSave = () => {
-    updateSettings(form)
+  // B14：追蹤未儲存變更（比對目前表單 vs 已存 settings）
+  const dirtyKeys = useMemo(() => {
+    if (!settings) return []
+    return Object.keys(form || {}).filter(k => {
+      // heroBanners 有自己的儲存按鈕，這裡用 JSON 比對其餘設定欄位
+      const a = form[k]
+      const b = settings[k]
+      if (typeof a === 'object') return JSON.stringify(a) !== JSON.stringify(b)
+      return a !== b
+    })
+  }, [form, settings])
+  const isDirty = dirtyKeys.length > 0
+  // 是否動到會影響容量／時段的設定（B1）
+  const capacityDirty = dirtyKeys.some(k => CAPACITY_FIELDS.includes(k))
+  // 未來已確認訂位筆數（保守估計：date>=今天 && status==='confirmed'）
+  const affectedBookingCount = useMemo(
+    () => (bookings || []).filter(b => b.date >= todayStr() && b.status === 'confirmed').length,
+    [bookings]
+  )
+  // 動態可訂時段數（依目前表單的營業時間 / 間隔）
+  const slotCount = useMemo(() => {
+    try {
+      return generateTimeSlots(form.openTime, form.closeTime, Number(form.slotInterval) || 30).length
+    } catch {
+      return 0
+    }
+  }, [form.openTime, form.closeTime, form.slotInterval])
+
+  // B14：離開前提醒尚有未儲存變更
+  useEffect(() => {
+    if (!isDirty) return
+    const handler = (e) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
+
+  const persist = (patch) => {
+    updateSettings(patch)
     setSavedMsg('✅ 已儲存')
     setTimeout(() => setSavedMsg(''), 2000)
+  }
+
+  // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
+  const handleSave = async () => {
+    if (capacityDirty && affectedBookingCount > 0) {
+      const changed = dirtyKeys.filter(k => CAPACITY_FIELDS.includes(k)).map(k => FIELD_LABELS[k] || k).join('、')
+      const ok = await confirm(
+        `你即將調整「${changed}」，這會改變可訂容量與時段。\n目前有 ${affectedBookingCount} 筆未來「已確認」訂位可能受影響（保守估計）。\n仍要儲存嗎？`,
+        { title: '影響現有訂位', danger: true, confirmLabel: '仍要儲存' }
+      )
+      if (!ok) return
+    }
+    persist(form)
   }
   const handleBannerFiles = async (files) => {
     const list = Array.from(files || [])
@@ -70,10 +141,29 @@ export default function SettingsView() {
     a.click()
     URL.revokeObjectURL(url)
   }
-  const handleResetAll = () => {
-    ['chicken_bookings_v1', 'chicken_tables_v3', 'chicken_tables_v2', 'chicken_waitlist_v1', 'chicken_customers_v1', 'chicken_noshow_v1']
+  const handleResetAll = async () => {
+    const ok = await confirm(
+      `將清除所有訂位、候位、桌位狀態與顧客資料，桌位佈局還原為預設。\n此動作無法復原。`,
+      { title: '重設所有資料', danger: true, confirmLabel: '⚠️ 確認重設' }
+    )
+    if (!ok) return
+    ;['chicken_bookings_v1', 'chicken_tables_v3', 'chicken_tables_v2', 'chicken_waitlist_v1', 'chicken_customers_v1', 'chicken_noshow_v1']
       .forEach(k => localStorage.removeItem(k))
     window.location.reload()
+  }
+  // C11：驗證設定（stub）— 檢查啟用 LIFF 時必填欄位是否非空
+  const handleValidateLine = () => {
+    const missing = []
+    if (!form.lineOfficialUrl?.trim()) missing.push('LINE 官方帳號加入連結')
+    if (form.lineUseLiff) {
+      if (!form.lineLiffUrl?.trim()) missing.push('LIFF 訂位綁定連結')
+      if (!form.lineLiffId?.trim()) missing.push('LIFF ID')
+    }
+    if (missing.length === 0) {
+      toast.success('LINE 設定檢查通過：必填欄位都有填寫')
+    } else {
+      toast.error(`尚有必填欄位未填：${missing.join('、')}`)
+    }
   }
   const handleCloudSync = async (type) => {
     setCloudBusy(true)
@@ -91,47 +181,110 @@ export default function SettingsView() {
 
   return (
     <div className="space-y-4">
+      {/* B14：未儲存變更 sticky 提示 + 統一儲存 CTA */}
+      {isDirty && (
+        <div className="sticky top-0 z-30 -mx-1 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
+          <div className="text-sm font-bold text-amber-800">
+            ⚠️ 有未儲存變更（{dirtyKeys.length} 項）
+            {capacityDirty && affectedBookingCount > 0 && (
+              <span className="ml-2 inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">
+                ⚠️ 影響現有訂位
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setForm(settings)}
+              className="min-h-[44px] rounded-xl border border-amber-400/60 bg-white px-4 py-2 text-sm font-bold text-amber-800 hover:bg-amber-50"
+            >
+              還原
+            </button>
+            <button
+              onClick={handleSave}
+              className="btn-primary min-h-[44px] px-5 py-2"
+            >
+              儲存全部變更
+            </button>
+          </div>
+        </div>
+      )}
+
       <SettingsSection title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" defaultOpen>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Input label="開始時間" type="time" value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))} />
             <Input label="結束時間" type="time" value={form.closeTime} onChange={e => setForm(f => ({ ...f, closeTime: e.target.value }))} />
           </div>
-          <Select
-            label="時段間隔"
-            value={form.slotInterval}
-            onChange={e => setForm(f => ({ ...f, slotInterval: Number(e.target.value) }))}
-            options={[{ value: 15, label: '15 分鐘' }, { value: 30, label: '30 分鐘' }, { value: 60, label: '60 分鐘' }]}
-          />
-          <Select
-            label="可預訂天數"
-            value={form.maxDaysAhead}
-            onChange={e => setForm(f => ({ ...f, maxDaysAhead: Number(e.target.value) }))}
-            options={[{ value: 7, label: '7 天' }, { value: 14, label: '14 天' }, { value: 30, label: '30 天' }, { value: 60, label: '60 天' }]}
-          />
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="label !mb-0">時段間隔</span>
+              <DefaultBadge current={Number(form.slotInterval)} fallback={SETTINGS_DEFAULTS.slotInterval} unit="分" />
+            </div>
+            <Select
+              className="mt-2"
+              value={form.slotInterval}
+              onChange={e => setForm(f => ({ ...f, slotInterval: Number(e.target.value) }))}
+              options={[{ value: 15, label: '15 分鐘' }, { value: 30, label: '30 分鐘' }, { value: 60, label: '60 分鐘' }]}
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="label !mb-0">可預訂天數</span>
+              <DefaultBadge current={Number(form.maxDaysAhead)} fallback={SETTINGS_DEFAULTS.maxDaysAhead} unit="天" />
+            </div>
+            <Select
+              className="mt-2"
+              value={form.maxDaysAhead}
+              onChange={e => setForm(f => ({ ...f, maxDaysAhead: Number(e.target.value) }))}
+              options={[{ value: 7, label: '7 天' }, { value: 14, label: '14 天' }, { value: 30, label: '30 天' }, { value: 60, label: '60 天' }]}
+            />
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="用餐時間（分鐘）"
-              type="number"
-              min="30"
-              max="240"
-              value={form.diningDurationMin || 90}
-              onChange={e => setForm(f => ({ ...f, diningDurationMin: Number(e.target.value) }))}
-            />
-            <Input
-              label="清桌緩衝（分鐘）"
-              type="number"
-              min="0"
-              max="60"
-              value={form.cleanupBufferMin || 10}
-              onChange={e => setForm(f => ({ ...f, cleanupBufferMin: Number(e.target.value) }))}
-            />
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="label !mb-0">用餐時間（分鐘）</span>
+                <DefaultBadge current={Number(form.diningDurationMin) || 90} fallback={SETTINGS_DEFAULTS.diningDurationMin} unit="分" />
+              </div>
+              <Input
+                className="mt-2"
+                type="number"
+                min="30"
+                max="240"
+                value={form.diningDurationMin || 90}
+                onChange={e => setForm(f => ({ ...f, diningDurationMin: Number(e.target.value) }))}
+              />
+            </div>
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="label !mb-0">清桌緩衝（分鐘）</span>
+                <DefaultBadge current={Number(form.cleanupBufferMin) || 10} fallback={SETTINGS_DEFAULTS.cleanupBufferMin} unit="分" />
+              </div>
+              <Input
+                className="mt-2"
+                type="number"
+                min="0"
+                max="60"
+                value={form.cleanupBufferMin || 10}
+                onChange={e => setForm(f => ({ ...f, cleanupBufferMin: Number(e.target.value) }))}
+              />
+            </div>
           </div>
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             可訂位容量會以「用餐時間 + 清桌緩衝」計算；目前每筆訂位佔用 {(Number(form.diningDurationMin) || 90) + (Number(form.cleanupBufferMin) || 10)} 分鐘。
+            <span className="mt-1 block">
+              依目前營業時間與間隔，每天可訂 <span className="font-black text-chicken-brown">{slotCount}</span> 個時段。
+            </span>
           </div>
+          {capacityDirty && (
+            <div className="flex items-center gap-2 rounded-xl border border-chicken-red/20 bg-chicken-red/5 px-3 py-2">
+              <span className="inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">⚠️ 影響現有訂位</span>
+              <span className="text-xs leading-5 text-chicken-brown/70">
+                此區設定會改變可訂容量／時段；儲存前會提示有 {affectedBookingCount} 筆未來已確認訂位可能受影響。
+              </span>
+            </div>
+          )}
           <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1">儲存設定</Button>
+            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存設定</Button>
             {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
         </div>
@@ -193,83 +346,119 @@ export default function SettingsView() {
           )}
 
           <div className="flex items-center gap-2">
-            <Button onClick={saveBanners} className="flex-1">儲存首頁廣告</Button>
+            <Button onClick={saveBanners} className="flex-1 min-h-[44px]">儲存首頁廣告</Button>
             {savedMsg && <span className="text-sm font-bold text-chicken-green">{savedMsg}</span>}
           </div>
         </div>
       </SettingsSection>
 
       <SettingsSection title="LINE 官方帳號" description="設定客人訂位成功後看到的 LINE 加好友入口與保存提醒。" defaultOpen>
-        <div className="space-y-3">
-          <Input
-            label="顯示名稱"
-            value={form.lineOfficialName || ''}
-            onChange={e => setForm(f => ({ ...f, lineOfficialName: e.target.value }))}
-            placeholder="雞王涮涮鍋 LINE 官方帳號"
-          />
-          <Input
-            label="LINE 官方帳號加入連結"
-            type="url"
-            value={form.lineOfficialUrl || ''}
-            onChange={e => setForm(f => ({ ...f, lineOfficialUrl: e.target.value.trim() }))}
-            placeholder="https://lin.ee/xxxxxxx"
-          />
-          <label className="flex items-start gap-3 rounded-xl border border-chicken-brown/10 bg-white px-4 py-3 text-sm font-bold text-chicken-brown">
-            <input
-              type="checkbox"
-              checked={!!form.lineUseLiff}
-              onChange={e => setForm(f => ({ ...f, lineUseLiff: e.target.checked }))}
-              className="mt-1"
-            />
-            <span>
-              使用 LIFF 自動綁定
-              <span className="mt-1 block text-xs font-bold leading-5 text-chicken-brown/55">
-                未確認 LIFF 正式可用前請保持關閉；關閉時客人會先進網站中轉頁，不會遇到 LINE 404。
+        <div className="space-y-4">
+          {/* C11：基本 */}
+          <FieldGroup title="基本" hint="客人訂位完成後看到的 LINE 加好友入口。">
+            <Field hint="顯示在加好友按鈕旁的官方帳號名稱。">
+              <Input
+                label="顯示名稱"
+                value={form.lineOfficialName || ''}
+                onChange={e => setForm(f => ({ ...f, lineOfficialName: e.target.value }))}
+                placeholder="雞王涮涮鍋 LINE 官方帳號"
+                title="顯示在加好友按鈕旁的官方帳號名稱"
+              />
+            </Field>
+            <Field hint="客人點「加入好友」會開啟的 lin.ee 連結，必填。">
+              <Input
+                label="LINE 官方帳號加入連結"
+                type="url"
+                value={form.lineOfficialUrl || ''}
+                onChange={e => setForm(f => ({ ...f, lineOfficialUrl: e.target.value.trim() }))}
+                placeholder="https://lin.ee/xxxxxxx"
+                title="客人點加入好友會開啟的 lin.ee 連結"
+              />
+            </Field>
+          </FieldGroup>
+
+          {/* C11：LIFF */}
+          <FieldGroup title="LIFF" hint="LIFF 自動綁定；未確認可用前請保持關閉，改走網站中轉頁避免 404。">
+            <label className="flex items-start gap-3 rounded-xl border border-chicken-brown/10 bg-white px-4 py-3 text-sm font-bold text-chicken-brown">
+              <input
+                type="checkbox"
+                checked={!!form.lineUseLiff}
+                onChange={e => setForm(f => ({ ...f, lineUseLiff: e.target.checked }))}
+                className="mt-1"
+              />
+              <span>
+                使用 LIFF 自動綁定
+                <span className="mt-1 block text-xs font-bold leading-5 text-chicken-brown/55">
+                  未確認 LIFF 正式可用前請保持關閉；關閉時客人會先進網站中轉頁，不會遇到 LINE 404。
+                </span>
               </span>
-            </span>
-          </label>
-          <Input
-            label="LIFF 訂位綁定連結（選填）"
-            type="url"
-            value={form.lineLiffUrl || ''}
-            onChange={e => setForm(f => ({ ...f, lineLiffUrl: e.target.value.trim() }))}
-            placeholder="https://liff.line.me/xxxxxxxx"
-          />
-          <Input
-            label="LIFF ID（選填）"
-            value={form.lineLiffId || ''}
-            onChange={e => setForm(f => ({ ...f, lineLiffId: e.target.value.trim() }))}
-            placeholder="xxxxxxxxxx-xxxxxxxx"
-          />
-          <Input
-            label="LINE 綁定後端端點（選填）"
-            type="url"
-            value={form.lineBindEndpoint || ''}
-            onChange={e => setForm(f => ({ ...f, lineBindEndpoint: e.target.value.trim() }))}
-            placeholder="https://.../lineBind"
-          />
-          <Input
-            label="LINE 推播後端端點（選填）"
-            type="url"
-            value={form.linePushEndpoint || ''}
-            onChange={e => setForm(f => ({ ...f, linePushEndpoint: e.target.value.trim() }))}
-            placeholder="https://.../linePushBooking"
-          />
-          <Input
-            label="LINE 訂位讀取端點（選填）"
-            type="url"
-            value={form.lineManageEndpoint || ''}
-            onChange={e => setForm(f => ({ ...f, lineManageEndpoint: e.target.value.trim() }))}
-            placeholder="https://.../lineGetBooking"
-          />
+            </label>
+            <Field hint="開啟 LIFF 時客人綁定頁的 liff.line.me 連結。">
+              <Input
+                label="LIFF 訂位綁定連結（選填）"
+                type="url"
+                value={form.lineLiffUrl || ''}
+                onChange={e => setForm(f => ({ ...f, lineLiffUrl: e.target.value.trim() }))}
+                placeholder="https://liff.line.me/xxxxxxxx"
+                title="LIFF 訂位綁定頁連結"
+              />
+            </Field>
+            <Field hint="LINE Developers 後台建立 LIFF App 後取得的 ID。">
+              <Input
+                label="LIFF ID（選填）"
+                value={form.lineLiffId || ''}
+                onChange={e => setForm(f => ({ ...f, lineLiffId: e.target.value.trim() }))}
+                placeholder="xxxxxxxxxx-xxxxxxxx"
+                title="LINE Developers 後台的 LIFF App ID"
+              />
+            </Field>
+          </FieldGroup>
+
+          {/* C11：後端端點 */}
+          <FieldGroup title="後端端點" hint="Cloud Functions / 後端服務網址；API Token 一律放後端，不可放前端。">
+            <Field hint="處理 LINE 綁定的後端網址。">
+              <Input
+                label="LINE 綁定後端端點（選填）"
+                type="url"
+                value={form.lineBindEndpoint || ''}
+                onChange={e => setForm(f => ({ ...f, lineBindEndpoint: e.target.value.trim() }))}
+                placeholder="https://.../lineBind"
+                title="處理 LINE 綁定的後端網址"
+              />
+            </Field>
+            <Field hint="推播訂位通知給客人的後端網址。">
+              <Input
+                label="LINE 推播後端端點（選填）"
+                type="url"
+                value={form.linePushEndpoint || ''}
+                onChange={e => setForm(f => ({ ...f, linePushEndpoint: e.target.value.trim() }))}
+                placeholder="https://.../linePushBooking"
+                title="推播訂位通知的後端網址"
+              />
+            </Field>
+            <Field hint="供客人在 LINE 內查詢訂位的後端網址。">
+              <Input
+                label="LINE 訂位讀取端點（選填）"
+                type="url"
+                value={form.lineManageEndpoint || ''}
+                onChange={e => setForm(f => ({ ...f, lineManageEndpoint: e.target.value.trim() }))}
+                placeholder="https://.../lineGetBooking"
+                title="客人在 LINE 內查詢訂位的後端網址"
+              />
+            </Field>
+          </FieldGroup>
+
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             目前預設會先開啟網站中轉頁，避免未公開或設定錯誤的 LIFF 造成 404。若已確認 LIFF Channel、Endpoint URL、Scope 與官方帳號連動都正常，再勾選「使用 LIFF 自動綁定」。
             LINE API Token 仍必須放在後端或 Cloud Functions，不能放前端。
           </div>
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1">儲存 LINE 設定</Button>
+          <div className="flex flex-wrap gap-2 items-center">
+            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存 LINE 設定</Button>
+            <button onClick={handleValidateLine} className="btn-secondary min-h-[44px] whitespace-nowrap">
+              驗證設定
+            </button>
             {form.lineOfficialUrl && (
-              <a href={form.lineOfficialUrl} target="_blank" rel="noreferrer" className="btn-secondary whitespace-nowrap">
+              <a href={form.lineOfficialUrl} target="_blank" rel="noreferrer" className="btn-secondary min-h-[44px] flex items-center whitespace-nowrap">
                 測試開啟
               </a>
             )}
@@ -320,7 +509,7 @@ export default function SettingsView() {
             />
           </div>
           <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1">儲存聯絡入口</Button>
+            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存聯絡入口</Button>
             {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
         </div>
@@ -339,10 +528,10 @@ export default function SettingsView() {
             {cloudStatus?.error && <div className="mt-1 font-bold text-chicken-red">錯誤：{cloudStatus.error}</div>}
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Button disabled={cloudBusy} onClick={() => handleCloudSync('push')} className="w-full">
+            <Button disabled={cloudBusy} onClick={() => handleCloudSync('push')} className="w-full min-h-[44px]">
               {cloudBusy ? '同步中...' : '上傳本機資料到 Firestore'}
             </Button>
-            <button disabled={cloudBusy} onClick={() => handleCloudSync('pull')} className="btn-secondary">
+            <button disabled={cloudBusy} onClick={() => handleCloudSync('pull')} className="btn-secondary min-h-[44px]">
               從 Firestore 重新整理
             </button>
           </div>
@@ -414,15 +603,12 @@ export default function SettingsView() {
       {can('settings.update') && (
         <SettingsSection title="危險操作" description="會清除資料，僅店長需要時使用。" danger>
           <p className="text-xs text-chicken-brown/60 mb-3">清除所有訂位、桌位狀態、候位、顧客資料（不可復原）</p>
-          <button onClick={() => setShowDanger(true)} className="btn-danger w-full">重設所有資料</button>
-          <Modal open={showDanger} onClose={() => setShowDanger(false)} title="確認重設？" footer={
-            <>
-              <button onClick={() => setShowDanger(false)} className="btn-secondary px-4 py-2">取消</button>
-              <button onClick={handleResetAll} className="btn-primary px-4 py-2 !bg-chicken-red">確認重設</button>
-            </>
-          }>
-            <p className="text-sm text-chicken-brown">所有訂位、候位、桌位狀態、顧客資料將被清除，桌位佈局還原為預設。<br/>此動作無法復原。</p>
-          </Modal>
+          <button
+            onClick={handleResetAll}
+            className="btn-destructive w-full"
+          >
+            🚫 重設所有資料
+          </button>
         </SettingsSection>
       )}
 
@@ -451,6 +637,42 @@ function readBannerFile(file) {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+// C11：LINE 端點分組區塊（基本 / LIFF / 後端端點）
+function FieldGroup({ title, hint, children }) {
+  return (
+    <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+      <div className="mb-2 flex items-baseline gap-2">
+        <h3 className="text-sm font-black text-chicken-brown">{title}</h3>
+        {hint && <span className="text-xs leading-5 text-chicken-brown/50">{hint}</span>}
+      </div>
+      <div className="space-y-3">{children}</div>
+    </div>
+  )
+}
+
+// 單一欄位 + 小字說明
+function Field({ hint, children }) {
+  return (
+    <div>
+      {children}
+      {hint && <p className="mt-1 text-xs leading-5 text-chicken-brown/50">{hint}</p>}
+    </div>
+  )
+}
+
+// C14：數值設定旁的「預設值對比」灰 badge（僅在目前值不同於預設時顯示）
+function DefaultBadge({ current, fallback, unit = '' }) {
+  if (current === fallback || fallback == null) return null
+  return (
+    <span
+      className="badge bg-chicken-brown/10 text-chicken-brown/60"
+      title={`系統預設為 ${fallback}${unit}，目前已自訂為 ${current}${unit}`}
+    >
+      預設 {fallback}{unit}
+    </span>
+  )
 }
 
 function SettingsSection({ title, description, children, defaultOpen = false, danger = false }) {
