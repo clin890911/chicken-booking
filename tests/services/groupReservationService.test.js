@@ -78,6 +78,33 @@ describe('groupReservationService.isBlankGroup', () => {
   })
 })
 
+describe('groupReservationService.purgeBlankGroups（清除殘留空白）', () => {
+  it('移除空白草稿、保留有內容的團單', () => {
+    group.create({}) // 空白：無旅行社、0 人、未圈桌
+    group.create({}) // 第二筆空白
+    group.create({ date: '2026-12-05', agencyName: '大發', counts: { total: 6 }, batches: [{ label: '第一梯', timeSlot: '11:00', tableNumbers: ['101'], guests: 6 }] })
+    const removed = group.purgeBlankGroups()
+    expect(removed).toBe(2)
+    const left = group.listAll()
+    expect(left).toHaveLength(1)
+    expect(left[0].agencyName).toBe('大發')
+  })
+
+  it('全部有內容 → 不刪、回 0', () => {
+    group.create({ date: '2026-12-06', agencyName: 'A', counts: { total: 4 }, batches: [{ label: '第一梯', timeSlot: '11:00', tableNumbers: ['107'], guests: 4 }] })
+    expect(group.purgeBlankGroups()).toBe(0)
+    expect(group.listAll()).toHaveLength(1)
+  })
+
+  it('全部空白 → 全清', () => {
+    group.create({})
+    group.create({})
+    group.create({})
+    expect(group.purgeBlankGroups()).toBe(3)
+    expect(group.listAll()).toHaveLength(0)
+  })
+})
+
 describe('groupReservationService.tableConflictsForBatch（含一般訂位）', () => {
   const D = '2026-12-01'
   beforeEach(() => {

@@ -313,6 +313,35 @@ export function BookingProvider({ children }) {
   const setGroupStatus = (id, status) => { const g = groupReservationService.setStatus(id, status); refresh(); syncCloudSoon(); return g }
   const removeGroupReservation = (id) => { groupReservationService.remove(id); refresh(); syncCloudSoon() }
 
+  // 一次性清除既有殘留空白團單（草稿優先改版前的舊資料）。本機刪除→syncCloudSoon 走泛型刪除同步雲端。
+  const purgeBlankGroups = () => {
+    const n = groupReservationService.purgeBlankGroups()
+    if (n) { refresh(); syncCloudSoon() }
+    return n
+  }
+
+  // 草稿優先：新團單在「填好按儲存」當下才落地。先本機 create() 鑄 id，線上再走交易原子把關。
+  // 409（桌位衝突）撤銷剛建立的本機記錄（無前快照可回滾）、不 syncCloudSoon，將錯誤丟給 UI。
+  const createAndReserveGroup = async (data) => {
+    const saved = groupReservationService.create(data)
+    refresh()
+    if (usingFirebase && isStaffRef.current && saved) {
+      try {
+        const r = await cloudData.groupReserveTables(saved)
+        if (r?.group) { groupReservationService.update(saved.id, r.group); refresh() }
+      } catch (err) {
+        if (err?.status === 409) {
+          groupReservationService.remove(saved.id)
+          refresh()
+          throw err
+        }
+        // 其他錯誤（離線/暫時性）：保留本機、照常排程同步
+      }
+    }
+    syncCloudSoon()
+    return saved
+  }
+
   // 圈桌存檔：先寫本機讓 UI 立即反映；線上時呼叫 groupReserveTables 交易做多裝置原子把關。
   // 真衝突（409）丟給 UI 顯示；離線等其他錯誤已存本機、照常排程同步、不阻斷。
   const reserveGroupTables = async (id, patch) => {
@@ -365,6 +394,7 @@ export function BookingProvider({ children }) {
     updateCustomer, setCustomerBlacklist, setCustomerVip,
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
+    createAndReserveGroup, purgeBlankGroups,
     seatGroupBatch, checkoutGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup,
     updateSettings,
   }
