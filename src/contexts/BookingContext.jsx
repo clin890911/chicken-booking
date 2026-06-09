@@ -316,6 +316,7 @@ export function BookingProvider({ children }) {
   // 圈桌存檔：先寫本機讓 UI 立即反映；線上時呼叫 groupReserveTables 交易做多裝置原子把關。
   // 真衝突（409）丟給 UI 顯示；離線等其他錯誤已存本機、照常排程同步、不阻斷。
   const reserveGroupTables = async (id, patch) => {
+    const before = groupReservationService.getById(id) // 衝突時回滾用的送出前快照
     const saved = groupReservationService.update(id, patch)
     refresh()
     if (usingFirebase && isStaffRef.current && saved) {
@@ -323,8 +324,14 @@ export function BookingProvider({ children }) {
         const r = await cloudData.groupReserveTables(saved)
         if (r?.group) { groupReservationService.update(id, r.group); refresh() }
       } catch (err) {
-        if (err?.status === 409) { syncCloudSoon(); throw err }
-        // 離線/暫時性錯誤：已存本機，照常同步
+        if (err?.status === 409) {
+          // 桌位衝突：回滾本機到送出前狀態，且「不」syncCloudSoon，
+          // 避免衝突中的圈桌資料被後續一般差異同步送上雲端。
+          if (before) groupReservationService.update(id, before)
+          refresh()
+          throw err
+        }
+        // 其他錯誤（離線/暫時性）：保留本機變更，照常排程同步
       }
     }
     syncCloudSoon()
