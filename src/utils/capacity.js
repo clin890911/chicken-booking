@@ -1,3 +1,5 @@
+import { seatingForSlot } from './timeSlots'
+
 const DEFAULT_DINING_DURATION_MIN = 90
 const DEFAULT_CLEANUP_BUFFER_MIN = 10
 
@@ -51,11 +53,32 @@ export function groupHeldSeats(group, tableCapByNumber) {
   return groupTableNumbers(group).reduce((sum, n) => sum + (Number(tableCapByNumber[n]) || 0), 0)
 }
 
+// === 關閉時段判定（client 與 server functions/index.js 必須同邏輯）===
+// 某日某抵達時段是否已被店家關閉訂位：整天公休 / 該時段被關 / 其所屬場次被關，任一成立即關閉。
+export function isSlotClosed(settings = {}, date, timeSlot) {
+  const c = settings?.closures || {}
+  if (Array.isArray(c.closedDates) && c.closedDates.includes(date)) return true
+  if (Array.isArray(c.closedSlots?.[date]) && c.closedSlots[date].includes(timeSlot)) return true
+  const seating = seatingForSlot(settings, timeSlot)
+  if (seating && Array.isArray(c.closedSeatings?.[date]) && c.closedSeatings[date].includes(seating.id)) return true
+  return false
+}
+
+// 某日某「場次」是否關閉（整天公休或該場次被關）。給統一地圖場次層判定用。
+export function isSeatingClosed(settings = {}, date, seating) {
+  const c = settings?.closures || {}
+  if (Array.isArray(c.closedDates) && c.closedDates.includes(date)) return true
+  if (seating && Array.isArray(c.closedSeatings?.[date]) && c.closedSeatings[date].includes(seating.id)) return true
+  return false
+}
+
 // 計算特定抵達時段的可訂位剩餘人數。
 // 散客訂位：每筆佔用「用餐時間 + 清桌緩衝」窗、扣 guests（各自佔各自座位 → 逐筆 sum）。
 // 團體預排：整桌專屬保留，扣「該團相異桌號的座位合計」、佔用窗為合併梯次窗
 //          （兩梯重用同桌只算一次，避免雙扣；圈大桌坐少人也照整桌扣，即「嚴格」口徑）。
+// 已關閉的時段直接回 0（與後端 calcSlotCapacityServer 一致），讓 availability 顯示為不可訂。
 export function calcSlotCapacity(tables, bookings, date, timeSlot, settings = {}, groupReservations = []) {
+  if (isSlotClosed(settings, date, timeSlot)) return 0
   const durationMin = occupancyMinutes(settings)
   const targetMinutes = toMinutes(timeSlot)
   const totalSeats = tables
@@ -97,4 +120,53 @@ export function calcDayBookings(bookings, date) {
 
 export function totalActiveSeats(tables) {
   return tables.filter(t => t.isActive).reduce((s, t) => s + t.capacity, 0)
+}
+
+// === 統一佔用解析器（散客 × 團客同框）===
+// 給「日期 + 場次」維度的統一座位地圖：把同日、且 timeSlot 歸屬於該場次的散客訂位與團客梯次
+// 攤平成「每桌佔用者」+ 摘要。複用 CAPACITY_EXCLUDED_STATUSES 與 seatingForSlot，口徑與容量引擎一致。
+//   - 散客：有 assignedTableId → 落該桌（kind:'walkin'）；未指派 → 只進 summary.unassignedWalkinGuests。
+//   - 團客：該梯各圈定桌號 → 落該桌（kind:'group'），整桌保留；同場次跨梯重用同桌只算一次。
+// 回傳 byTable={ 桌號: { kind, booking?|group?+batch? } } 與 summary。
+export function resolveSlotOccupancy(tables = [], bookings = [], groupReservations = [], date, seating, settings = {}) {
+  const byTable = {}
+  const capByNum = {}
+  tables.forEach(t => { capByNum[t.number] = Number(t.capacity) || 0 })
+  const belongs = (timeSlot) => !!seating && seatingForSlot(settings, timeSlot)?.id === seating.id
+
+  let walkinGuests = 0
+  let unassignedWalkinGuests = 0
+  let walkinAssignedTables = 0
+  ;(bookings || []).forEach(b => {
+    if (b.date !== date || !b.timeSlot || CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return
+    if (!belongs(b.timeSlot)) return
+    walkinGuests += Number(b.guests) || 0
+    const tn = b.assignedTableId ? String(b.assignedTableId) : null
+    if (tn) {
+      if (!byTable[tn]) { byTable[tn] = { kind: 'walkin', booking: b }; walkinAssignedTables++ }
+    } else {
+      unassignedWalkinGuests += Number(b.guests) || 0
+    }
+  })
+
+  let groupHeldSeats = 0
+  let groupTableCount = 0
+  ;(groupReservations || []).forEach(g => {
+    if (g.date !== date || CAPACITY_EXCLUDED_STATUSES.includes(g.status)) return
+    ;(g.batches || []).forEach(bt => {
+      if (!belongs(bt.timeSlot)) return
+      ;(bt.tableNumbers || []).forEach(n => {
+        const key = String(n)
+        if (!byTable[key]) { byTable[key] = { kind: 'group', group: g, batch: bt }; groupHeldSeats += capByNum[key] || 0; groupTableCount++ }
+      })
+    })
+  })
+
+  const totalSeats = (tables || []).filter(t => t.isActive !== false).reduce((s, t) => s + (Number(t.capacity) || 0), 0)
+  const closed = isSeatingClosed(settings, date, seating)
+  const remaining = closed ? 0 : Math.max(0, totalSeats - walkinGuests - groupHeldSeats)
+  return {
+    byTable,
+    summary: { totalSeats, walkinGuests, unassignedWalkinGuests, walkinAssignedTables, groupHeldSeats, groupTableCount, remaining, closed },
+  }
 }

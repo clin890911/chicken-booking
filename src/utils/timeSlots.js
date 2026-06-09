@@ -41,3 +41,28 @@ export function dayLabel(dateStr) {
   const w = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()]
   return `${d.getMonth() + 1}/${d.getDate()} (${w})`
 }
+
+// === 場次（seating）：把抵達時段歸類到店家自訂的固定場次（如「午餐第一批」）===
+// settings.seatings = [{ id, name, start:'HH:MM', end:'HH:MM' }]；採半開區間 [start, end)。
+// 散客以其 timeSlot、團客以各梯 timeSlot 對應到所屬場次，地圖時間軸即以場次切換。
+function slotToMinutes(t) {
+  const [h, m] = String(t || '').split(':').map(Number)
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0)
+}
+
+// 回傳包含此抵達時段的場次（找不到回 null；多場次重疊時取第一個命中）。
+export function seatingForSlot(settings, timeSlot) {
+  const list = Array.isArray(settings?.seatings) ? settings.seatings : []
+  const x = slotToMinutes(timeSlot)
+  return list.find(s => x >= slotToMinutes(s.start) && x < slotToMinutes(s.end)) || null
+}
+
+// 回傳某場次涵蓋的所有抵達時段（依營業設定的開始/結束/間隔產生）。
+// 用於「關閉整場次 → 展開為各時段」與 SettingsView 的時段勾選清單。
+export function slotsInSeating(settings, seating) {
+  if (!seating) return []
+  const all = generateTimeSlots(settings?.openTime, settings?.closeTime, settings?.slotInterval)
+  const s = slotToMinutes(seating.start)
+  const e = slotToMinutes(seating.end)
+  return all.filter(t => { const x = slotToMinutes(t); return x >= s && x < e })
+}

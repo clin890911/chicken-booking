@@ -106,10 +106,12 @@ export default function BookingPage() {
     return serverSlots
       // 只接受格式正確的時段，避免後端萬一回傳異常資料時 time.slice 在 render 階段丟例外。
       .filter(s => s && typeof s.time === 'string' && /^\d{2}:\d{2}/.test(s.time))
-      .map(({ time, remaining }) => ({
+      .map(({ time, remaining, closed }) => ({
         time,
         remaining,
-        full: remaining < data.guests,
+        closed: !!closed,
+        // 已關閉的時段視同不可訂（不顯示給客人）；與「已滿」一併被 groupedSlots 過濾。
+        full: !!closed || remaining < data.guests,
         period: Number(time.slice(0, 2)) < 15 ? '午餐' : '晚餐',
       }))
   }, [serverSlots, data.guests])

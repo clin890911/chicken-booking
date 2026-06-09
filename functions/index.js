@@ -156,6 +156,12 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
     const durationMin = (Number(settings.diningDurationMin) || DEFAULT_DINING_DURATION_MIN) + (Number(settings.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN)
 
+    // 關閉的時段/場次/公休日不可圈桌（與散客一致；繞過前端也擋得住）。
+    const closedBatch = (group.batches || []).find(b => (b.tableNumbers || []).length && isSlotClosedServer(settings, group.date, b.timeSlot))
+    if (closedBatch) {
+      return res.status(409).json({ ok: false, error: `「${closedBatch.label || closedBatch.timeSlot}」所在時段已關閉訂位，無法圈桌` })
+    }
+
     const groupsRef = db.collection(COLLECTIONS.groupReservations)
     const saved = await db.runTransaction(async (tx) => {
       // ★ 所有 read 必須在所有 write 之前：同日「其他團」+「一般訂位已指派桌」一起讀。
@@ -283,6 +289,8 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
           time,
           // 團體預排佔位一併扣除（只回傳數值 remaining，絕不外洩 groupReservations 明細）。
           remaining: calcSlotCapacityServer(tables, bookings, date, time, settings, groupReservations),
+          // 已關閉旗標：讓客人端把「店休/關閉」與「已滿」視覺區隔。
+          closed: isSlotClosedServer(settings, date, time),
         }))
     }
 
@@ -887,9 +895,40 @@ function normalizeBookingForFirestore(booking = {}) {
   }
 }
 
+// 固定場次 / 關閉設定的後端正規化（與 client settingsService 的正規化同邏輯）。
+// ★ 必須在白名單內：否則 adminPushData/adminPullData 會把這兩個欄位靜默剝除，關閉功能永不生效。
+function normalizeSeatingsServer(seatings) {
+  if (!Array.isArray(seatings)) return []
+  return seatings
+    .filter(s => s && s.id && /^\d{1,2}:\d{2}$/.test(s.start || '') && /^\d{1,2}:\d{2}$/.test(s.end || ''))
+    .map(s => ({ id: String(s.id), name: String(s.name || ''), start: String(s.start), end: String(s.end) }))
+}
+function normalizeClosuresServer(c) {
+  const out = { closedDates: [], closedSlots: {}, closedSeatings: {} }
+  if (!c || typeof c !== 'object') return out
+  if (Array.isArray(c.closedDates)) out.closedDates = c.closedDates.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).map(String)
+  const cleanMap = (m, valRe) => {
+    const o = {}
+    if (m && typeof m === 'object') {
+      for (const [d, arr] of Object.entries(m)) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d) && Array.isArray(arr)) {
+          const v = arr.filter(x => (valRe ? valRe.test(x) : !!x)).map(String)
+          if (v.length) o[d] = v
+        }
+      }
+    }
+    return o
+  }
+  out.closedSlots = cleanMap(c.closedSlots, /^\d{1,2}:\d{2}$/)
+  out.closedSeatings = cleanMap(c.closedSeatings, null)
+  return out
+}
+
 function normalizeStoreSettings(settings = {}) {
   return {
     openTime: settings.openTime || '11:00',
+    seatings: normalizeSeatingsServer(settings.seatings),
+    closures: normalizeClosuresServer(settings.closures),
     closeTime: settings.closeTime || '19:00',
     slotInterval: Number(settings.slotInterval) || 30,
     maxDaysAhead: Number(settings.maxDaysAhead) || 30,
@@ -1139,6 +1178,9 @@ function publicStoreSettings(settings = {}) {
     maxDaysAhead: settings.maxDaysAhead,
     diningDurationMin: settings.diningDurationMin,
     cleanupBufferMin: settings.cleanupBufferMin,
+    // 客人端 TimeSlotPicker 需要 seatings/closures 才能把關閉的時段灰顯為「已關閉」。
+    seatings: settings.seatings,
+    closures: settings.closures,
     storeName: settings.storeName,
     storePhone: settings.storePhone,
     storeAddress: settings.storeAddress,
@@ -1180,6 +1222,10 @@ function validateNewBooking(body = {}, settings = {}) {
   if (slotEpochMs(date, timeSlot) <= Date.now()) {
     return { ok: false, error: '此時段已過，請選擇較晚的時段' }
   }
+  // 後端硬擋「已關閉的時段/場次/公休日」：繞過前端也擋得住（權威層）。
+  if (isSlotClosedServer(settings, date, timeSlot)) {
+    return { ok: false, error: '此時段已關閉訂位，請改選其他時段' }
+  }
 
   const notes = {
     pet: !!body.notes?.pet,
@@ -1215,10 +1261,28 @@ function groupHeldSeatsServer(group, tableCapByNumber) {
   return groupTableNumbersServer(group).reduce((sum, n) => sum + (Number(tableCapByNumber[n]) || 0), 0)
 }
 
+// === 場次 / 關閉時段（與前端 utils/timeSlots.js seatingForSlot、utils/capacity.js isSlotClosed 必須同邏輯）===
+function seatingForSlotServer(settings, timeSlot) {
+  const list = Array.isArray(settings?.seatings) ? settings.seatings : []
+  const x = toMinutes(timeSlot)
+  return list.find(s => x >= toMinutes(s.start) && x < toMinutes(s.end)) || null
+}
+
+// 某日某抵達時段是否已被店家關閉訂位：整天公休 / 該時段被關 / 其所屬場次被關，任一成立即關閉。
+function isSlotClosedServer(settings = {}, date, timeSlot) {
+  const c = settings?.closures || {}
+  if (Array.isArray(c.closedDates) && c.closedDates.includes(date)) return true
+  if (Array.isArray(c.closedSlots?.[date]) && c.closedSlots[date].includes(timeSlot)) return true
+  const seating = seatingForSlotServer(settings, timeSlot)
+  if (seating && Array.isArray(c.closedSeatings?.[date]) && c.closedSeatings[date].includes(seating.id)) return true
+  return false
+}
+
 // 與前端 calcSlotCapacity 位元級一致：散客逐筆 sum(guests)、團體整桌 sum(座位)。
 // ★ 為何團體用「整桌座位」、booking 用「逐筆 guests」：團體預排是整桌專屬保留，
 //   圈走的桌不論坐幾人都不給線上散客；兩梯重用同桌只算一次，避免雙扣。
 function calcSlotCapacityServer(tables, bookings, date, timeSlot, settings = {}, groupReservations = []) {
+  if (isSlotClosedServer(settings, date, timeSlot)) return 0
   const durationMin = (Number(settings.diningDurationMin) || DEFAULT_DINING_DURATION_MIN) + (Number(settings.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN)
   const targetMinutes = toMinutes(timeSlot)
   const totalSeats = tables

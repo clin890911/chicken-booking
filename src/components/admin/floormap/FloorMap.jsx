@@ -60,6 +60,10 @@ export default function FloorMap({
   selectedTables = [],      // 規劃模式：本梯次已選桌號
   blockedTables = [],       // 規劃模式：他團佔用/已被指派、不可選的桌號
   groupHoldTables = {},     // 今日即時圖疊加：{ 桌號: { agencyName } } 唯讀標示今日團體 hold
+  scopedMode = false,       // 統一佔用視圖（日期+場次）：散客暖色 / 團客冷色 / 空桌淺色
+  scopedByTable = {},       // 統一佔用視圖：{ 桌號: { kind:'walkin'|'group', booking?|group?+batch? } }
+  scopedClosed = false,     // 統一佔用視圖：此日期/場次已關閉 → 整圖淡化
+  scopedHighlightTables = [], // 統一佔用視圖：預先配桌模式中、可選的空桌（高亮）
 }) {
   const [, setTick] = useState(0)
   // 每 5 秒重繪，讓桌位用餐計時即時跳動
@@ -94,6 +98,27 @@ export default function FloorMap({
       <FixtureLayer floor={floor} />
 
       {floorTables.map(t => {
+        // 統一佔用視圖（日期+場次）：散客暖色 / 團客冷色 / 空桌淺色；不吃今日即時狀態。
+        if (scopedMode) {
+          const occ = scopedByTable[t.number]
+          const occState = occ ? occ.kind : 'free'
+          const occLabel = occ?.kind === 'walkin' ? (occ.booking?.name || '散客')
+            : occ?.kind === 'group' ? (occ.group?.agencyName || '團體')
+            : ''
+          return (
+            <TableShape
+              key={t.number}
+              table={t}
+              settings={settings}
+              isSelected={selectedTableNumber === t.number}
+              occState={occState}
+              occLabel={occLabel}
+              occHighlight={scopedHighlightTables.includes(t.number)}
+              occDimmed={scopedClosed}
+              onClick={() => onSelectTable(t.number)}
+            />
+          )
+        }
         // 規劃模式：完全略過今日即時狀態（booking/指派），只看 plan 狀態
         if (planningMode) {
           const planState = selectedTables.includes(t.number)
