@@ -279,6 +279,47 @@ export async function migrateTableLayoutOnce() {
   return { ok: true, migrated: true, removed: oldNumbers.length }
 }
 
+// 一次性桌位「尺寸正規化」遷移：六人桌由直式（80×100）改為橫式（90×75，較寬）。
+// 只依桌號把既有桌位的 x/y/w/h 對齊到新版 INITIAL_TABLES，保留 status/currentBookingId/
+// seatedAt/mergedWith 等運營狀態（不像 layout 遷移會整份覆寫）。在首次 pull 之前執行，
+// 並把更新後的桌位推到雲端，確保各裝置一致。
+const TABLE_DIMS_VERSION = 'wide-6p-2026-06'
+const DIMS_FLAG = 'chicken_table_dims_version'
+
+export async function migrateTableDimsOnce() {
+  if (localStorage.getItem(DIMS_FLAG) === TABLE_DIMS_VERSION) return { ok: true, skipped: true }
+  const defByNumber = new Map(INITIAL_TABLES.map(t => [t.number, t]))
+  const local = readJson(KEYS.tables, [])
+  if (!Array.isArray(local) || local.length === 0) {
+    // 還沒有本機桌位（會由 layout 遷移或首次 read seed 出新尺寸）→ 直接標記，避免日後誤改
+    localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
+    return { ok: true, skipped: true }
+  }
+  let changed = 0
+  const patched = local.map(t => {
+    const def = defByNumber.get(t.number)
+    if (!def) return t
+    if (t.x !== def.x || t.y !== def.y || t.w !== def.w || t.h !== def.h) {
+      changed++
+      return { ...t, x: def.x, y: def.y, w: def.w, h: def.h }
+    }
+    return t
+  })
+  if (changed === 0) {
+    localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
+    return { ok: true, skipped: true }
+  }
+  writeJson(KEYS.tables, patched)
+  try {
+    await pushCloudData({ tables: patched })
+  } catch (err) {
+    // 推送失敗：本機已更新、雲端尚未。先不標記旗標，下次載入再試（避免首拉用雲端舊尺寸蓋回卻不再重試）。
+    return { ok: false, reason: err?.message || 'push-failed', localUpdated: true }
+  }
+  localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
+  return { ok: true, migrated: true, changed }
+}
+
 // 團體預排桌位原子把關（員工端，需帶 Bearer token）。回 { ok, group } 或丟出含 409 的錯誤。
 export async function groupReserveTables(group) {
   return requestJson(endpoint('groupReserveTables'), {

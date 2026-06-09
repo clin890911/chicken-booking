@@ -124,6 +124,13 @@ export function BookingProvider({ children }) {
       } catch (err) {
         console.warn('Table layout migration skipped:', err)
       }
+      // 一次性把六人桌改成橫式（90×75）並對齊同列；只更新桌位幾何、保留運營狀態。
+      // 同樣須在 pullCloud 之前（已推到雲端，首拉才不會用舊尺寸蓋回）。
+      try {
+        await cloudData.migrateTableDimsOnce()
+      } catch (err) {
+        console.warn('Table dims migration skipped:', err)
+      }
       if (!cancelled) await pullCloud()
     }
     bootCloud()
