@@ -87,6 +87,7 @@ export const INITIAL_TABLES = [...FLOOR_1F, ...FLOOR_2F].map(t => ({
   // 即時運營狀態（外場操作時更新；不影響 booking schema）
   status: 'vacant',         // vacant | reserved | dining | cleaning | blocked
   currentBookingId: null,   // 關聯到當前 reservation
+  currentRef: null,         // 團體梯次入座時 = { type:'group', groupId, batchId }
   seatedAt: null,
   mergedWith: null,         // 併桌：對方 table number
   blockReason: null,

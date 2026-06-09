@@ -12,11 +12,12 @@ import { todayStr, dayLabel } from '../../utils/timeSlots'
 
 // 後台新增訂位 — 電話為先導鍵，自動帶顧客檔
 // 設計：Single page、smart-fill、min taps to create
+// 註：旅行社團體請走「團體」分頁的預排流程（整桌容量把關 + 回傳單），不再用單筆 group 訂位，
+// 避免與團體預排的容量重複計算。
 const SOURCE_OPTIONS = [
   { value: 'phone',  label: '📞 電話' },
   { value: 'line',   label: '💚 LINE' },
   { value: 'walkin', label: '🚶 現場' },
-  { value: 'group',  label: '👥 團體' },
   { value: 'online', label: '🌐 線上代訂' },
 ]
 
@@ -27,7 +28,7 @@ const NOTE_OPTIONS = [
 ]
 
 export default function AddBookingView({ onCreated, onAssignTable }) {
-  const { bookings, tables, settings, addBooking, suggestTable } = useBooking()
+  const { bookings, tables, groupReservations, settings, addBooking, suggestTable } = useBooking()
   const { user } = useAuth()
   const toast = useToast()
 
@@ -38,7 +39,7 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
   const [date, setDate] = useState(todayStr())
   const [timeSlot, setTimeSlot] = useState('')
   const [notes, setNotes] = useState({ pet: false, child: false, mobility: false, text: '' })
-  const [autoAssign, setAutoAssign] = useState(false)
+  const [autoAssign, setAutoAssign] = useState(true)
   const [busy, setBusy] = useState(false)
 
   // 自動帶顧客檔
@@ -100,14 +101,14 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
       }
       // 重設（保留 source）
       setPhone(''); setName(''); setGuests(2); setTimeSlot(''); setNotes({ pet: false, child: false, mobility: false, text: '' })
-      setAutoAssign(false)
+      setAutoAssign(true)
       onCreated?.(b)
     } finally {
       setBusy(false)
     }
   }
 
-  const guestOpts = Array.from({ length: source === 'group' ? 100 : 20 }, (_, i) => ({ value: i + 1, label: `${i + 1} 位` }))
+  const guestOpts = Array.from({ length: 20 }, (_, i) => ({ value: i + 1, label: `${i + 1} 位` }))
 
   return (
     <div className="space-y-3 max-w-3xl mx-auto">
@@ -185,6 +186,7 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
               settings={settings}
               tables={tables}
               bookings={bookings}
+              groupReservations={groupReservations}
               guests={guests}
               hideFull={false}
             />
@@ -223,16 +225,16 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
 
       {/* === 自動指派 + 提交 === */}
       <Card>
-        <label className="flex items-center gap-2 mb-3 cursor-pointer">
+        <label className="flex items-center gap-2 mb-3 cursor-pointer min-h-[44px]">
           <input
             type="checkbox"
             checked={autoAssign}
             onChange={e => setAutoAssign(e.target.checked)}
-            className="w-4 h-4"
+            className="w-5 h-5"
           />
-          <span className="text-sm font-bold text-chicken-brown">建立後立刻自動指派最佳桌</span>
+          <span className="text-sm font-bold text-chicken-brown">建立後立刻自動指派最佳桌（可手動修改）</span>
         </label>
-        <Button onClick={handleSubmit} disabled={!valid || busy} className="w-full text-base">
+        <Button onClick={handleSubmit} disabled={!valid || busy} className="w-full text-base min-h-[44px]">
           {busy ? '建立中...' : timeSlot ? `✅ 確認新增訂位 · ${date} ${timeSlot}` : '請填完必填欄位'}
         </Button>
       </Card>

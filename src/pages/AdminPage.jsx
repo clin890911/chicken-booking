@@ -7,6 +7,7 @@ import OperationsView from '../components/admin/OperationsView'
 import BookingsView from '../components/admin/BookingsView'
 import WaitlistView from '../components/admin/WaitlistView'
 import CustomersView from '../components/admin/CustomersView'
+import GroupView from '../components/admin/group/GroupView'
 import SettingsView from '../components/admin/SettingsView'
 import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
@@ -18,6 +19,7 @@ const TABS = [
   { key: 'bookings',  label: '訂位',  icon: '📋', subtitle: '今日 · 日曆 · 新增',          badgeKey: 'bookings' },
   { key: 'waitlist',  label: '候位',  icon: '🚦', subtitle: '取號 · 叫號 · 入座',          badgeKey: 'waitlist' },
   { key: 'customers', label: '顧客',  icon: '👥', subtitle: '顧客檔 · VIP · 黑名單' },
+  { key: 'group',     label: '團體',  icon: '🚌', subtitle: '預排規劃 · 今日團體 · 名冊歷史' },
   { key: 'settings',  label: '設定',  icon: '⚙️', subtitle: '營業時段 · 桌位 · 帳號' },
 ]
 
@@ -41,8 +43,13 @@ export default function AdminPage() {
     if (prevIdsRef.current !== null) {
       const added = confirmed.filter(b => !prevIdsRef.current.has(b.id))
       added.forEach(b => {
-        const dateHint = b.date === today ? '' : `${b.date} · `
-        toast.info(`📋 新訂位：${b.name} ${b.guests} 位 · ${dateHint}${b.timeSlot}`, { duration: 6000 })
+        const isToday = b.date === today
+        // 今日 = 顯眼且停留久；未來日 = 較不緊迫（標註「未來日」、縮短停留）
+        if (isToday) {
+          toast.info(`📋 新訂位：${b.name} ${b.guests} 位 · ${b.timeSlot}`, { duration: 6000 })
+        } else {
+          toast.info(`🗓 未來日新訂位：${b.name} ${b.guests} 位 · ${b.date} ${b.timeSlot}`, { duration: 3500 })
+        }
       })
     }
     prevIdsRef.current = ids
@@ -158,6 +165,7 @@ export default function AdminPage() {
                 <WaitlistView onSeatWaitlist={handleSeatWaitlist} />
               )}
               {tab === 'customers' && <CustomersView />}
+              {tab === 'group' && <GroupView />}
               {tab === 'settings' && <SettingsView />}
             </motion.div>
           </AnimatePresence>

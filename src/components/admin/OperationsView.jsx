@@ -8,13 +8,15 @@ import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
+import { groupTableNumbers } from '../../utils/capacity'
+import { todayStr } from '../../utils/timeSlots'
 
 // 「現場營運」主畫面
 // 模式：normal | merge | assign-booking | seat-waitlist | move-table
 // 每個模式有對應的 banner、桌位 highlight、確認 toast
 export default function OperationsView({ pendingAssign, onAssignDone, pendingSeatWait, onSeatWaitDone }) {
   const {
-    tables, bookings, waitlist, settings,
+    tables, bookings, waitlist, settings, groupReservations,
     mergeTables, assignBookingToTable, seatWaitlist, moveTable,
     findSuitableTables, suggestTable,
   } = useBooking()
@@ -24,8 +26,26 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
   const [floor, setFloor] = useState('1F')
   const [selectedTable, setSelectedTable] = useState(null)
   const [mode, setMode] = useState(null)
-  const [justAssigned, setJustAssigned] = useState(null) // 剛指派的桌號（綠光 2 秒）
+  const [justAssigned, setJustAssigned] = useState(null) // 剛指派的桌號（綠光）
+  const [pendingConfirm, setPendingConfirm] = useState(null) // 指派/候位/換桌：待確認的桌號（二步確認）
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
+
+  // 今日團體 hold：今日（未取消/未完成）團體的桌位，若尚未實際入座（非 dining）則於圖上標示 🚌
+  const groupHoldTables = useMemo(() => {
+    const today = todayStr()
+    const tableByNumber = {}
+    tables.forEach(t => { tableByNumber[t.number] = t })
+    const map = {}
+    ;(groupReservations || [])
+      .filter(g => g.date === today && !['cancelled', 'completed'].includes(g.status))
+      .forEach(g => {
+        groupTableNumbers(g).forEach(n => {
+          const t = tableByNumber[n]
+          if (t && t.status !== 'dining') map[n] = { agencyName: g.agencyName }
+        })
+      })
+    return map
+  }, [groupReservations, tables])
 
   // 進入指派桌模式（含自動建議）
   const startAssign = (booking) => {
@@ -34,6 +54,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
     const suggestion = suggestTable(booking.guests)
     setMode({ type: 'assign', booking, suitable, suggestion: suggestion?.number })
     setSelectedTable(null)
+    setPendingConfirm(null)
     if (suggestion) setFloor(suggestion.floor)
   }
 
@@ -43,6 +64,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
     const suggestion = suggestTable(wait.partySize)
     setMode({ type: 'seat-waitlist', wait, suitable, suggestion: suggestion?.number })
     setSelectedTable(null)
+    setPendingConfirm(null)
     if (suggestion) setFloor(suggestion.floor)
   }
 
@@ -57,9 +79,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
     if (suitable.length === 0) return toast.error('沒有可換的空桌')
     setMode({ type: 'move', booking, suitable, suggestion: suggestTable(booking.guests)?.number })
     setSelectedTable(null)
+    setPendingConfirm(null)
   }
 
-  const cancelMode = () => setMode(null)
+  const cancelMode = () => { setMode(null); setPendingConfirm(null) }
 
   // 桌位點選 — 依模式分流
   const handleTableClick = (number) => {
@@ -79,11 +102,23 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
       cancelMode()
       return
     }
-    if (mode.type === 'assign') {
+    // 指派 / 候位入座 / 換桌：二步確認
+    // 第一次點合適桌 → 進入「待確認」預覽；第二次點同一桌（或按確認鈕）才真正執行
+    if (mode.type === 'assign' || mode.type === 'seat-waitlist' || mode.type === 'move') {
       if (!mode.suitable.includes(number)) return toast.error('此桌不符合容量或非空桌')
+      if (pendingConfirm === number) { executeAssign(number); return }
+      setPendingConfirm(number)
+      return
+    }
+  }
+
+  // 真正執行指派/候位入座/換桌（由二步確認的第二步或確認鈕觸發）
+  const executeAssign = (number) => {
+    if (!mode || !number) return
+    if (mode.type === 'assign') {
       const r = assignBookingToTable(mode.booking.id, number)
       if (!r.ok) return toast.error('指派失敗：' + r.error)
-      toast.success(`✅ ${mode.booking.name}（${mode.booking.guests} 位）指派至 ${number}`)
+      toast.success(`✅ ${mode.booking.name}（${mode.booking.guests} 位）指派至 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
@@ -91,10 +126,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
       return
     }
     if (mode.type === 'seat-waitlist') {
-      if (!mode.suitable.includes(number)) return toast.error('此桌不符合容量或非空桌')
       const r = seatWaitlist(mode.wait.id, number)
       if (!r.ok) return toast.error('入座失敗：' + r.error)
-      toast.success(`✅ ${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number}`)
+      toast.success(`✅ ${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
@@ -102,10 +136,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
       return
     }
     if (mode.type === 'move') {
-      if (!mode.suitable.includes(number)) return toast.error('此桌不符合容量或非空桌')
       const r = moveTable(mode.booking.id, number)
       if (!r.ok) return toast.error('換桌失敗：' + r.error)
-      toast.success(`✅ ${mode.booking.name} 已換到 ${number}`)
+      toast.success(`✅ ${mode.booking.name} 已換到 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
@@ -115,7 +148,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
 
   const flashAssigned = (number) => {
     setJustAssigned(number)
-    setTimeout(() => setJustAssigned(null), 2200)
+    setTimeout(() => setJustAssigned(null), 3500)
   }
 
   // 當前選中桌的物件 + 對應 booking
@@ -157,17 +190,32 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
     cancelMode()
   }
 
-  // === Mode banner 文案 ===
-  const banner = (() => {
+  // === Mode banner 設定（依模式不同底色 + emoji，避免誤判模式）===
+  const BANNER_STYLE = {
+    merge:          { bg: 'bg-amber-500',  btn: 'text-amber-700',   emoji: '⇆' },
+    assign:         { bg: 'bg-sky-600',    btn: 'text-sky-700',     emoji: '📋' },
+    'seat-waitlist':{ bg: 'bg-emerald-600',btn: 'text-emerald-700', emoji: '🚦' },
+    move:           { bg: 'bg-indigo-600', btn: 'text-indigo-700',  emoji: '↔' },
+  }
+  const bannerStyle = mode ? BANNER_STYLE[mode.type] : null
+
+  // banner 主文案（建議桌另以底色塊突出，不放在這裡）
+  const bannerText = (() => {
     if (!mode) return null
     if (mode.type === 'merge') return mode.first
       ? `併桌模式：已選 ${mode.first}，請點選另一張相鄰桌`
       : '併桌模式：請點選第一張桌'
-    if (mode.type === 'assign') return `指派桌位：${mode.booking.name} ${mode.booking.guests} 位 — 建議 ${mode.suggestion || '無'}（綠閃）`
-    if (mode.type === 'seat-waitlist') return `候位入座：${mode.wait.name} #${mode.wait.queueNumber}（${mode.wait.partySize} 位）— 建議 ${mode.suggestion || '無'}`
+    if (mode.type === 'assign') return `指派桌位：${mode.booking.name} ${mode.booking.guests} 位`
+    if (mode.type === 'seat-waitlist') return `候位入座：${mode.wait.name} #${mode.wait.queueNumber}（${mode.wait.partySize} 位）`
     if (mode.type === 'move') return `換桌：${mode.booking.name} 從 ${mode.booking.assignedTableId} → 選新桌`
     return null
   })()
+
+  // 待確認的對象名稱（用於確認列文案）
+  const pendingTargetName = mode?.type === 'assign' ? mode.booking?.name
+    : mode?.type === 'seat-waitlist' ? mode.wait?.name
+    : mode?.type === 'move' ? mode.booking?.name
+    : ''
 
   return (
     <div className="space-y-3">
@@ -208,11 +256,47 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
         )}
       </div>
 
-      {/* Mode banner */}
-      {banner && (
-        <div className="bg-chicken-yellow text-white px-4 py-2.5 rounded-xl flex items-center justify-between gap-3 shadow-md">
-          <div className="text-sm font-bold flex-1">{banner}</div>
-          <button onClick={cancelModeAndNotify} className="text-xs px-3 py-1 bg-white text-chicken-yellow rounded-lg font-bold whitespace-nowrap">取消</button>
+      {/* Mode banner — 依模式不同底色 + emoji，避免誤判 */}
+      {mode && bannerStyle && (
+        <div className={`${bannerStyle.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
+              <span className="text-base leading-none">{bannerStyle.emoji}</span>
+              <span>{bannerText}</span>
+              {/* C5：建議桌以底色塊 + 💡 突出 */}
+              {(mode.type === 'assign' || mode.type === 'seat-waitlist' || mode.type === 'move') && (
+                mode.suggestion ? (
+                  <span className="inline-flex items-center gap-1 bg-white/95 text-chicken-brown px-2.5 py-1 rounded-lg font-black text-sm shadow-sm">
+                    💡 建議 {mode.suggestion}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold">
+                    無建議桌
+                  </span>
+                )
+              )}
+            </div>
+            <button onClick={cancelModeAndNotify} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${bannerStyle.btn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
+          </div>
+
+          {/* A6：二步確認 — 待確認列 */}
+          {pendingConfirm && (mode.type === 'assign' || mode.type === 'seat-waitlist' || mode.type === 'move') && (
+            <div className="bg-white/15 rounded-lg px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
+              <div className="text-sm font-bold">
+                確認指派 {pendingTargetName} 至桌 {pendingConfirm}？
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPendingConfirm(null)}
+                  className={`text-xs px-3 py-2 min-h-[44px] bg-white/90 ${bannerStyle.btn} rounded-lg font-bold whitespace-nowrap`}
+                >取消</button>
+                <button
+                  onClick={() => executeAssign(pendingConfirm)}
+                  className="text-xs px-4 py-2 min-h-[44px] bg-white text-emerald-700 rounded-lg font-black whitespace-nowrap shadow-sm"
+                >✓ 確認指派</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -221,10 +305,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
         {/* 地圖區 */}
         <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 min-h-[430px] sm:min-h-[560px] lg:min-h-[680px] overflow-hidden">
           <div className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-emerald-500" />可入座</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-sky-500" />已預訂</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-emerald-600" />可入座</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-sky-600" />已預訂</span>
             <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />用餐中</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-500" />待清桌</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-600" />待清桌</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-chicken-red" />超時</span>
           </div>
           <FloorMap
             floor={floor}
@@ -243,7 +328,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
               : []
             }
             suggestionTable={mode?.suggestion || null}
+            pendingConfirmTable={pendingConfirm}
             justAssignedTable={justAssigned}
+            groupHoldTables={groupHoldTables}
           />
         </div>
 

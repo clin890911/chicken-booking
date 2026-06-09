@@ -136,11 +136,14 @@ export function ConfirmProvider({ children }) {
           >
             <motion.div
               initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95 }}
-              className="bg-white rounded-3xl shadow-xl w-full max-w-sm p-6"
+              className={`bg-white rounded-3xl shadow-xl w-full max-w-sm p-6
+                ${state.options.danger ? 'border-l-4 border-chicken-red' : ''}`}
               onClick={e => e.stopPropagation()}
             >
               {state.options.title && (
-                <h3 className="text-lg font-black text-chicken-brown mb-2">{state.options.title}</h3>
+                <h3 className={`text-lg font-black mb-2 ${state.options.danger ? 'text-chicken-red' : 'text-chicken-brown'}`}>
+                  {state.options.danger && '⚠️ '}{state.options.title}
+                </h3>
               )}
               <p className="text-sm text-chicken-brown leading-relaxed">{state.message}</p>
               <div className="flex gap-2 mt-5 justify-end">

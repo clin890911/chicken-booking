@@ -54,7 +54,12 @@ export default function FloorMap({
   highlightTables = [],   // 指派模式：要 highlight 的桌號陣列
   assignMode = false,
   suggestionTable = null, // 指派模式：被推薦的最佳桌（強閃）
-  justAssignedTable = null, // 剛指派完，閃 2 秒提醒
+  pendingConfirmTable = null, // 二步確認：待確認的桌（醒目高亮）
+  justAssignedTable = null, // 剛指派完，閃提醒
+  planningMode = false,     // 規劃模式（日期維度預排）：不吃今日即時狀態、改藍紫色系
+  selectedTables = [],      // 規劃模式：本梯次已選桌號
+  blockedTables = [],       // 規劃模式：他團佔用/已被指派、不可選的桌號
+  groupHoldTables = {},     // 今日即時圖疊加：{ 桌號: { agencyName } } 唯讀標示今日團體 hold
 }) {
   const [, setTick] = useState(0)
   // 每 5 秒重繪，讓桌位用餐計時即時跳動
@@ -89,11 +94,30 @@ export default function FloorMap({
       <FixtureLayer floor={floor} />
 
       {floorTables.map(t => {
+        // 規劃模式：完全略過今日即時狀態（booking/指派），只看 plan 狀態
+        if (planningMode) {
+          const planState = selectedTables.includes(t.number)
+            ? 'selected'
+            : blockedTables.includes(t.number)
+              ? 'blocked'
+              : 'available'
+          return (
+            <TableShape
+              key={t.number}
+              table={t}
+              settings={settings}
+              isSelected={selectedTableNumber === t.number}
+              planState={planState}
+              onClick={() => onSelectTable(t.number)}
+            />
+          )
+        }
         const booking = t.currentBookingId ? bookingMap[t.currentBookingId] : null
         const isSelected = selectedTableNumber === t.number
         const isMergeFirst = mergeFirst === t.number
         const isHighlight = assignMode && highlightTables.includes(t.number)
         const isAssignSuggestion = assignMode && suggestionTable === t.number
+        const isPendingConfirm = assignMode && pendingConfirmTable === t.number
         const isJustAssigned = justAssignedTable === t.number
         return (
           <TableShape
@@ -105,10 +129,24 @@ export default function FloorMap({
             isMergeCandidate={isMergeFirst}
             isHighlight={isHighlight}
             isAssignSuggestion={isAssignSuggestion}
+            isPendingConfirm={isPendingConfirm}
             isJustAssigned={isJustAssigned}
             isDimmed={assignMode && !highlightTables.includes(t.number)}
             onClick={() => onSelectTable(t.number)}
           />
+        )
+      })}
+
+      {/* 今日團體 hold 唯讀疊加：今日已預排、尚未入座的團，於其桌位畫靛色虛線框 + 🚌 */}
+      {!planningMode && floorTables.map(t => {
+        const hold = groupHoldTables[t.number]
+        if (!hold) return null
+        return (
+          <g key={`hold-${t.number}`} pointerEvents="none">
+            <rect x={t.x - 3} y={t.y - 3} width={t.w + 6} height={t.h + 6} rx={11}
+                  fill="none" stroke="#6366f1" strokeWidth={2.5} strokeDasharray="5 3" opacity={0.9} />
+            <text x={t.x + t.w - 6} y={t.y + 14} fontSize={13} textAnchor="end" pointerEvents="none">🚌</text>
+          </g>
         )
       })}
     </svg>

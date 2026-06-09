@@ -4,13 +4,15 @@ import { getNoshowCount } from '../../services/bookingService'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 
+// 狀態色採品牌語義：待確認=琥珀(需處理) / 待到=綠(已就緒) / 用餐中=橙(進行中)
+// 文字皆採深色確保可讀（不用低對比的純品牌色當文字）
 const STATUS_MAP = {
-  pending:   { label: '待確認', color: 'bg-chicken-brown/10 text-chicken-brown' },
-  confirmed: { label: '待到',  color: 'bg-sky-50 text-sky-700' },
-  arrived:   { label: '用餐中', color: 'bg-orange-50 text-orange-700' },
-  completed: { label: '已離', color: 'bg-chicken-brown/10 text-chicken-brown/60' },
+  pending:   { label: '待確認', color: 'bg-amber-100 text-amber-800' },
+  confirmed: { label: '待到',  color: 'bg-emerald-50 text-emerald-700' },
+  arrived:   { label: '用餐中', color: 'bg-orange-100 text-orange-700' },
+  completed: { label: '已離', color: 'bg-chicken-brown/10 text-chicken-brown/50' },
   noshow:    { label: 'No-show', color: 'bg-chicken-red text-white' },
-  cancelled: { label: '已取消', color: 'bg-chicken-brown/10 text-chicken-brown/40' },
+  cancelled: { label: '已取消', color: 'bg-chicken-brown/5 text-chicken-brown/40' },
 }
 
 const SOURCE_MAP = {
@@ -243,12 +245,12 @@ export default function BookingCard({ booking, onAssign, onClick }) {
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleNoshow() }}
-                  className="text-xs px-3 py-1.5 bg-white border border-chicken-brown/15 text-chicken-brown/60 rounded-lg font-bold hover:border-chicken-red hover:text-chicken-red"
+                  className="text-xs px-3 py-1.5 bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5"
                 >標 No-show</button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleCancel() }}
-                  className="text-xs px-3 py-1.5 bg-white border border-chicken-brown/15 text-chicken-brown/60 rounded-lg font-bold hover:border-chicken-red hover:text-chicken-red"
-                >取消訂位</button>
+                  className="text-xs px-3 py-1.5 bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5"
+                >✕ 取消訂位</button>
               </>
             )}
             {booking.status === 'noshow' && (

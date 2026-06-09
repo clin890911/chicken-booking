@@ -2,14 +2,14 @@ import { useMemo } from 'react'
 import { generateTimeSlots } from '../../utils/timeSlots'
 import { calcSlotCapacity } from '../../utils/capacity'
 
-export default function TimeSlotPicker({ date, value, onChange, settings, tables, bookings, guests = 1, hideFull = true }) {
+export default function TimeSlotPicker({ date, value, onChange, settings, tables, bookings, groupReservations = [], guests = 1, hideFull = true }) {
   const slots = useMemo(() => {
     const list = generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval)
     return list.map(t => {
-      const remaining = calcSlotCapacity(tables, bookings, date, t, settings)
+      const remaining = calcSlotCapacity(tables, bookings, date, t, settings, groupReservations)
       return { time: t, remaining, full: remaining < guests }
     })
-  }, [date, settings, tables, bookings, guests])
+  }, [date, settings, tables, bookings, groupReservations, guests])
 
   const visible = hideFull ? slots.filter(s => !s.full) : slots
 

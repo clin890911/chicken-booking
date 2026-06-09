@@ -5,6 +5,9 @@ import * as settingsService from '../services/settingsService'
 import * as waitlistService from '../services/waitlistService'
 import * as customerService from '../services/customerService'
 import * as seatingService from '../services/seatingService'
+import * as agencyService from '../services/agencyService'
+import * as guideService from '../services/guideService'
+import * as groupReservationService from '../services/groupReservationService'
 import * as tg from '../services/telegramService'
 import * as cloudData from '../services/cloudDataService'
 import { useAuth } from './AuthContext'
@@ -28,7 +31,7 @@ export function BookingProvider({ children }) {
   // 只有登入的員工才會啟動「全量雲端同步」。
   // 客人端（公開頁）一律不碰 admin 同步，避免把所有顧客個資灌進客人的瀏覽器，
   // 也避免未授權的全量讀寫（真正的把關在後端 requireStaff）。
-  const { user, getToken } = useAuth() || {}
+  const { user, getToken, usingFirebase } = useAuth() || {}
   const isStaff = !!user
   const toast = useToast()
   const toastRef = useRef(toast)
@@ -40,6 +43,9 @@ export function BookingProvider({ children }) {
   const [tables, setTables] = useState([])
   const [waitlist, setWaitlist] = useState([])
   const [customers, setCustomers] = useState([])
+  const [agencies, setAgencies] = useState([])
+  const [guides, setGuides] = useState([])
+  const [groupReservations, setGroupReservations] = useState([])
   const [settings, setSettings] = useState(settingsService.getSettings())
   const [cloudStatus, setCloudStatus] = useState({ state: 'idle', lastSyncAt: null, error: '' })
   const syncTimerRef = useRef(null)
@@ -57,6 +63,9 @@ export function BookingProvider({ children }) {
     setTables(tableService.listAll())
     setWaitlist(waitlistService.listAll())
     setCustomers(customerService.listAll())
+    setAgencies(agencyService.listAll())
+    setGuides(guideService.listAll())
+    setGroupReservations(groupReservationService.listAll())
     setSettings(settingsService.getSettings())
   }, [])
 
@@ -290,6 +299,45 @@ export function BookingProvider({ children }) {
     return s
   }
 
+  // ============ 旅行社 / 導遊 名冊 ============
+  const addAgency = (data) => { const a = agencyService.create(data); refresh(); syncCloudSoon(); return a }
+  const updateAgency = (id, patch) => { const a = agencyService.update(id, patch); refresh(); syncCloudSoon(); return a }
+  const archiveAgency = (id) => { agencyService.archive(id); refresh(); syncCloudSoon() }
+  const addGuide = (data) => { const g = guideService.create(data); refresh(); syncCloudSoon(); return g }
+  const updateGuide = (id, patch) => { const g = guideService.update(id, patch); refresh(); syncCloudSoon(); return g }
+  const archiveGuide = (id) => { guideService.archive(id); refresh(); syncCloudSoon() }
+
+  // ============ 團體預排單 ============
+  const addGroupReservation = (data) => { const g = groupReservationService.create(data); refresh(); syncCloudSoon(); return g }
+  const updateGroupReservation = (id, patch) => { const g = groupReservationService.update(id, patch); refresh(); syncCloudSoon(); return g }
+  const setGroupStatus = (id, status) => { const g = groupReservationService.setStatus(id, status); refresh(); syncCloudSoon(); return g }
+  const removeGroupReservation = (id) => { groupReservationService.remove(id); refresh(); syncCloudSoon() }
+
+  // 圈桌存檔：先寫本機讓 UI 立即反映；線上時呼叫 groupReserveTables 交易做多裝置原子把關。
+  // 真衝突（409）丟給 UI 顯示；離線等其他錯誤已存本機、照常排程同步、不阻斷。
+  const reserveGroupTables = async (id, patch) => {
+    const saved = groupReservationService.update(id, patch)
+    refresh()
+    if (usingFirebase && isStaffRef.current && saved) {
+      try {
+        const r = await cloudData.groupReserveTables(saved)
+        if (r?.group) { groupReservationService.update(id, r.group); refresh() }
+      } catch (err) {
+        if (err?.status === 409) { syncCloudSoon(); throw err }
+        // 離線/暫時性錯誤：已存本機，照常同步
+      }
+    }
+    syncCloudSoon()
+    return saved
+  }
+
+  // 團體梯次入座流程（含通知略過：團體現場操作頻繁，暫不發 TG）
+  const seatGroupBatch = (groupId, batchId) => { const r = seatingService.seatGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
+  const checkoutGroupBatch = (groupId, batchId) => { const r = seatingService.checkoutGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
+  const seatNextBatchOnTable = (tableNumber, groupId, batchId) => { const r = seatingService.seatNextBatchOnTable(tableNumber, groupId, batchId); refresh(); syncCloudSoon(); return r }
+  const finalizeGroup = (groupId) => { const r = seatingService.finalizeGroup(groupId); refresh(); syncCloudSoon(); return r }
+  const cancelGroup = (groupId) => { const r = seatingService.cancelGroup(groupId); refresh(); syncCloudSoon(); return r }
+
   const migrateLocalToCloud = async () => {
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     const result = await cloudData.pushCloudData()
@@ -300,6 +348,7 @@ export function BookingProvider({ children }) {
 
   const value = {
     bookings, tables, waitlist, customers, settings, cloudStatus,
+    agencies, guides, groupReservations,
     refresh, pullCloud, migrateLocalToCloud,
     addBooking, updateBooking, cycleStatus, setStatus,
     toggleTable, setTableStatus, blockTable, unblockTable, mergeTables, unmergeTable, updateTablePosition,
@@ -307,6 +356,9 @@ export function BookingProvider({ children }) {
     assignBookingToTable, seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, moveTable, findSuitableTables, suggestTable,
     addWaitlist, callWaitlist, seatWaitlist, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,
+    addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
+    addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
+    seatGroupBatch, checkoutGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup,
     updateSettings,
   }
 

@@ -14,12 +14,13 @@ const STATUS_LABELS = {
   cleaning: '等待清桌',
   blocked: '不可用',
 }
+// 與桌位地圖 (TableShape) 同色語義：綠=可入座 / 藍=已預訂 / 橙=用餐 / 琥珀=清桌 / 灰=不可用
 const STATUS_PILL_BG = {
-  vacant: 'bg-emerald-500',
-  reserved: 'bg-yellow-500',
-  dining: 'bg-red-500',
-  cleaning: 'bg-orange-500',
-  blocked: 'bg-slate-400',
+  vacant: 'bg-emerald-600',
+  reserved: 'bg-sky-600',
+  dining: 'bg-orange-500',
+  cleaning: 'bg-amber-600',
+  blocked: 'bg-slate-500',
 }
 
 function fmtTime(d) {
@@ -37,7 +38,7 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
   const {
     setTableStatus, blockTable, unblockTable, walkInSeat,
     seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, setStatus,
-    settings,
+    settings, groupReservations,
   } = useBooking()
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [showBlock, setShowBlock] = useState(false)
@@ -53,6 +54,12 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
   }, [table?.number, table?.status])
 
   if (!table) return null
+
+  // 團體梯次入座的桌（currentRef 指向 group/batch，無散客 booking）
+  const groupRef = table.currentRef?.type === 'group'
+    ? (groupReservations || []).find(g => g.id === table.currentRef.groupId)
+    : null
+  const groupBatch = groupRef?.batches?.find(b => b.id === table.currentRef?.batchId) || null
 
   const canEdit = can('table.update')
   const canBlock = can('table.block')
@@ -101,15 +108,32 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
       { title: '一鍵釋出桌位', confirmLabel: '已離席+清桌' })
     if (!ok) return
     const min = minutesSeated()
-    const r = finalizeBooking(booking.id)
+    const releasedBooking = booking
+    const tableNumber = table.number
+    const r = finalizeBooking(releasedBooking.id)
     if (!r.ok) return toast.error(r.error)
-    toast.success(`✨ ${booking.name} 已離席且 ${table.number} 已釋出（用餐 ${min} 分）`)
+    // 復原窗口：把該桌與 booking 還原為釋出前（重新入座 → dining）
+    toast.action(`✨ ${releasedBooking.name} 已離席且 ${tableNumber} 已釋出（用餐 ${min} 分）`,
+      { label: '↩ 復原', onClick: () => {
+        const back = seatBooking(releasedBooking.id)
+        if (back.ok) toast.success(`已復原 ${releasedBooking.name} 至 ${tableNumber}`)
+        else toast.error('無法復原：' + back.error)
+      } },
+      { duration: 8000 })
     onClose?.()
   }
 
   const handleClear = () => {
-    clearTable(table.number)
-    toast.success(`${table.number} 已清桌完成`)
+    const tableNumber = table.number
+    const prevBookingId = table.currentBookingId
+    clearTable(tableNumber)
+    // 復原窗口：把桌位還原回「等待清桌」狀態（重新標 cleaning + 還原 booking 綁定）
+    toast.action(`${tableNumber} 已清桌完成`,
+      { label: '↩ 復原', onClick: () => {
+        setTableStatus(tableNumber, 'cleaning', prevBookingId ? { currentBookingId: prevBookingId } : {})
+        toast.success(`已復原 ${tableNumber} 為等待清桌`)
+      } },
+      { duration: 8000 })
     onClose?.()
   }
 
@@ -182,7 +206,7 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
                   <div className={`flex items-center justify-between rounded-xl px-3 py-2 mt-2
                     ${stage === 'buffer-overtime' ? 'bg-chicken-red text-white animate-pulse'
                       : stage === 'overtime' ? 'bg-chicken-red/90 text-white'
-                      : stage === 'late' ? 'bg-chicken-yellow/20 text-chicken-yellow'
+                      : stage === 'late' ? 'bg-orange-100 text-orange-700'
                       : 'bg-chicken-cream text-chicken-brown'}`}>
                     <span className="text-xs font-bold">已用餐</span>
                     <span className="text-2xl font-black tabular-nums">
@@ -190,7 +214,7 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
                     </span>
                   </div>
                   {stage === 'late' && (
-                    <div className="text-[11px] text-chicken-yellow font-bold mt-1 text-center">
+                    <div className="text-[11px] text-orange-700 font-bold mt-1 text-center">
                       接近 {diningDuration} 分鐘用餐時間，請留意下一組安排
                     </div>
                   )}
@@ -220,7 +244,27 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
           </div>
         )}
 
-        {table.status === 'cleaning' && (
+        {/* 團體梯次佔用：顯示團資訊，操作引導至「團體 → 今日團體」 */}
+        {groupRef && (
+          <div className="space-y-2">
+            <div className="px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+              <div className="font-bold text-indigo-700">🚌 {groupRef.agencyName || '旅行社團體'}</div>
+              <div className="text-xs text-indigo-700/80 mt-0.5">
+                {groupBatch ? `${groupBatch.label} ${groupBatch.timeSlot}` : ''} · 導遊 {groupRef.guideName || '—'}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
+              <span className="px-2 py-0.5 rounded-full bg-chicken-red/10 text-chicken-red">總 {groupRef.counts?.total || 0}</span>
+              {groupRef.counts?.vegetarian > 0 && <span className="px-2 py-0.5 rounded-full bg-chicken-green/15 text-chicken-green">素 {groupRef.counts.vegetarian}</span>}
+              {groupRef.counts?.mobility > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">♿ {groupRef.counts.mobility}</span>}
+              {groupRef.counts?.wheelchair > 0 && <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">輪椅 {groupRef.counts.wheelchair}</span>}
+            </div>
+            {groupRef.allergyText && <div className="text-[11px] text-chicken-red font-bold">過敏：{groupRef.allergyText}</div>}
+            <p className="text-[11px] text-chicken-brown/50">梯次入座 / 離席 / 接第二梯，請至「團體 → 今日團體」操作。</p>
+          </div>
+        )}
+
+        {table.status === 'cleaning' && !groupRef && (
           <p className="text-chicken-brown/60 text-center py-4">外場清桌中</p>
         )}
         {table.status === 'blocked' && (
@@ -261,19 +305,24 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
             <>
               <button onClick={handleSeat} className="btn-primary w-full">✅ 客人到了 — 入座</button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={handleCancel} className="btn-secondary text-sm">取消訂位</button>
                 <button onClick={onStartMerge} className="btn-secondary text-sm">⇆ 併桌</button>
+                <button onClick={handleCancel} className="text-sm rounded-2xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
               </div>
             </>
           )}
 
           {table.status === 'dining' && booking && (
             <>
-              <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 rounded-2xl w-full">
-                🚪 已離席（待清桌）
+              {/* 主要操作：漸進式 — 先進「等待清桌」，避免連點直接釋出髒桌 */}
+              <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-2xl w-full">
+                🚪 客人已離席
               </button>
-              <button onClick={handleFinalize} className="bg-chicken-green hover:opacity-90 text-white font-bold py-3 rounded-2xl w-full">
-                ✨ 已離席 + 清桌完成（一鍵釋出）
+              {/* 次要：直接釋出（已清桌完成），降權重、較小較淡、保留 confirm */}
+              <button
+                onClick={handleFinalize}
+                className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
+              >
+                直接釋出（已清桌完成）
               </button>
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={onStartMove} className="btn-secondary text-sm">↔ 換桌</button>
