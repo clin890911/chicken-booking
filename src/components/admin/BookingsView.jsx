@@ -3,10 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion'
 import TodayView from './TodayView'
 import CalendarView from './CalendarView'
 import AddBookingView from './AddBookingView'
+import SearchBookingsView from './SearchBookingsView'
 
 const SUB_TABS = [
   { key: 'today', label: '今日', icon: '📋' },
   { key: 'calendar', label: '日曆', icon: '📅' },
+  { key: 'search', label: '查詢', icon: '🔍' },
   { key: 'add', label: '新增', icon: '➕' },
 ]
 
@@ -44,6 +46,7 @@ export default function BookingsView({ onAssignTable, onCreated }) {
         >
           {sub === 'today' && <TodayView onAssignTable={onAssignTable} />}
           {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} />}
+          {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} />}
           {sub === 'add' && <AddBookingView onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} />}
         </motion.div>
       </AnimatePresence>

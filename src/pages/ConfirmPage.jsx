@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import * as bookingService from '../services/bookingService'
 import { dayLabel } from '../utils/timeSlots'
+import { copyText } from '../utils/clipboard'
 import { Card, Button, Badge } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import { lineBindUrl } from '../services/lineService'
@@ -72,34 +73,20 @@ export default function ConfirmPage() {
   const mapUrl = settings.storeMapUrl || (settings.storeAddress ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(settings.storeAddress)}` : '')
   const telUrl = settings.storePhone ? `tel:${settings.storePhone}` : ''
 
-  const copyText = async (text, onDone) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      onDone()
-    } catch {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      document.body.appendChild(ta)
-      ta.select()
-      try { document.execCommand('copy'); onDone() } catch {}
-      document.body.removeChild(ta)
-    }
-  }
-
   const copyId = async () => {
     if (!b) return
-    copyText(b.id, () => {
+    if (await copyText(b.id)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
-    })
+    }
   }
 
   const copyManageUrl = async () => {
     if (!manageUrl) return
-    copyText(manageUrl, () => {
+    if (await copyText(manageUrl)) {
       setCopiedManage(true)
       setTimeout(() => setCopiedManage(false), 1800)
-    })
+    }
   }
 
   if (loading) {
