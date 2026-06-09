@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { AlertTriangle, CalendarDays, ChevronLeft, Clock, Hash, Phone, Search, UserRound, Users } from 'lucide-react'
 import { Button, Input, Badge } from '../components/ui'
 import { dayLabel } from '../utils/timeSlots'
+import { normalizeBookingId } from '../utils/bookingId'
 import { guestLookupBooking } from '../services/cloudDataService'
 
 const STATUS_LABEL = {
@@ -33,7 +34,7 @@ export default function LookupBookingPage() {
     try {
       const payload = mode === 'identity'
         ? { mode, surname: surname.trim(), phone: phone.trim() }
-        : { mode, bookingId: bookingId.trim(), phoneTail: phoneTail.trim() }
+        : { mode, bookingId: normalizeBookingId(bookingId), phoneTail: phoneTail.trim() }
       const result = await guestLookupBooking(payload)
       setItems(result.items || [])
       setSearched(true)

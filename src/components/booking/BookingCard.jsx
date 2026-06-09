@@ -3,6 +3,7 @@ import { Badge } from '../ui'
 import { getNoshowCount } from '../../services/bookingService'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
+import { copyText } from '../../utils/clipboard'
 
 // 狀態色採品牌語義：待確認=琥珀(需處理) / 待到=綠(已就緒) / 用餐中=橙(進行中)
 // 文字皆採深色確保可讀（不用低對比的純品牌色當文字）
@@ -282,11 +283,23 @@ export default function BookingCard({ booking, onAssign, onClick }) {
           </div>
         </div>
 
-        {/* 右側狀態 pill（純顯示，不可點）*/}
+        {/* 右側狀態 pill（純顯示，不可點）+ 訂位編號（點擊複製，方便店員核對報號）*/}
         <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
           <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${status.color}`}>
             {status.label}
           </span>
+          {booking.id && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                copyText(booking.id).then(ok => { if (ok) toast.success(`已複製編號 ${booking.id}`) })
+              }}
+              className="font-mono text-[10px] text-chicken-brown/40 hover:text-chicken-red tabular-nums"
+              title="點擊複製訂位編號"
+            >
+              #{booking.id}
+            </button>
+          )}
         </div>
       </div>
     </div>

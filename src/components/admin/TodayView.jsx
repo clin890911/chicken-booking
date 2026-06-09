@@ -38,7 +38,8 @@ export default function TodayView({ onAssignTable }) {
       list = list.filter(b =>
         (b.name || '').toLowerCase().includes(q) ||
         (b.phone || '').includes(q) ||
-        (b.assignedTableId || '').toLowerCase().includes(q)
+        (b.assignedTableId || '').toLowerCase().includes(q) ||
+        (b.id || '').toLowerCase().includes(q)
       )
     }
     return [...list].sort((a, b) => {
@@ -98,7 +99,7 @@ export default function TodayView({ onAssignTable }) {
         <div className="flex gap-2 items-center">
           <input
             type="search"
-            placeholder="搜尋姓名 / 電話 / 桌號"
+            placeholder="搜尋姓名 / 電話 / 桌號 / 編號"
             value={query}
             onChange={e => setQuery(e.target.value)}
             className="input flex-1"
