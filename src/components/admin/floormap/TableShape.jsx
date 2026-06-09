@@ -46,6 +46,11 @@ export default function TableShape({
   isPendingConfirm = false,    // 二步確認：待確認的桌（醒目高亮）
   isJustAssigned = false,      // 剛指派完的桌（綠閃後熄）
   planState = null,            // 規劃模式：'selected' | 'blocked' | 'available'（藍紫色系，與今日即時圖區隔）
+  occState = null,             // 統一佔用視圖（日期+場次）：'walkin'(暖) | 'group'(冷) | 'free'(淺)
+  occLabel = '',               // 統一佔用視圖：佔用者顯示名（散客姓名 / 團客旅行社）
+  occSub = '',                 // 統一佔用視圖：次要說明（人數·時段 / 梯次·時段）
+  occHighlight = false,        // 統一佔用視圖：預先配桌模式中、可選的空桌高亮
+  occDimmed = false,           // 統一佔用視圖：場次已關閉時整體淡化
   onClick,
 }) {
   const { x, y, w, h, capacity, status, mergedWith, isActive, fuel, number } = table
@@ -87,6 +92,32 @@ export default function TableShape({
               fontSize={9} fontWeight={700} fill={P.text} opacity={0.9} textAnchor="middle" pointerEvents="none">
           {planState === 'selected' ? '✓ 已選' : P.label}
         </text>
+      </g>
+    )
+  }
+
+  // === 統一佔用視圖（日期 + 場次）===
+  // 散客暖色、團客冷色、空桌淺色；與今日即時圖（status 驅動）、規劃圖（planState）皆區隔。
+  if (occState) {
+    const O = {
+      walkin: { fill: '#ea580c', stroke: '#c2410c', text: '#ffffff' },
+      group:  { fill: '#4f46e5', stroke: '#3730a3', text: '#ffffff' },
+      free:   { fill: '#e2e8f0', stroke: '#94a3b8', text: '#334155' },
+    }[occState] || { fill: '#e2e8f0', stroke: '#94a3b8', text: '#334155' }
+    const stroke = isSelected ? '#e60012' : occHighlight ? '#9eb63a' : O.stroke
+    const strokeWidth = isSelected ? 3 : occHighlight ? 3 : 1.5
+    return (
+      <g onClick={onClick} style={{ cursor: 'pointer', opacity: occDimmed ? 0.5 : 1 }} className={occHighlight ? 'animate-pulse' : ''}>
+        <rect x={x} y={y} width={w} height={h} rx={8}
+              fill={O.fill} stroke={stroke} strokeWidth={strokeWidth}
+              strokeDasharray={occHighlight ? '4 2' : null} />
+        <text x={x + w / 2} y={y + (h <= 80 ? 22 : 26)} fontSize={h <= 80 ? 14 : 16} fontWeight={800} fill={O.text} textAnchor="middle" pointerEvents="none">{number}</text>
+        <text x={x + w / 2} y={y + (h <= 80 ? 36 : 41)} fontSize={9} fontWeight={600} fill={O.text} opacity={0.9} textAnchor="middle" pointerEvents="none">{capacity}人</text>
+        {occLabel && (
+          <text x={x + w / 2} y={y + h - 8} fontSize={8.5} fontWeight={700} fill={O.text} textAnchor="middle" pointerEvents="none">
+            {occLabel.length > 5 ? occLabel.slice(0, 5) : occLabel}
+          </text>
+        )}
       </g>
     )
   }

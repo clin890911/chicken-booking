@@ -11,6 +11,12 @@ const DEFAULT = {
   maxDaysAhead: 30,
   diningDurationMin: 90,
   cleanupBufferMin: 10,
+  seatings: [
+    { id: 'lunch1', name: '午餐第一批', start: '11:00', end: '12:30' },
+    { id: 'lunch2', name: '午餐第二批', start: '12:30', end: '14:30' },
+    { id: 'dinner1', name: '晚餐第一批', start: '17:00', end: '19:00' },
+  ],
+  closures: { closedDates: [], closedSlots: {}, closedSeatings: {} },
   heroBanners: [],
   lineOfficialUrl: 'https://lin.ee/8lECi4S',
   lineOfficialName: '雞王涮涮鍋 LINE 官方帳號',

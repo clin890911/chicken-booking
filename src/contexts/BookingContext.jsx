@@ -273,6 +273,12 @@ export function BookingProvider({ children }) {
   const findSuitableTables = (partySize) => seatingService.findSuitableTables(partySize)
   const suggestTable = (partySize) => seatingService.suggestTable(partySize)
 
+  // 統一座位地圖的「預先配桌」：僅在 booking 上記錄 assignedTableId（per-date），
+  // ★ 不更動 live tables（currentBookingId/status），故未來日期預排不會誤佔今日現場桌況。
+  // 到店當天仍走現場「指派桌」流程把實體桌設為 reserved/dining。
+  const preassignBookingTable = (bookingId, tableNumber) => { const b = bookingService.assignTable(bookingId, tableNumber); refresh(); syncCloudSoon(); return b }
+  const clearBookingPreassign = (bookingId) => { const b = bookingService.unassignTable(bookingId); refresh(); syncCloudSoon(); return b }
+
   // ============ 候位動作 ============
   const addWaitlist = (data) => {
     const w = waitlistService.create(data)
@@ -397,6 +403,7 @@ export function BookingProvider({ children }) {
     toggleTable, setTableStatus, blockTable, unblockTable, mergeTables, unmergeTable, updateTablePosition,
     bulkSaveTables, addTable, removeTable, resetTables,
     assignBookingToTable, seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, moveTable, findSuitableTables, suggestTable,
+    preassignBookingTable, clearBookingPreassign,
     addWaitlist, callWaitlist, seatWaitlist, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,

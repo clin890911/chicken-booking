@@ -4,7 +4,7 @@ import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast, useConfirm } from '../ui/Toast'
 import { searchNoshow, exportCSV } from '../../services/bookingService'
-import { generateTimeSlots, todayStr } from '../../utils/timeSlots'
+import { generateTimeSlots, todayStr, slotsInSeating, seatingForSlot } from '../../utils/timeSlots'
 import TableGrid from './TableGrid'
 import LayoutEditor from './LayoutEditor'
 import TelegramSettings from './TelegramSettings'
@@ -287,6 +287,22 @@ export default function SettingsView() {
             <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存設定</Button>
             {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。座位總覽地圖與「關閉整場次」皆依此。" defaultOpen>
+        <SeatingsEditor form={form} setForm={setForm} />
+        <div className="flex gap-2 items-center mt-3">
+          <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存場次</Button>
+          {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。">
+        <ClosuresEditor form={form} setForm={setForm} bookings={bookings} />
+        <div className="flex gap-2 items-center mt-3">
+          <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存關閉設定</Button>
+          {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
         </div>
       </SettingsSection>
 
@@ -637,6 +653,140 @@ function readBannerFile(file) {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+// 場次（seating）編輯器：增刪場次、改名稱/起訖時間。寫回 form.seatings。
+function SeatingsEditor({ form, setForm }) {
+  const seatings = Array.isArray(form.seatings) ? form.seatings : []
+  const patch = (id, p) => setForm(f => ({ ...f, seatings: (f.seatings || []).map(s => s.id === id ? { ...s, ...p } : s) }))
+  const add = () => setForm(f => {
+    const list = f.seatings || []
+    const id = `s${Date.now().toString(36)}${list.length}`
+    return { ...f, seatings: [...list, { id, name: `場次${list.length + 1}`, start: f.openTime || '11:00', end: f.closeTime || '19:00' }] }
+  })
+  const remove = (id) => setForm(f => ({ ...f, seatings: (f.seatings || []).filter(s => s.id !== id) }))
+
+  return (
+    <div className="space-y-2">
+      {seatings.length === 0 && (
+        <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-sm text-chicken-brown/60">
+          尚未設定場次。新增後，座位總覽地圖即可依場次（如「午餐第一批」）切換檢視。
+        </div>
+      )}
+      {seatings.map(s => (
+        <div key={s.id} className="flex items-end gap-2 flex-wrap rounded-xl border border-chicken-brown/10 bg-white p-2">
+          <Input label="名稱" value={s.name} onChange={e => patch(s.id, { name: e.target.value })} className="flex-1 min-w-[120px]" />
+          <Input label="開始" type="time" value={s.start} onChange={e => patch(s.id, { start: e.target.value })} className="w-28" />
+          <Input label="結束" type="time" value={s.end} onChange={e => patch(s.id, { end: e.target.value })} className="w-28" />
+          <button onClick={() => remove(s.id)} className="min-h-[44px] px-3 text-sm font-bold text-chicken-red border-2 border-chicken-red/30 rounded-xl">刪除</button>
+        </div>
+      ))}
+      <button onClick={add} className="text-sm font-bold text-chicken-red">＋ 新增場次</button>
+    </div>
+  )
+}
+
+// 關閉時段編輯器：選日期 → 整天公休 / 關閉整場次 / 關閉個別時段。寫回 form.closures。
+function ClosuresEditor({ form, setForm, bookings }) {
+  const [date, setDate] = useState(todayStr())
+  const closures = form.closures || { closedDates: [], closedSlots: {}, closedSeatings: {} }
+  const seatings = Array.isArray(form.seatings) ? form.seatings : []
+  const dayClosed = (closures.closedDates || []).includes(date)
+  const closedSeatingIds = closures.closedSeatings?.[date] || []
+  const closedSlotList = closures.closedSlots?.[date] || []
+
+  // 受影響的未來已確認訂位（僅此日期），供關閉前提醒。
+  const affected = (bookings || []).filter(b => b.date === date && b.status === 'confirmed')
+
+  const setClosures = (next) => setForm(f => ({ ...f, closures: next }))
+  const toggleArr = (arr = [], v) => arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]
+  const setDateMap = (mapKey, key, arr) => {
+    const m = { ...(closures[mapKey] || {}) }
+    if (arr.length) m[key] = arr; else delete m[key]
+    setClosures({ ...closures, [mapKey]: m })
+  }
+  const toggleDay = () => setClosures({ ...closures, closedDates: toggleArr(closures.closedDates, date) })
+  const toggleSeating = (id) => setDateMap('closedSeatings', date, toggleArr(closedSeatingIds, id))
+  const toggleSlot = (t) => setDateMap('closedSlots', date, toggleArr(closedSlotList, t))
+
+  // 不屬於任何場次的時段（午晚餐之間等），歸到「其他時段」
+  const orphanSlots = generateTimeSlots(form.openTime, form.closeTime, form.slotInterval)
+    .filter(t => !seatingForSlot(form, t))
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-end gap-2 flex-wrap">
+        <div>
+          <span className="label !mb-1 block">選擇日期</span>
+          <input type="date" value={date} min={todayStr()} onChange={e => setDate(e.target.value)}
+            className="rounded-xl border-2 border-chicken-brown/15 px-3 py-2 text-sm font-bold text-chicken-brown" />
+        </div>
+        <label className="flex items-center gap-2 min-h-[44px] rounded-xl border-2 px-3 font-bold text-sm cursor-pointer"
+          style={{ borderColor: dayClosed ? '#e11d48' : 'rgba(58,46,38,0.15)', color: dayClosed ? '#be123c' : '#3a2e26', background: dayClosed ? '#fff1f2' : '#fff' }}>
+          <input type="checkbox" checked={dayClosed} onChange={toggleDay} />
+          🚫 整天公休
+        </label>
+      </div>
+
+      {affected.length > 0 && (
+        <div className="rounded-xl border border-chicken-red/20 bg-chicken-red/5 px-3 py-2 text-xs leading-5 text-chicken-brown/70">
+          ⚠️ 此日期已有 <span className="font-black text-chicken-red">{affected.length}</span> 筆已確認訂位。關閉只會停止「新訂位」，<b>不會自動取消既有訂位</b>，必要時請另行通知客人。
+        </div>
+      )}
+
+      {dayClosed ? (
+        <div className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-500">本日已設為整天公休，所有場次與時段皆停止新訂位。</div>
+      ) : (
+        <>
+          {seatings.map(s => {
+            const seatingClosed = closedSeatingIds.includes(s.id)
+            const slots = slotsInSeating(form, s)
+            return (
+              <div key={s.id} className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+                <label className="flex items-center justify-between gap-2 cursor-pointer">
+                  <span className="font-bold text-chicken-brown text-sm">{s.name} <span className="text-xs font-normal text-chicken-brown/50">{s.start}–{s.end}</span></span>
+                  <span className="flex items-center gap-1.5 text-xs font-bold" style={{ color: seatingClosed ? '#be123c' : '#3a2e26' }}>
+                    <input type="checkbox" checked={seatingClosed} onChange={() => toggleSeating(s.id)} />
+                    關閉整場次
+                  </span>
+                </label>
+                {!seatingClosed && slots.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {slots.map(t => {
+                      const on = closedSlotList.includes(t)
+                      return (
+                        <button key={t} onClick={() => toggleSlot(t)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 ${on ? 'border-rose-400 bg-rose-50 text-rose-600 line-through' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
+                          {t}{on ? ' 🚫' : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {seatingClosed && <div className="mt-1 text-xs text-rose-500">整場次已關閉，涵蓋 {slots.join('、') || '—'}</div>}
+              </div>
+            )
+          })}
+          {orphanSlots.length > 0 && (
+            <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+              <div className="font-bold text-chicken-brown text-sm mb-2">其他時段（不屬任何場次）</div>
+              <div className="flex flex-wrap gap-1.5">
+                {orphanSlots.map(t => {
+                  const on = closedSlotList.includes(t)
+                  return (
+                    <button key={t} onClick={() => toggleSlot(t)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 ${on ? 'border-rose-400 bg-rose-50 text-rose-600 line-through' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
+                      {t}{on ? ' 🚫' : ''}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
 }
 
 // C11：LINE 端點分組區塊（基本 / LIFF / 後端端點）

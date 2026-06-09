@@ -12,6 +12,7 @@ import LookupBookingPage from './pages/LookupBookingPage'
 import LineBindPage from './pages/LineBindPage'
 import LoginPage from './pages/LoginPage'
 import AdminPage from './pages/AdminPage'
+import SlotMapDemoPage from './pages/SlotMapDemoPage'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="/line/bind" element={<LineBindPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
+        <Route path="/demo/slot-map" element={<SlotMapDemoPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </ErrorBoundary>
