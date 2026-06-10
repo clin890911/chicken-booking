@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { groupTableNumbers } from '../../../../utils/capacity'
-import { dayLabel } from '../../../../utils/timeSlots'
+import { groupTableNumbers } from '../../../utils/capacity'
+import { dayLabel } from '../../../utils/timeSlots'
 
 // 當日團體預排總表（給廚房 / 外場當天備餐用的紙本）。
 // 沿用 GroupSheet.jsx 模板手法：自包含 A4 SVG、@media print（A4）、SVG→PNG 匯出。

@@ -1,10 +1,11 @@
 import { useMemo } from 'react'
-import { todayStr, formatDate } from '../../../../utils/timeSlots'
+import { todayStr, formatDate } from '../../../utils/timeSlots'
 
 // Pane A：團體預排月曆。仿 CalendarView 月格，吃 monthSummary（團體彙總）視覺化整月忙閒。
 // 受控元件：value(選中日) / cursor(年月) 由容器持有；點日 onSelect、換月 onCursorChange。
 // 每格：🚌N團 · N位 + 依「保留席/全店座位」的忙碌條；公休 🚫、今天標記、純團爆量 ⚠。
-export default function GroupCalendar({ value, onSelect, cursor, onCursorChange, monthSummary, settings, totalSeats = 0 }) {
+// walkinByDate（可選）：{ [date]: { count, guests } } 散客量小字（≥sm 顯示）；缺省時行為與舊版一致。
+export default function GroupCalendar({ value, onSelect, cursor, onCursorChange, monthSummary, settings, totalSeats = 0, walkinByDate }) {
   const byDate = monthSummary?.byDate || {}
   const month = monthSummary?.month || { groupCount: 0, guests: 0 }
   const closedDates = settings?.closures?.closedDates || []
@@ -52,6 +53,8 @@ export default function GroupCalendar({ value, onSelect, cursor, onCursorChange,
           const isClosed = closedDates.includes(dateStr)
           const s = byDate[dateStr]
           const hasGroups = !!s && s.groupCount > 0
+          const w = walkinByDate?.[dateStr]
+          const hasWalkins = !!w && w.count > 0
           const ratio = totalSeats > 0 && s ? Math.min(1, s.heldSeats / totalSeats) : 0
           const barColor = s?.overCapacityGroupOnly || ratio >= 0.75 ? '#e60012' : ratio >= 0.4 ? '#f29100' : '#9eb63a'
 
@@ -78,18 +81,30 @@ export default function GroupCalendar({ value, onSelect, cursor, onCursorChange,
                   : isToday && !isSelected ? <span className="w-1.5 h-1.5 rounded-full bg-chicken-yellow" /> : null}
               </div>
 
-              {hasGroups ? (
+              {(hasGroups || hasWalkins) ? (
                 <div className="flex-1 flex flex-col justify-end gap-1 mt-1 min-w-0">
-                  <div className={`text-[10px] sm:text-[11px] font-black tabular-nums leading-tight ${isSelected ? 'text-white' : 'text-chicken-brown/85'}`}>
-                    <span className="sm:hidden">🚌{s.groupCount}·{s.guests}</span>
-                    <span className="hidden sm:inline">🚌 {s.groupCount} 團 · {s.guests} 位</span>
-                  </div>
-                  {/* 忙碌條：保留席 / 全店座位 */}
-                  <div className={`h-1.5 rounded-full overflow-hidden ${isSelected ? 'bg-white/30' : 'bg-chicken-brown/10'}`}>
-                    <div className="h-full rounded-full" style={{ width: `${Math.max(8, ratio * 100)}%`, backgroundColor: isSelected ? '#ffffff' : barColor }} />
-                  </div>
-                  {s.overCapacityGroupOnly && (
-                    <div className={`text-[9px] font-black rounded px-1 py-0.5 leading-tight w-fit ${isSelected ? 'bg-white/25 text-white' : 'bg-chicken-red text-white'}`}>⚠ 超量</div>
+                  {hasGroups && (
+                    <div className={`text-[10px] sm:text-[11px] font-black tabular-nums leading-tight ${isSelected ? 'text-white' : 'text-chicken-brown/85'}`}>
+                      <span className="sm:hidden">🚌{s.groupCount}·{s.guests}</span>
+                      <span className="hidden sm:inline">🚌 {s.groupCount} 團 · {s.guests} 位</span>
+                    </div>
+                  )}
+                  {/* 散客量小字（≥sm；手機格太窄不顯示） */}
+                  {hasWalkins && (
+                    <div className={`hidden sm:block text-[10px] font-bold tabular-nums leading-tight ${isSelected ? 'text-white/85' : 'text-chicken-brown/55'}`}>
+                      🧍 散客 {w.count} 筆 · {w.guests} 位
+                    </div>
+                  )}
+                  {hasGroups && (
+                    <>
+                      {/* 忙碌條：保留席 / 全店座位（維持只看團體保留席；散客人數≠精確佔席，混入會誤導） */}
+                      <div className={`h-1.5 rounded-full overflow-hidden ${isSelected ? 'bg-white/30' : 'bg-chicken-brown/10'}`}>
+                        <div className="h-full rounded-full" style={{ width: `${Math.max(8, ratio * 100)}%`, backgroundColor: isSelected ? '#ffffff' : barColor }} />
+                      </div>
+                      {s.overCapacityGroupOnly && (
+                        <div className={`text-[9px] font-black rounded px-1 py-0.5 leading-tight w-fit ${isSelected ? 'bg-white/25 text-white' : 'bg-chicken-red text-white'}`}>⚠ 超量</div>
+                      )}
+                    </>
                   )}
                 </div>
               ) : (

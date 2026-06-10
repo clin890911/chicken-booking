@@ -1,5 +1,5 @@
-import { EmptyState } from '../../../ui'
-import { dayLabel } from '../../../../utils/timeSlots'
+import { EmptyState } from '../../ui'
+import { dayLabel } from '../../../utils/timeSlots'
 import GroupArrivalTimeline from './GroupArrivalTimeline'
 import GroupPrepDigest from './GroupPrepDigest'
 
@@ -116,7 +116,7 @@ function SessionSection({ seating, summary, rows, onNewGroup, onSelectGroup, onD
   )
 }
 
-export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onDuplicate, onGoToday, onPrintSheet }) {
+export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onDuplicate, onGoToday, onPrintSheet, onOpenMap }) {
   const s = daySummary || {}
   const counts = s.prep?.counts || {}
   const hasGroups = dayGroups.length > 0
@@ -144,6 +144,9 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
             )}
           </div>
           <div className="flex gap-1.5">
+            {onOpenMap && (
+              <button onClick={onOpenMap} className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">🗺️ 排位地圖</button>
+            )}
             {hasGroups && (
               <button onClick={onPrintSheet} className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">🖨 列印備餐單</button>
             )}
