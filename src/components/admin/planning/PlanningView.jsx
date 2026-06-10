@@ -25,7 +25,10 @@ const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 // 兩態共享 selectedDate；pane 切換用純條件渲染（外層 AdminPage 已有 key=tab 動畫，不再疊動畫）。
 // 草稿優先：新團單在記憶體編輯，填好按儲存才落地（杜絕空白團單）。
 // 編輯器以 key（new 或 group.id）強制 remount，故 draft 以 initialGroup 初始化即可。
-export default function PlanningView({ onGoToday }) {
+// 跨頁導向 props（AdminPage 餵入、消費後回呼清空）：
+//   pendingPreassign：未來日訂位的「指派桌位（預配）」→ 切到該日排位地圖 + 自動進預配模式
+//   pendingGroupOpen：訂位頁團體卡點擊 → 切到該日 + 開團單詳情
+export default function PlanningView({ onGoToday, pendingPreassign, onPreassignConsumed, pendingGroupOpen, onGroupOpenConsumed }) {
   const {
     groupReservations, agencies, guides, tables, bookings, settings,
     reserveGroupTables, removeGroupReservation, addAgency, addGuide,
@@ -63,6 +66,39 @@ export default function PlanningView({ onGoToday }) {
     if (n) toast.info(`已清除 ${n} 筆未完成的空白團單`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 同步 selectedDate + 月曆游標到指定日期（跨頁導向共用）
+  const jumpToDate = (date) => {
+    if (!date) return
+    setSelectedDate(date)
+    const d = new Date(date + 'T00:00:00')
+    setMonthCursor(prev => (prev.year === d.getFullYear() && prev.month === d.getMonth())
+      ? prev : { year: d.getFullYear(), month: d.getMonth() })
+  }
+
+  // 跨頁：未來日訂位預配 → 該日排位地圖 + 自動進預配模式（重用 mapAssign → SlotMapPanel assignRequest）
+  useEffect(() => {
+    if (!pendingPreassign) return
+    const b = pendingPreassign
+    setEditorGroup(null); setEditorIsNew(false)
+    setDetailGroupId(null)
+    jumpToDate(b.date)
+    setMapAssign({ bookingId: b.id, seatingId: seatingForSlot(settings, b.timeSlot)?.id || null })
+    setPane('map')
+    onPreassignConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPreassign?.id])
+
+  // 跨頁：訂位頁團體卡 → 該日 + 團單詳情
+  useEffect(() => {
+    if (!pendingGroupOpen) return
+    setEditorGroup(null); setEditorIsNew(false)
+    jumpToDate(pendingGroupOpen.date)
+    setPane('day')
+    setDetailGroupId(pendingGroupOpen.groupId || null)
+    onGroupOpenConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingGroupOpen?.groupId])
 
   const slots = useMemo(
     () => generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval),

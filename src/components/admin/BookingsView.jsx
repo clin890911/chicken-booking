@@ -12,8 +12,9 @@ const SUB_TABS = [
 ]
 
 // 訂位總頁：合併 今日 / 日曆 / 新增 為 sub-tabs
-// 「指派桌」按鈕呼叫 onAssignTable，由父元件負責切到 OperationsView
-export default function BookingsView({ onAssignTable, onCreated }) {
+// 「指派桌」按鈕呼叫 onAssignTable（今天→現場、未來日→規劃排位地圖，由 AdminPage 分流）；
+// 團體卡點擊呼叫 onOpenGroup → 規劃頁團單詳情
+export default function BookingsView({ onAssignTable, onOpenGroup, onCreated }) {
   const [sub, setSub] = useState('today')
 
   return (
@@ -37,8 +38,8 @@ export default function BookingsView({ onAssignTable, onCreated }) {
 
       {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
       <div key={sub} className="animate-soft-enter">
-          {sub === 'today' && <TodayView onAssignTable={onAssignTable} />}
-          {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} />}
+          {sub === 'today' && <TodayView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} />}
+          {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} />}
           {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} />}
           {sub === 'add' && <AddBookingView onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} />}
       </div>

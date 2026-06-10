@@ -1,18 +1,19 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import DatePicker from '../booking/DatePicker'
 import TimeSlotPicker from '../booking/TimeSlotPicker'
-import { Card, Input, Select, Textarea, Button } from '../ui'
+import { Card, Input, Textarea, Button } from '../ui'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
 import * as customerService from '../../services/customerService'
 import { getNoshowCount } from '../../services/bookingService'
 import * as seatingService from '../../services/seatingService'
-import { todayStr, dayLabel } from '../../utils/timeSlots'
+import { todayStr, dayLabel, formatDate, addDays } from '../../utils/timeSlots'
 
 // 後台新增訂位 — 電話為先導鍵，自動帶顧客檔
-// 設計：Single page、smart-fill、min taps to create
-// 註：旅行社團體請走「團體」分頁的預排流程（整桌容量把關 + 回傳單），不再用單筆 group 訂位，
+// 設計：緊湊單頁、由上而下一路填完；缺漏欄位即時列在底部黏性操作列（點 pill 捲到該欄）；
+// 日期用「今天/明天/後天」chips 快選、月曆預設收合（解決日期區佔版面、難以定位缺漏的問題）。
+// 註：旅行社團體請走「規劃」分頁的預排流程（整桌容量把關 + 回傳單），不再用單筆 group 訂位，
 // 避免與團體預排的容量重複計算。
 const SOURCE_OPTIONS = [
   { value: 'phone',  label: '📞 電話' },
@@ -27,6 +28,8 @@ const NOTE_OPTIONS = [
   { key: 'mobility', label: '♿ 行動不便' },
 ]
 
+const QUICK_GUESTS = [1, 2, 3, 4, 5, 6, 7, 8]
+
 export default function AddBookingView({ onCreated, onAssignTable }) {
   const { bookings, tables, groupReservations, settings, addBooking, suggestTable } = useBooking()
   const { user } = useAuth()
@@ -36,11 +39,19 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
   const [source, setSource] = useState('phone')
   const [name, setName] = useState('')
   const [guests, setGuests] = useState(2)
+  const [moreGuests, setMoreGuests] = useState(false)
   const [date, setDate] = useState(todayStr())
+  const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState('')
   const [notes, setNotes] = useState({ pet: false, child: false, mobility: false, text: '' })
   const [autoAssign, setAutoAssign] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [attempted, setAttempted] = useState(false) // 按過提交才顯示欄位級紅框
+
+  const phoneRef = useRef(null)
+  const nameRef = useRef(null)
+  const guestsRef = useRef(null)
+  const slotRef = useRef(null)
 
   // 自動帶顧客檔
   const matchedCustomer = useMemo(() => {
@@ -68,14 +79,32 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
   // 換日重設時段
   useEffect(() => { setTimeSlot('') }, [date])
 
-  const valid = phone.trim() && name.trim() && timeSlot && guests > 0
+  // 缺漏清單：底部黏性列即時顯示「還差哪幾欄」，點 pill 捲到該欄
+  const missing = useMemo(() => [
+    !phone.trim() && { key: 'phone', label: '電話', ref: phoneRef },
+    !name.trim() && { key: 'name', label: '姓名', ref: nameRef },
+    !(guests > 0) && { key: 'guests', label: '人數', ref: guestsRef },
+    !timeSlot && { key: 'slot', label: '時段', ref: slotRef },
+  ].filter(Boolean), [phone, name, guests, timeSlot])
+  const valid = missing.length === 0
+
+  const scrollToField = (m) => m.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+  // 日期快選 chips：今天 / 明天 / 後天 / 其他日期（展開緊湊月曆）
+  const quickDates = useMemo(() => {
+    const base = new Date()
+    return [0, 1, 2].map(i => {
+      const d = formatDate(addDays(base, i))
+      return { date: d, label: i === 0 ? '今天' : i === 1 ? '明天' : '後天', sub: dayLabel(d) }
+    })
+  }, [])
+  const isQuickDate = quickDates.some(q => q.date === date)
 
   const handleSubmit = async () => {
     if (!valid) {
-      if (!phone.trim()) return toast.error('請填電話')
-      if (!name.trim()) return toast.error('請填姓名')
-      if (!timeSlot) return toast.error('請選時段')
-      return toast.error('資料不完整')
+      setAttempted(true)
+      scrollToField(missing[0])
+      return toast.error(`還差：${missing.map(m => m.label).join('、')}`)
     }
     setBusy(true)
     try {
@@ -85,8 +114,8 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
         status: 'confirmed',
         createdBy: user?.email || 'staff',
       })
-      // 自動指派最佳桌
-      if (autoAssign) {
+      // 自動指派最佳桌（查今日即時空桌——僅今天的訂位適用；未來日請用規劃頁預配）
+      if (autoAssign && date === todayStr()) {
         const best = suggestTable(guests)
         if (best) {
           const r = seatingService.assignBookingToTable(b.id, best.number)
@@ -97,26 +126,25 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
         }
       } else {
         toast.action(`✅ ${name} ${guests} 位 · ${date} ${timeSlot} 已建立`,
-          { label: '指派桌', onClick: () => onAssignTable?.(b) })
+          { label: date === todayStr() ? '指派桌' : '預配桌位', onClick: () => onAssignTable?.(b) })
       }
       // 重設（保留 source）
-      setPhone(''); setName(''); setGuests(2); setTimeSlot(''); setNotes({ pet: false, child: false, mobility: false, text: '' })
-      setAutoAssign(true)
+      setPhone(''); setName(''); setGuests(2); setMoreGuests(false); setTimeSlot('')
+      setNotes({ pet: false, child: false, mobility: false, text: '' })
+      setAutoAssign(true); setAttempted(false); setShowCalendar(false)
       onCreated?.(b)
     } finally {
       setBusy(false)
     }
   }
 
-  const guestOpts = Array.from({ length: 20 }, (_, i) => ({ value: i + 1, label: `${i + 1} 位` }))
-
   return (
     <div className="space-y-3 max-w-3xl mx-auto">
-      {/* === 客人 === */}
+      {/* === ① 客人 === */}
       <Card>
         <h2 className="font-bold text-chicken-brown mb-3">📱 客人資訊</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2 relative">
+        <div className="space-y-3">
+          <div ref={phoneRef} className="relative">
             <Input
               label="電話（鍵入時自動帶顧客檔）"
               type="tel"
@@ -124,6 +152,7 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
               value={phone}
               onChange={e => setPhone(e.target.value)}
               placeholder="0912345678"
+              error={attempted && !phone.trim() ? '必填' : ''}
             />
             {(matchedCustomer || noshowCount > 0) && (
               <div className="mt-2 flex flex-wrap gap-2 text-xs">
@@ -155,30 +184,101 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
               </div>
             )}
           </div>
-          <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />
-          <Select label="來源" value={source} onChange={e => setSource(e.target.value)} options={SOURCE_OPTIONS} />
+          <div ref={nameRef}>
+            <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐"
+              error={attempted && !name.trim() ? '必填' : ''} />
+          </div>
+          {/* 來源：chips 取代下拉（少一次點擊、省高度） */}
+          <div>
+            <label className="label">來源</label>
+            <div className="flex gap-1.5 flex-wrap">
+              {SOURCE_OPTIONS.map(o => (
+                <button key={o.value} type="button" onClick={() => setSource(o.value)}
+                  className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+                    source === o.value
+                      ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'
+                      : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </Card>
 
-      {/* === 訂位 === */}
+      {/* === ② 人數 · 日期 · 時段 === */}
       <Card>
         <h2 className="font-bold text-chicken-brown mb-3">🍲 用餐資訊</h2>
-        <div className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Select
-              label="人數"
-              value={guests}
-              onChange={e => setGuests(Number(e.target.value))}
-              options={guestOpts}
-            />
+        <div className="space-y-4">
+          {/* 人數：1–8 快選 + 更多 */}
+          <div ref={guestsRef}>
+            <label className="label">人數</label>
+            <div className="flex gap-1.5 flex-wrap items-center">
+              {QUICK_GUESTS.map(n => (
+                <button key={n} type="button" onClick={() => { setGuests(n); setMoreGuests(false) }}
+                  className={`w-11 h-11 rounded-xl border-2 text-sm font-black tabular-nums transition-all ${
+                    guests === n && !moreGuests
+                      ? 'border-chicken-red bg-chicken-red text-white'
+                      : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
+                  {n}
+                </button>
+              ))}
+              {moreGuests || guests > 8 ? (
+                <select
+                  value={guests}
+                  onChange={e => setGuests(Number(e.target.value))}
+                  className="input w-28 !py-2.5 font-bold"
+                >
+                  {Array.from({ length: 12 }, (_, i) => i + 9).map(n => (
+                    <option key={n} value={n}>{n} 位</option>
+                  ))}
+                </select>
+              ) : (
+                <button type="button" onClick={() => { setMoreGuests(true); setGuests(9) }}
+                  className="px-3 h-11 rounded-xl border-2 border-chicken-brown/15 bg-white text-sm font-bold text-chicken-brown/70">
+                  9+ ▾
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-chicken-brown/55 mt-1">已選：{guests} 位{guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}</p>
           </div>
+
+          {/* 日期：今天/明天/後天 chips + 其他日期（展開緊湊月曆） */}
           <div>
             <label className="label">日期</label>
-            <DatePicker value={date} onChange={setDate} maxDaysAhead={settings.maxDaysAhead} />
-            <p className="text-xs text-chicken-brown/60 mt-1">已選：{dayLabel(date)}</p>
+            <div className="flex gap-1.5 flex-wrap">
+              {quickDates.map(q => (
+                <button key={q.date} type="button"
+                  onClick={() => { setDate(q.date); setShowCalendar(false) }}
+                  className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+                    date === q.date
+                      ? 'border-chicken-red bg-chicken-red text-white'
+                      : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
+                  {q.label}
+                  <span className={`block text-[10px] font-bold ${date === q.date ? 'text-white/80' : 'text-chicken-brown/50'}`}>{q.sub}</span>
+                </button>
+              ))}
+              <button type="button" onClick={() => setShowCalendar(s => !s)}
+                className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+                  !isQuickDate
+                    ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'
+                    : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
+                📅 其他日期
+                <span className="block text-[10px] font-bold opacity-70">
+                  {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合 ▴' : '展開 ▾'}
+                </span>
+              </button>
+            </div>
+            {showCalendar && (
+              <div className="mt-2 animate-soft-enter">
+                <DatePicker compact value={date} onChange={(d) => { setDate(d); setShowCalendar(false) }} maxDaysAhead={settings.maxDaysAhead} />
+              </div>
+            )}
           </div>
-          <div>
-            <label className="label">時段</label>
+
+          {/* 時段 */}
+          <div ref={slotRef} className={attempted && !timeSlot ? 'rounded-xl ring-2 ring-chicken-red/40 p-2 -m-2' : ''}>
+            <label className="label">時段（{dayLabel(date)}）</label>
             <TimeSlotPicker
               date={date}
               value={timeSlot}
@@ -190,11 +290,12 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
               guests={guests}
               hideFull={false}
             />
+            {attempted && !timeSlot && <p className="text-xs text-chicken-red font-bold mt-1">請選時段</p>}
           </div>
         </div>
       </Card>
 
-      {/* === 備註 === */}
+      {/* === ③ 備註 === */}
       <Card>
         <h2 className="font-bold text-chicken-brown mb-3">📝 特殊需求（選填）</h2>
         <div className="grid grid-cols-3 gap-2 mb-3">
@@ -223,21 +324,36 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
         />
       </Card>
 
-      {/* === 自動指派 + 提交 === */}
-      <Card>
-        <label className="flex items-center gap-2 mb-3 cursor-pointer min-h-[44px]">
-          <input
-            type="checkbox"
-            checked={autoAssign}
-            onChange={e => setAutoAssign(e.target.checked)}
-            className="w-5 h-5"
-          />
-          <span className="text-sm font-bold text-chicken-brown">建立後立刻自動指派最佳桌（可手動修改）</span>
-        </label>
-        <Button onClick={handleSubmit} disabled={!valid || busy} className="w-full text-base min-h-[44px]">
-          {busy ? '建立中...' : timeSlot ? `✅ 確認新增訂位 · ${date} ${timeSlot}` : '請填完必填欄位'}
-        </Button>
-      </Card>
+      {/* === 底部黏性操作列：缺漏 checklist + 大按鈕（避開手機 BottomNav） === */}
+      <div className="sticky bottom-24 lg:bottom-4 z-20">
+        <Card className="shadow-lg border-2 border-chicken-brown/10">
+          <label className="flex items-center gap-2 mb-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoAssign}
+              onChange={e => setAutoAssign(e.target.checked)}
+              className="w-5 h-5"
+            />
+            <span className="text-sm font-bold text-chicken-brown">建立後立刻自動指派最佳桌（限今天；可手動修改）</span>
+          </label>
+          {missing.length > 0 && (
+            <div className="mb-2 flex items-center gap-1.5 flex-wrap text-xs">
+              <span className="font-bold text-chicken-brown/55">還差：</span>
+              {missing.map(m => (
+                <button key={m.key} type="button" onClick={() => scrollToField(m)}
+                  className="px-2.5 py-1 rounded-full bg-chicken-red/10 text-chicken-red font-black hover:bg-chicken-red/20">
+                  ⚠ {m.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <Button onClick={handleSubmit} disabled={!valid || busy} className="w-full text-base min-h-[44px]">
+            {busy ? '建立中...'
+              : valid ? `✅ 確認新增 · ${dayLabel(date)} ${timeSlot} · ${guests} 位`
+              : `還差：${missing.map(m => m.label).join('、')}`}
+          </Button>
+        </Card>
+      </div>
     </div>
   )
 }

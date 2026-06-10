@@ -25,6 +25,11 @@ export default function AdminPage() {
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式
   // （候位入座已是現場頁內互動，無需跨頁機制）
   const [pendingAssign, setPendingAssign] = useState(null)
+  // pendingPlanAssign：未來日訂位的「指派桌位（預配）」→ 規劃頁排位地圖預配模式
+  // （現場頁只呈現今天即時桌況，未來日在那裡指派是錯誤脈絡）
+  const [pendingPlanAssign, setPendingPlanAssign] = useState(null)
+  // pendingGroupOpen：訂位頁團體卡點擊 → 規劃頁該團單詳情
+  const [pendingGroupOpen, setPendingGroupOpen] = useState(null)
   const { user, usingFirebase } = useAuth()
   const { bookings, waitlist } = useBooking()
   const toast = useToast()
@@ -79,12 +84,23 @@ export default function AdminPage() {
 
   const tabInfo = TABS.find(t => t.key === tab) || TABS[0]
 
-  // 從 BookingsView 觸發「指派桌」→ 切換到現場頁 + 帶上待指派訂位
+  // 從 BookingsView 觸發「指派桌」：今天 → 現場頁即時指派；未來日 → 規劃頁排位地圖預配
   const handleAssignTable = (booking) => {
-    setPendingAssign(booking)
-    setTab('ops')
+    if (!booking.date || booking.date === todayStr()) {
+      setPendingAssign(booking)
+      setTab('ops')
+    } else {
+      setPendingPlanAssign(booking)
+      setTab('planning')
+    }
   }
   const handleAssignDone = () => setPendingAssign(null)
+
+  // 訂位頁團體卡點擊 → 規劃頁開該團單詳情
+  const handleOpenGroup = (group) => {
+    setPendingGroupOpen({ groupId: group.id, date: group.date })
+    setTab('planning')
+  }
 
   return (
     <div className="min-h-screen bg-chicken-cream flex">
@@ -139,9 +155,17 @@ export default function AdminPage() {
                   onAssignDone={handleAssignDone}
                 />
               )}
-              {tab === 'planning' && <PlanningView onGoToday={() => setTab('ops')} />}
+              {tab === 'planning' && (
+                <PlanningView
+                  onGoToday={() => setTab('ops')}
+                  pendingPreassign={pendingPlanAssign}
+                  onPreassignConsumed={() => setPendingPlanAssign(null)}
+                  pendingGroupOpen={pendingGroupOpen}
+                  onGroupOpenConsumed={() => setPendingGroupOpen(null)}
+                />
+              )}
               {tab === 'bookings' && (
-                <BookingsView onAssignTable={handleAssignTable} />
+                <BookingsView onAssignTable={handleAssignTable} onOpenGroup={handleOpenGroup} />
               )}
               {tab === 'roster' && <RosterView />}
               {tab === 'settings' && <SettingsView />}

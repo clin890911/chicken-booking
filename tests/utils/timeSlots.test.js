@@ -6,6 +6,7 @@ import {
   addDays,
   isPast,
   dayLabel,
+  bookingDayKind,
 } from '../../src/utils/timeSlots'
 
 // Per instructions: fix system time to 2026-06-15 12:00 local for any
@@ -278,5 +279,28 @@ describe('dayLabel', () => {
   it('handles the first day of a month', () => {
     // 2026-06-01 is a Monday
     expect(dayLabel('2026-06-01')).toBe('6/1 (一)')
+  })
+})
+
+describe('bookingDayKind', () => {
+  const TODAY = '2026-06-15'
+
+  it('過去 / 今天 / 未來 三態', () => {
+    expect(bookingDayKind('2026-06-14', TODAY)).toBe('past')
+    expect(bookingDayKind('2026-06-15', TODAY)).toBe('today')
+    expect(bookingDayKind('2026-06-16', TODAY)).toBe('future')
+  })
+
+  it('跨月/跨年比較正確（字典序即日期序）', () => {
+    expect(bookingDayKind('2026-05-31', TODAY)).toBe('past')
+    expect(bookingDayKind('2026-07-01', TODAY)).toBe('future')
+    expect(bookingDayKind('2025-12-31', TODAY)).toBe('past')
+    expect(bookingDayKind('2027-01-01', TODAY)).toBe('future')
+  })
+
+  it('無 date 視為今天（舊資料防呆）', () => {
+    expect(bookingDayKind(undefined, TODAY)).toBe('today')
+    expect(bookingDayKind('', TODAY)).toBe('today')
+    expect(bookingDayKind(null, TODAY)).toBe('today')
   })
 })
