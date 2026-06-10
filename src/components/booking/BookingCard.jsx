@@ -4,6 +4,7 @@ import { getNoshowCount } from '../../services/bookingService'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { copyText } from '../../utils/clipboard'
+import { bookingDayKind, todayStr } from '../../utils/timeSlots'
 
 // 狀態色採品牌語義：待確認=琥珀(需處理) / 待到=綠(已就緒) / 用餐中=橙(進行中)
 // 文字皆採深色確保可讀（不用低對比的純品牌色當文字）
@@ -63,12 +64,17 @@ export default function BookingCard({ booking, onAssign, onClick }) {
   // B12：手機上低頻操作收進「⋯ 更多」展開選單
   const [showMore, setShowMore] = useState(false)
 
+  // 日期三態 guard：未來日不可「客人到了/標No-show」、過去日只可補登（離席/No-show/取消）
+  const dayKind = bookingDayKind(booking.date, todayStr())
+
   // 對應桌位（如有指派）
   const table = booking.assignedTableId ? tables.find(t => t.number === booking.assignedTableId) : null
   const seatedAt = booking.actualArrivalTime || table?.seatedAt
   const minutes = useDiningMinutes(booking.status === 'arrived' ? seatedAt : null)
   const stage = diningStage(minutes, settings)
-  const suggestion = booking.status === 'confirmed' && !booking.assignedTableId ? suggestTable(booking.guests) : null
+  // 建議桌查的是「今日即時空桌」，對未來/過去日無意義且誤導
+  const suggestion = dayKind === 'today' && booking.status === 'confirmed' && !booking.assignedTableId
+    ? suggestTable(booking.guests) : null
 
   // === 操作 ===
   const handleSeat = async () => {
@@ -243,19 +249,23 @@ export default function BookingCard({ booking, onAssign, onClick }) {
             </div>
           )}
 
-          {/* 動作按鈕（依狀態顯示）*/}
-          <div className="mt-3 flex gap-2 flex-wrap">
-            {booking.status === 'confirmed' && !booking.assignedTableId && (
+          {/* 動作按鈕（依狀態 × 日期三態顯示）：
+              future = 預配/取消（報到類操作當天才開放）；past = 補登（離席/No-show/取消） */}
+          <div className="mt-3 flex gap-2 flex-wrap items-center">
+            {booking.status === 'confirmed' && !booking.assignedTableId && dayKind !== 'past' && (
               <button
                 onClick={(e) => { e.stopPropagation(); onAssign?.(booking) }}
                 className="text-sm px-3.5 min-h-[44px] bg-chicken-red text-white rounded-lg font-bold hover:opacity-90"
-              >指派桌位</button>
+              >{dayKind === 'future' ? '指派桌位（預配）' : '指派桌位'}</button>
             )}
-            {booking.status === 'confirmed' && booking.assignedTableId && (
+            {booking.status === 'confirmed' && booking.assignedTableId && dayKind === 'today' && (
               <button
                 onClick={(e) => { e.stopPropagation(); handleSeat() }}
                 className="text-sm px-3.5 min-h-[44px] bg-chicken-green text-white rounded-lg font-bold hover:opacity-90"
               >客人到了</button>
+            )}
+            {booking.status === 'confirmed' && booking.assignedTableId && dayKind === 'future' && (
+              <span className="text-xs font-bold text-chicken-brown/50 py-2">未來訂位 · 當天才可報到</span>
             )}
             {/* A5：主操作「客人已離席」顯眼、次操作「直接釋出」降權較小，避免誤點 */}
             {booking.status === 'arrived' && (
@@ -270,7 +280,8 @@ export default function BookingCard({ booking, onAssign, onClick }) {
                 >直接釋出（已清桌）</button>
               </>
             )}
-            {/* B12：低頻操作（標No-show/取消訂位）手機收進「⋯ 更多」，桌面(sm:)直接全列 */}
+            {/* B12：低頻操作（標No-show/取消訂位）手機收進「⋯ 更多」，桌面(sm:)直接全列；
+                標 No-show 只在今天/過去日（未來不可能 no-show） */}
             {(booking.status === 'confirmed' || booking.status === 'pending') && (
               <>
                 <button
@@ -278,10 +289,12 @@ export default function BookingCard({ booking, onAssign, onClick }) {
                   className="sm:hidden text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown/70 rounded-lg font-bold hover:border-chicken-brown/30"
                   aria-expanded={showMore}
                 >⋯ 更多</button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleNoshow() }}
-                  className={`${showMore ? 'flex' : 'hidden'} sm:inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5`}
-                >標 No-show</button>
+                {dayKind !== 'future' && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleNoshow() }}
+                    className={`${showMore ? 'flex' : 'hidden'} sm:inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5`}
+                  >標 No-show</button>
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); handleCancel() }}
                   className={`${showMore ? 'flex' : 'hidden'} sm:inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5`}
@@ -293,6 +306,9 @@ export default function BookingCard({ booking, onAssign, onClick }) {
                 onClick={(e) => { e.stopPropagation(); handleRestore() }}
                 className="text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown rounded-lg font-bold hover:border-chicken-green hover:text-chicken-green"
               >↩ 恢復為待到</button>
+            )}
+            {dayKind === 'past' && booking.status !== 'completed' && booking.status !== 'cancelled' && (
+              <span className="text-[11px] font-bold text-chicken-brown/45">過去日期 · 僅可補登</span>
             )}
           </div>
         </div>

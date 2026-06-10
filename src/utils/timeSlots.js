@@ -36,6 +36,15 @@ export function isPast(dateStr) {
   return dateStr < todayStr()
 }
 
+// 訂位日期相對今天的分類：past=補登（離席/No-show/取消）、today=完整操作、
+// future=只能預配/取消（現場報到類操作當天才開放）。無 date 視為今天（舊資料防呆）。
+export function bookingDayKind(dateStr, today = todayStr()) {
+  if (!dateStr) return 'today'
+  if (dateStr < today) return 'past'
+  if (dateStr > today) return 'future'
+  return 'today'
+}
+
 export function dayLabel(dateStr) {
   const d = new Date(dateStr + 'T00:00:00')
   const w = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()]
