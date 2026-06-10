@@ -126,27 +126,9 @@ export function loadLiffSdk() {
   })
 }
 
-export async function notifyLineBooking(settings = {}, booking, type = 'updated') {
-  const endpoint = linePushEndpoint(settings)
-  if (!endpoint || !booking) return { ok: false, reason: 'not-configured' }
-  const manageUrl = `${window.location.origin}/manage/${booking.id}?token=${encodeURIComponent(booking.manageToken || '')}`
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type,
-        ...bookingLinePayload(booking, settings, manageUrl),
-      }),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok || data.ok === false) return { ok: false, error: data.error || `HTTP ${res.status}` }
-    return { ok: true }
-  } catch (err) {
-    console.warn('LINE notify failed:', err)
-    return { ok: false, error: err.message }
-  }
-}
+// 注意：訂位修改/取消的 LINE 通知已改由後端 guestUpdateBooking / guestCancelBooking
+// 內部權威送出（經 outbox 重試），前端不再有 notifyLineBooking——避免「客人關頁就漏發」。
+// linePushEndpoint 仍保留：linePushBooking 端點供「重新傳送訂位資訊」類功能重用。
 
 export async function fetchLineBooking(settings = {}, bookingId, token) {
   const endpoint = lineManageEndpoint(settings)

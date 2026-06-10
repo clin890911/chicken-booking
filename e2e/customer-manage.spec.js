@@ -23,7 +23,16 @@ const AVAILABILITY = {
   settings: { maxDaysAhead: 30, diningDurationMin: 90, cleanupBufferMin: 10 },
 }
 
+// LINE 通知已改由後端 guestUpdate/guestCancel 權威送出：前端不得再打 linePushBooking
+// （否則部署共存期外的正常狀態也會重複推播）。計數攔截、事後斷言為 0。
+let linePushCalls = 0
+
 test.beforeEach(async ({ page }) => {
+  linePushCalls = 0
+  await page.route(/linepushbooking/i, route => {
+    linePushCalls += 1
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) })
+  })
   await page.route('**/guestGetBooking', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, booking: BOOKING }) }))
   await page.route('**/guestGetAvailability', route =>
@@ -57,6 +66,7 @@ test('用戶端：驗證末碼 → 改時段 → 更新成功', async ({ page })
   await page.getByRole('button', { name: '確認修改' }).click()
 
   await expect(page.getByRole('heading', { name: '訂位已更新' })).toBeVisible()
+  expect(linePushCalls).toBe(0)
 })
 
 test('用戶端：驗證末碼 → 取消訂位 → 取消成功', async ({ page }) => {
@@ -69,4 +79,5 @@ test('用戶端：驗證末碼 → 取消訂位 → 取消成功', async ({ page
   await page.getByRole('button', { name: '確定取消' }).click()
 
   await expect(page.getByRole('heading', { name: '訂位已取消' })).toBeVisible()
+  expect(linePushCalls).toBe(0)
 })

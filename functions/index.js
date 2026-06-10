@@ -5,6 +5,13 @@ import { getAuth } from 'firebase-admin/auth'
 import { onRequest } from 'firebase-functions/v2/https'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { defineSecret } from 'firebase-functions/params'
+import {
+  notificationStateHash,
+  shouldSkipDuplicatePush,
+  isRetryableLineStatus,
+  dayLabelServer,
+  buildManageUrl,
+} from './lib/notify.js'
 
 initializeApp()
 
@@ -409,7 +416,7 @@ export const guestGetBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public' 
   }
 })
 
-export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID] }, async (req, res) => {
+export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     const { bookingId, token, patch = {} } = req.body || {}
@@ -484,6 +491,8 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         ),
       },
     })
+    // LINE 通知由後端權威送出（過去靠前端 fetch 觸發，客人關頁/斷網就漏發）。
+    await notifyLineBookingChange(booking.id, updated, 'updated', settings)
     return res.json({ ok: true, booking: updated })
   } catch (err) {
     const code = err.status || 500
@@ -492,7 +501,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
   }
 })
 
-export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID] }, async (req, res) => {
+export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     const { bookingId, token, reason = '' } = req.body || {}
@@ -545,6 +554,8 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         ),
       },
     })
+    // LINE 通知由後端權威送出（同 guestUpdateBooking，不再依賴前端觸發）。
+    await notifyLineBookingChange(booking.id, cancelled, 'cancelled')
     return res.json({ ok: true, booking: cancelled })
   } catch (err) {
     const code = err.status || 500
@@ -563,6 +574,11 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
 
     // 權威重讀：以 bookings 為準並驗證 manageToken（safeTokenEqual），不再整包信任 client 傳來的 booking。
     const authBooking = await getBookingByToken(booking.id, booking.token)
+    // manageUrl 由後端以 publicSiteUrl 設定組成（Firestore booking 沒有此欄位；
+    // 過去權威重讀後直接用 authBooking 組訊息，Flex 卡片因此缺「管理 / 修改訂位」按鈕）。
+    const settingsSnap = await db.collection('settings').doc('main').get()
+    const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+    const manageUrl = buildManageUrl(settings.publicSiteUrl, authBooking.id, authBooking.manageToken)
 
     const bindingRef = db.collection('lineBookingBindings').doc(authBooking.id)
     const bookingRef = db.collection(COLLECTIONS.bookings).doc(authBooking.id)
@@ -582,12 +598,18 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       lineUserId: line.userId,
       lineDisplayName: line.displayName || '',
       linePictureUrl: line.pictureUrl || '',
-      booking: authBooking,
+      booking: manageUrl ? { ...authBooking, manageUrl } : authBooking,
       store: nextStore,
       updatedAt: FieldValue.serverTimestamp(),
       createdAt: existing?.createdAt || FieldValue.serverTimestamp(),
       lastBindAttemptAt: now,
-      ...(recentlyPushed ? {} : { lastBindPushAt: now }),
+      ...(recentlyPushed ? {} : {
+        lastBindPushAt: now,
+        lastPushByEvent: {
+          ...(existing?.lastPushByEvent || {}),
+          confirmed: { at: now, stateHash: notificationStateHash(authBooking) },
+        },
+      }),
     }
 
     const batch = db.batch()
@@ -604,7 +626,14 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
         channel: 'line',
         event: 'created',
         bookingId: authBooking.id,
-        payload: { to: line.userId, messages: buildBookingMessages(authBooking, nextStore, 'confirmed') },
+        payload: {
+          to: line.userId,
+          messages: buildBookingMessages(
+            { ...authBooking, manageUrl, dateLabel: dayLabelServer(authBooking.date) },
+            nextStore,
+            'confirmed',
+          ),
+        },
       })
     }
 
@@ -631,31 +660,21 @@ export const lineWebhook = onRequest({ invoker: 'public', secrets: [LINE_CHANNEL
 export const linePushBooking = onRequest({ cors: true, invoker: 'public', secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
-    const { bookingId, booking, store, type = 'updated' } = req.body || {}
+    const { bookingId, booking } = req.body || {}
     const targetBookingId = bookingId || booking?.id
     const token = booking?.token || req.body?.token || ''
+    // type 收斂到已知事件集合：lastPushByEvent 以它為 key，不能讓 client 任意字串污染綁定文件。
+    const type = ['confirmed', 'updated', 'cancelled'].includes(req.body?.type) ? req.body.type : 'updated'
     if (!targetBookingId) return res.status(400).json({ ok: false, error: 'missing-booking-id' })
     if (!token) return res.status(400).json({ ok: false, error: 'missing-token' })
 
-    // 權威驗證：token 必須對應 bookings 中的 manageToken；以 server booking 為推播內容。
+    // 權威驗證：token 必須對應 bookings 中的 manageToken；推播統一走 notifyLineBookingChange
+    // （含事件級防重與 pushBlocked 檢查），與 guestUpdate/guestCancel 後端內部路徑共用同一張防重表，
+    // 舊前端 bundle 在部署共存窗口重複呼叫此端點也不會疊加訊息。
     const authBooking = await getBookingByToken(targetBookingId, token)
-
-    const snap = await db.collection('lineBookingBindings').doc(targetBookingId).get()
-    if (!snap.exists) return res.status(404).json({ ok: false, error: 'binding-not-found' })
-    const existing = snap.data()
-    const nextStore = normalizeStore({ ...existing.store, ...store })
-    await db.collection('lineBookingBindings').doc(targetBookingId).set({
-      booking: authBooking,
-      store: nextStore,
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true })
-    await enqueueAndTrySend({
-      channel: 'line',
-      event: type,
-      bookingId: targetBookingId,
-      payload: { to: existing.lineUserId, messages: buildBookingMessages(authBooking, nextStore, type) },
-    })
-    return res.json({ ok: true })
+    const result = await notifyLineBookingChange(targetBookingId, authBooking, type)
+    if (result.skipped === 'no-binding') return res.status(404).json({ ok: false, error: 'binding-not-found' })
+    return res.json({ ok: true, ...(result.skipped ? { skippedPush: result.skipped } : {}) })
   } catch (err) {
     const code = err.status || 500
     if (code >= 500) console.error('linePushBooking failed:', err)
@@ -708,6 +727,75 @@ async function handleLineEvent(event) {
       type: 'text',
       text: '歡迎加入雞王涮涮鍋！完成線上訂位後，可用官方帳號接收訂位資訊、定位與修改連結。',
     }])
+  }
+}
+
+// settings（storeName/storePhone/...）→ 訊息組裝用的 store 形狀。
+// 一律以「當下」settings 為準，不用 binding.store 舊快照——店家改地址/電話後通知立即生效。
+function storeFromSettings(settings = {}) {
+  return normalizeStore({
+    name: settings.storeName,
+    address: settings.storeAddress,
+    phone: settings.storePhone,
+    mapUrl: settings.storeMapUrl,
+    latitude: settings.storeLatitude,
+    longitude: settings.storeLongitude,
+    lineOfficialUrl: settings.lineOfficialUrl,
+    diningDurationMin: settings.diningDurationMin,
+    cleanupBufferMin: settings.cleanupBufferMin,
+  })
+}
+
+// 後端權威 LINE 通知：訂位修改/取消時由端點內部直接呼叫，不再依賴前端 fetch 觸發（漏發根因）。
+// - 無綁定 / 已知拒推（封鎖、非好友）→ 沉默跳過，不入列必死訊息
+// - 事件級防重：同 event 同內容指紋（date|timeSlot|guests|status）90 秒內只送一次，
+//   擋下「functions 先部署、舊前端仍打 linePushBooking」共存窗口的重複推播與重送疊加
+// - 任何錯誤只記 log，絕不影響主回應（與 outbox 哲學一致）
+async function notifyLineBookingChange(bookingId, booking, event, providedSettings = null) {
+  try {
+    const bindingRef = db.collection('lineBookingBindings').doc(bookingId)
+    const snap = await bindingRef.get()
+    if (!snap.exists) return { skipped: 'no-binding' }
+    const binding = snap.data()
+    if (!binding.lineUserId) return { skipped: 'no-line-user' }
+    if (binding.pushBlocked) return { skipped: 'push-blocked' }
+
+    const stateHash = notificationStateHash(booking)
+    if (shouldSkipDuplicatePush(binding.lastPushByEvent, event, stateHash, Date.now())) {
+      return { skipped: 'duplicate-push' }
+    }
+
+    let settings = providedSettings
+    if (!settings) {
+      const settingsSnap = await db.collection('settings').doc('main').get()
+      settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+    }
+    const manageUrl = buildManageUrl(settings.publicSiteUrl, bookingId, booking.manageToken)
+      || binding.booking?.manageUrl || ''
+
+    const now = new Date().toISOString()
+    await bindingRef.set({
+      booking: manageUrl ? { ...booking, manageUrl } : booking,
+      lastPushByEvent: { ...(binding.lastPushByEvent || {}), [event]: { at: now, stateHash } },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true })
+    await enqueueAndTrySend({
+      channel: 'line',
+      event,
+      bookingId,
+      payload: {
+        to: binding.lineUserId,
+        messages: buildBookingMessages(
+          { ...booking, manageUrl, dateLabel: dayLabelServer(booking.date) },
+          storeFromSettings(settings),
+          event,
+        ),
+      },
+    })
+    return { ok: true }
+  } catch (err) {
+    console.error('notifyLineBookingChange failed:', err?.message)
+    return { ok: false, error: err?.message }
   }
 }
 
@@ -943,6 +1031,8 @@ function normalizeStoreSettings(settings = {}) {
     lineBindEndpoint: settings.lineBindEndpoint || 'https://linebind-reaor76eyq-uc.a.run.app',
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
+    // 前端正式站網址：後端組 LINE 訊息「管理 / 修改訂位」按鈕連結用；未設定則該按鈕不顯示。
+    publicSiteUrl: String(settings.publicSiteUrl || '').trim(),
     storeName: settings.storeName || '雞王涮涮鍋',
     storePhone: settings.storePhone || DEFAULT_STORE_PHONE,
     storeAddress: settings.storeAddress || DEFAULT_STORE_ADDRESS,
@@ -1408,9 +1498,13 @@ async function tgSend(text) {
   }
 }
 
-// 送 LINE push（AbortController 逾時保護），回 { ok, error }
+// 送 LINE push（AbortController 逾時保護），回 { ok, error, retryable?, httpStatus? }。
+// retryable === false（4xx 非 429：封鎖/非好友/壞請求）時重試也不會好，由 sendOutboxDoc 立即 dead-letter。
+// line-not-configured 維持可重試：呼叫端點可能沒綁 secret，但 retryNotifications 排程有，補送會成功。
 async function lineSend(to, messages) {
-  if (!to || !Array.isArray(messages) || !messages.length) return { ok: false, error: 'line-bad-payload' }
+  if (!to || !Array.isArray(messages) || !messages.length) {
+    return { ok: false, error: 'line-bad-payload', retryable: false }
+  }
   let token = ''
   try { token = lineChannelAccessToken() } catch { token = '' }
   if (!token) return { ok: false, error: 'line-not-configured' }
@@ -1423,7 +1517,14 @@ async function lineSend(to, messages) {
       body: JSON.stringify({ to, messages }),
       signal: controller.signal,
     })
-    if (!res.ok) return { ok: false, error: `line-${res.status}: ${(await res.text()).slice(0, 300)}` }
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: `line-${res.status}: ${(await res.text()).slice(0, 300)}`,
+        retryable: isRetryableLineStatus(res.status),
+        httpStatus: res.status,
+      }
+    }
     return { ok: true }
   } catch (err) {
     return { ok: false, error: err?.name === 'AbortError' ? 'line-timeout' : (err?.message || 'line-error') }
@@ -1460,7 +1561,9 @@ async function enqueueNotification(doc) {
   return { ref, record }
 }
 
-// 嘗試送出一筆 outbox 文件並更新狀態（成功→sent；失敗→排程重試或 dead-letter）
+// 嘗試送出一筆 outbox 文件並更新狀態（成功→sent；失敗→排程重試或 dead-letter）。
+// retryable === false（LINE 4xx 非 429）不消耗重試額度直接 dead-letter，
+// 並標記綁定 pushBlocked——後續通知不再對已封鎖/非好友的對象入列必死訊息。
 async function sendOutboxDoc(ref, data) {
   const result = await deliverNotification(data)
   const now = new Date().toISOString()
@@ -1470,15 +1573,33 @@ async function sendOutboxDoc(ref, data) {
   }
   const attempts = (Number(data.attempts) || 0) + 1
   const maxAttempts = Number(data.maxAttempts) || NOTIFICATION_MAX_ATTEMPTS
-  if (attempts >= maxAttempts) {
-    await ref.set({ status: 'failed', attempts, lastError: result.error, nextAttemptAt: null, failedAt: now }, { merge: true })
+  if (attempts >= maxAttempts || result.retryable === false) {
+    await ref.set({
+      status: 'failed',
+      attempts,
+      lastError: result.error,
+      nextAttemptAt: null,
+      failedAt: now,
+      ...(result.retryable === false ? { nonRetryable: true } : {}),
+    }, { merge: true })
     console.error('NOTIFICATION_DEAD_LETTER', { id: ref.id, channel: data.channel, event: data.event, error: result.error })
+    if (data.channel === 'line' && data.bookingId && Number(result.httpStatus) >= 400 && Number(result.httpStatus) < 500) {
+      await markLinePushBlocked(data.bookingId, result.error, now)
+    }
   } else {
     const backoff = NOTIFICATION_BACKOFF_MS[Math.min(attempts - 1, NOTIFICATION_BACKOFF_MS.length - 1)]
     const nextAttemptAt = new Date(Date.now() + backoff).toISOString()
     await ref.set({ status: 'pending', attempts, lastError: result.error, nextAttemptAt }, { merge: true })
   }
   return result
+}
+
+// LINE 拒推（封鎖/非好友/無效 user）→ 標記綁定與訂位鏡像旗標。
+// 用 update（文件不存在即失敗吞掉）而非 set merge，避免替已刪除的訂位憑空創出殘檔。
+async function markLinePushBlocked(bookingId, reason, now) {
+  const patch = { pushBlocked: true, pushBlockedReason: String(reason || '').slice(0, 200), pushBlockedAt: now }
+  await db.collection('lineBookingBindings').doc(bookingId).update(patch).catch(() => {})
+  await db.collection(COLLECTIONS.bookings).doc(bookingId).update({ linePushBlocked: true, updatedAt: now }).catch(() => {})
 }
 
 // 寫入 + 立即試送（主流程呼叫；逾時由 AbortController 保護，失敗交給排程重試，絕不影響主流程）

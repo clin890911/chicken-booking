@@ -26,6 +26,7 @@ const DEFAULT = {
   lineBindEndpoint: 'https://linebind-reaor76eyq-uc.a.run.app',
   linePushEndpoint: 'https://linepushbooking-reaor76eyq-uc.a.run.app',
   lineManageEndpoint: 'https://linegetbooking-reaor76eyq-uc.a.run.app',
+  publicSiteUrl: '',
   storeName: '雞王涮涮鍋',
   storePhone: '049-2753377',
   storeAddress: '南投縣鹿谷鄉中正路二段377號',
@@ -252,6 +253,12 @@ describe('settingsService', () => {
       for (const f of protectedStringFields) {
         expect(result[f]).toBe(DEFAULT[f])
       }
+    })
+
+    it('publicSiteUrl：預設空字串、儲存時去前後空白（與 functions 白名單成對）', () => {
+      expect(getSettings().publicSiteUrl).toBe('')
+      const result = saveSettings({ publicSiteUrl: '  https://booking.example.com  ' })
+      expect(result.publicSiteUrl).toBe('https://booking.example.com')
     })
 
     it('字串欄位提供有效值時保留覆蓋值（非空）', () => {

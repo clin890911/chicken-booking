@@ -19,7 +19,7 @@ import { Button, Input, Textarea, Badge, SlotSkeleton } from '../components/ui'
 import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
-import { lineBindUrl, notifyLineBooking } from '../services/lineService'
+import { lineBindUrl } from '../services/lineService'
 import { guestCancelBooking, guestGetAvailability, guestGetBooking, guestUpdateBooking } from '../services/cloudDataService'
 import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
 import { isValidTwPhone } from '../utils/validation'
@@ -212,8 +212,8 @@ export default function ManageBookingPage() {
       setForm(toForm(result.booking))
       setMode('success')
       setError('')
-      // Telegram 由後端 guestUpdateBooking 經 outbox 送出（前端 token 在 prod 為空，原呼叫為 no-op）
-      notifyLineBooking(settings, result.booking, 'updated')
+      // Telegram 與 LINE 通知皆由後端 guestUpdateBooking 經 outbox 權威送出，
+      // 不再由前端觸發（客人關頁/斷網會漏發）。
       toast.success('訂位已更新，同仁端也會同步看到')
     } finally {
       setBusy(false)
@@ -243,8 +243,7 @@ export default function ManageBookingPage() {
       setForm(toForm(result.booking))
       setMode('cancelled')
       setError('')
-      // Telegram 由後端 guestCancelBooking 經 outbox 送出（前端 token 在 prod 為空，原呼叫為 no-op）
-      notifyLineBooking(settings, result.booking, 'cancelled')
+      // Telegram 與 LINE 通知皆由後端 guestCancelBooking 經 outbox 權威送出。
       toast.success('訂位已取消')
     } finally {
       setBusy(false)
