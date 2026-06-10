@@ -13,6 +13,7 @@ import {
   bookingOccupancyLabel,
   calcDayBookings,
   totalActiveSeats,
+  findPreassignedBooking,
 } from '../../src/utils/capacity'
 
 // ---- 假資料工廠 ----
@@ -584,5 +585,53 @@ describe('totalActiveSeats', () => {
 
   it('全部停用 → 0', () => {
     expect(totalActiveSeats([mkTable('A1', 4, false)])).toBe(0)
+  })
+})
+
+// findPreassignedBooking：現場「指派桌」防呆用 —— 找出已把某桌預先配走的別筆散客訂位。
+describe('findPreassignedBooking — 預先配桌衝突偵測', () => {
+  it('某桌已被別筆 booking 預配 → 回傳該筆', () => {
+    const bookings = [
+      mkBooking({ id: 'A', name: '阿明', assignedTableId: '101', date: DATE }),
+      mkBooking({ id: 'B', name: '小華', assignedTableId: '102', date: DATE }),
+    ]
+    const hit = findPreassignedBooking(bookings, '101', { date: DATE, excludeBookingId: 'B' })
+    expect(hit?.id).toBe('A')
+    expect(hit?.name).toBe('阿明')
+  })
+
+  it('沒有任何 booking 配到此桌 → null', () => {
+    const bookings = [mkBooking({ id: 'A', assignedTableId: '102', date: DATE })]
+    expect(findPreassignedBooking(bookings, '101', { date: DATE })).toBeNull()
+  })
+
+  it('預配的就是正在指派的這筆（id 相同）→ null（不自我示警，正常流程不受影響）', () => {
+    const bookings = [mkBooking({ id: 'A', assignedTableId: '101', date: DATE })]
+    expect(findPreassignedBooking(bookings, '101', { date: DATE, excludeBookingId: 'A' })).toBeNull()
+  })
+
+  it('已取消／未到／已完成的預配不算（不再佔位）', () => {
+    for (const status of CAPACITY_EXCLUDED_STATUSES) {
+      const bookings = [mkBooking({ id: 'A', assignedTableId: '101', date: DATE, status })]
+      expect(findPreassignedBooking(bookings, '101', { date: DATE })).toBeNull()
+    }
+  })
+
+  it('限定同日：不同日的預配不誤報', () => {
+    const bookings = [mkBooking({ id: 'A', assignedTableId: '101', date: '2026-06-16' })]
+    expect(findPreassignedBooking(bookings, '101', { date: DATE })).toBeNull()
+    // 不傳 date → 不限日，仍找得到
+    expect(findPreassignedBooking(bookings, '101', {})?.id).toBe('A')
+  })
+
+  it('桌號型別寬鬆比對（數字 vs 字串）', () => {
+    const bookings = [mkBooking({ id: 'A', assignedTableId: 101, date: DATE })]
+    expect(findPreassignedBooking(bookings, '101', { date: DATE })?.id).toBe('A')
+  })
+
+  it('tableNumber 為空 / 無預配欄位 → null（防呆不誤觸）', () => {
+    expect(findPreassignedBooking([mkBooking({ id: 'A', assignedTableId: '101' })], null, {})).toBeNull()
+    expect(findPreassignedBooking([mkBooking({ id: 'A', assignedTableId: null })], '101', {})).toBeNull()
+    expect(findPreassignedBooking(undefined, '101', {})).toBeNull()
   })
 })
