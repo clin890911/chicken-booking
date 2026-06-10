@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, Search, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { Input, Textarea, SlotSkeleton } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
@@ -135,7 +135,9 @@ export default function BookingPage() {
   const continueToInfo = () => {
     if (!selectedReady) return
     setStep('info')
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    // 即時捲頂（不用 smooth）：步驟切換時整頁內容同步替換、文件高度大幅塌縮，
+    // iOS 上平滑捲動與高度塌縮並行會有捲動位置異常的怪癖。
+    window.scrollTo(0, 0)
   }
 
   const submit = async () => {
@@ -168,7 +170,7 @@ export default function BookingPage() {
         setError({ submit: err.message })
         setStep('availability')
         loadAvailability(data.date)
-        window.scrollTo({ top: 0, behavior: 'smooth' })
+        window.scrollTo(0, 0)
       } else {
         setError({ submit: err.message || '訂位失敗，請稍後再試' })
       }
@@ -209,115 +211,103 @@ export default function BookingPage() {
       </header>
 
       <main className="mx-auto grid w-full max-w-5xl gap-5 px-4 py-5 lg:grid-cols-[1fr_340px]">
-        <AnimatePresence mode="wait">
-          {step === 'availability' ? (
-            <motion.section
-              key="availability"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.22 }}
-              className="space-y-4"
-            >
-              <HeroPanel />
-              <PartyPanel guests={data.guests} onSetGuests={setGuests} />
-              <CalendarPicker dates={dates} value={data.date} onChange={setDate} />
-              {error.submit && (
-                <div className="surface border border-chicken-red/30 bg-chicken-red/5 p-4 text-sm font-bold text-chicken-red">
-                  {error.submit}
-                </div>
-              )}
-              <TimeGrid
-                groupedSlots={groupedSlots}
-                value={data.timeSlot}
-                guests={data.guests}
-                settings={settings}
-                loading={slotsLoading}
-                error={slotsError}
-                onChange={(time) => set('timeSlot', time)}
-                onFindNext={findNextAvailable}
-                findingNext={findingNext}
-                findNextMsg={findNextMsg}
+        {/* step 切換刻意不用 AnimatePresence mode="wait"：framer-motion 11.x 有多個
+            「exit 完成回呼遺失 → 新畫面永不掛載」的已知 bug（12.x 才修），手機上會整片白屏
+            且不拋例外、ErrorBoundary 攔不到。改用 key 重掛 + 純 CSS 進場動畫，
+            新畫面的顯示不依賴任何 JS 動畫回呼。 */}
+        {step === 'availability' ? (
+          <section key="availability" className="animate-soft-enter space-y-4">
+            <HeroPanel />
+            <PartyPanel guests={data.guests} onSetGuests={setGuests} />
+            <CalendarPicker dates={dates} value={data.date} onChange={setDate} />
+            {error.submit && (
+              <div className="surface border border-chicken-red/30 bg-chicken-red/5 p-4 text-sm font-bold text-chicken-red">
+                {error.submit}
+              </div>
+            )}
+            <TimeGrid
+              groupedSlots={groupedSlots}
+              value={data.timeSlot}
+              guests={data.guests}
+              settings={settings}
+              loading={slotsLoading}
+              error={slotsError}
+              onChange={(time) => set('timeSlot', time)}
+              onFindNext={findNextAvailable}
+              findingNext={findingNext}
+              findNextMsg={findNextMsg}
+            />
+          </section>
+        ) : (
+          <section key="info" className="animate-soft-enter space-y-4">
+            <div className="surface p-5">
+              <div className="mb-1 text-xs font-black text-chicken-red">最後一步</div>
+              <h1 className="text-2xl font-black text-chicken-brown">留下聯絡資訊</h1>
+              <p className="mt-2 text-sm leading-6 text-chicken-brown/65">
+                送出後會立即建立訂位紀錄。到店時出示訂位編號即可。
+              </p>
+            </div>
+
+            {error.submit && (
+              <div className="surface border border-chicken-red/30 bg-chicken-red/5 p-4 text-sm font-bold text-chicken-red">
+                {error.submit}
+              </div>
+            )}
+
+            <div className="surface space-y-4 p-5">
+              <Input
+                label="姓名"
+                value={data.name}
+                onChange={e => { set('name', e.target.value); if (error.name) setError(p => ({ ...p, name: undefined })) }}
+                placeholder="王小姐"
+                error={error.name}
               />
-            </motion.section>
-          ) : (
-            <motion.section
-              key="info"
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.22 }}
-              className="space-y-4"
-            >
-              <div className="surface p-5">
-                <div className="mb-1 text-xs font-black text-chicken-red">最後一步</div>
-                <h1 className="text-2xl font-black text-chicken-brown">留下聯絡資訊</h1>
-                <p className="mt-2 text-sm leading-6 text-chicken-brown/65">
-                  送出後會立即建立訂位紀錄。到店時出示訂位編號即可。
-                </p>
+              <Input
+                label="電話"
+                type="tel"
+                inputMode="numeric"
+                value={data.phone}
+                onChange={e => { set('phone', e.target.value); if (error.phone) setError(p => ({ ...p, phone: undefined })) }}
+                onBlur={() => {
+                  const v = data.phone.trim()
+                  if (v && !isValidTwPhone(v)) setError(p => ({ ...p, phone: '電話格式不正確，請輸入正確的台灣電話號碼' }))
+                }}
+                placeholder="0912345678"
+                error={error.phone}
+              />
+
+              <div>
+                <label className="label">特殊需求（可複選）</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {NOTE_OPTIONS.map(option => {
+                    const active = data.notes[option.key]
+                    return (
+                      <button
+                        type="button"
+                        key={option.key}
+                        onClick={() => toggleNote(option.key)}
+                        className={`min-h-[48px] rounded-xl border px-2 text-sm font-bold transition-all ${
+                          active
+                            ? 'border-chicken-red bg-chicken-red text-white shadow-sm'
+                            : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
 
-              {error.submit && (
-                <div className="surface border border-chicken-red/30 bg-chicken-red/5 p-4 text-sm font-bold text-chicken-red">
-                  {error.submit}
-                </div>
-              )}
-
-              <div className="surface space-y-4 p-5">
-                <Input
-                  label="姓名"
-                  value={data.name}
-                  onChange={e => { set('name', e.target.value); if (error.name) setError(p => ({ ...p, name: undefined })) }}
-                  placeholder="王小姐"
-                  error={error.name}
-                />
-                <Input
-                  label="電話"
-                  type="tel"
-                  inputMode="numeric"
-                  value={data.phone}
-                  onChange={e => { set('phone', e.target.value); if (error.phone) setError(p => ({ ...p, phone: undefined })) }}
-                  onBlur={() => {
-                    const v = data.phone.trim()
-                    if (v && !isValidTwPhone(v)) setError(p => ({ ...p, phone: '電話格式不正確，請輸入正確的台灣電話號碼' }))
-                  }}
-                  placeholder="0912345678"
-                  error={error.phone}
-                />
-
-                <div>
-                  <label className="label">特殊需求（可複選）</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {NOTE_OPTIONS.map(option => {
-                      const active = data.notes[option.key]
-                      return (
-                        <button
-                          type="button"
-                          key={option.key}
-                          onClick={() => toggleNote(option.key)}
-                          className={`min-h-[48px] rounded-xl border px-2 text-sm font-bold transition-all ${
-                            active
-                              ? 'border-chicken-red bg-chicken-red text-white shadow-sm'
-                              : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                <Textarea
-                  label="備註（選填）"
-                  value={data.notes.text}
-                  onChange={e => set('notes', { ...data.notes, text: e.target.value })}
-                  placeholder="例：靠窗、慶生、過敏、長輩需剪雞肉..."
-                />
-              </div>
-            </motion.section>
-          )}
-        </AnimatePresence>
+              <Textarea
+                label="備註（選填）"
+                value={data.notes.text}
+                onChange={e => set('notes', { ...data.notes, text: e.target.value })}
+                placeholder="例：靠窗、慶生、過敏、長輩需剪雞肉..."
+              />
+            </div>
+          </section>
+        )}
 
         <aside className="lg:sticky lg:top-[86px] lg:h-fit">
           <BookingSummary
@@ -589,7 +579,6 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
                     const scarce = slot.remaining <= Math.max(guests * 2, 12)
                     return (
                       <motion.button
-                        layout
                         key={slot.time}
                         onClick={() => onChange(slot.time)}
                         aria-pressed={active}
@@ -607,7 +596,9 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
                         </div>
                         {active && (
                           <motion.span
-                            layoutId="selected-time-check"
+                            initial={{ scale: 0.5, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ duration: 0.15 }}
                             className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-white text-chicken-red"
                           >
                             <Check size={14} strokeWidth={3} />

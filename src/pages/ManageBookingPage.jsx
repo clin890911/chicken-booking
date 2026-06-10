@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import {
   AlertTriangle,
   CalendarDays,
@@ -287,15 +287,17 @@ export default function ManageBookingPage() {
         ) : mode !== 'cancelled' && (!editable.ok || booking.status !== 'confirmed') ? (
           <LockedPanel reason={editable.reason} booking={booking} />
         ) : (
-          <AnimatePresence mode="wait">
+          <>
+            {/* mode 切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug 會讓新畫面永不掛載、
+                手機白屏），改 key 重掛 + 純 CSS 進場動畫，與 BookingPage 同一修法。 */}
             {mode === 'home' && (
-              <motion.section key="home" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
+              <section key="home" className="animate-soft-enter space-y-4">
                 <ActionGrid setMode={setMode} booking={booking} settings={settings} />
                 <EditHistory booking={booking} />
-              </motion.section>
+              </section>
             )}
             {mode === 'schedule' && (
-              <motion.section key="schedule" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="surface space-y-5 p-5">
+              <section key="schedule" className="animate-soft-enter surface space-y-5 p-5">
                 <SectionHead icon={CalendarDays} title="修改日期、時間與人數" hint="像重新訂位一樣選擇新時段，送出前會再次確認。" />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Input label="用餐日期" type="date" min={todayStr()} max={maxDate} value={form.date} onChange={e => set('date', e.target.value)} />
@@ -304,10 +306,10 @@ export default function ManageBookingPage() {
                 <SlotGrid groupedSlots={groupedSlots} value={form.timeSlot} loading={slotsLoading} error={slotsError} onChange={(time) => set('timeSlot', time)} />
                 <BeforeAfter before={booking} after={form} />
                 <FooterActions busy={busy} changed={changed} error={error} onBack={resetForm} onSubmit={submit} />
-              </motion.section>
+              </section>
             )}
             {mode === 'details' && (
-              <motion.section key="details" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="surface space-y-5 p-5">
+              <section key="details" className="animate-soft-enter surface space-y-5 p-5">
                 <SectionHead icon={Edit3} title="修改聯絡資訊與備註" hint="若只調整姓名、電話或特殊需求，不會解除桌位指派。" />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Input label="姓名" value={form.name} onChange={e => set('name', e.target.value)} />
@@ -333,10 +335,10 @@ export default function ManageBookingPage() {
                 <Textarea label="備註" value={form.notes.text} onChange={e => set('notes', { ...form.notes, text: e.target.value })} />
                 <BeforeAfter before={booking} after={form} compact />
                 <FooterActions busy={busy} changed={changed} error={error} onBack={resetForm} onSubmit={submit} />
-              </motion.section>
+              </section>
             )}
             {mode === 'cancel' && (
-              <motion.section key="cancel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="surface space-y-5 p-5">
+              <section key="cancel" className="animate-soft-enter surface space-y-5 p-5">
                 <SectionHead icon={Trash2} title="取消訂位" hint="取消後座位會釋出，原因會提供給現場同仁判斷營運狀況。" danger />
                 <div className="grid gap-2 sm:grid-cols-2">
                   {CANCEL_REASONS.map(reason => (
@@ -363,11 +365,11 @@ export default function ManageBookingPage() {
                     {busy ? '取消中...' : '確認取消訂位'}
                   </button>
                 </div>
-              </motion.section>
+              </section>
             )}
             {mode === 'success' && <SuccessPanel key="success" booking={booking} settings={settings} onBack={() => setMode('home')} />}
             {mode === 'cancelled' && <CancelledPanel key="cancelled" booking={booking} />}
-          </AnimatePresence>
+          </>
         )}
       </motion.div>
     </Shell>

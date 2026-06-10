@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import Header from '../components/layout/Header'
 import SidebarNav from '../components/layout/SidebarNav'
 import BottomNav from '../components/layout/BottomNav'
@@ -144,14 +144,8 @@ export default function AdminPage() {
               </p>
             </div>
           )}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={tab}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.18 }}
-            >
+          {/* 分頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
+          <div key={tab} className="animate-soft-enter">
               {tab === 'ops' && (
                 <OperationsView
                   pendingAssign={pendingAssign}
@@ -170,8 +164,7 @@ export default function AdminPage() {
               {tab === 'customers' && <CustomersView />}
               {tab === 'group' && <GroupView />}
               {tab === 'settings' && <SettingsView />}
-            </motion.div>
-          </AnimatePresence>
+          </div>
         </main>
 
         {/* 手機版底部導航 */}
