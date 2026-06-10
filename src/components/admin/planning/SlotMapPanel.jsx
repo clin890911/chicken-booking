@@ -9,7 +9,9 @@ import { resolveSlotOccupancy, isSeatingClosed, CAPACITY_EXCLUDED_STATUSES } fro
 // 排位地圖（自 SlotOverviewView 拆出、嵌入規劃主控台）：
 // 依「日期（受控 prop）+ 場次（內部 state）」呈現散客（暖色）×團客（冷色）佔位，
 // 支援「散客預先配桌」（只記 booking.assignedTableId，不動今日即時桌況）。
-export default function SlotMapPanel({ date }) {
+// assignRequest（{ bookingId, seatingId }）：容器要求自動切場次並進入該散客的預配模式
+// （來源：當日總覽散客列「→ 配桌」、訂位頁未來日「指派桌位（預配）」跨頁導向）。
+export default function SlotMapPanel({ date, assignRequest = null, onAssignHandled }) {
   const { settings, bookings, groupReservations, tables, preassignBookingTable, clearBookingPreassign } = useBooking()
   const toast = useToast()
 
@@ -24,6 +26,19 @@ export default function SlotMapPanel({ date }) {
     setSelectedTable(null)
     setAssignBooking(null)
   }, [date])
+
+  // 消費 assignRequest：切場次 + 自動進預配模式（宣告在換日 reset 之後——mount 同輪執行時本 effect 勝出）
+  useEffect(() => {
+    if (!assignRequest) return
+    if (assignRequest.seatingId) setSeatingId(assignRequest.seatingId)
+    const b = (bookings || []).find(x => x.id === assignRequest.bookingId)
+    if (b && !b.assignedTableId) {
+      setAssignBooking(b)
+      setSelectedTable(null)
+    }
+    onAssignHandled?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignRequest])
 
   const seating = seatings.find(s => s.id === seatingId) || seatings[0] || null
   const closed = seating ? isSeatingClosed(settings, date, seating) : false
