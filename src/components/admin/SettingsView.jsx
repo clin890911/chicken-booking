@@ -290,7 +290,7 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。座位總覽地圖與「關閉整場次」皆依此。" defaultOpen>
+      <SettingsSection title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" defaultOpen>
         <SeatingsEditor form={form} setForm={setForm} />
         <div className="flex gap-2 items-center mt-3">
           <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存場次</Button>
@@ -670,7 +670,7 @@ function SeatingsEditor({ form, setForm }) {
     <div className="space-y-2">
       {seatings.length === 0 && (
         <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-sm text-chicken-brown/60">
-          尚未設定場次。新增後，座位總覽地圖即可依場次（如「午餐第一批」）切換檢視。
+          尚未設定場次。新增後，排位規劃地圖即可依場次（如「午餐第一批」）切換檢視。
         </div>
       )}
       {seatings.map(s => (
