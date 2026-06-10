@@ -75,3 +75,17 @@ export function slotsInSeating(settings, seating) {
   const e = slotToMinutes(seating.end)
   return all.filter(t => { const x = slotToMinutes(t); return x >= s && x < e })
 }
+
+// 場次內可選的「預計抵達時間」清單（固定 stepMin 間隔、預設 15 分；半開區間 [start, end)）。
+// 與 slotsInSeating 不同：不綁營業 slotInterval，讓店員能挑 11:45 這種較細的抵達時間，
+// 且保證所有選項都落在場次窗內 → 用下拉挑選即可，無須事後驗證/拒絕。
+export function arrivalSlotsForSeating(seating, stepMin = 15) {
+  if (!seating) return []
+  const step = Number(stepMin) > 0 ? Number(stepMin) : 15
+  const e = slotToMinutes(seating.end)
+  const out = []
+  for (let m = slotToMinutes(seating.start); m < e; m += step) {
+    out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`)
+  }
+  return out
+}

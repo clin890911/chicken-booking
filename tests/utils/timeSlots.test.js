@@ -7,6 +7,7 @@ import {
   isPast,
   dayLabel,
   bookingDayKind,
+  arrivalSlotsForSeating,
 } from '../../src/utils/timeSlots'
 
 // Per instructions: fix system time to 2026-06-15 12:00 local for any
@@ -302,5 +303,27 @@ describe('bookingDayKind', () => {
     expect(bookingDayKind(undefined, TODAY)).toBe('today')
     expect(bookingDayKind('', TODAY)).toBe('today')
     expect(bookingDayKind(null, TODAY)).toBe('today')
+  })
+})
+
+describe('arrivalSlotsForSeating', () => {
+  it('場次窗內每 15 分（半開區間 [start, end)）', () => {
+    expect(arrivalSlotsForSeating({ start: '11:00', end: '12:30' }))
+      .toEqual(['11:00', '11:15', '11:30', '11:45', '12:00', '12:15'])
+  })
+
+  it('不含結束時間（12:30 屬下一場次）', () => {
+    expect(arrivalSlotsForSeating({ start: '11:00', end: '12:30' })).not.toContain('12:30')
+  })
+
+  it('可自訂間隔', () => {
+    expect(arrivalSlotsForSeating({ start: '17:00', end: '19:00' }, 30))
+      .toEqual(['17:00', '17:30', '18:00', '18:30'])
+  })
+
+  it('無場次回空陣列；非正整數間隔退回 15', () => {
+    expect(arrivalSlotsForSeating(null)).toEqual([])
+    expect(arrivalSlotsForSeating({ start: '11:00', end: '11:45' }, 0))
+      .toEqual(['11:00', '11:15', '11:30'])
   })
 })
