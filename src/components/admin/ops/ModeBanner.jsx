@@ -1,13 +1,14 @@
-// 現場營運的「模式 banner」：指派 / 候位入座 / 換桌 / 團體改派桌位
+// 現場營運的「模式 banner」：指派 / 候位入座 / 立即帶位 / 換桌 / 團體改派桌位
 // 依模式不同底色 + emoji 避免誤判；指派類模式帶二步確認列與預配衝突警告
 const BANNER_STYLE = {
   assign:         { bg: 'bg-sky-600',    btn: 'text-sky-700',     emoji: '📋' },
   'seat-waitlist':{ bg: 'bg-emerald-600',btn: 'text-emerald-700', emoji: '🚦' },
+  walkin:         { bg: 'bg-amber-600',  btn: 'text-amber-700',   emoji: '🪑' },
   move:           { bg: 'bg-indigo-600', btn: 'text-indigo-700',  emoji: '↔' },
   'group-reseat': { bg: 'bg-violet-600', btn: 'text-violet-700',  emoji: '🚌' },
 }
 
-const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
+const CONFIRMABLE = ['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat']
 
 export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pendingGroupHold, onCancel, onConfirm, onClearPending }) {
   if (!mode) return null
@@ -17,6 +18,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
   const bannerText = (() => {
     if (mode.type === 'assign') return `指派桌位：${mode.booking.name} ${mode.booking.guests} 位`
     if (mode.type === 'seat-waitlist') return `候位入座：${mode.wait.name} #${mode.wait.queueNumber}（${mode.wait.partySize} 位）`
+    if (mode.type === 'walkin') return `立即帶位：${mode.guestData?.name || '散客'} ${mode.guestData?.guests || 0} 位 — 請點選空桌`
     if (mode.type === 'move') return `換桌：${mode.booking.name} 從 ${mode.booking.assignedTableId} → 選新桌`
     if (mode.type === 'group-reseat') {
       const remain = (mode.queue || []).length
@@ -28,13 +30,16 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
   // 待確認的對象名稱（用於確認列文案）
   const pendingTargetName = mode.type === 'assign' ? mode.booking?.name
     : mode.type === 'seat-waitlist' ? mode.wait?.name
+    : mode.type === 'walkin' ? (mode.guestData?.name || '散客')
     : mode.type === 'move' ? mode.booking?.name
     : mode.type === 'group-reseat' ? (mode.group?.agencyName || '團體')
     : ''
 
   const confirmText = mode.type === 'group-reseat'
     ? `把 ${mode.current} 改派為 ${pendingConfirm} 並整梯入座？（將更新該梯圈桌）`
-    : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
+    : mode.type === 'walkin'
+      ? `確認帶 ${pendingTargetName} 入座桌 ${pendingConfirm}？`
+      : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
 
   return (
     <div className={`${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
@@ -97,7 +102,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
                 onClick={onConfirm}
                 className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-black whitespace-nowrap shadow-sm ${
                   (pendingConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-              >{(pendingConflict || pendingGroupHold) ? '⚠️ 仍要覆蓋指派' : mode.type === 'group-reseat' ? '✓ 確認改派' : '✓ 確認指派'}</button>
+              >{(pendingConflict || pendingGroupHold) ? '⚠️ 仍要覆蓋指派' : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'walkin' ? '✓ 確認帶位' : '✓ 確認指派'}</button>
             </div>
           </div>
         </div>

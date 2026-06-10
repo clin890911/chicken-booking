@@ -6,6 +6,7 @@ import ModeBanner from './ops/ModeBanner'
 import OpsRail from './ops/OpsRail'
 import OpsHintBar from './ops/OpsHintBar'
 import OpsLogModal from './ops/OpsLogModal'
+import WalkInSeatModal from './ops/WalkInSeatModal'
 import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
@@ -21,7 +22,7 @@ import { todayStr } from '../../utils/timeSlots'
 export default function OperationsView({ pendingAssign, onAssignDone }) {
   const {
     tables, bookings, waitlist, settings, groupReservations,
-    assignBookingToTable, seatWaitlist, moveTable, reseatGroupBatchTable,
+    assignBookingToTable, seatWaitlist, walkInSeat, moveTable, reseatGroupBatchTable,
     findSuitableTables, suggestTable,
   } = useBooking()
   const toast = useToast()
@@ -35,6 +36,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const [pendingConfirm, setPendingConfirm] = useState(null) // 指派/候位/換桌：待確認的桌號（二步確認）
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
   const [showOpsLog, setShowOpsLog] = useState(false) // 系統自動處理紀錄（自動清檯留痕）
+  const [showWalkIn, setShowWalkIn] = useState(false) // 立即帶位表單
 
   // 今日團體 hold：今日（未取消/未完成）團體的桌位，若尚未實際入座（非 dining）則於圖上標示 🚌。
   // value = { agencyName, holds: [{ group, batch }] }（未入座梯次，依時段排序）：
@@ -63,6 +65,24 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     setSelectedTable(null)
     setPendingConfirm(null)
     if (suggestion) setFloor(suggestion.floor)
+  }
+
+  // 立即帶位（客人優先）：填好人數/姓名/電話 → 進選桌模式（高亮空桌 + 建議桌）。
+  // 無合適空桌時 toast 並回傳 false（讓表單維持開啟，方便改人數或改走候位）。
+  const startWalkin = (guestData) => {
+    const guests = Number(guestData?.guests) || 0
+    const suitable = findSuitableTables(guests).map(t => t.number)
+    if (suitable.length === 0) {
+      toast.error(`目前無符合 ${guests} 位的空桌（可改用候位取號）`)
+      return false
+    }
+    const suggestion = suggestTable(guests)
+    setMode({ type: 'walkin', guestData: { ...guestData, guests }, suitable, suggestion: suggestion?.number })
+    setSelectedTable(null)
+    setPendingConfirm(null)
+    setShowWalkIn(false)
+    if (suggestion) setFloor(suggestion.floor)
+    return true
   }
 
   // 改派桌位模式：團體梯次入座被佔桌卡住 → 逐桌挑替代空桌（queue 依序處理）
@@ -104,7 +124,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     }
     // 指派 / 候位入座 / 換桌 / 團體改派：二步確認
     // 第一次點合適桌 → 進入「待確認」預覽；第二次點同一桌（或按確認鈕）才真正執行
-    if (['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode.type)) {
+    if (['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode.type)) {
       if (!mode.suitable.includes(number)) {
         return toast.error(mode.type === 'group-reseat' ? '此桌非空桌或已被其他團體保留' : '此桌不符合容量或非空桌')
       }
@@ -131,6 +151,15 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
       const r = seatWaitlist(mode.wait.id, number)
       if (!r.ok) return toast.error('入座失敗：' + r.error)
       toast.success(`✅ ${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`)
+      flashAssigned(number)
+      cancelMode()
+      setSelectedTable(number)
+      return
+    }
+    if (mode.type === 'walkin') {
+      const r = walkInSeat(number, mode.guestData)
+      if (!r.ok) return toast.error('入座失敗：' + r.error)
+      toast.success(`✅ ${r.booking?.name || '散客'}（${r.booking?.guests || mode.guestData.guests} 位）入座 ${number} · 可帶下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
@@ -194,9 +223,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   // 只示警「不同 booking 的預配」：現場指派的就是被預配的那位客人（id 相同）時不觸發。
   const pendingConflict = useMemo(() => {
     if (!pendingConfirm || !mode) return null
-    if (!['assign', 'seat-waitlist', 'move'].includes(mode.type)) return null
-    const excludeBookingId = mode.booking?.id // seat-waitlist 無 booking（新建 walk-in），任何預配都算他人
-    const date = mode.type === 'seat-waitlist' ? todayStr() : (mode.booking?.date || todayStr())
+    if (!['assign', 'seat-waitlist', 'walkin', 'move'].includes(mode.type)) return null
+    const excludeBookingId = mode.booking?.id // seat-waitlist / walkin 無 booking（新建 walk-in），任何預配都算他人
+    const date = ['seat-waitlist', 'walkin'].includes(mode.type) ? todayStr() : (mode.booking?.date || todayStr())
     return findPreassignedBooking(bookings, pendingConfirm, { date, excludeBookingId })
   }, [pendingConfirm, mode, bookings])
 
@@ -204,7 +233,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   // findSuitableTables 只看桌況（vacant），不知道團體圈桌 → 指派/換桌/候位入座前先示警，避免散客坐掉團體桌。
   const pendingGroupHold = useMemo(() => {
     if (!pendingConfirm || !mode) return null
-    if (!['assign', 'seat-waitlist', 'move'].includes(mode.type)) return null
+    if (!['assign', 'seat-waitlist', 'walkin', 'move'].includes(mode.type)) return null
     const hold = groupHoldTables[pendingConfirm]
     return hold?.holds?.length ? hold : null
   }, [pendingConfirm, mode, groupHoldTables])
@@ -267,6 +296,12 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
           ))}
         </div>
         <div className="flex-1" />
+        {!mode && (
+          <button
+            onClick={() => setShowWalkIn(true)}
+            className="px-4 py-2 rounded-xl text-sm font-black bg-amber-500 text-white shadow hover:bg-amber-600 transition-all"
+          >🪑 立即帶位</button>
+        )}
         {!mode && can('table.config') && (
           <button
             onClick={() => setShowLayoutEditor(true)}
@@ -306,9 +341,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
             settings={settings}
             selectedTableNumber={selectedTable}
             onSelectTable={handleTableClick}
-            assignMode={['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode?.type)}
+            assignMode={['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type)}
             highlightTables={
-              ['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable : []
+              ['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable : []
             }
             suggestionTable={mode?.suggestion || null}
             pendingConfirmTable={pendingConfirm}
@@ -359,6 +394,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
 
       {/* 系統自動處理紀錄（自動清檯留痕） */}
       <OpsLogModal open={showOpsLog} onClose={() => setShowOpsLog(false)} />
+
+      {/* 立即帶位：客人優先表單 → startWalkin 進選桌模式 */}
+      <WalkInSeatModal open={showWalkIn} onClose={() => setShowWalkIn(false)} onStart={startWalkin} />
     </div>
   )
 }
