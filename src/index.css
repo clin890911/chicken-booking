@@ -20,6 +20,18 @@ body {
   .animate-soft-enter {
     animation: soft-enter 420ms cubic-bezier(.2,.8,.2,1);
   }
+  .animate-check-pop {
+    animation: check-pop 150ms cubic-bezier(.2,.8,.2,1);
+  }
+}
+
+@keyframes check-pop {
+  from {
+    transform: scale(.5);
+  }
+  to {
+    transform: scale(1);
+  }
 }
 
 /* 進場動畫刻意只動 transform、不碰 opacity：

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { motion } from 'framer-motion'
 import {
   AlertTriangle,
   CalendarDays,
@@ -279,7 +278,7 @@ export default function ManageBookingPage() {
 
   return (
     <Shell>
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+      <div className="animate-soft-enter space-y-4">
         <BookingHero booking={booking} editable={editable} />
 
         {!access?.ok ? (
@@ -371,7 +370,7 @@ export default function ManageBookingPage() {
             {mode === 'cancelled' && <CancelledPanel key="cancelled" booking={booking} />}
           </>
         )}
-      </motion.div>
+      </div>
     </Shell>
   )
 }
@@ -583,7 +582,7 @@ function FooterActions({ busy, changed, error, onBack, onSubmit }) {
 
 function SuccessPanel({ booking, settings, onBack }) {
   return (
-    <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="surface p-6 text-center">
+    <section className="animate-soft-enter surface p-6 text-center">
       <CheckCircle2 className="mx-auto text-chicken-green" size={44} />
       <h2 className="mt-3 text-xl font-black text-chicken-brown">訂位已更新</h2>
       <p className="mt-2 text-sm leading-6 text-chicken-brown/60">同仁端已同步收到新的訂位內容。</p>
@@ -594,18 +593,18 @@ function SuccessPanel({ booking, settings, onBack }) {
         </p>
         <button onClick={onBack} className="text-sm font-bold text-chicken-brown/60 underline">回訂位管理中心</button>
       </div>
-    </motion.section>
+    </section>
   )
 }
 
 function CancelledPanel({ booking }) {
   return (
-    <motion.section initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="surface p-6 text-center">
+    <section className="animate-soft-enter surface p-6 text-center">
       <CheckCircle2 className="mx-auto text-chicken-green" size={44} />
       <h2 className="mt-3 text-xl font-black text-chicken-brown">訂位已取消</h2>
       <p className="mt-2 text-sm leading-6 text-chicken-brown/60">取消原因：{booking.cancellationReason?.reason || '未提供'}</p>
       <Link to="/book" className="btn-primary mt-5 block text-center">重新訂位</Link>
-    </motion.section>
+    </section>
   )
 }
 

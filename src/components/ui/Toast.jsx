@@ -127,19 +127,18 @@ export function ConfirmProvider({ children }) {
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
-      <AnimatePresence>
-        {state.open && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4"
-            onClick={() => handle(false)}
+      {/* 背板用條件渲染同步卸載、不走 AnimatePresence exit：framer v11 的 exit 完成回呼
+          在動畫時鐘凍結時會遺失，全螢幕 fixed 背板若卸不掉會把整頁鎖死（顧客取消訂位流程會開此框）。 */}
+      {state.open && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4"
+          onClick={() => handle(false)}
+        >
+          <div
+            className={`animate-soft-enter bg-white rounded-3xl shadow-xl w-full max-w-sm p-6
+              ${state.options.danger ? 'border-l-4 border-chicken-red' : ''}`}
+            onClick={e => e.stopPropagation()}
           >
-            <motion.div
-              initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95 }}
-              className={`bg-white rounded-3xl shadow-xl w-full max-w-sm p-6
-                ${state.options.danger ? 'border-l-4 border-chicken-red' : ''}`}
-              onClick={e => e.stopPropagation()}
-            >
               {state.options.title && (
                 <h3 className={`text-lg font-black mb-2 ${state.options.danger ? 'text-chicken-red' : 'text-chicken-brown'}`}>
                   {state.options.danger && '⚠️ '}{state.options.title}
@@ -156,10 +155,9 @@ export function ConfirmProvider({ children }) {
                   {state.options.confirmLabel || '確認'}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </div>
+      )}
     </ConfirmContext.Provider>
   )
 }
