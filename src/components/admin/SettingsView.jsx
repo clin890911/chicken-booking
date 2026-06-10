@@ -481,6 +481,25 @@ export default function SettingsView() {
             </Field>
           </FieldGroup>
 
+          {/* 店員端改動通知客人（feature flag，預設關）*/}
+          <FieldGroup title="通知" hint="店員後台改動訂位時是否自動 LINE 通知客人。">
+            <label className="flex items-start gap-3 rounded-xl border border-chicken-brown/10 bg-white px-4 py-3 text-sm font-bold text-chicken-brown">
+              <input
+                type="checkbox"
+                checked={!!form.lineNotifyOnAdminChange}
+                onChange={e => setForm(f => ({ ...f, lineNotifyOnAdminChange: e.target.checked }))}
+                className="mt-1"
+              />
+              <span>
+                後台改期 / 取消時自動 LINE 通知客人
+                <span className="mt-1 block text-xs font-bold leading-5 text-chicken-brown/55">
+                  只通知客人在意的變更（取消、改日期/時段/人數）；指派桌位、入座、結帳等內務操作不通知。
+                  通知約在 2 分鐘內送達已綁定 LINE 的客人。建議店內先驗證一輪再開啟。
+                </span>
+              </span>
+            </label>
+          </FieldGroup>
+
           {/* C11：後端端點 */}
           <FieldGroup title="後端端點" hint="Cloud Functions / 後端服務網址；API Token 一律放後端，不可放前端。">
             <Field hint="處理 LINE 綁定的後端網址。">

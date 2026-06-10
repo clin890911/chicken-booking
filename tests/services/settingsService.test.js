@@ -31,6 +31,7 @@ const DEFAULT = {
   linePushEndpoint: 'https://linepushbooking-reaor76eyq-uc.a.run.app',
   lineManageEndpoint: 'https://linegetbooking-reaor76eyq-uc.a.run.app',
   publicSiteUrl: '',
+  lineNotifyOnAdminChange: false,
   storeName: '雞王涮涮鍋',
   storePhone: '049-2753377',
   storeAddress: '南投縣鹿谷鄉中正路二段377號',
@@ -353,5 +354,14 @@ describe('現場自動化（自動清檯）設定欄位', () => {
     const s = getSettings()
     expect(s.autoReleaseEnabled).toBe(false)
     expect(s.autoNoshowOnRollover).toBe(true)
+  })
+})
+
+describe('lineNotifyOnAdminChange（店員端通知開關）', () => {
+  it('預設關閉；只有布林 true 會開啟（truthy 字串不算）', () => {
+    expect(getSettings().lineNotifyOnAdminChange).toBe(false)
+    expect(saveSettings({ lineNotifyOnAdminChange: true }).lineNotifyOnAdminChange).toBe(true)
+    expect(saveSettings({ lineNotifyOnAdminChange: 'true' }).lineNotifyOnAdminChange).toBe(false)
+    expect(saveSettings({ lineNotifyOnAdminChange: 1 }).lineNotifyOnAdminChange).toBe(false)
   })
 })

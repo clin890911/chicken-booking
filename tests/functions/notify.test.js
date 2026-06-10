@@ -5,6 +5,7 @@ import {
   isRetryableLineStatus,
   dayLabelServer,
   buildManageUrl,
+  classifyAdminBookingChange,
   LINE_PUSH_DEDUPE_WINDOW_MS,
 } from '../../functions/lib/notify.js'
 
@@ -104,5 +105,47 @@ describe('buildManageUrl', () => {
     expect(buildManageUrl('javascript:alert(1)', 'B123', 'tok')).toBe('')
     expect(buildManageUrl('https://example.com', '', 'tok')).toBe('')
     expect(buildManageUrl('https://example.com', 'B123', '')).toBe('')
+  })
+})
+
+describe('classifyAdminBookingChange（店員端變更分類：只通知客人在意的變更）', () => {
+  const base = {
+    id: 'B1', status: 'confirmed', date: '2026-06-20', timeSlot: '18:00', guests: 4,
+    assignedTableId: null, notes: { text: '' },
+  }
+
+  it.each([
+    ['confirmed → cancelled', { status: 'cancelled' }, 'cancelled'],
+    ['arrived → cancelled', { status: 'cancelled' }, 'cancelled', { status: 'arrived' }],
+    ['改日期', { date: '2026-06-21' }, 'updated'],
+    ['改時段', { timeSlot: '18:30' }, 'updated'],
+    ['改人數', { guests: 6 }, 'updated'],
+  ])('%s → %s', (_label, patch, expected, beforePatch = {}) => {
+    expect(classifyAdminBookingChange({ ...base, ...beforePatch }, { ...base, ...beforePatch, ...patch })).toBe(expected)
+  })
+
+  it.each([
+    ['指派桌位', { assignedTableId: '102' }],
+    ['改備註', { notes: { text: '靠窗' } }],
+    ['入座', { status: 'arrived' }],
+    ['結帳', { status: 'completed' }],
+    ['標 no-show', { status: 'noshow' }],
+    ['完全沒變', {}],
+  ])('內務操作不通知：%s → null', (_label, patch) => {
+    expect(classifyAdminBookingChange(base, { ...base, ...patch })).toBeNull()
+  })
+
+  it('已取消的再編輯不再通知（cancelled → cancelled）', () => {
+    expect(classifyAdminBookingChange({ ...base, status: 'cancelled' }, { ...base, status: 'cancelled', guests: 2 })).toBeNull()
+  })
+
+  it('新文件（無 before）→ null', () => {
+    expect(classifyAdminBookingChange(null, base)).toBeNull()
+    expect(classifyAdminBookingChange(undefined, base)).toBeNull()
+  })
+
+  it('guests 數字/字串混型仍正確比對', () => {
+    expect(classifyAdminBookingChange({ ...base, guests: 4 }, { ...base, guests: '4' })).toBeNull()
+    expect(classifyAdminBookingChange({ ...base, guests: '4' }, { ...base, guests: 6 })).toBe('updated')
   })
 })
