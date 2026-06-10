@@ -31,7 +31,7 @@ function diffMin(d) {
   return Math.floor((Date.now() - new Date(d).getTime()) / 60000)
 }
 
-export default function TableDrawer({ table, booking, onClose, onStartMerge, onStartMove, mode }) {
+export default function TableDrawer({ table, booking, preassign, onClose, onStartMerge, onStartMove, mode }) {
   const { can } = useAuth()
   const toast = useToast()
   const confirmDialog = useConfirm()
@@ -268,6 +268,14 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
         {table.status === 'blocked' && (
           <div className="text-chicken-brown/60 text-sm">
             <span className="font-bold">原因：</span>{table.blockReason || '—'}
+          </div>
+        )}
+        {/* 預配提示：此空桌已於排位規劃預留給某散客（桌況仍空，現場入座／指派前先知會） */}
+        {table.status === 'vacant' && preassign && (
+          <div className="px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-xs">
+            <span className="font-bold text-orange-700">🪑 已預留：</span>
+            <span className="text-orange-700/90">排位規劃已預先配給 {preassign.name}（{preassign.guests} 位{preassign.timeSlot ? ` · ${preassign.timeSlot}` : ''}）</span>
+            <p className="text-[11px] text-orange-700/70 mt-0.5">直接入座或指派他人會覆蓋此預留。</p>
           </div>
         )}
         {table.status === 'vacant' && !mode?.assigning && (

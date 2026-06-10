@@ -8,7 +8,7 @@ import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
-import { groupTableNumbers } from '../../utils/capacity'
+import { groupTableNumbers, findPreassignedBooking } from '../../utils/capacity'
 import { todayStr } from '../../utils/timeSlots'
 
 // 「現場營運」主畫面
@@ -161,6 +161,26 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
     return bookings.find(b => b.id === selectedTableObj.currentBookingId) || null
   }, [selectedTableObj, bookings])
 
+  // 防呆：待確認桌是否已被「別筆 booking」於排位規劃預先配走（assignedTableId 指向此桌）。
+  // 預配不動桌況（桌仍 vacant），會默默被現場指派覆蓋；指派前先示警讓店員知情。
+  // 只示警「不同 booking 的預配」：現場指派的就是被預配的那位客人（id 相同）時不觸發。
+  const pendingConflict = useMemo(() => {
+    if (!pendingConfirm || !mode) return null
+    if (!['assign', 'seat-waitlist', 'move'].includes(mode.type)) return null
+    const excludeBookingId = mode.booking?.id // seat-waitlist 無 booking（新建 walk-in），任何預配都算他人
+    const date = mode.type === 'seat-waitlist' ? todayStr() : (mode.booking?.date || todayStr())
+    return findPreassignedBooking(bookings, pendingConfirm, { date, excludeBookingId })
+  }, [pendingConfirm, mode, bookings])
+
+  // 桌位詳情用：選中的「空桌」是否已被別筆 booking 預先配走（被動提示，未進指派模式也看得到）。
+  const selectedTablePreassign = useMemo(() => {
+    if (!selectedTableObj || selectedTableObj.status !== 'vacant') return null
+    return findPreassignedBooking(bookings, selectedTable, {
+      date: todayStr(),
+      excludeBookingId: selectedTableObj.currentBookingId,
+    })
+  }, [selectedTableObj, selectedTable, bookings])
+
   // ESC 取消模式
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') { cancelMode(); setSelectedTable(null) } }
@@ -281,19 +301,33 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
 
           {/* A6：二步確認 — 待確認列 */}
           {pendingConfirm && (mode.type === 'assign' || mode.type === 'seat-waitlist' || mode.type === 'move') && (
-            <div className="bg-white/15 rounded-lg px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
-              <div className="text-sm font-bold">
-                確認指派 {pendingTargetName} 至桌 {pendingConfirm}？
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPendingConfirm(null)}
-                  className={`text-xs px-3 py-2 min-h-[44px] bg-white/90 ${bannerStyle.btn} rounded-lg font-bold whitespace-nowrap`}
-                >取消</button>
-                <button
-                  onClick={() => executeAssign(pendingConfirm)}
-                  className="text-xs px-4 py-2 min-h-[44px] bg-white text-emerald-700 rounded-lg font-black whitespace-nowrap shadow-sm"
-                >✓ 確認指派</button>
+            <div className="bg-white/15 rounded-lg px-3 py-2 space-y-2">
+              {/* 防呆：此桌已被別筆 booking 預先配走 → 紅底示警，確認鈕改為「仍要覆蓋」 */}
+              {pendingConflict && (
+                <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
+                  <span className="text-sm leading-none">⚠️</span>
+                  <span>
+                    此桌已於排位規劃預留給 <span className="underline">{pendingConflict.name}</span>
+                    （{pendingConflict.guests} 位{pendingConflict.timeSlot ? ` · ${pendingConflict.timeSlot}` : ''}）。
+                    確認後將覆蓋其預配，{pendingConflict.name} 將變回未配桌。
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-sm font-bold">
+                  確認指派 {pendingTargetName} 至桌 {pendingConfirm}？
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPendingConfirm(null)}
+                    className={`text-xs px-3 py-2 min-h-[44px] bg-white/90 ${bannerStyle.btn} rounded-lg font-bold whitespace-nowrap`}
+                  >取消</button>
+                  <button
+                    onClick={() => executeAssign(pendingConfirm)}
+                    className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-black whitespace-nowrap shadow-sm ${
+                      pendingConflict ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
+                  >{pendingConflict ? '⚠️ 仍要覆蓋指派' : '✓ 確認指派'}</button>
+                </div>
               </div>
             </div>
           )}
@@ -340,6 +374,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
             <TableDrawer
               table={selectedTableObj}
               booking={selectedBooking}
+              preassign={selectedTablePreassign}
               onClose={() => setSelectedTable(null)}
               onStartMerge={() => setMode({ type: 'merge', first: selectedTable })}
               onStartMove={() => startMove(selectedBooking)}

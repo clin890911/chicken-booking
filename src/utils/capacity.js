@@ -170,3 +170,22 @@ export function resolveSlotOccupancy(tables = [], bookings = [], groupReservatio
     summary: { totalSeats, walkinGuests, unassignedWalkinGuests, walkinAssignedTables, groupHeldSeats, groupTableCount, remaining, closed },
   }
 }
+
+// === 預先配桌衝突偵測 ===
+// 找出「已把某桌預先配走」的散客訂位（assignedTableId 指向此桌、未取消/未完成）。
+// 用途：現場「指派桌」防呆 — 指派到一張已被別筆預配的桌前，先示警「此桌已預留給 ○○」。
+//   預配只記 booking.assignedTableId、不動 table.status，故被預配的桌仍是 vacant，
+//   會照常出現在現場可指派清單，若不示警就會默默覆蓋前者預配。
+// 參數：
+//   - excludeBookingId：正在指派的這筆自己。現場指派的就是被預配的那位客人時，傳入其 id 以免自我示警。
+//   - date：限定同日比對，避免跨日的預配誤報（不傳則不限日）。
+export function findPreassignedBooking(bookings = [], tableNumber, { date, excludeBookingId } = {}) {
+  if (tableNumber == null) return null
+  return (bookings || []).find(b =>
+    b.assignedTableId != null &&
+    String(b.assignedTableId) === String(tableNumber) &&
+    b.id !== excludeBookingId &&
+    (date == null || b.date === date) &&
+    !CAPACITY_EXCLUDED_STATUSES.includes(b.status),
+  ) || null
+}
