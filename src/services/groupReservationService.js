@@ -207,6 +207,39 @@ export function isBlankGroup(g) {
     (g.counts?.total || 0) === 0 && groupTableNumbers(g).length === 0
 }
 
+// 複製團單為新草稿（給「複製上一筆團單」）：保留旅行社/導遊/人數/特殊需求/梯次結構與場次，
+// 但 **清空 tableNumbers**（須重新圈桌，避免沿用舊桌造成衝突）、重生 batch id、spend 歸零、
+// status=planned、可改日期。純函式：回傳草稿物件（無 id），由容器當 initialGroup 走草稿優先建立。
+export function cloneGroupForDuplicate(source, { date } = {}) {
+  if (!source) return null
+  const batches = (source.batches || []).map(b => ({
+    id: batchUid(),
+    label: b.label || '第一梯',
+    timeSlot: b.timeSlot || '11:00',
+    tableNumbers: [],
+    guests: Number(b.guests) || 0,
+    note: b.note || '',
+  }))
+  if (!batches.length) batches.push({ id: batchUid(), label: '第一梯', timeSlot: '11:00', tableNumbers: [], guests: 0, note: '' })
+  return {
+    date: date || source.date,
+    schemaVersion: GROUP_SCHEMA_VERSION,
+    agencyId: source.agencyId || null,
+    agencyName: source.agencyName || '',
+    guideId: source.guideId || null,
+    guideName: source.guideName || '',
+    guidePhone: source.guidePhone || '',
+    batches,
+    counts: normalizeCounts(source.counts),
+    allergyText: source.allergyText || '',
+    tableSideNeeds: source.tableSideNeeds || '',
+    busInfo: source.busInfo || '',
+    notes: source.notes || '',
+    spend: 0,
+    status: 'planned',
+  }
+}
+
 // 一次性清除既有殘留的空白草稿（無旅行社、0 人、未圈桌）。
 // 草稿優先（記憶體草稿，填好才寫入）改版後不會再產生空白；此函式用於清掉舊版殘留。
 // 回傳清除筆數；本機刪除後由呼叫端 syncCloudSoon 觸發雲端泛型差異刪除。

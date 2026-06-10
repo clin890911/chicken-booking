@@ -162,11 +162,31 @@ export function resolveSlotOccupancy(tables = [], bookings = [], groupReservatio
     })
   })
 
-  const totalSeats = (tables || []).filter(t => t.isActive !== false).reduce((s, t) => s + (Number(t.capacity) || 0), 0)
+  const activeTables = (tables || []).filter(t => t.isActive !== false)
+  const totalSeats = activeTables.reduce((s, t) => s + (Number(t.capacity) || 0), 0)
+  const totalTables = activeTables.length
+  const occupiedTables = Object.keys(byTable).length // = walkinAssignedTables + groupTableCount（byTable 已去重）
   const closed = isSeatingClosed(settings, date, seating)
   const remaining = closed ? 0 : Math.max(0, totalSeats - walkinGuests - groupHeldSeats)
+  const remainingTables = closed ? 0 : Math.max(0, totalTables - occupiedTables)
   return {
     byTable,
-    summary: { totalSeats, walkinGuests, unassignedWalkinGuests, walkinAssignedTables, groupHeldSeats, groupTableCount, remaining, closed },
+    summary: { totalSeats, totalTables, occupiedTables, walkinGuests, unassignedWalkinGuests, walkinAssignedTables, groupHeldSeats, groupTableCount, remaining, remainingTables, closed },
+  }
+}
+
+// 某「日期 + 場次」還剩幾桌 / 幾席 —— 給團體預排「預選場次」的剩餘提示。
+// 只呼叫一次 resolveSlotOccupancy（與容量引擎同口徑），由其 summary 取焦點欄位。
+// 註：occupiedTables 以「相異被佔桌號」計，一張大桌被 2 人散客佔仍算 1 桌占用，
+//     故 remainingTables 為保守值、remainingSeats 為嚴格席數。
+export function remainingTablesForSeating(tables = [], bookings = [], groupReservations = [], date, seating, settings = {}) {
+  const { summary } = resolveSlotOccupancy(tables, bookings, groupReservations, date, seating, settings)
+  return {
+    totalTables: summary.totalTables,
+    occupiedTables: summary.occupiedTables,
+    remainingTables: summary.remainingTables,
+    totalSeats: summary.totalSeats,
+    remainingSeats: summary.remaining,
+    closed: summary.closed,
   }
 }
