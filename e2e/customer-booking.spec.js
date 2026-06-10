@@ -15,6 +15,10 @@ const AVAILABILITY = {
 }
 
 test.beforeEach(async ({ page }) => {
+  // 兜底安全網（先註冊 → 最後匹配）：任何未被下方明確攔截的 guest* 端點一律擋下，
+  // 確保就算之後頁面多打了新端點，也絕不會送到正式 Cloud Functions。
+  await page.route('**/guest*', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-blocked' }) }))
   // 攔截可訂時段查詢
   await page.route('**/guestGetAvailability', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(AVAILABILITY) }))
@@ -62,4 +66,52 @@ test('用戶端：電話格式錯誤時擋下，無法送出', async ({ page }) 
   await expect(page.getByRole('button', { name: '完成訂位' })).toBeDisabled()
   // 仍停在 /book，未導向確認頁
   await expect(page).toHaveURL(/\/book/)
+})
+
+// === 手機版主流程 @mobile ===
+// 手機（lg 以下）顧客實際操作的是 fixed 底欄 MobileActionBar，桌面摘要卡完全隱藏。
+// 2026-06 手機白屏 bug（AnimatePresence mode="wait" exit 回呼遺失 → 步驟切換後新內容永不掛載，
+// PR #19 修復）只在這條動線觸發，桌面 viewport 永遠測不到。此測試在真機尺寸走完整流程，
+// 並以「1 秒內可見」斷言防衛「步驟切換後內容未掛載」的迴歸。
+test.describe('手機版 @mobile', () => {
+  test('換日期 → 改選時段兩次 → 底欄進入聯絡資訊（1 秒內掛載）→ 完成訂位', async ({ page }) => {
+    await page.goto('/book')
+
+    // 手機尺寸下底欄必須可見（桌面摘要卡 hidden lg:block 不可見）
+    const bar = page.getByTestId('mobile-action-bar')
+    await expect(bar).toBeVisible()
+
+    // 等今天的可訂時段載入
+    await expect(page.getByRole('button', { name: /12:00 抵達/ })).toBeVisible()
+
+    // 換日期：點月曆上的「明天」（cell 的 aria-label 由 dayLabel 組成，必為可預訂）
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    const weekday = ['日', '一', '二', '三', '四', '五', '六'][tomorrow.getDay()]
+    await page.getByRole('button', { name: `${tomorrow.getMonth() + 1}/${tomorrow.getDate()} (${weekday})，可預訂` }).click()
+
+    // 換日期會清空已選時段 → 底欄 CTA 退回 disabled 狀態
+    await expect(bar.getByRole('button', { name: '請先選擇可訂時段' })).toBeDisabled()
+
+    // 改選時段兩次：先 12:00、再改 18:00，底欄摘要應跟著更新
+    await page.getByRole('button', { name: /12:00 抵達/ }).click()
+    await page.getByRole('button', { name: /18:00 抵達/ }).click()
+    await expect(bar).toContainText('18:00')
+
+    // 點底欄「填寫聯絡資訊」→ 聯絡資訊表單必須在 1 秒內可見（白屏迴歸防線）
+    await bar.getByRole('button', { name: '填寫聯絡資訊' }).click()
+    await expect(page.getByPlaceholder('王小姐')).toBeVisible({ timeout: 1000 })
+
+    // 底欄「修改」返回選時段 → 反向切換的內容同樣必須在 1 秒內掛載
+    await bar.getByRole('button', { name: '修改' }).click()
+    await expect(page.getByRole('button', { name: /18:00 抵達/ })).toBeVisible({ timeout: 1000 })
+
+    // 再前進一次，填資料並由底欄送出 → 進入確認頁
+    await bar.getByRole('button', { name: '填寫聯絡資訊' }).click()
+    await expect(page.getByPlaceholder('王小姐')).toBeVisible({ timeout: 1000 })
+    await page.getByPlaceholder('王小姐').fill('E2E 手機客')
+    await page.getByPlaceholder('0912345678').fill('0912345678')
+    await bar.getByRole('button', { name: '完成訂位' }).click()
+    await expect(page).toHaveURL(/\/confirm\/E2E-CUS-1/)
+  })
 })

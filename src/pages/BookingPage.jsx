@@ -642,7 +642,7 @@ function BookingSummary({ data, settings, ready, step, busy, canSubmit, onEdit, 
 
 function MobileActionBar({ data, ready, step, busy, canSubmit, onEdit, onContinue, onSubmit }) {
   return (
-    <div className="fixed inset-x-0 bottom-0 z-30 border-t border-chicken-brown/10 bg-white/95 backdrop-blur lg:hidden safe-bottom">
+    <div data-testid="mobile-action-bar" className="fixed inset-x-0 bottom-0 z-30 border-t border-chicken-brown/10 bg-white/95 backdrop-blur lg:hidden safe-bottom">
       <div className="mx-auto max-w-md px-4 py-3">
         <div className="mb-2 flex items-center justify-between text-xs">
           <span className="font-bold text-chicken-brown/55">目前選擇</span>
