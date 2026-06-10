@@ -16,8 +16,8 @@ import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
 
 const TABS = [
-  { key: 'ops',       label: '桌位',  icon: '🪑', subtitle: '桌位地圖 · 即將到達 · 候位', badgeKey: 'ops' },
-  { key: 'slotmap',   label: '座位總覽', icon: '🗺️', subtitle: '日期 · 場次 · 散客團客同框' },
+  { key: 'ops',       label: '現場',  icon: '🪑', subtitle: '即時桌況 · 即將到達 · 候位', badgeKey: 'ops' },
+  { key: 'slotmap',   label: '排位規劃', icon: '🗺️', subtitle: '日期 · 場次 · 散客團客同框' },
   { key: 'bookings',  label: '訂位',  icon: '📋', subtitle: '今日 · 日曆 · 新增',          badgeKey: 'bookings' },
   { key: 'waitlist',  label: '候位',  icon: '🚦', subtitle: '取號 · 叫號 · 入座',          badgeKey: 'waitlist' },
   { key: 'customers', label: '顧客',  icon: '👥', subtitle: '顧客檔 · VIP · 黑名單' },
