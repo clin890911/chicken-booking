@@ -1,12 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { motion } from 'framer-motion'
 import Header from '../components/layout/Header'
 import SidebarNav from '../components/layout/SidebarNav'
 import BottomNav from '../components/layout/BottomNav'
 import OperationsView from '../components/admin/OperationsView'
 import SlotOverviewView from '../components/admin/SlotOverviewView'
 import BookingsView from '../components/admin/BookingsView'
-import WaitlistView from '../components/admin/WaitlistView'
 import CustomersView from '../components/admin/CustomersView'
 import GroupView from '../components/admin/group/GroupView'
 import SettingsView from '../components/admin/SettingsView'
@@ -19,7 +17,6 @@ const TABS = [
   { key: 'ops',       label: '現場',  icon: '🪑', subtitle: '即時桌況 · 即將到達 · 候位', badgeKey: 'ops' },
   { key: 'slotmap',   label: '排位規劃', icon: '🗺️', subtitle: '日期 · 場次 · 散客團客同框' },
   { key: 'bookings',  label: '訂位',  icon: '📋', subtitle: '今日 · 日曆 · 新增',          badgeKey: 'bookings' },
-  { key: 'waitlist',  label: '候位',  icon: '🚦', subtitle: '取號 · 叫號 · 入座',          badgeKey: 'waitlist' },
   { key: 'customers', label: '顧客',  icon: '👥', subtitle: '顧客檔 · VIP · 黑名單' },
   { key: 'group',     label: '團體',  icon: '🚌', subtitle: '預排規劃 · 今日團體 · 名冊歷史' },
   { key: 'settings',  label: '設定',  icon: '⚙️', subtitle: '營業時段 · 桌位 · 帳號' },
@@ -28,9 +25,8 @@ const TABS = [
 export default function AdminPage() {
   const [tab, setTab] = useState('bookings')
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式
+  // （候位入座已是現場頁內互動，無需跨頁機制）
   const [pendingAssign, setPendingAssign] = useState(null)
-  // pendingSeatWait：候位列表「入座」按鈕觸發；OperationsView 進入候位入座模式
-  const [pendingSeatWait, setPendingSeatWait] = useState(null)
   const { user, usingFirebase } = useAuth()
   const { bookings, waitlist } = useBooking()
   const toast = useToast()
@@ -78,8 +74,8 @@ export default function AdminPage() {
     const waiting = waitlist.filter(w => w.status === 'waiting' || w.status === 'called').length
     return {
       bookings: unassigned,
-      ops: upcomingUnassigned,  // 緊急的（即將到達還沒排）
-      waitlist: waiting,
+      // 現場待辦 = 即將到達還沒排 + 候位中（明細由現場頁右側欄各籤 badge 拆解）
+      ops: upcomingUnassigned + waiting,
     }
   }, [bookings, waitlist])
 
@@ -91,13 +87,6 @@ export default function AdminPage() {
     setTab('ops')
   }
   const handleAssignDone = () => setPendingAssign(null)
-
-  // 候位列表點「入座」→ 切到現場頁進入入座模式
-  const handleSeatWaitlist = (wait) => {
-    setPendingSeatWait(wait)
-    setTab('ops')
-  }
-  const handleSeatWaitDone = () => setPendingSeatWait(null)
 
   return (
     <div className="min-h-screen bg-chicken-cream flex">
@@ -150,16 +139,11 @@ export default function AdminPage() {
                 <OperationsView
                   pendingAssign={pendingAssign}
                   onAssignDone={handleAssignDone}
-                  pendingSeatWait={pendingSeatWait}
-                  onSeatWaitDone={handleSeatWaitDone}
                 />
               )}
               {tab === 'slotmap' && <SlotOverviewView />}
               {tab === 'bookings' && (
                 <BookingsView onAssignTable={handleAssignTable} />
-              )}
-              {tab === 'waitlist' && (
-                <WaitlistView onSeatWaitlist={handleSeatWaitlist} />
               )}
               {tab === 'customers' && <CustomersView />}
               {tab === 'group' && <GroupView />}

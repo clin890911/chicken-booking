@@ -14,7 +14,8 @@ import { todayStr } from '../../utils/timeSlots'
 // 「現場營運」主畫面
 // 模式：normal | merge | assign-booking | seat-waitlist | move-table
 // 每個模式有對應的 banner、桌位 highlight、確認 toast
-export default function OperationsView({ pendingAssign, onAssignDone, pendingSeatWait, onSeatWaitDone }) {
+// 候位入座由右側欄（OpsRail > WaitlistPanel）頁內觸發；指派桌仍可由「訂位」分頁跨頁觸發（pendingAssign）
+export default function OperationsView({ pendingAssign, onAssignDone }) {
   const {
     tables, bookings, waitlist, settings, groupReservations,
     mergeTables, assignBookingToTable, seatWaitlist, moveTable,
@@ -133,7 +134,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
-      onSeatWaitDone?.()
       return
     }
     if (mode.type === 'move') {
@@ -197,17 +197,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAssign?.id])
 
-  // 從外部觸發候位入座
-  useEffect(() => {
-    if (pendingSeatWait && (!mode || mode.wait?.id !== pendingSeatWait.id)) {
-      startSeatWaitlist(pendingSeatWait)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingSeatWait?.id])
-
   const cancelModeAndNotify = () => {
     if (mode?.type === 'assign') onAssignDone?.()
-    if (mode?.type === 'seat-waitlist') onSeatWaitDone?.()
     cancelMode()
   }
 

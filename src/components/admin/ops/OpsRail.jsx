@@ -3,7 +3,7 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { listUpcoming } from '../../../services/bookingService'
 import { todayStr } from '../../../utils/timeSlots'
 import UpcomingPanel from '../floormap/UpcomingPanel'
-import WaitlistMiniPanel from '../floormap/WaitlistMiniPanel'
+import WaitlistPanel from './WaitlistPanel'
 
 // 現場右側欄：籤切換（即將到達 / 候位），每籤獨佔全高、badge 顯示待辦數。
 // 選中桌時整欄被 TableDrawer 取代（由 OperationsView 控制），籤狀態保留在外層不重設。
@@ -55,7 +55,7 @@ export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssi
           <UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} />
         )}
         {effective === 'waitlist' && (
-          <WaitlistMiniPanel onSeatWaitlist={onSeatWaitlist} />
+          <WaitlistPanel onSeatWaitlist={onSeatWaitlist} />
         )}
       </div>
     </div>
