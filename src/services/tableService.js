@@ -1,7 +1,7 @@
 // tableService：桌位 CRUD + 即時運營狀態管理
-// schema: { number, capacity, floor, x, y, w, h, fuel, isActive,
+// schema: { number, capacity, floor, x, y, w, h, isActive,
 //           status, currentBookingId, seatedAt, mergedWith, blockReason, updatedAt }
-import { INITIAL_TABLES } from '../data/tables'
+import { INITIAL_TABLES, tableDims } from '../data/tables'
 
 const STORAGE_KEY = 'chicken_tables_v3'   // v3: 改為「雞王座號圖」桌號（101–113 / 201–267）
 const LEGACY_KEYS = ['chicken_tables_v2', 'chicken_tables_v1']
@@ -188,7 +188,7 @@ export function bulkWrite(list) {
 
 // === 新增桌位 ===
 // 自動分配下一個可用桌號（依 capacity：4 人 = A 系列、6 人 = B 系列）
-export function addTable({ capacity = 4, floor = '1F', x = 200, y = 200, fuel = null }) {
+export function addTable({ capacity = 4, floor = '1F', x = 200, y = 200 }) {
   const list = read()
   const prefix = capacity === 6 ? 'B' : 'A'
   const usedNumbers = new Set(list.filter(t => t.number.startsWith(prefix)).map(t => parseInt(t.number.slice(1), 10)).filter(n => !isNaN(n)))
@@ -199,9 +199,7 @@ export function addTable({ capacity = 4, floor = '1F', x = 200, y = 200, fuel = 
     capacity,
     floor,
     x, y,
-    w: 80,
-    h: capacity === 6 ? 100 : 75,
-    fuel,
+    ...tableDims(capacity),
     isActive: true,
     status: 'vacant',
     currentBookingId: null,

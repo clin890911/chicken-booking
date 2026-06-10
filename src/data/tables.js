@@ -12,19 +12,23 @@
 //
 // 座標系統：viewBox 1200x800，x/y/w/h 為左上角座標
 //   4P: 80×75 ｜ 6P: 90×75（橫式，較寬；六人桌實體較寬不是較長）
-// fuel: 'natural-gas' | 'tank' | null（PDF 未標示燃料別，預設 null，可後台調整）
 
 const TABLE_4P_W = 80
 const TABLE_4P_H = 75
 const TABLE_6P_W = 90   // 六人桌橫式：寬＞高，且比四人桌寬
 const TABLE_6P_H = 75
 
+// 依人數回傳桌位寬高 — 單一來源。預設佈局、編輯器改容量、新增桌位都用這個，
+// 確保「4 人改 6 人」時尺寸一致（六人桌變寬不變長），不會各自寫死而走鐘。
+export function tableDims(capacity) {
+  return Number(capacity) === 6
+    ? { w: TABLE_6P_W, h: TABLE_6P_H }
+    : { w: TABLE_4P_W, h: TABLE_4P_H }
+}
+
 // 小工具：依人數自動帶入寬高
-const mk = (number, capacity, floor, x, y, fuel = null) => ({
-  number, capacity, floor, x, y,
-  w: capacity === 6 ? TABLE_6P_W : TABLE_4P_W,
-  h: capacity === 6 ? TABLE_6P_H : TABLE_4P_H,
-  fuel,
+const mk = (number, capacity, floor, x, y) => ({
+  number, capacity, floor, x, y, ...tableDims(capacity),
 })
 
 // === 1F：六人桌 101,102,103,108,109,110；四人桌 105,106,107,111,112,113 ===

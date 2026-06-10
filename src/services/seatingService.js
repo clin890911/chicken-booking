@@ -173,11 +173,6 @@ export function findSuitableTables(partySize) {
       const wasteB = b.capacity - partySize
       if (wasteA !== wasteB) return wasteA - wasteB
       if (a.floor !== b.floor) return a.floor === '1F' ? -1 : 1
-      // tank 排在 natural-gas 後面
-      if (a.fuel !== b.fuel) {
-        if (a.fuel === 'tank') return 1
-        if (b.fuel === 'tank') return -1
-      }
       return a.number.localeCompare(b.number)
     })
 }

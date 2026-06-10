@@ -172,8 +172,6 @@ export default function TableDrawer({ table, booking, onClose, onStartMerge, onS
             </div>
             <div className="text-xs text-chicken-brown/60">
               {table.floor === '1F' ? '一樓' : '二樓'}
-              {table.fuel === 'tank' && <span className="ml-1 text-chicken-yellow">· 瓦斯桶</span>}
-              {table.fuel === 'natural-gas' && <span className="ml-1 text-chicken-brown/40">· 天然氣</span>}
             </div>
           </div>
           <button onClick={onClose} className="text-chicken-brown/40 hover:text-chicken-brown text-2xl leading-none">×</button>

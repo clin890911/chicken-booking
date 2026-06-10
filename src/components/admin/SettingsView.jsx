@@ -559,9 +559,9 @@ export default function SettingsView() {
 
       {/* 桌位佈局編輯（拖拉位置、新增/刪除桌、改容量）*/}
       {can('table.config') && (
-        <SettingsSection title="桌位佈局" description="拖拉桌位、調整容量與燃料型態。">
+        <SettingsSection title="桌位佈局" description="拖拉桌位、調整容量與樓層。">
           <p className="text-xs text-chicken-brown/60 mb-3">
-            打開全螢幕編輯器：拖拉移動桌位、調整容量與瓦斯型態、新增或刪除桌位。
+            打開全螢幕編輯器：拖拉移動桌位、調整容量與樓層、新增或刪除桌位。
             修改完按「儲存變更」才會生效。
           </p>
           <Button onClick={() => setShowLayoutEditor(true)} className="w-full">

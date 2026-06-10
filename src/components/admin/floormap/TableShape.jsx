@@ -53,7 +53,7 @@ export default function TableShape({
   occDimmed = false,           // 統一佔用視圖：場次已關閉時整體淡化
   onClick,
 }) {
-  const { x, y, w, h, capacity, status, mergedWith, isActive, fuel, number } = table
+  const { x, y, w, h, capacity, status, mergedWith, isActive, number } = table
 
   if (!isActive) {
     return (
@@ -213,10 +213,6 @@ export default function TableShape({
         </text>
       )}
 
-      {/* 燃料標示（瓦斯桶 = 橘色小點） */}
-      {fuel === 'tank' && (
-        <circle cx={x + w - 8} cy={y + 8} r={4} fill="#f29100" stroke="white" strokeWidth={1} pointerEvents="none" />
-      )}
       {/* 併桌標示 */}
       {mergedWith && (
         <text x={x + 8} y={y + 14} fontSize={10} fill="white" pointerEvents="none">⇆</text>
