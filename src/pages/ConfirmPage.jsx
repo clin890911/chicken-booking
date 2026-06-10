@@ -160,6 +160,9 @@ export default function ConfirmPage() {
           </div>
           <h1 className="text-2xl font-black text-chicken-brown">訂位成功！</h1>
           <p className="text-sm text-chicken-brown/70 mt-1">訂位已建立，到店出示訂位編號即可</p>
+          <p className="mt-1.5 text-xs font-bold leading-5 text-chicken-brown/55">
+            📸 建議截圖保存此頁；或綁定下方 LINE 通知，之後在 LINE 隨時可查詢、修改訂位
+          </p>
         </div>
 
         {/* 訂位券：品牌紅色 header + 票券感虛線分隔 */}

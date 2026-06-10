@@ -33,6 +33,8 @@ const DEFAULT = {
   lineBindEndpoint: 'https://linebind-reaor76eyq-uc.a.run.app',
   linePushEndpoint: 'https://linepushbooking-reaor76eyq-uc.a.run.app',
   lineManageEndpoint: 'https://linegetbooking-reaor76eyq-uc.a.run.app',
+  lineMyBookingsEndpoint: 'https://linemybookings-reaor76eyq-uc.a.run.app',
+  lineLoginChannelId: '',
   publicSiteUrl: '',
   lineNotifyOnAdminChange: false,
   storeName: '雞王涮涮鍋',
@@ -386,5 +388,16 @@ describe('lineNotifyOnAdminChange（店員端通知開關）', () => {
     expect(saveSettings({ lineNotifyOnAdminChange: true }).lineNotifyOnAdminChange).toBe(true)
     expect(saveSettings({ lineNotifyOnAdminChange: 'true' }).lineNotifyOnAdminChange).toBe(false)
     expect(saveSettings({ lineNotifyOnAdminChange: 1 }).lineNotifyOnAdminChange).toBe(false)
+  })
+})
+
+describe('LINE 我的訂位設定欄位（白名單成對）', () => {
+  it('lineLoginChannelId：預設空、儲存去空白', () => {
+    expect(getSettings().lineLoginChannelId).toBe('')
+    expect(saveSettings({ lineLoginChannelId: ' 1234567890 ' }).lineLoginChannelId).toBe('1234567890')
+  })
+
+  it('lineMyBookingsEndpoint：空值回退預設', () => {
+    expect(saveSettings({ lineMyBookingsEndpoint: '' }).lineMyBookingsEndpoint).toBe(DEFAULT.lineMyBookingsEndpoint)
   })
 })

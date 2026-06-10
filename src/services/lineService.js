@@ -3,6 +3,7 @@ const DEFAULT_LIFF_ID = '2009996489-f1SCb75q'
 const DEFAULT_BIND_ENDPOINT = 'https://linebind-reaor76eyq-uc.a.run.app'
 const DEFAULT_PUSH_ENDPOINT = 'https://linepushbooking-reaor76eyq-uc.a.run.app'
 const DEFAULT_MANAGE_ENDPOINT = 'https://linegetbooking-reaor76eyq-uc.a.run.app'
+const DEFAULT_MYBOOKINGS_ENDPOINT = 'https://linemybookings-reaor76eyq-uc.a.run.app'
 
 // 綁定入口連結：只帶 bookingId + token，不再夾帶 base64 的姓名/電話 payload——
 // 那會把個資寫進 LINE 伺服器 log 與瀏覽器歷史。綁定頁顯示資料改由 lineGetBooking 端點回讀，
@@ -38,6 +39,30 @@ export function linePushEndpoint(settings = {}) {
 
 export function lineManageEndpoint(settings = {}) {
   return settings.lineManageEndpoint || import.meta.env.VITE_LINE_MANAGE_ENDPOINT || DEFAULT_MANAGE_ENDPOINT
+}
+
+export function lineMyBookingsEndpoint(settings = {}) {
+  return settings.lineMyBookingsEndpoint || import.meta.env.VITE_LINE_MYBOOKINGS_ENDPOINT || DEFAULT_MYBOOKINGS_ENDPOINT
+}
+
+// 「LINE 我的訂位」：以 LIFF idToken 向後端查詢本人綁定的訂位清單。
+// 身分由後端向 LINE 驗證 idToken 確立，前端不傳 userId。
+export async function fetchLineMyBookings(settings = {}, idToken) {
+  const endpoint = lineMyBookingsEndpoint(settings)
+  if (!endpoint || !idToken) return { ok: false, error: 'not-configured' }
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.ok === false) return { ok: false, error: data.error || `HTTP ${res.status}` }
+    return { ok: true, items: data.items || [], store: data.store || {}, line: data.line || {} }
+  } catch (err) {
+    console.warn('LINE my-bookings fetch failed:', err)
+    return { ok: false, error: err.message || 'fetch-failed' }
+  }
 }
 
 export function lineLiffId(settings = {}) {
