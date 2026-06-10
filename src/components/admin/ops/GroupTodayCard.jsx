@@ -14,10 +14,12 @@ const STATUS_LABEL = {
 
 // 今日團體單張卡（現場右側欄窄版）：梯次入座 / 離席、整團完成、回傳單。
 // 入座/離席/完成一次翻動多桌，誤觸成本高 → 一律 confirm（不走地圖二步確認，桌已預圈無選桌步驟）。
-export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable }) {
+// 已完成（status=completed）的卡片轉唯讀：灰階、無操作按鈕，僅保留回傳單列印。
+export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, onReseatBatch }) {
   const { tables, seatGroupBatch, checkoutGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
+  const isDone = g.status === 'completed'
 
   const tableByNumber = useMemo(() => {
     const m = {}
@@ -33,7 +35,12 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable }) 
     )
     if (!ok) return
     const r = seatGroupBatch(g.id, b.id)
-    if (!r.ok) return toast.error('入座失敗：' + r.error)
+    if (!r.ok) {
+      toast.error('入座失敗：' + r.error)
+      // 桌被佔 → 直接進「改派桌位」模式，讓操作者馬上在地圖上挑替代桌
+      if (r.blocked?.length && onReseatBatch) onReseatBatch(g, b, r.blocked)
+      return
+    }
     toast.success(`✅ ${g.agencyName} ${b.label} 已入座（${tablesTxt}）`)
   }
 
@@ -63,11 +70,11 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable }) 
   const c = g.counts || {}
 
   return (
-    <div className="bg-white rounded-xl border border-chicken-brown/10 p-3">
+    <div className={`rounded-xl border p-3 ${isDone ? 'bg-gray-50 border-chicken-brown/10 opacity-80' : 'bg-white border-chicken-brown/10'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="font-black text-chicken-brown text-sm">
-            🚌 {g.agencyName || '（未填旅行社）'}
+          <div className={`font-black text-sm ${isDone ? 'text-chicken-brown/60' : 'text-chicken-brown'}`}>
+            {isDone ? '✅' : '🚌'} {g.agencyName || '（未填旅行社）'}
             <Badge color={st.color} className="ml-1.5">{st.label}</Badge>
           </div>
           <div className="text-[11px] text-chicken-brown/60 mt-0.5">
@@ -111,7 +118,9 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable }) 
                     ))
                   )}
                 </div>
-                {seated ? (
+                {isDone ? (
+                  <span className="text-[10px] font-bold text-chicken-brown/45">已完成</span>
+                ) : seated ? (
                   <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
                 ) : (
                   <button onClick={() => onSeat(b)} disabled={!(b.tableNumbers || []).length}
@@ -123,14 +132,14 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable }) 
         })}
       </div>
 
-      <div className="mt-2 flex items-center justify-between gap-2">
-        {g.status === 'planned' ? (
-          <button onClick={() => setGroupStatus(g.id, 'confirmed')} className="text-[11px] text-chicken-brown/60 underline">標記為已確認</button>
-        ) : <span />}
-        {g.status !== 'completed' && (
+      {!isDone && (
+        <div className="mt-2 flex items-center justify-between gap-2">
+          {g.status === 'planned' ? (
+            <button onClick={() => setGroupStatus(g.id, 'confirmed')} className="text-[11px] text-chicken-brown/60 underline">標記為已確認</button>
+          ) : <span />}
           <button onClick={onFinalize} className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-chicken-brown text-white">整團完成</button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

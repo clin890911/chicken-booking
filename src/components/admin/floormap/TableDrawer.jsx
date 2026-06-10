@@ -5,16 +5,10 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import TableCandidatePanel from './TableCandidatePanel'
 import GroupTableSection from './GroupTableSection'
+import { STATUS_ZH as STATUS_LABELS } from '../../../utils/tableStatus'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
-const STATUS_LABELS = {
-  vacant: '空桌',
-  reserved: '已預訂',
-  dining: '用餐中',
-  cleaning: '等待清桌',
-  blocked: '不可用',
-}
 // 與桌位地圖 (TableShape) 同色語義：綠=可入座 / 藍=已預訂 / 橙=用餐 / 琥珀=清桌 / 灰=不可用
 const STATUS_PILL_BG = {
   vacant: 'bg-emerald-600',
@@ -32,7 +26,7 @@ function diffMin(d) {
   return Math.floor((Date.now() - new Date(d).getTime()) / 60000)
 }
 
-export default function TableDrawer({ table, booking, preassign, groupHold, onClose, onStartMerge, onStartMove, mode }) {
+export default function TableDrawer({ table, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, mode }) {
   const { can } = useAuth()
   const toast = useToast()
   const confirmDialog = useConfirm()
@@ -255,6 +249,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
             groupHold={activeHold}
             canEdit={canEdit}
             onWalkInOverride={() => setShowWalkIn(true)}
+            onReseatBatch={onReseatBatch}
             onClose={onClose}
           />
         )}
@@ -282,13 +277,6 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           </>
         )}
 
-        {/* 併桌資訊 */}
-        {table.mergedWith && (
-          <div className="px-3 py-2 bg-chicken-yellow/10 border border-chicken-yellow/30 rounded-lg text-xs">
-            <span className="font-bold text-chicken-yellow">⇆ 併桌中：</span>
-            與 {table.mergedWith} 合併（合計 {table.capacity + 4} 人座位）
-          </div>
-        )}
       </div>
 
       {/* Action 按鈕 */}
@@ -297,20 +285,14 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           {table.status === 'vacant' && !activeHold && (
             <>
               <button onClick={() => setShowWalkIn(true)} className="btn-primary w-full">✅ 散客直接入座</button>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={onStartMerge} className="btn-secondary text-sm">⇆ 併桌</button>
-                {canBlock && <button onClick={() => setShowBlock(true)} className="btn-secondary text-sm">🚫 設不可用</button>}
-              </div>
+              {canBlock && <button onClick={() => setShowBlock(true)} className="btn-secondary text-sm w-full">🚫 設不可用</button>}
             </>
           )}
 
           {table.status === 'reserved' && booking && (
             <>
               <button onClick={handleSeat} className="btn-primary w-full">✅ 客人到了 — 入座</button>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={onStartMerge} className="btn-secondary text-sm">⇆ 併桌</button>
-                <button onClick={handleCancel} className="text-sm rounded-2xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
-              </div>
+              <button onClick={handleCancel} className="w-full text-sm rounded-2xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
             </>
           )}
 

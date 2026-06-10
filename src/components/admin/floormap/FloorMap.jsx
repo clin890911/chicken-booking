@@ -40,7 +40,7 @@ function FixtureLayer({ floor }) {
 }
 
 // FloorMap：渲染指定樓層的所有桌位（SVG）
-// 功能：點選、選取狀態、併桌模式、指派模式
+// 功能：點選、選取狀態、指派模式
 // 自動每 30 秒重繪一次（更新 dining 計時）
 export default function FloorMap({
   floor,
@@ -49,8 +49,6 @@ export default function FloorMap({
   settings = {},
   selectedTableNumber,
   onSelectTable,
-  mergeMode = false,
-  mergeFirst = null,
   highlightTables = [],   // 指派模式：要 highlight 的桌號陣列
   assignMode = false,
   suggestionTable = null, // 指派模式：被推薦的最佳桌（強閃）
@@ -139,7 +137,6 @@ export default function FloorMap({
         }
         const booking = t.currentBookingId ? bookingMap[t.currentBookingId] : null
         const isSelected = selectedTableNumber === t.number
-        const isMergeFirst = mergeFirst === t.number
         const isHighlight = assignMode && highlightTables.includes(t.number)
         const isAssignSuggestion = assignMode && suggestionTable === t.number
         const isPendingConfirm = assignMode && pendingConfirmTable === t.number
@@ -151,7 +148,6 @@ export default function FloorMap({
             booking={booking}
             settings={settings}
             isSelected={isSelected}
-            isMergeCandidate={isMergeFirst}
             isHighlight={isHighlight}
             isAssignSuggestion={isAssignSuggestion}
             isPendingConfirm={isPendingConfirm}

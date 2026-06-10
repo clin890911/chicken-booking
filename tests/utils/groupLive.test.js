@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   sortedBatches,
   todayActiveGroups,
+  todayGroupsByState,
   batchSeated,
   nextBatchForTable,
   buildGroupHolds,
+  reseatCandidateTables,
 } from '../../src/utils/groupLive'
 
 const mkTable = (number, status = 'vacant', currentRef = null) => ({ number, status, currentRef })
@@ -39,14 +41,68 @@ describe('sortedBatches', () => {
 })
 
 describe('todayActiveGroups', () => {
-  it('只留今日、排除已取消，依最早梯次排序', () => {
+  it('只留今日、排除已取消與已完成，依最早梯次排序', () => {
     const groups = [
       { ...GROUP, id: 'A', batches: [{ id: 'b', timeSlot: '12:30', tableNumbers: [] }] },
       { ...GROUP, id: 'B' },                                  // 最早梯 11:30
       { ...GROUP, id: 'C', status: 'cancelled' },
       { ...GROUP, id: 'D', date: '2026-06-11' },
+      { ...GROUP, id: 'E', status: 'completed' },             // 已完成不得再列入可操作清單
     ]
     expect(todayActiveGroups(groups, '2026-06-10').map(g => g.id)).toEqual(['B', 'A'])
+  })
+})
+
+describe('todayGroupsByState（側欄渲染口徑）', () => {
+  it('active 與 completed 分開、各依最早梯次排序、排除 cancelled', () => {
+    const groups = [
+      { ...GROUP, id: 'A', batches: [{ id: 'b', timeSlot: '12:30', tableNumbers: [] }] },
+      { ...GROUP, id: 'B' },
+      { ...GROUP, id: 'C', status: 'cancelled' },
+      { ...GROUP, id: 'E', status: 'completed' },
+      { ...GROUP, id: 'F', status: 'completed', batches: [{ id: 'b', timeSlot: '10:00', tableNumbers: [] }] },
+    ]
+    const r = todayGroupsByState(groups, '2026-06-10')
+    expect(r.active.map(g => g.id)).toEqual(['B', 'A'])
+    expect(r.completed.map(g => g.id)).toEqual(['F', 'E'])
+  })
+  it('空清單回兩個空陣列', () => {
+    expect(todayGroupsByState([], '2026-06-10')).toEqual({ active: [], completed: [] })
+  })
+})
+
+describe('reseatCandidateTables（改派桌位候選）', () => {
+  const mkT = (number, { status = 'vacant', isActive = true, capacity = 4, floor = '1F' } = {}) =>
+    ({ number, status, isActive, capacity, floor })
+  const group = { id: 'G1' }
+  const batch = { id: 'B1', tableNumbers: ['101', '102'] }
+  const fromTable = mkT('101', { capacity: 6, floor: '1F' })
+
+  it('只留啟用中空桌，排除本梯已圈桌與他團 hold；本團 hold 可選', () => {
+    const tables = [
+      mkT('102'),                          // 本梯已圈 → 排除
+      mkT('103', { status: 'dining' }),    // 非空桌 → 排除
+      mkT('104', { isActive: false }),     // 停用 → 排除
+      mkT('105'),                          // 他團 hold → 排除
+      mkT('106'),                          // 本團 hold → 可選
+      mkT('107'),                          // 一般空桌 → 可選
+    ]
+    const holds = {
+      105: { holds: [{ group: { id: 'G2' } }] },
+      106: { holds: [{ group: { id: 'G1' } }] },
+    }
+    const r = reseatCandidateTables({ tables, holds, group, batch, fromTable })
+    expect(r.map(t => t.number).sort()).toEqual(['106', '107'])
+  })
+
+  it('排序：容量最接近原桌 → 同樓層優先 → 桌號', () => {
+    const tables = [
+      mkT('201', { capacity: 6, floor: '2F' }), // 容量同 6 但異樓層
+      mkT('110', { capacity: 4, floor: '1F' }), // 容量差 2
+      mkT('103', { capacity: 6, floor: '1F' }), // 容量同 6、同樓層 → 第一
+    ]
+    const r = reseatCandidateTables({ tables, holds: {}, group, batch, fromTable })
+    expect(r.map(t => t.number)).toEqual(['103', '201', '110'])
   })
 })
 

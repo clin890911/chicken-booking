@@ -9,17 +9,17 @@ import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
 import { findPreassignedBooking } from '../../utils/capacity'
-import { buildGroupHolds, todayActiveGroups } from '../../utils/groupLive'
+import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
 import { todayStr } from '../../utils/timeSlots'
 
 // 「現場營運」主畫面
-// 模式：normal | merge | assign-booking | seat-waitlist | move-table
+// 模式：normal | assign-booking | seat-waitlist | move-table | group-reseat
 // 每個模式有對應的 banner、桌位 highlight、確認 toast
 // 候位入座由右側欄（OpsRail > WaitlistPanel）頁內觸發；指派桌仍可由「訂位」分頁跨頁觸發（pendingAssign）
 export default function OperationsView({ pendingAssign, onAssignDone }) {
   const {
     tables, bookings, waitlist, settings, groupReservations,
-    mergeTables, assignBookingToTable, seatWaitlist, moveTable,
+    assignBookingToTable, seatWaitlist, moveTable, reseatGroupBatchTable,
     findSuitableTables, suggestTable,
   } = useBooking()
   const toast = useToast()
@@ -62,8 +62,23 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     if (suggestion) setFloor(suggestion.floor)
   }
 
-  const startMerge = () => {
-    setMode({ type: 'merge', first: selectedTable })
+  // 改派桌位模式：團體梯次入座被佔桌卡住 → 逐桌挑替代空桌（queue 依序處理）
+  const startGroupReseat = (group, batch, blocked) => {
+    const queue = (blocked || []).map(b => b.tableNumber)
+    if (!queue.length) return
+    const current = queue[0]
+    const fromTable = tables.find(t => t.number === current)
+    const suitable = reseatCandidateTables({
+      tables, holds: groupHoldTables, group, batch, fromTable,
+    }).map(t => t.number)
+    if (!suitable.length) {
+      return toast.error(`目前沒有可改派的空桌（${current} 被佔）`)
+    }
+    setMode({ type: 'group-reseat', group, batch, queue, current, suitable, suggestion: suitable[0] })
+    setSelectedTable(null)
+    setPendingConfirm(null)
+    const sug = tables.find(t => t.number === suitable[0])
+    if (sug) setFloor(sug.floor)
   }
 
   // 換桌模式：當前用餐桌 → 選一張新空桌
@@ -84,22 +99,12 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
       setSelectedTable(prev => prev === number ? null : number)
       return
     }
-    if (mode.type === 'merge') {
-      if (!mode.first) {
-        setMode({ ...mode, first: number })
-        return
-      }
-      if (mode.first === number) { cancelMode(); return }
-      const r = mergeTables(mode.first, number)
-      if (!r.ok) toast.error('併桌失敗：' + r.error)
-      else toast.success(`✅ ${mode.first} + ${number} 已併桌（合計 ${r.totalCapacity} 位）`)
-      cancelMode()
-      return
-    }
-    // 指派 / 候位入座 / 換桌：二步確認
+    // 指派 / 候位入座 / 換桌 / 團體改派：二步確認
     // 第一次點合適桌 → 進入「待確認」預覽；第二次點同一桌（或按確認鈕）才真正執行
-    if (mode.type === 'assign' || mode.type === 'seat-waitlist' || mode.type === 'move') {
-      if (!mode.suitable.includes(number)) return toast.error('此桌不符合容量或非空桌')
+    if (['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode.type)) {
+      if (!mode.suitable.includes(number)) {
+        return toast.error(mode.type === 'group-reseat' ? '此桌非空桌或已被其他團體保留' : '此桌不符合容量或非空桌')
+      }
       if (pendingConfirm === number) { executeAssign(number); return }
       setPendingConfirm(number)
       return
@@ -135,6 +140,33 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
+      return
+    }
+    if (mode.type === 'group-reseat') {
+      const { group, batch, current } = mode
+      const r = reseatGroupBatchTable(group.id, batch.id, current, number)
+      if (!r.ok) { setPendingConfirm(null); return toast.error('改派失敗：' + r.error) }
+      if (r.seated) {
+        toast.success(`✅ 已改派 ${current} → ${number}，${group.agencyName || '團體'} ${batch.label || ''} 整梯入座`)
+        flashAssigned(number)
+        cancelMode()
+        setSelectedTable(number)
+        return
+      }
+      // 改派已落地但其他桌仍被佔 → 換下一張被佔桌繼續處理
+      const nextQueue = (r.blocked || []).map(b => b.tableNumber)
+      toast.info(`已改派 ${current} → ${number}，尚有 ${nextQueue.length} 桌被佔`)
+      const nextCurrent = nextQueue[0]
+      const fromTable = tables.find(t => t.number === nextCurrent)
+      const suitable = reseatCandidateTables({
+        tables, holds: groupHoldTables, group, batch, fromTable,
+      }).map(t => t.number)
+      if (!suitable.length) {
+        cancelMode()
+        return toast.error(`目前沒有可改派的空桌（${nextCurrent} 被佔）`)
+      }
+      setMode({ type: 'group-reseat', group, batch, queue: nextQueue, current: nextCurrent, suitable, suggestion: suitable[0] })
+      setPendingConfirm(null)
       return
     }
   }
@@ -226,19 +258,11 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
           ))}
         </div>
         <div className="flex-1" />
-        {!mode && (
-          <>
-            {can('table.config') && (
-              <button
-                onClick={() => setShowLayoutEditor(true)}
-                className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown hover:border-chicken-red"
-              >編輯佈局</button>
-            )}
-            <button
-              onClick={() => setMode({ type: 'merge', first: null })}
-              className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown hover:border-chicken-yellow"
-            >併桌模式</button>
-          </>
+        {!mode && can('table.config') && (
+          <button
+            onClick={() => setShowLayoutEditor(true)}
+            className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown hover:border-chicken-red"
+          >編輯佈局</button>
         )}
       </div>
 
@@ -271,14 +295,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
             settings={settings}
             selectedTableNumber={selectedTable}
             onSelectTable={handleTableClick}
-            mergeMode={mode?.type === 'merge'}
-            mergeFirst={mode?.type === 'merge' ? mode.first : null}
-            assignMode={mode?.type === 'assign' || mode?.type === 'seat-waitlist' || mode?.type === 'move'}
+            assignMode={['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode?.type)}
             highlightTables={
-              mode?.type === 'assign' ? mode.suitable
-              : mode?.type === 'seat-waitlist' ? mode.suitable
-              : mode?.type === 'move' ? mode.suitable
-              : []
+              ['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable : []
             }
             suggestionTable={mode?.suggestion || null}
             pendingConfirmTable={pendingConfirm}
@@ -296,8 +315,8 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
               preassign={selectedTablePreassign}
               groupHold={groupHoldTables[selectedTable] || null}
               onClose={() => setSelectedTable(null)}
-              onStartMerge={() => setMode({ type: 'merge', first: selectedTable })}
               onStartMove={() => startMove(selectedBooking)}
+              onReseatBatch={startGroupReseat}
               mode={{ assigning: mode?.type === 'assign' }}
             />
           ) : (
@@ -309,6 +328,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
               }}
               onAssignTable={startAssign}
               onSeatWaitlist={startSeatWaitlist}
+              onReseatBatch={startGroupReseat}
               onFocusTable={(n) => {
                 const t = tables.find(x => x.number === n)
                 if (t) setFloor(t.floor)

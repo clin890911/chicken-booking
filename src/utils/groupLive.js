@@ -9,12 +9,26 @@ export function sortedBatches(group) {
     String(a.timeSlot || '99:99').localeCompare(String(b.timeSlot || '99:99')))
 }
 
-// 今日有效團體（排除已取消），依最早梯次時段排序
+const firstSlot = (g) => String(sortedBatches(g)[0]?.timeSlot || '99:99')
+const byFirstSlot = (a, b) => firstSlot(a).localeCompare(firstSlot(b))
+
+// 今日進行中團體（排除已取消「與已完成」），依最早梯次時段排序。
+// 已完成的團不得再出現在可操作清單（曾因漏濾 completed 導致側欄可重複入座）。
 export function todayActiveGroups(groupReservations, today) {
-  const firstSlot = (g) => String(sortedBatches(g)[0]?.timeSlot || '99:99')
   return (groupReservations || [])
+    .filter(g => g.date === today && !['cancelled', 'completed'].includes(g.status))
+    .sort(byFirstSlot)
+}
+
+// 側欄渲染口徑：active 可操作；completed 仍要渲染「已完成」區塊（灰階、可印回傳單）。
+export function todayGroupsByState(groupReservations, today) {
+  const all = (groupReservations || [])
     .filter(g => g.date === today && g.status !== 'cancelled')
-    .sort((a, b) => firstSlot(a).localeCompare(firstSlot(b)))
+    .sort(byFirstSlot)
+  return {
+    active: all.filter(g => g.status !== 'completed'),
+    completed: all.filter(g => g.status === 'completed'),
+  }
 }
 
 // 某梯次是否已入座：其桌至少一張為 dining 且 currentRef 指向此梯次
@@ -38,6 +52,24 @@ export function nextBatchForTable(group, tableNumber, tableByNumber, afterBatchI
     if ((b.tableNumbers || []).includes(tableNumber) && !batchSeated(group, b, tableByNumber)) return b
   }
   return null
+}
+
+// 改派桌位候選：被佔桌 fromTable 的替代桌清單。
+// 條件：啟用中空桌、不在本梯已圈桌內、未被其他團體 hold（本團自己的 hold 可以選——
+// 例如把第一梯的桌讓給第二梯屬正常調度）。排序：容量最接近原桌 → 同樓層優先 → 桌號。
+export function reseatCandidateTables({ tables, holds, group, batch, fromTable }) {
+  const batchNums = (batch?.tableNumbers || []).map(String)
+  const fromCap = Number(fromTable?.capacity) || 0
+  const fromFloor = fromTable?.floor
+  return (tables || [])
+    .filter(t =>
+      t.isActive && t.status === 'vacant'
+      && !batchNums.includes(String(t.number))
+      && !((holds?.[t.number]?.holds) || []).some(h => h.group.id !== group?.id))
+    .sort((a, b) =>
+      (Math.abs(a.capacity - fromCap) - Math.abs(b.capacity - fromCap))
+      || ((a.floor === fromFloor ? 0 : 1) - (b.floor === fromFloor ? 0 : 1))
+      || String(a.number).localeCompare(String(b.number)))
 }
 
 // 今日團體 hold 對應：桌號 → { agencyName, holds: [{ group, batch }, ...] }

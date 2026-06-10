@@ -7,7 +7,7 @@ import { nextBatchForTable } from '../../../utils/groupLive'
 // 1. vacant 但被今日團體 hold（groupHold）→ 顯示團資訊＋「梯次入座」；散客入座降為次按鈕＋confirm
 // 2. dining 且 currentRef 指向團（groupRef）→ 「此梯離席」「整團完成」
 // 3. cleaning 且 currentRef 指向團 → 有下一梯圈此桌時「清桌完成＋接下一梯」，否則「清桌完成」
-export default function GroupTableSection({ table, groupRef, groupBatch, groupHold, canEdit, onWalkInOverride, onClose }) {
+export default function GroupTableSection({ table, groupRef, groupBatch, groupHold, canEdit, onWalkInOverride, onReseatBatch, onClose }) {
   const { tables, seatGroupBatch, checkoutGroupBatch, finalizeGroup, seatNextBatchOnTable, clearTable } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -37,7 +37,15 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
     )
     if (!ok) return
     const r = seatGroupBatch(g.id, batch.id)
-    if (!r.ok) return toast.error('入座失敗：' + r.error)
+    if (!r.ok) {
+      toast.error('入座失敗：' + r.error)
+      // 桌被佔 → 進「改派桌位」模式（關閉抽屜讓地圖選桌）
+      if (r.blocked?.length && onReseatBatch) {
+        onClose?.()
+        onReseatBatch(g, batch, r.blocked)
+      }
+      return
+    }
     toast.success(`✅ ${g.agencyName} ${batch.label} 已入座（${tablesTxt}）`)
   }
 
