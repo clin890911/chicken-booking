@@ -591,7 +591,13 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       && Number.isFinite(lastPushMs)
       && Date.now() - lastPushMs < LINE_BIND_PUSH_DEDUPE_MS
 
-    const nextStore = normalizeStore(store)
+    // 店家資訊一律以當下 settings 為準（client 可不再傳 store；舊版前端傳了也照常容忍）。
+    const nextStore = store && Object.keys(store).length ? normalizeStore(store) : storeFromSettings(settings)
+    // 好友狀態：未加好友的 push 必定被 LINE 拒絕——標記 pushBlocked 並跳過首推，
+    // 待 follow 事件（顧客加好友）清旗標自動補發，不再產生「重試 6 次進 dead-letter」的必死訊息。
+    // 重新綁定且非 needFriend 則清除舊旗標（解除封鎖後重綁即可恢復通知）。
+    const needFriend = line.friendFlag === false
+    const skipPush = recentlyPushed || needFriend
     const record = {
       bookingId: authBooking.id,
       manageToken: authBooking.manageToken,
@@ -603,7 +609,10 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       updatedAt: FieldValue.serverTimestamp(),
       createdAt: existing?.createdAt || FieldValue.serverTimestamp(),
       lastBindAttemptAt: now,
-      ...(recentlyPushed ? {} : {
+      ...(needFriend
+        ? { pushBlocked: true, pushBlockedReason: 'not-friend', pushBlockedAt: now }
+        : { pushBlocked: false, pushBlockedReason: null, pushBlockedAt: null }),
+      ...(skipPush ? {} : {
         lastBindPushAt: now,
         lastPushByEvent: {
           ...(existing?.lastPushByEvent || {}),
@@ -618,10 +627,11 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       lineUserId: line.userId,
       lineDisplayName: line.displayName || '',
       linePictureUrl: line.pictureUrl || '',
+      linePushBlocked: needFriend,
       updatedAt: now,
     }, { merge: true })
     await batch.commit()
-    if (!recentlyPushed) {
+    if (!skipPush) {
       await enqueueAndTrySend({
         channel: 'line',
         event: 'created',
@@ -637,7 +647,7 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
       })
     }
 
-    return res.json({ ok: true, skippedPush: recentlyPushed })
+    return res.json({ ok: true, skippedPush: recentlyPushed, ...(needFriend ? { needFriend: true } : {}) })
   } catch (err) {
     const code = err.status || 500
     if (code >= 500) console.error('lineBind failed:', err)
@@ -722,11 +732,51 @@ export const lineGetBooking = onRequest({ cors: true, invoker: 'public' }, async
 })
 
 async function handleLineEvent(event) {
-  if (event.type === 'follow' && event.replyToken) {
-    await replyLineMessage(event.replyToken, [{
-      type: 'text',
-      text: '歡迎加入雞王涮涮鍋！完成線上訂位後，可用官方帳號接收訂位資訊、定位與修改連結。',
-    }])
+  if (event.type === 'follow') {
+    // 加好友（含解除封鎖後重新加入）：先補發先前因「非好友」被擱置的訂位資訊，再回歡迎詞。
+    const uid = event.source?.userId || ''
+    if (uid) await resendPendingBindPushes(uid)
+    if (event.replyToken) {
+      await replyLineMessage(event.replyToken, [{
+        type: 'text',
+        text: '歡迎加入雞王涮涮鍋！完成線上訂位後，可用官方帳號接收訂位資訊、定位與修改連結。',
+      }])
+    }
+  }
+}
+
+// 「先綁定、後加好友」的補救閉環：follow 事件清掉該使用者所有 pushBlocked 旗標
+// （成為好友後 push 已可送達），並對仍有效的未來訂位補發確認卡片。
+async function resendPendingBindPushes(lineUserId) {
+  try {
+    const snap = await db.collection('lineBookingBindings')
+      .where('lineUserId', '==', lineUserId)
+      .limit(10)
+      .get()
+    for (const doc of snap.docs) {
+      const binding = doc.data()
+      if (!binding.pushBlocked) continue
+      const wasNotFriend = binding.pushBlockedReason === 'not-friend'
+      const now = new Date().toISOString()
+      await doc.ref.set({
+        pushBlocked: false,
+        pushBlockedReason: null,
+        pushBlockedAt: null,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true })
+      await db.collection(COLLECTIONS.bookings).doc(doc.id)
+        .update({ linePushBlocked: false, updatedAt: now })
+        .catch(() => {})
+      if (!wasNotFriend) continue // 其他拒推原因只解鎖後續通知，不主動補發舊卡片
+      const bookingSnap = await db.collection(COLLECTIONS.bookings).doc(doc.id).get()
+      if (!bookingSnap.exists) continue
+      const booking = { id: bookingSnap.id, ...bookingSnap.data() }
+      if (booking.status !== 'confirmed') continue
+      if (slotEpochMs(booking.date, booking.timeSlot) <= Date.now()) continue
+      await notifyLineBookingChange(booking.id, booking, 'confirmed')
+    }
+  } catch (err) {
+    console.error('resendPendingBindPushes failed:', err?.message)
   }
 }
 
