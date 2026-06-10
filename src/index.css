@@ -15,8 +15,10 @@ body {
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  /* 不用 fill-mode：動畫結束後 transform 回到 none。若用 both/forwards，
+     殘留的 transform 會讓容器變成 fixed 子孫（如 Modal）的 containing block，定位會壞。 */
   .animate-soft-enter {
-    animation: soft-enter 420ms cubic-bezier(.2,.8,.2,1) both;
+    animation: soft-enter 420ms cubic-bezier(.2,.8,.2,1);
   }
 }
 
