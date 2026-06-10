@@ -9,6 +9,7 @@ import {
   buildArrivalTimeline,
   dayCapacityBySeating,
   buildGroupDaySummary,
+  frequentAgencies,
 } from '../../src/utils/groupDaySummary'
 import { resolveSlotOccupancy } from '../../src/utils/capacity'
 
@@ -294,5 +295,42 @@ describe('buildGroupDaySummary', () => {
     const settings = baseSettings({ closures: { closedDates: [], closedSlots: {}, closedSeatings: { [DATE]: ['lunch1'] } } })
     const out = buildGroupDaySummary({ groupReservations: groups, bookings, tables: TABLES, date: DATE, settings })
     expect(out.warnings.find(w => w.type === 'overcapacity')).toBeUndefined()
+  })
+})
+
+describe('frequentAgencies', () => {
+  const AGENCIES = [
+    { id: 'AG1', name: '甲旅行社' },
+    { id: 'AG2', name: '乙旅行社' },
+    { id: 'AG3', name: '丙旅行社（已封存）', archived: true },
+  ]
+  const groups = [
+    mkGroup({ id: 'g1', agencyId: 'AG1', date: '2026-06-01' }),
+    mkGroup({ id: 'g2', agencyId: 'AG1', date: '2026-06-02' }),
+    mkGroup({ id: 'g3', agencyId: 'AG2', date: '2026-06-03' }),
+    mkGroup({ id: 'g4', agencyId: 'AG1', date: '2026-06-04', status: 'cancelled' }), // 取消不計
+    mkGroup({ id: 'g5', agencyId: 'AG3', date: '2026-06-05' }),                       // 封存不列
+    mkGroup({ id: 'g6', agencyId: null, date: '2026-06-06' }),                        // 無 agencyId 略過
+  ]
+
+  it('依團數排序取前 N、過濾封存、排除取消', () => {
+    const r = frequentAgencies(groups, AGENCIES, { limit: 5 })
+    expect(r.map(a => a.id)).toEqual(['AG1', 'AG2']) // AG1=2團、AG2=1團；AG3 封存、null 略過
+  })
+
+  it('sinceDate 過濾較舊團', () => {
+    const r = frequentAgencies(groups, AGENCIES, { sinceDate: '2026-06-03' })
+    // 只算 06-03 起：AG2(g3) 1 團；AG1 的 g1/g2 在之前、g4 取消 → AG1 不入
+    expect(r.map(a => a.id)).toEqual(['AG2'])
+  })
+
+  it('limit 限制數量', () => {
+    const r = frequentAgencies(groups, AGENCIES, { limit: 1 })
+    expect(r).toHaveLength(1)
+    expect(r[0].id).toBe('AG1')
+  })
+
+  it('無資料 → 空陣列', () => {
+    expect(frequentAgencies([], AGENCIES)).toEqual([])
   })
 })

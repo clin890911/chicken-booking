@@ -8,6 +8,7 @@ import {
   isSeatingClosed,
   calcSlotCapacity,
   resolveSlotOccupancy,
+  remainingTablesForSeating,
 } from '../../src/utils/capacity'
 
 const SEATINGS = [
@@ -148,5 +149,68 @@ describe('resolveSlotOccupancy', () => {
     const { summary } = resolveSlotOccupancy(tables, bookings, groups, DATE, SEATINGS[0], s)
     expect(summary.closed).toBe(true)
     expect(summary.remaining).toBe(0)
+  })
+
+  it('summary 帶 totalTables / occupiedTables / remainingTables', () => {
+    const { summary } = resolveSlotOccupancy(tables, bookings, groups, DATE, SEATINGS[0], baseSettings())
+    expect(summary.totalTables).toBe(4)       // 101,102,107,201 皆 active
+    expect(summary.occupiedTables).toBe(3)    // 107(walkin)+101,102(group)
+    expect(summary.remainingTables).toBe(1)
+  })
+})
+
+describe('remainingTablesForSeating', () => {
+  const tables = [
+    { number: '101', capacity: 6, isActive: true },
+    { number: '102', capacity: 6, isActive: true },
+    { number: '107', capacity: 4, isActive: true },
+    { number: '201', capacity: 6, isActive: true },
+  ]
+  const bookings = [
+    { id: 'b1', date: DATE, timeSlot: '11:00', guests: 4, status: 'confirmed', assignedTableId: '107' },
+  ]
+  const groups = [
+    { id: 'g1', date: DATE, status: 'confirmed', batches: [
+      { id: 'gb1', timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12 },
+    ] },
+  ]
+
+  it('空日：剩餘桌=全部桌、剩餘席=全部席', () => {
+    const r = remainingTablesForSeating(tables, [], [], DATE, SEATINGS[0], baseSettings())
+    expect(r.remainingTables).toBe(4)
+    expect(r.remainingSeats).toBe(22)
+    expect(r.closed).toBe(false)
+  })
+
+  it('lunch1 佔用：107 散客 + 101/102 團 → 剩 1 桌 / 6 席', () => {
+    const r = remainingTablesForSeating(tables, bookings, groups, DATE, SEATINGS[0], baseSettings())
+    expect(r.occupiedTables).toBe(3)
+    expect(r.remainingTables).toBe(1)
+    expect(r.remainingSeats).toBe(22 - 4 - 12) // 6
+  })
+
+  it('大桌被小散客佔仍算 1 桌占用（桌保守、席嚴格）', () => {
+    const oneWalkin = [{ id: 'w', date: DATE, timeSlot: '11:00', guests: 2, status: 'confirmed', assignedTableId: '101' }]
+    const r = remainingTablesForSeating(tables, oneWalkin, [], DATE, SEATINGS[0], baseSettings())
+    expect(r.occupiedTables).toBe(1)            // 101 一桌
+    expect(r.remainingTables).toBe(3)
+    expect(r.remainingSeats).toBe(22 - 2)       // 席只扣 2
+  })
+
+  it('其他場次佔用不外溢到 lunch1', () => {
+    const dinnerGroup = [{ id: 'gd', date: DATE, status: 'confirmed', batches: [
+      { id: 'x', timeSlot: '17:00', tableNumbers: ['201'], guests: 6 },
+    ] }]
+    const r = remainingTablesForSeating(tables, [], dinnerGroup, DATE, SEATINGS[0], baseSettings())
+    expect(r.remainingTables).toBe(4)
+    expect(r.remainingSeats).toBe(22)
+  })
+
+  it('場次關閉 → 剩餘桌/席皆 0', () => {
+    const s = baseSettings({ closures: { closedDates: [], closedSlots: {}, closedSeatings: { [DATE]: ['lunch1'] } } })
+    const r = remainingTablesForSeating(tables, bookings, groups, DATE, SEATINGS[0], s)
+    expect(r.closed).toBe(true)
+    expect(r.remainingTables).toBe(0)
+    expect(r.remainingSeats).toBe(0)
   })
 })

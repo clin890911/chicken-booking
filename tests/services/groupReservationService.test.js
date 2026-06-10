@@ -140,3 +140,50 @@ describe('groupReservationService.tableConflictsForBatch（含一般訂位）', 
     expect(c['101']).toBeUndefined()
   })
 })
+
+describe('cloneGroupForDuplicate（複製團單為新草稿）', () => {
+  const source = {
+    id: 'G_SRC', date: '2026-06-09', status: 'completed', spend: 5000,
+    agencyId: 'AG1', agencyName: '大發旅行社', guideId: 'GD1', guideName: '李導', guidePhone: '0912',
+    counts: { total: 20, vegetarian: 3, child: 2, mobility: 1, wheelchair: 0 },
+    allergyText: '花生', tableSideNeeds: '剪雞肉', busInfo: '車號 AB-123', notes: '靠窗',
+    batches: [
+      { id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12, note: '' },
+      { id: 'b2', label: '第二梯', timeSlot: '12:30', tableNumbers: ['103'], guests: 8, note: '' },
+    ],
+  }
+
+  it('保留旅行社/導遊/人數/特殊需求/梯次結構與場次', () => {
+    const d = group.cloneGroupForDuplicate(source)
+    expect(d.agencyId).toBe('AG1')
+    expect(d.guideName).toBe('李導')
+    expect(d.counts).toEqual(source.counts)
+    expect(d.allergyText).toBe('花生')
+    expect(d.batches.map(b => b.timeSlot)).toEqual(['11:00', '12:30'])
+    expect(d.batches.map(b => b.guests)).toEqual([12, 8])
+  })
+
+  it('清空 tableNumbers、重生 batch id、spend 歸零、status=planned、無 id', () => {
+    const d = group.cloneGroupForDuplicate(source)
+    expect(d.batches.every(b => b.tableNumbers.length === 0)).toBe(true)
+    expect(d.batches.map(b => b.id)).not.toEqual(['b1', 'b2'])
+    expect(d.spend).toBe(0)
+    expect(d.status).toBe('planned')
+    expect(d.id).toBeUndefined()
+  })
+
+  it('可改日期；未給則沿用來源日期', () => {
+    expect(group.cloneGroupForDuplicate(source).date).toBe('2026-06-09')
+    expect(group.cloneGroupForDuplicate(source, { date: '2026-07-01' }).date).toBe('2026-07-01')
+  })
+
+  it('來源無梯次 → 補一個預設第一梯', () => {
+    const d = group.cloneGroupForDuplicate({ ...source, batches: [] })
+    expect(d.batches).toHaveLength(1)
+    expect(d.batches[0].tableNumbers).toEqual([])
+  })
+
+  it('null 來源 → null', () => {
+    expect(group.cloneGroupForDuplicate(null)).toBeNull()
+  })
+})

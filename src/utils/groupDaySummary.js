@@ -17,6 +17,26 @@ import { seatingForSlot } from './timeSlots'
 
 const NO_SEATING = '__none__' // 對不到任何場次的梯次桶鍵
 
+// === 常用旅行社（給「新增團單」快速快選 chip）===
+// 純由 groupReservations 即時彙算，不另存計數器。依 agencyId 計團數（可限近 N 天，排除取消），
+// 取前 limit 名、過濾已封存，回傳 agency 物件陣列。
+export function frequentAgencies(groupReservations = [], agencies = [], { sinceDate = null, limit = 5 } = {}) {
+  const byId = {}
+  ;(groupReservations || []).forEach(g => {
+    if (!g.agencyId || g.status === 'cancelled') return
+    if (sinceDate && g.date && g.date < sinceDate) return
+    byId[g.agencyId] = (byId[g.agencyId] || 0) + 1
+  })
+  const agencyById = {}
+  ;(agencies || []).forEach(a => { agencyById[a.id] = a })
+  return Object.entries(byId)
+    .map(([id, count]) => ({ agency: agencyById[id], count }))
+    .filter(x => x.agency && !x.agency.archived)
+    .sort((a, b) => b.count - a.count || String(a.agency.name || '').localeCompare(String(b.agency.name || '')))
+    .slice(0, Math.max(0, limit))
+    .map(x => x.agency)
+}
+
 // 整天公休？（只讀設定，非座位運算，故可在此判定）
 function isDayClosed(settings, date) {
   const cd = settings?.closures?.closedDates

@@ -75,18 +75,34 @@ export default function GroupPlanningView({ onGoToday }) {
     setEditorIsNew(false)
   }
 
-  const openNewDraft = () => {
+  // seatingId 可選：由當日總覽的「某場次 ＋新增團單」帶入，預先鎖定主梯次的場次（= 場次.start）。
+  // 注意 Hero 的純「新增團單」按鈕會把事件物件當參數傳入，故先正規化成字串或 null。
+  const openNewDraft = (seatingId) => {
+    const sid = typeof seatingId === 'string' ? seatingId : null
+    const seating = sid ? (settings.seatings || []).find(s => s.id === sid) : null
     const firstBatchId = 'BT' + Date.now().toString(36)
     setEditorGroup({
       date: selectedDate,
       schemaVersion: groupReservationService.GROUP_SCHEMA_VERSION,
       agencyId: null, agencyName: '', guideId: null, guideName: '', guidePhone: '',
-      batches: [{ id: firstBatchId, label: '第一梯', timeSlot: slots[0] || '11:00', tableNumbers: [], guests: 0, note: '' }],
+      batches: [{ id: firstBatchId, label: '第一梯', timeSlot: seating?.start || slots[0] || '11:00', tableNumbers: [], guests: 0, note: '' }],
       counts: { total: 0, vegetarian: 0, child: 0, mobility: 0, wheelchair: 0 },
       allergyText: '', tableSideNeeds: '', busInfo: '', notes: '', spend: 0,
       status: 'planned',
     })
     setEditorIsNew(true)
+  }
+
+  // 複製團單為新草稿（清空桌號，須重新圈桌）。
+  const duplicateGroupToDraft = (sourceId, targetDate) => {
+    const src = groupReservations.find(g => g.id === sourceId)
+    if (!src) return
+    const target = targetDate || selectedDate
+    const draft = groupReservationService.cloneGroupForDuplicate(src, { date: target })
+    if (target !== selectedDate) setSelectedDate(target)
+    setEditorGroup(draft)
+    setEditorIsNew(true)
+    toast.info('已複製為新團單草稿，請重新圈桌後儲存')
   }
 
   const backToConsole = () => { setEditorGroup(null); setEditorIsNew(false) }
@@ -105,6 +121,7 @@ export default function GroupPlanningView({ onGoToday }) {
         bookings={bookings}
         agencies={agencies}
         guides={guides}
+        groupReservations={groupReservations}
         onBack={backToConsole}
         onSaved={backToConsole}
         onDeleted={backToConsole}
@@ -135,6 +152,7 @@ export default function GroupPlanningView({ onGoToday }) {
         isToday={selectedDate === today}
         onSelectGroup={openExisting}
         onNewGroup={openNewDraft}
+        onDuplicate={duplicateGroupToDraft}
         onGoToday={onGoToday}
         onPrintSheet={() => setSheetOpen(true)}
       />
