@@ -5,8 +5,7 @@ import BottomNav from '../components/layout/BottomNav'
 import OperationsView from '../components/admin/OperationsView'
 import PlanningView from '../components/admin/planning/PlanningView'
 import BookingsView from '../components/admin/BookingsView'
-import CustomersView from '../components/admin/CustomersView'
-import GroupDirectoryView from '../components/admin/group/GroupDirectoryView'
+import RosterView from '../components/admin/roster/RosterView'
 import SettingsView from '../components/admin/SettingsView'
 import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
@@ -17,8 +16,7 @@ const TABS = [
   { key: 'ops',       label: '現場',  icon: '🪑', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
   { key: 'planning',  label: '規劃',  icon: '🗺️', subtitle: '月曆 · 當日總覽 · 排位地圖 · 團體預排' },
   { key: 'bookings',  label: '訂位',  icon: '📋', subtitle: '散客 · 今日 · 日曆 · 新增',   badgeKey: 'bookings' },
-  { key: 'customers', label: '顧客',  icon: '👥', subtitle: '顧客檔 · VIP · 黑名單' },
-  { key: 'group',     label: '團體',  icon: '🚌', subtitle: '旅行社名冊 · 歷史' },
+  { key: 'roster',    label: '名冊',  icon: '👥', subtitle: '顧客檔 · VIP · 旅行社 · 導遊' },
   { key: 'settings',  label: '設定',  icon: '⚙️', subtitle: '營業時段 · 桌位 · 帳號' },
 ]
 
@@ -145,8 +143,7 @@ export default function AdminPage() {
               {tab === 'bookings' && (
                 <BookingsView onAssignTable={handleAssignTable} />
               )}
-              {tab === 'customers' && <CustomersView />}
-              {tab === 'group' && <GroupDirectoryView />}
+              {tab === 'roster' && <RosterView />}
               {tab === 'settings' && <SettingsView />}
           </div>
         </main>
