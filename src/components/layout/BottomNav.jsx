@@ -1,8 +1,11 @@
 // 手機版底部導航（lg 以下顯示）
+// Tailwind 無法動態拼 class 字串，欄數需顯式對照；依分頁數選欄數讓所有籤保持單行
+const COLS = { 4: 'grid-cols-4', 5: 'grid-cols-5', 6: 'grid-cols-6', 7: 'grid-cols-7' }
+
 export default function BottomNav({ tabs, active, onChange, badges = {} }) {
   return (
     <nav className="lg:hidden safe-bottom fixed bottom-0 inset-x-0 z-30 border-t border-chicken-brown/10 bg-white/95 shadow-[0_-6px_18px_rgba(58,46,38,0.08)] backdrop-blur">
-      <div className="grid grid-cols-5 gap-1 px-2 py-1.5">
+      <div className={`grid ${COLS[tabs.length] || 'grid-cols-5'} gap-1 px-2 py-1.5`}>
         {tabs.map(t => {
           const isActive = active === t.key
           const badge = t.badgeKey ? badges[t.badgeKey] : 0
