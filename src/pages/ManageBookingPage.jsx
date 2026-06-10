@@ -19,7 +19,7 @@ import { Button, Input, Textarea, Badge, SlotSkeleton } from '../components/ui'
 import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
-import { lineBindUrl } from '../services/lineService'
+import { lineBindUrl, lineOfficialUrl, resendLineBooking } from '../services/lineService'
 import { guestCancelBooking, guestGetAvailability, guestGetBooking, guestUpdateBooking } from '../services/cloudDataService'
 import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
 import { isValidTwPhone } from '../utils/validation'
@@ -445,19 +445,73 @@ function LockedPanel({ reason, booking }) {
   )
 }
 
+// LINE 卡片三態：未綁定 → 綁定 CTA；已綁定 → 顯示帳號 + 重新傳送；推播被拒 → 重加好友引導。
+function LineStatusCard({ booking, settings }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+
+  if (booking.linePushBlocked) {
+    return (
+      <div className="surface flex min-h-[118px] flex-col justify-between border border-chicken-yellow/40 bg-chicken-yellow/5 p-4">
+        <AlertTriangle className="text-chicken-yellow" size={24} />
+        <div>
+          <div className="font-black text-chicken-brown">LINE 通知暫時無法送達</div>
+          <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">請重新加入官方帳號好友，加入後會自動補發訂位資訊</div>
+          {lineOfficialUrl(settings) && (
+            <a href={lineOfficialUrl(settings)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-black text-[#06A848] underline">
+              重新加入好友
+            </a>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (booking.lineUserId) {
+    const resend = async () => {
+      setBusy(true)
+      try {
+        const r = await resendLineBooking(settings, booking)
+        if (!r.ok) return toast.error('傳送失敗，請稍後再試')
+        toast.success(r.skipped ? '剛剛已傳送過，請查看 LINE' : '已重新傳送訂位資訊到您的 LINE')
+      } finally {
+        setBusy(false)
+      }
+    }
+    return (
+      <div className="surface flex min-h-[118px] flex-col justify-between p-4">
+        <CheckCircle2 className="text-[#06C755]" size={24} />
+        <div>
+          <div className="font-black text-chicken-brown">
+            已綁定 LINE{booking.lineDisplayName ? `：${booking.lineDisplayName}` : ''}
+          </div>
+          <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">訂位異動會自動推播到您的 LINE</div>
+          <button type="button" onClick={resend} disabled={busy} className="mt-2 text-sm font-black text-[#06A848] underline disabled:opacity-50">
+            {busy ? '傳送中...' : '重新傳送訂位資訊'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
+      <MessageCircle className="text-[#06C755]" size={24} />
+      <div>
+        <div className="font-black text-chicken-brown">綁定 LINE 訂位通知</div>
+        <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">加好友 → 一鍵綁定，訂位卡片與異動自動傳到 LINE</div>
+      </div>
+    </a>
+  )
+}
+
 function ActionGrid({ setMode, booking, settings }) {
   return (
     <section className="grid gap-3 sm:grid-cols-3">
       <ActionCard icon={CalendarDays} title="修改日期 / 時間 / 人數" hint="重新挑選可訂時段" onClick={() => setMode('schedule')} />
       <ActionCard icon={Edit3} title="修改聯絡資訊 / 備註" hint="調整姓名、電話、特殊需求" onClick={() => setMode('details')} />
       <ActionCard icon={Trash2} title="取消訂位" hint="提供原因並釋出座位" danger onClick={() => setMode('cancel')} />
-      <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
-        <MessageCircle className="text-[#06C755]" size={24} />
-        <div>
-          <div className="font-black text-chicken-brown">綁定 LINE 訂位通知</div>
-          <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">加好友 → 一鍵綁定，訂位卡片與異動自動傳到 LINE</div>
-        </div>
-      </a>
+      <LineStatusCard booking={booking} settings={settings} />
       {settings.storePhone ? (
         <a href={`tel:${settings.storePhone}`} className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
           <Phone className="text-chicken-red" size={24} />
@@ -586,10 +640,18 @@ function SuccessPanel({ booking, settings, onBack }) {
       <h2 className="mt-3 text-xl font-black text-chicken-brown">訂位已更新</h2>
       <p className="mt-2 text-sm leading-6 text-chicken-brown/60">同仁端已同步收到新的訂位內容。</p>
       <div className="mt-5 grid gap-2">
-        <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">綁定 LINE 訂位通知</a>
-        <p className="text-xs font-bold leading-5 text-chicken-brown/55">
-          已綁定的訂位異動會自動推播到 LINE；尚未綁定可點上方按鈕（先加好友再綁定）。
-        </p>
+        {booking.lineUserId && !booking.linePushBlocked ? (
+          <p className="rounded-xl bg-[#06C755]/10 px-3 py-2 text-sm font-black text-[#06A848]">
+            ✓ 已綁定 LINE{booking.lineDisplayName ? `（${booking.lineDisplayName}）` : ''}，最新訂位卡片已自動傳送
+          </p>
+        ) : (
+          <>
+            <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">綁定 LINE 訂位通知</a>
+            <p className="text-xs font-bold leading-5 text-chicken-brown/55">
+              已綁定的訂位異動會自動推播到 LINE；尚未綁定可點上方按鈕（先加好友再綁定）。
+            </p>
+          </>
+        )}
         <button onClick={onBack} className="text-sm font-bold text-chicken-brown/60 underline">回訂位管理中心</button>
       </div>
     </section>

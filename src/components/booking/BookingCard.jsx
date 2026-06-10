@@ -188,6 +188,20 @@ export default function BookingCard({ booking, onAssign, onClick }) {
                 取消原因：{booking.cancellationReason.reason}
               </span>
             )}
+            {/* LINE 綁定/送達狀態：被拒（封鎖/非好友）紅、已綁定綠（附最近通知結果）*/}
+            {booking.linePushBlocked || booking.lineLastNotify?.status === 'failed' ? (
+              <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-black text-chicken-red" title="LINE 推播被拒或重試用盡，客人需重新加入官方帳號好友">
+                LINE 無法送達
+              </span>
+            ) : booking.lineUserId ? (
+              <span className="rounded-full bg-[#06C755]/10 px-2 py-0.5 font-black text-[#06A848]" title={booking.lineDisplayName ? `LINE：${booking.lineDisplayName}` : 'LINE 已綁定'}>
+                LINE ✓{booking.lineLastNotify?.status === 'sent'
+                  ? ` 已送達 ${fmtTime(booking.lineLastNotify.at)}`
+                  : booking.lineLastNotify?.status === 'pending'
+                  ? ' 通知重試中'
+                  : ''}
+              </span>
+            ) : null}
             {/* 2. 操作線索（綠/黃）居中 */}
             {suggestion && (
               <span className="rounded-full border border-chicken-green/40 bg-chicken-green/10 px-2 py-0.5 font-black text-chicken-green">

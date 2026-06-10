@@ -106,3 +106,22 @@ export async function fetchLineBooking(settings = {}, bookingId, token) {
     return { ok: false, error: err.message || 'Load failed' }
   }
 }
+
+// 已綁定者「重新傳送訂位資訊到 LINE」：打 linePushBooking 端點（manageToken 驗證 +
+// 後端 90 秒事件級防重，連點不會洗版）。type 固定 confirmed = 重發當前訂位卡片。
+export async function resendLineBooking(settings = {}, booking) {
+  const endpoint = linePushEndpoint(settings)
+  if (!endpoint || !booking?.id) return { ok: false, reason: 'not-configured' }
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookingId: booking.id, token: booking.manageToken || '', type: 'confirmed' }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.ok === false) return { ok: false, error: data.error || `HTTP ${res.status}` }
+    return { ok: true, skipped: !!data.skippedPush }
+  } catch (err) {
+    return { ok: false, error: err.message || 'resend-failed' }
+  }
+}
