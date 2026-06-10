@@ -18,6 +18,11 @@ import {
   isOverAutoCloseThreshold,
   isPastSessionCutoff,
 } from './lib/onlineGuards.js'
+import {
+  normalizeStaffEmail,
+  resolveStaffRole,
+  validateStaffUpsert,
+} from './lib/staffAccess.js'
 
 initializeApp()
 
@@ -30,7 +35,9 @@ const STAFF_EMAILS = String(process.env.ADMIN_EMAILS || 'berrylin0911@gmail.com'
   .map(s => s.trim().toLowerCase())
   .filter(Boolean)
 
-// 驗證請求帶有有效的 Firebase ID Token，且 email 在員工白名單內。
+// 驗證請求帶有有效的 Firebase ID Token，且 email 是有效員工。
+// 員工兩個來源：(1) 環境變數白名單（固定管理員，role 一律 manager，永遠有效——
+// 防 admins 集合誤刪後完全鎖死）；(2) Firestore admins 集合（後台動態新增，毋須重新部署）。
 // 失敗時丟出帶 status 的錯誤，由各端點轉成 401/403。
 async function requireStaff(req) {
   const header = req.get('authorization') || req.get('Authorization') || ''
@@ -43,8 +50,18 @@ async function requireStaff(req) {
     throw errorWithStatus('invalid-auth-token', 401)
   }
   const email = String(decoded.email || '').toLowerCase()
-  if (!email || !STAFF_EMAILS.includes(email)) throw errorWithStatus('not-authorized', 403)
-  return { uid: decoded.uid, email }
+  if (!email) throw errorWithStatus('not-authorized', 403)
+  if (STAFF_EMAILS.includes(email)) return { uid: decoded.uid, email, role: 'manager', source: 'env' }
+  try {
+    const snap = await db.collection('admins').doc(email).get()
+    if (snap.exists && snap.data().active !== false) {
+      return { uid: decoded.uid, email, role: resolveStaffRole(snap.data().role), source: 'db' }
+    }
+  } catch (err) {
+    // 查詢失敗（非「不存在」）時保守拒絕，但留 log 供排查。
+    console.error('admins lookup failed:', err)
+  }
+  throw errorWithStatus('not-authorized', 403)
 }
 const LINE_CHANNEL_ACCESS_TOKEN = defineSecret('LINE_CHANNEL_ACCESS_TOKEN')
 const LINE_CHANNEL_SECRET = defineSecret('LINE_CHANNEL_SECRET')
@@ -156,6 +173,79 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
   } catch (err) {
     console.error('adminPushData failed:', err)
     return res.status(500).json({ ok: false, error: err.message || 'admin-push-failed' })
+  }
+})
+
+// 員工身分查詢：前端登入後用來確認「這個 Google 帳號是不是有效員工、角色為何」。
+// 動態管理員（admins 集合）不在前端建置期環境變數內，必須靠這支在執行期判斷。
+export const staffWhoAmI = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+  if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  try {
+    const staff = await requireStaff(req)
+    return res.json({ ok: true, email: staff.email, role: staff.role, source: staff.source })
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
+  }
+})
+
+// 管理員帳號管理（僅店長）：list / upsert / remove。
+// 刻意不走 adminPushData 同步管線：admins 集合只能經過這支「後端角色硬檢查」的端點寫入，
+// 避免任何已登入員工都能用開放的 push 端點自抬權限。
+export const adminManageStaff = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  let staff
+  try {
+    staff = await requireStaff(req)
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
+  }
+  if (staff.role !== 'manager') {
+    return res.status(403).json({ ok: false, error: '僅店長可管理管理員帳號' })
+  }
+  try {
+    const { action, email, role, name } = req.body || {}
+
+    if (action === 'list') {
+      const snap = await db.collection('admins').get()
+      const admins = snap.docs
+        .map(d => ({ email: d.id, ...d.data() }))
+        .sort((a, b) => a.email.localeCompare(b.email))
+      return res.json({ ok: true, envAdmins: STAFF_EMAILS, admins })
+    }
+
+    if (action === 'upsert') {
+      const clean = validateStaffUpsert({ email, role, name })
+      if (!clean.ok) return res.status(400).json({ ok: false, error: clean.error })
+      if (STAFF_EMAILS.includes(clean.value.email)) {
+        return res.status(400).json({ ok: false, error: '此帳號為固定管理員（部署白名單），毋須新增' })
+      }
+      const now = new Date().toISOString()
+      const ref = db.collection('admins').doc(clean.value.email)
+      const prev = await ref.get()
+      await ref.set({
+        email: clean.value.email,
+        role: clean.value.role,
+        name: clean.value.name,
+        active: true,
+        addedBy: prev.exists ? (prev.data().addedBy || staff.email) : staff.email,
+        createdAt: prev.exists ? (prev.data().createdAt || now) : now,
+        updatedAt: now,
+      })
+      return res.json({ ok: true })
+    }
+
+    if (action === 'remove') {
+      const norm = normalizeStaffEmail(email)
+      if (!norm) return res.status(400).json({ ok: false, error: 'email 格式不正確' })
+      if (norm === staff.email) return res.status(400).json({ ok: false, error: '不能移除自己的帳號' })
+      await db.collection('admins').doc(norm).delete()
+      return res.json({ ok: true })
+    }
+
+    return res.status(400).json({ ok: false, error: 'unknown-action' })
+  } catch (err) {
+    console.error('adminManageStaff failed:', err)
+    return res.status(500).json({ ok: false, error: err.message || 'manage-staff-failed' })
   }
 })
 

@@ -329,6 +329,25 @@ export async function groupReserveTables(group) {
   })
 }
 
+// 員工身分查詢（登入流程用）：可帶明確 token（AuthContext 在 BookingContext 注入
+// token provider 之前就要呼叫，不能依賴 authHeader 的注入時序）。
+export async function staffWhoAmI(token) {
+  return requestJson(endpoint('staffWhoAmI'), {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : await authHeader(),
+    body: JSON.stringify({}),
+  })
+}
+
+// 管理員帳號管理（僅店長；後端硬性檢查角色）。payload: { action: 'list'|'upsert'|'remove', email, role, name }
+export async function adminManageStaff(payload) {
+  return requestJson(endpoint('adminManageStaff'), {
+    method: 'POST',
+    headers: await authHeader(),
+    body: JSON.stringify(payload || {}),
+  })
+}
+
 export async function guestGetAvailability(date) {
   return requestJson(endpoint('guestGetAvailability'), {
     method: 'POST',

@@ -3,6 +3,7 @@ import {
   auth, googleProvider, isFirebaseConfigured,
   signInWithPopup, signOut as fbSignOut, onAuthStateChanged, getIdToken,
 } from '../services/firebase'
+import { staffWhoAmI } from '../services/cloudDataService'
 
 const STORAGE_KEY = 'chicken_auth_v1'
 
@@ -76,15 +77,29 @@ const PERMISSIONS = {
 
 const AuthContext = createContext(null)
 
-function buildUser(email, displayName) {
+function buildUser(email, displayName, roleOverride) {
   const e = (email || '').trim().toLowerCase()
-  const role = ROLE_MAP[e] || DEFAULT_ROLE
+  const role = roleOverride || ROLE_MAP[e] || DEFAULT_ROLE
   return {
     email: e,
     displayName: displayName || e.split('@')[0],
     role,
     roleLabel: ROLE_LABELS[role] || role,
     loggedAt: new Date().toISOString(),
+  }
+}
+
+// 動態管理員驗證：email 不在建置期白名單時，拿 ID Token 問後端 staffWhoAmI
+// （admins 集合由店長在後台「管理員帳號」維護，毋須改環境變數重新部署）。
+// 回 { ok, role } 或 null（非員工 / 查詢失敗）。
+async function verifyDynamicStaff() {
+  try {
+    const token = await getIdToken()
+    if (!token) return null
+    const info = await staffWhoAmI(token)
+    return info?.ok ? info : null
+  } catch {
+    return null
   }
 }
 
@@ -95,15 +110,25 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     // 正式模式：交由 Firebase Auth 維護登入狀態（onAuthStateChanged）。
     if (isFirebaseConfigured) {
-      const unsub = onAuthStateChanged(auth, (fbUser) => {
+      const unsub = onAuthStateChanged(auth, async (fbUser) => {
         const email = (fbUser?.email || '').toLowerCase()
         // 前端白名單只負責 UI；真正的權限由後端 requireStaff 二次把關。
         if (fbUser && ALLOWED_EMAILS.includes(email)) {
           setUser(buildUser(email, fbUser.displayName))
-        } else {
-          if (fbUser) fbSignOut(auth).catch(() => {})
-          setUser(null)
+          setLoading(false)
+          return
         }
+        // 不在建置期白名單 → 可能是後台動態新增的管理員，問後端確認後才放行/登出。
+        if (fbUser && email) {
+          const info = await verifyDynamicStaff()
+          if (info) {
+            setUser(buildUser(email, fbUser.displayName, info.role))
+            setLoading(false)
+            return
+          }
+        }
+        if (fbUser) fbSignOut(auth).catch(() => {})
+        setUser(null)
         setLoading(false)
       })
       return unsub
@@ -121,12 +146,15 @@ export function AuthProvider({ children }) {
     if (isFirebaseConfigured) {
       const result = await signInWithPopup(auth, googleProvider)
       const e = (result.user?.email || '').toLowerCase()
-      if (!ALLOWED_EMAILS.includes(e)) {
-        await fbSignOut(auth).catch(() => {})
-        throw new Error('此 Google 帳號未授權，請聯絡店長加入白名單')
+      if (ALLOWED_EMAILS.includes(e)) {
+        // onAuthStateChanged 會接手設定 user
+        return buildUser(e, result.user?.displayName)
       }
-      // onAuthStateChanged 會接手設定 user
-      return buildUser(e, result.user?.displayName)
+      // 動態管理員：後端 admins 集合說了算（店長在後台「管理員帳號」新增即可登入）。
+      const info = await verifyDynamicStaff()
+      if (info) return buildUser(e, result.user?.displayName, info.role)
+      await fbSignOut(auth).catch(() => {})
+      throw new Error('此 Google 帳號未授權，請聯絡店長在後台「設定 → 管理員帳號」新增')
     }
     const e = (email || '').trim().toLowerCase()
     if (!e) throw new Error('請輸入 email')
