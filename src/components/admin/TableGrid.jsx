@@ -3,7 +3,7 @@ import { Card } from '../ui'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { totalActiveSeats } from '../../utils/capacity'
-import { isTableOutOnDate, outageLabel } from '../../utils/tableAvailability'
+import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../utils/tableAvailability'
 import { todayStr } from '../../utils/timeSlots'
 
 export default function TableGrid() {
@@ -25,8 +25,9 @@ export default function TableGrid() {
     const fourActive = four.filter(t => t.isActive).length
     const sixActive = six.filter(t => t.isActive).length
     const seats = totalActiveSeats(tables)
-    const outToday = tables.filter(t => t.isActive && isTableOutOnDate(t, today)).length
-    return { fourActive, fourTotal: four.length, sixActive, sixTotal: six.length, seats, outToday }
+    const outTables = tables.filter(t => t.isActive && isTableOutOnDate(t, today))
+    const outSeats = outTables.reduce((s, t) => s + (Number(t.capacity) || 0), 0)
+    return { fourActive, fourTotal: four.length, sixActive, sixTotal: six.length, seats, outToday: outTables.length, outSeats }
   }, [tables, today])
 
   const fourSeaters = tables.filter(t => t.capacity === 4)
@@ -39,7 +40,9 @@ export default function TableGrid() {
 
   const renderTable = (t, activeClass) => {
     const out = isTableOutOnDate(t, today)
-    const upcoming = !out && t.outage ? outageLabel(t, today) : ''
+    // 只有「未來」的維修窗標為排定；過期紀錄不再顯示（normalizeOutage 過濾壞資料）
+    const o = normalizeOutage(t.outage)
+    const upcoming = !out && o && o.from > today ? outageLabel(t, today) : ''
     return (
       <button
         key={t.number}
@@ -77,7 +80,7 @@ export default function TableGrid() {
           </div>
         </div>
         {stats.outToday > 0 && (
-          <p className="mt-2 text-center text-xs font-bold text-orange-600">🛠 今日有 {stats.outToday} 桌維修中（容量已自動扣除；到現場頁點該桌可結束維修）</p>
+          <p className="mt-2 text-center text-xs font-bold text-orange-600">🛠 今日有 {stats.outToday} 桌維修中（今日實際可訂 {stats.seats - stats.outSeats} 位 = 上方 {stats.seats} − 維修 {stats.outSeats}；到現場頁點該桌可結束維修）</p>
         )}
       </Card>
 

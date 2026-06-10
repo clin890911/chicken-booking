@@ -81,6 +81,9 @@ export default function FloorMap({
   // 維修窗判定：規劃/統一視圖看該日期；今日即時圖看今天。
   const effectiveDate = mapDate || todayStr()
   const outNoteFor = (t) => isTableOutOnDate(t, effectiveDate) ? outageLabel(t, effectiveDate) : ''
+  // 即時圖：桌上有客人（跨午夜進維修窗、或同步進來的不一致狀態）時，真實桌況優先於維修置灰，
+  // 否則用餐計時/超時警示會從地圖上消失。空桌才整塊置灰。
+  const isOccupied = (t) => ['dining', 'reserved', 'cleaning'].includes(t.status) || !!t.currentBookingId || !!t.currentRef
 
   const bookingMap = useMemo(() => {
     const m = {}
@@ -168,7 +171,7 @@ export default function FloorMap({
             isJustAssigned={isJustAssigned}
             isDimmed={assignMode && !highlightTables.includes(t.number)}
             groupHoldLabel={holdLabel}
-            outNote={outNoteFor(t)}
+            outNote={isOccupied(t) ? '' : outNoteFor(t)}
             outClickable={!assignMode}
             onClick={() => onSelectTable(t.number)}
           />

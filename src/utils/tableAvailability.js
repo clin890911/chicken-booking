@@ -33,12 +33,14 @@ export function isTableUsableOnDate(table, date) {
 }
 
 // 顯示用：維修標籤文字，例如「維修 6/12 起」「維修至 6/15」「維修中」。
+// 已過期的窗（to < today）回空字串——過期紀錄不該再以任何形式標示為維修。
 export function outageLabel(table, today) {
   const o = normalizeOutage(table?.outage)
   if (!o) return ''
   const short = (d) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`
-  if (today && DATE_RE.test(today) && o.from > today) {
-    return o.to ? `維修 ${short(o.from)}–${short(o.to)}` : `維修 ${short(o.from)} 起`
+  if (today && DATE_RE.test(today)) {
+    if (o.to && o.to < today) return ''
+    if (o.from > today) return o.to ? `維修 ${short(o.from)}–${short(o.to)}` : `維修 ${short(o.from)} 起`
   }
   return o.to ? `維修至 ${short(o.to)}` : '維修中'
 }

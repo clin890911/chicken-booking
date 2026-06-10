@@ -208,15 +208,17 @@ export function unmergeTable(number) {
 export function summary() {
   const list = read()
   const today = todayStr()
-  const usable = (t) => t.isActive && !isTableOutOnDate(t, today)
+  // 維修/停用只剔除空著的桌；有客人的桌照常計入（避免在席數憑空消失）。
+  const counted = (t) => (t.isActive && !isTableOutOnDate(t, today))
+    || ['dining', 'reserved', 'cleaning'].includes(t.status) || t.currentBookingId || t.currentRef
   const counts = { vacant: 0, reserved: 0, dining: 0, cleaning: 0, blocked: 0 }
   let occupiedSeats = 0
   list.forEach(t => {
-    if (!usable(t)) return
+    if (!counted(t)) return
     counts[t.status] = (counts[t.status] || 0) + 1
     if (t.status === 'dining') occupiedSeats += t.capacity
   })
-  return { counts, occupiedSeats, total: list.filter(usable).length }
+  return { counts, occupiedSeats, total: list.filter(counted).length }
 }
 
 // === 重設 ===
@@ -249,8 +251,10 @@ export function addTable({ capacity = 4, floor = '1F', x = 200, y = 200 }) {
     x, y,
     ...tableDims(capacity),
     isActive: true,
+    outage: null,
     status: 'vacant',
     currentBookingId: null,
+    currentRef: null,
     seatedAt: null,
     mergedWith: null,
     blockReason: null,

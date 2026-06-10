@@ -477,7 +477,7 @@ describe('unmergeTable', () => {
 // 統計：summary
 // ============================================================
 describe('summary', () => {
-  it('只統計 isActive 桌位；dining 累計座位數', () => {
+  it('停用/維修只剔除空桌；有客人的桌照常計入（在席數不憑空消失）', () => {
     tableService.bulkWrite([
       mkTable({ number: 'A', status: 'vacant', capacity: 4, isActive: true }),
       mkTable({ number: 'B', status: 'reserved', capacity: 4, isActive: true }),
@@ -485,18 +485,22 @@ describe('summary', () => {
       mkTable({ number: 'D', status: 'dining', capacity: 4, isActive: true }),
       mkTable({ number: 'E', status: 'cleaning', capacity: 4, isActive: true }),
       mkTable({ number: 'F', status: 'blocked', capacity: 4, isActive: true }),
-      // 停用桌位：完全不計（即使 dining）
+      // 停用但仍有客人（遺留不一致狀態）：照常計入 dining，避免在席客人從統計上消失
       mkTable({ number: 'G', status: 'dining', capacity: 8, isActive: false }),
+      // 停用且空著：不計
+      mkTable({ number: 'H', status: 'vacant', capacity: 4, isActive: false }),
+      // 維修中且空著（今天在窗內）：不計
+      mkTable({ number: 'I', status: 'vacant', capacity: 4, isActive: true, outage: { from: '2026-06-15', to: '', reason: 'x' } }),
     ])
     const s = tableService.summary()
-    expect(s.counts).toEqual({ vacant: 1, reserved: 1, dining: 2, cleaning: 1, blocked: 1 })
-    expect(s.occupiedSeats).toBe(10) // 6 + 4，不含停用的 8
-    expect(s.total).toBe(6) // 只算 isActive
+    expect(s.counts).toEqual({ vacant: 1, reserved: 1, dining: 3, cleaning: 1, blocked: 1 })
+    expect(s.occupiedSeats).toBe(18) // 6 + 4 + 8（停用但用餐中的 G 仍計）
+    expect(s.total).toBe(7) // 6 張可用 + G（佔用中）；H/I 空著不計
   })
 
-  it('全部停用時 total=0、occupiedSeats=0', () => {
+  it('全部停用且空桌時 total=0、occupiedSeats=0', () => {
     tableService.bulkWrite([
-      mkTable({ number: 'A', status: 'dining', capacity: 4, isActive: false }),
+      mkTable({ number: 'A', status: 'vacant', capacity: 4, isActive: false }),
       mkTable({ number: 'B', status: 'vacant', capacity: 4, isActive: false }),
     ])
     const s = tableService.summary()

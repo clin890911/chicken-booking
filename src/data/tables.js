@@ -88,6 +88,9 @@ export const FIXTURES = {
 export const INITIAL_TABLES = [...FLOOR_1F, ...FLOOR_2F].map(t => ({
   ...t,
   isActive: true,
+  // 維修停用窗 { from, to, reason }；★ 必須顯式帶 null：Firestore merge-upsert
+  // 無法刪除「缺席」欄位，少了這個鍵，重設佈局後雲端殘留的 outage 會在下次拉取時復活。
+  outage: null,
   // 即時運營狀態（外場操作時更新；不影響 booking schema）
   status: 'vacant',         // vacant | reserved | dining | cleaning | blocked
   currentBookingId: null,   // 關聯到當前 reservation

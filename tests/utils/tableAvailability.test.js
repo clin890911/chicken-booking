@@ -87,4 +87,7 @@ describe('outageLabel（顯示文字）', () => {
     expect(client.outageLabel(T({ outage: { from: '2026-06-20', to: '2026-06-22' } }), '2026-06-10')).toBe('維修 6/20–6/22')
     expect(client.outageLabel(T(), '2026-06-10')).toBe('')
   })
+  it('已過期的窗回空字串（殘留紀錄不再標示為維修/排定）', () => {
+    expect(client.outageLabel(T({ outage: { from: '2026-06-01', to: '2026-06-05' } }), '2026-06-10')).toBe('')
+  })
 })

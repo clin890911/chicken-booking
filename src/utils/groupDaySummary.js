@@ -99,6 +99,8 @@ export function summarizeGroupDay(groupReservations = [], tables = [], date, set
     bySeating,
     overCapacityGroupOnly,
     closed: isDayClosed(settings, date),
+    // 該日可用總席（已扣停用/維修桌）：月曆熱度比的正確分母（容量現在會按日期變動）。
+    totalSeats,
   }
 }
 

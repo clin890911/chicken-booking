@@ -55,7 +55,9 @@ export default function GroupCalendar({ value, onSelect, cursor, onCursorChange,
           const hasGroups = !!s && s.groupCount > 0
           const w = walkinByDate?.[dateStr]
           const hasWalkins = !!w && w.count > 0
-          const ratio = totalSeats > 0 && s ? Math.min(1, s.heldSeats / totalSeats) : 0
+          // 分母優先用該日的可用席（summarizeGroupDay 已扣維修/停用桌）；退回全店概略值
+          const denom = s?.totalSeats ?? totalSeats
+          const ratio = denom > 0 && s ? Math.min(1, s.heldSeats / denom) : 0
           const barColor = s?.overCapacityGroupOnly || ratio >= 0.75 ? '#e60012' : ratio >= 0.4 ? '#f29100' : '#9eb63a'
 
           const bg = isSelected ? 'bg-chicken-red'
