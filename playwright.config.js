@@ -19,7 +19,17 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    // 桌面主力：跑全部非 @mobile 測試。
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } },
+      grepInvert: /@mobile/,
+    },
+    // 手機：只跑標記 @mobile 的測試。顧客在手機上實際使用的是 MobileActionBar 固定底欄
+    // （桌面摘要卡 lg 以下隱藏），2026-06 手機白屏 bug（PR #19）在桌面 viewport 永遠測不到，
+    // 故補真機尺寸並跑雙引擎（chromium + webkit≒iOS Safari）。
+    { name: 'mobile-chromium', use: { ...devices['Pixel 7'] }, grep: /@mobile/ },
+    { name: 'mobile-webkit', use: { ...devices['iPhone 14'] }, grep: /@mobile/ },
   ],
   webServer: {
     command: 'npm run dev',
