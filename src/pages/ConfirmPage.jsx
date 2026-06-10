@@ -249,23 +249,43 @@ export default function ConfirmPage() {
           </div>
 
           <div className="mt-3 grid gap-2">
-            {lineFriendUrl ? (
-              <a href={lineFriendUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755]">
-                ① 加入 {lineOfficialName} 好友
-              </a>
+            {/* 已綁定（頁面重新整理走 guestGetBooking 才會有此狀態）→ 顯示綁定成功取代重複的加入流程 */}
+            {b.lineUserId && !b.linePushBlocked ? (
+              <div className="rounded-xl bg-white/80 px-3 py-2.5 text-sm font-black text-[#06A848]">
+                ✓ 已綁定 LINE{b.lineDisplayName ? `（${b.lineDisplayName}）` : ''}，訂位卡片與異動會自動傳送
+              </div>
+            ) : b.linePushBlocked ? (
+              <>
+                <div className="rounded-xl bg-chicken-yellow/15 px-3 py-2.5 text-sm font-black text-chicken-brown">
+                  ⚠ LINE 通知暫時無法送達，請重新加入官方帳號好友（加入後會自動補發）
+                </div>
+                {lineFriendUrl && (
+                  <a href={lineFriendUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755]">
+                    重新加入 {lineOfficialName} 好友
+                  </a>
+                )}
+              </>
             ) : (
-              <button className="btn-primary w-full opacity-70" disabled>
-                LINE 官方帳號尚未設定
-              </button>
+              <>
+                {lineFriendUrl ? (
+                  <a href={lineFriendUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755]">
+                    ① 加入 {lineOfficialName} 好友
+                  </a>
+                ) : (
+                  <button className="btn-primary w-full opacity-70" disabled>
+                    LINE 官方帳號尚未設定
+                  </button>
+                )}
+                {lineReceiveUrl && (
+                  <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
+                    ② 綁定訂位通知（自動傳送訂位卡片）
+                  </a>
+                )}
+                <div className="rounded-xl bg-white/80 px-3 py-2 text-xs font-bold leading-5 text-chicken-brown/60">
+                  先加好友再綁定，訂位卡片才能送達。若先綁定才加好友也沒關係——加入好友後會自動補發訂位資訊。
+                </div>
+              </>
             )}
-            {lineReceiveUrl && (
-              <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
-                ② 綁定訂位通知（自動傳送訂位卡片）
-              </a>
-            )}
-            <div className="rounded-xl bg-white/80 px-3 py-2 text-xs font-bold leading-5 text-chicken-brown/60">
-              先加好友再綁定，訂位卡片才能送達。若先綁定才加好友也沒關係——加入好友後會自動補發訂位資訊。
-            </div>
             <Link to={`/manage/${b.id}?token=${encodeURIComponent(b.manageToken || '')}`} className="btn-yellow w-full text-center">
               管理 / 修改我的訂位
             </Link>

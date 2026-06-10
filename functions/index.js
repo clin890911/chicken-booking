@@ -1619,6 +1619,7 @@ async function sendOutboxDoc(ref, data) {
   const now = new Date().toISOString()
   if (result.ok) {
     await ref.set({ status: 'sent', sentAt: now, lastError: null, nextAttemptAt: null }, { merge: true })
+    await mirrorLineNotifyStatus(data, { event: data.event || 'unknown', status: 'sent', at: now })
     return result
   }
   const attempts = (Number(data.attempts) || 0) + 1
@@ -1633,6 +1634,7 @@ async function sendOutboxDoc(ref, data) {
       ...(result.retryable === false ? { nonRetryable: true } : {}),
     }, { merge: true })
     console.error('NOTIFICATION_DEAD_LETTER', { id: ref.id, channel: data.channel, event: data.event, error: result.error })
+    await mirrorLineNotifyStatus(data, { event: data.event || 'unknown', status: 'failed', at: now, error: String(result.error || '').slice(0, 200) })
     if (data.channel === 'line' && data.bookingId && Number(result.httpStatus) >= 400 && Number(result.httpStatus) < 500) {
       await markLinePushBlocked(data.bookingId, result.error, now)
     }
@@ -1640,8 +1642,19 @@ async function sendOutboxDoc(ref, data) {
     const backoff = NOTIFICATION_BACKOFF_MS[Math.min(attempts - 1, NOTIFICATION_BACKOFF_MS.length - 1)]
     const nextAttemptAt = new Date(Date.now() + backoff).toISOString()
     await ref.set({ status: 'pending', attempts, lastError: result.error, nextAttemptAt }, { merge: true })
+    await mirrorLineNotifyStatus(data, { event: data.event || 'unknown', status: 'pending', at: now, error: String(result.error || '').slice(0, 200) })
   }
   return result
+}
+
+// 把 LINE 通知的最新送達狀態鏡像到 booking 文件（lineLastNotify），
+// 經 adminPullData 既有差異同步管線自然流到店員端顯示「已送達/重試中/失敗」。
+// 用 update：booking 已刪除就靜默跳過，不憑空創檔。
+async function mirrorLineNotifyStatus(data, payload) {
+  if (data.channel !== 'line' || !data.bookingId) return
+  await db.collection(COLLECTIONS.bookings).doc(data.bookingId)
+    .update({ lineLastNotify: payload, updatedAt: payload.at })
+    .catch(() => {})
 }
 
 // LINE 拒推（封鎖/非好友/無效 user）→ 標記綁定與訂位鏡像旗標。

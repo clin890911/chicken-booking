@@ -896,3 +896,44 @@ describe('資料隔離（每測試從乾淨狀態開始）', () => {
     expect(localStorage.getItem(NOSHOW_KEY)).toBeNull()
   })
 })
+
+describe('upsertFromRemote：LINE 欄位 round-trip 保存（repo 已知坑型：固定欄位白名單剝欄位）', () => {
+  it('lineUserId / lineDisplayName / linePushBlocked / lineLastNotify 經 upsert 後完整保留', () => {
+    const remote = {
+      id: 'B-LINE-1',
+      name: '綁定客人',
+      phone: '0911222333',
+      guests: 2,
+      date: '2026-06-20',
+      timeSlot: '18:00',
+      status: 'confirmed',
+      manageToken: 'tok-1',
+      lineUserId: 'U-abc',
+      lineDisplayName: '小綠',
+      linePushBlocked: true,
+      lineLastNotify: { event: 'updated', status: 'failed', at: '2026-06-15T10:00:00.000Z', error: 'line-403' },
+    }
+    bookingService.upsertFromRemote(remote)
+    const saved = bookingService.getById('B-LINE-1')
+    expect(saved.lineUserId).toBe('U-abc')
+    expect(saved.lineDisplayName).toBe('小綠')
+    expect(saved.linePushBlocked).toBe(true)
+    expect(saved.lineLastNotify).toEqual(remote.lineLastNotify)
+  })
+
+  it('二次 upsert（雲端更新送達狀態）覆蓋舊值而不丟其他欄位', () => {
+    bookingService.upsertFromRemote({
+      id: 'B-LINE-2', name: 'A', phone: '0911', guests: 2, date: '2026-06-21', timeSlot: '12:00',
+      manageToken: 't', lineUserId: 'U-1', lineDisplayName: '阿綠', linePushBlocked: false,
+      lineLastNotify: { event: 'created', status: 'pending', at: '2026-06-15T09:00:00.000Z' },
+    })
+    bookingService.upsertFromRemote({
+      id: 'B-LINE-2', name: 'A', phone: '0911', guests: 2, date: '2026-06-21', timeSlot: '12:00',
+      manageToken: 't', lineUserId: 'U-1', lineDisplayName: '阿綠', linePushBlocked: false,
+      lineLastNotify: { event: 'created', status: 'sent', at: '2026-06-15T09:01:00.000Z' },
+    })
+    const saved = bookingService.getById('B-LINE-2')
+    expect(saved.lineLastNotify.status).toBe('sent')
+    expect(saved.lineDisplayName).toBe('阿綠')
+  })
+})

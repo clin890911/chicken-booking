@@ -81,3 +81,27 @@ test('用戶端：驗證末碼 → 取消訂位 → 取消成功', async ({ page
   await expect(page.getByRole('heading', { name: '訂位已取消' })).toBeVisible()
   expect(linePushCalls).toBe(0)
 })
+
+test('用戶端：已綁定 LINE 的訂位 → 顯示綁定狀態與重新傳送，不顯示綁定 CTA', async ({ page }) => {
+  // 覆蓋 guestGetBooking：回已綁定 LINE 的訂位（後註冊的 route 優先生效）
+  const BOUND = { ...BOOKING, lineUserId: 'U-e2e-bound', lineDisplayName: '綠綠', linePushBlocked: false }
+  await page.route('**/guestGetBooking', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, booking: BOUND }) }))
+
+  await openAndVerify(page)
+
+  await expect(page.getByText('已綁定 LINE：綠綠')).toBeVisible()
+  await expect(page.getByRole('button', { name: '重新傳送訂位資訊' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '綁定 LINE 訂位通知' })).toHaveCount(0)
+})
+
+test('用戶端：LINE 推播被拒的訂位 → 顯示重加好友警示', async ({ page }) => {
+  const BLOCKED = { ...BOOKING, lineUserId: 'U-e2e-blocked', lineDisplayName: '小黑', linePushBlocked: true }
+  await page.route('**/guestGetBooking', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, booking: BLOCKED }) }))
+
+  await openAndVerify(page)
+
+  await expect(page.getByText('LINE 通知暫時無法送達')).toBeVisible()
+  await expect(page.getByRole('link', { name: '重新加入好友' })).toBeVisible()
+})
