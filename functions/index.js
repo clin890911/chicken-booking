@@ -1022,6 +1022,11 @@ function normalizeStoreSettings(settings = {}) {
     maxDaysAhead: Number(settings.maxDaysAhead) || 30,
     diningDurationMin: Number(settings.diningDurationMin) || DEFAULT_DINING_DURATION_MIN,
     cleanupBufferMin: Number(settings.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN,
+    // 現場自動化（自動清檯）：與前端 settingsService withDefaults 成對
+    autoReleaseEnabled: settings.autoReleaseEnabled !== false,
+    autoReleaseAfterMin: Math.min(720, Math.max(120, Number(settings.autoReleaseAfterMin) || 300)),
+    dayRolloverEnabled: settings.dayRolloverEnabled !== false,
+    autoNoshowOnRollover: settings.autoNoshowOnRollover === true,
     heroBanners: Array.isArray(settings.heroBanners) ? settings.heroBanners : [],
     lineOfficialUrl: settings.lineOfficialUrl || 'https://lin.ee/8lECi4S',
     lineOfficialName: settings.lineOfficialName || '雞王涮涮鍋 LINE 官方帳號',

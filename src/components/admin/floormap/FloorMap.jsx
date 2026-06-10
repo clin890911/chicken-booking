@@ -141,6 +141,11 @@ export default function FloorMap({
         const isAssignSuggestion = assignMode && suggestionTable === t.number
         const isPendingConfirm = assignMode && pendingConfirmTable === t.number
         const isJustAssigned = justAssignedTable === t.number
+        // 團保桌桌面顯示「HH:MM 團保」取代「可入座」：忙碌時不必點開抽屜就知道別帶散客
+        const hold = groupHoldTables[t.number]
+        const holdLabel = t.status === 'vacant' && hold?.holds?.length
+          ? `${hold.holds[0].batch?.timeSlot || ''} 團保`.trim()
+          : null
         return (
           <TableShape
             key={t.number}
@@ -153,6 +158,7 @@ export default function FloorMap({
             isPendingConfirm={isPendingConfirm}
             isJustAssigned={isJustAssigned}
             isDimmed={assignMode && !highlightTables.includes(t.number)}
+            groupHoldLabel={holdLabel}
             onClick={() => onSelectTable(t.number)}
           />
         )

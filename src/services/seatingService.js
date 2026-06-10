@@ -293,6 +293,56 @@ export function finalizeGroup(groupId) {
   return { ok: true }
 }
 
+// =====================================================================
+// 現場自動清檯（sweep）執行層：吃 opsSweep 純計算層產出的 action 清單。
+// 每個 action 執行前重驗前置條件 → 冪等：多分頁/多裝置同時 sweep 也只會收斂到同一終態。
+// 注意：一律走 service 層（不發 TG 通知；context 層的 finalizeBooking 會發）。
+// =====================================================================
+export function executeSweepActions(actions = []) {
+  const done = []
+  for (const a of actions) {
+    if (a.type === 'finalize-booking') {
+      const t = tableService.getByNumber(a.tableNumber)
+      if (t?.status === 'dining' && t.currentBookingId === a.bookingId) {
+        finalizeBooking(a.bookingId)
+        done.push(a)
+      }
+    } else if (a.type === 'checkout-group-table') {
+      const t = tableService.getByNumber(a.tableNumber)
+      if (t?.status === 'dining' && t.currentRef?.groupId === a.groupId) {
+        tableService.checkoutTable(a.tableNumber)
+        done.push(a)
+      }
+    } else if (a.type === 'clear-table') {
+      const t = tableService.getByNumber(a.tableNumber)
+      if (t && ['dining', 'cleaning', 'reserved'].includes(t.status)) {
+        tableService.clearTable(a.tableNumber)
+        done.push(a)
+      }
+    } else if (a.type === 'complete-booking') {
+      const b = bookingService.getById(a.bookingId)
+      if (b && b.status === 'arrived') {
+        bookingService.update(a.bookingId, { status: 'completed' })
+        done.push(a)
+      }
+    } else if (a.type === 'complete-group') {
+      const g = groupService.getById(a.groupId)
+      if (g && !['completed', 'cancelled'].includes(g.status)) {
+        finalizeGroup(a.groupId)
+        done.push(a)
+      }
+    } else if (a.type === 'mark-noshow-auto') {
+      const b = bookingService.getById(a.bookingId)
+      if (b && b.status === 'confirmed') {
+        // 直寫 update 繞過 setStatus → 不觸發 recordNoshow 罰則累計（系統自動標記≠客人惡意未到）
+        bookingService.update(a.bookingId, { status: 'noshow', autoFlag: 'rollover' })
+        done.push(a)
+      }
+    }
+  }
+  return done
+}
+
 // 取消團體：清空所有相關桌、團 status→cancelled。
 export function cancelGroup(groupId) {
   const group = groupService.getById(groupId)

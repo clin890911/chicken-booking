@@ -4,6 +4,8 @@
 //   接近用餐時間：黃色光暈
 //   超過用餐時間/清桌緩衝：加深與警示
 // 填色加深以確保白字可讀（對比 ≥3:1）；色相語義維持：綠=可入座 / 藍=已預訂 / 橙=用餐 / 琥珀=清桌 / 灰=不可用
+import { diffMin, stageOf } from '../../../utils/diningStage'
+
 const STATUS_COLOR = {
   vacant:   { fill: '#059669', stroke: '#047857' },   // 加深綠：白字可讀、可入座最顯眼
   reserved: { fill: '#0284c7', stroke: '#075985' },   // 沉穩鋼藍：尚不能入座，不與可入座綠爭視覺
@@ -18,20 +20,6 @@ const DINING_STAGE_FILL = {
   late:     '#ea580c',  // 接近時限（還有時間）：深橘提醒，不用紅避免假性超時
   overtime: '#dc2626',  // 已達用餐時間：紅
   'buffer-overtime': '#b91c1c',  // 超過清桌緩衝：深紅
-}
-
-function diffMin(d) {
-  return Math.floor((Date.now() - new Date(d).getTime()) / 60000)
-}
-
-function stageOf(minutes, settings = {}) {
-  const diningDuration = Number(settings.diningDurationMin) || 90
-  const buffer = Number(settings.cleanupBufferMin) || 10
-  const lateThreshold = Math.max(0, diningDuration - 30)
-  if (minutes >= diningDuration + buffer) return 'buffer-overtime'
-  if (minutes >= diningDuration) return 'overtime'
-  if (minutes >= lateThreshold) return 'late'
-  return 'normal'
 }
 
 export default function TableShape({
@@ -50,6 +38,7 @@ export default function TableShape({
   occSub = '',                 // 統一佔用視圖：次要說明（人數·時段 / 梯次·時段）
   occHighlight = false,        // 統一佔用視圖：預先配桌模式中、可選的空桌高亮
   occDimmed = false,           // 統一佔用視圖：場次已關閉時整體淡化
+  groupHoldLabel = null,       // 今日團體保留桌：vacant 桌面改顯示「HH:MM 團保」取代「可入座」
   onClick,
 }) {
   const { x, y, w, h, capacity, status, isActive, number } = table
@@ -206,8 +195,8 @@ export default function TableShape({
       )}
       {status === 'vacant' && (
         <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fontWeight={600} fill="white" textAnchor="middle" pointerEvents="none">
-          可入座
+              fontSize={9} fontWeight={groupHoldLabel ? 800 : 600} fill="white" textAnchor="middle" pointerEvents="none">
+          {groupHoldLabel || '可入座'}
         </text>
       )}
     </g>

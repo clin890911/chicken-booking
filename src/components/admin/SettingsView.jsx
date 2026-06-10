@@ -298,6 +298,57 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。">
+        <div className="space-y-4">
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <div className="text-sm font-bold text-chicken-brown">超時自動釋桌</div>
+              <div className="text-xs text-chicken-brown/55 mt-0.5">用餐超過下方時數高概率是忘記按清桌：散客桌自動釋出、團體桌自動「此梯離席」待清。</div>
+            </div>
+            <input type="checkbox" className="w-5 h-5 accent-chicken-red"
+              checked={form.autoReleaseEnabled !== false}
+              onChange={e => setForm(f => ({ ...f, autoReleaseEnabled: e.target.checked }))} />
+          </label>
+          <div>
+            <span className="label">視為忘記清桌的時數</span>
+            <Select
+              className="mt-2"
+              value={Number(form.autoReleaseAfterMin) || 300}
+              onChange={e => setForm(f => ({ ...f, autoReleaseAfterMin: Number(e.target.value) }))}
+              options={[
+                { value: 180, label: '3 小時' },
+                { value: 240, label: '4 小時' },
+                { value: 300, label: '5 小時（建議）' },
+                { value: 360, label: '6 小時' },
+                { value: 480, label: '8 小時' },
+              ]}
+            />
+          </div>
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <div className="text-sm font-bold text-chicken-brown">換日掃除</div>
+              <div className="text-xs text-chicken-brown/55 mt-0.5">每天第一次打開系統時，自動清掉昨日殘留的用餐/待清桌況，昨日已到店團體自動結案。</div>
+            </div>
+            <input type="checkbox" className="w-5 h-5 accent-chicken-red"
+              checked={form.dayRolloverEnabled !== false}
+              onChange={e => setForm(f => ({ ...f, dayRolloverEnabled: e.target.checked }))} />
+          </label>
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <div className="text-sm font-bold text-chicken-brown">換日自動標記未到（No-show）</div>
+              <div className="text-xs text-chicken-red/80 mt-0.5">⚠️ 建議保持關閉：昨日未處理的訂位自動標 No-show 會影響報表口徑（不計入顧客罰則）。當天請改用現場「訂位脈動 → 過時未到」處理。</div>
+            </div>
+            <input type="checkbox" className="w-5 h-5 accent-chicken-red"
+              checked={form.autoNoshowOnRollover === true}
+              onChange={e => setForm(f => ({ ...f, autoNoshowOnRollover: e.target.checked }))} />
+          </label>
+          <div className="flex gap-2 items-center">
+            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存自動化設定</Button>
+            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
+          </div>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。">
         <ClosuresEditor form={form} setForm={setForm} bookings={bookings} />
         <div className="flex gap-2 items-center mt-3">

@@ -1,8 +1,8 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
-import { listUpcoming } from '../../../services/bookingService'
 import { todayStr } from '../../../utils/timeSlots'
 import { todayGroupsByState } from '../../../utils/groupLive'
+import { classifyTodayPulse } from '../../../utils/bookingPulse'
 import UpcomingPanel from '../floormap/UpcomingPanel'
 import WaitlistPanel from './WaitlistPanel'
 import GroupTodayPanel from './GroupTodayPanel'
@@ -14,12 +14,18 @@ export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssi
   const { bookings, waitlist, groupReservations } = useBooking()
   const today = todayStr()
 
-  // 即將到達且未指派桌（90 分鐘窗，與 UpcomingPanel 同口徑）
-  const upcomingCount = useMemo(
-    () => listUpcoming(today, 90).filter(b => !b.assignedTableId).length,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [bookings, today],
-  )
+  // 30 秒 tick：badge 跟著時間推移更新（將到 → 過時未到）
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  // badge＝過時未到全部（就算已指派也要人處理）+ 90 分內將到且未指派（與 UpcomingPanel 同口徑）
+  const upcomingCount = useMemo(() => {
+    const { overdue, soon } = classifyTodayPulse(bookings, today, now)
+    return overdue.length + soon.filter(b => !b.assignedTableId).length
+  }, [bookings, today, now])
   const waitingCount = useMemo(
     () => waitlist.filter(w => w.status === 'waiting' || w.status === 'called').length,
     [waitlist],
@@ -30,7 +36,7 @@ export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssi
   )
 
   const tabs = [
-    { key: 'upcoming', label: '即將到達', badge: upcomingCount },
+    { key: 'upcoming', label: '訂位脈動', badge: upcomingCount },
     { key: 'waitlist', label: '候位', badge: waitingCount },
     // 全完成的日子籤仍在（badge 0），才能回去印回傳單
     ...(activeGroups.length + completedGroups.length > 0

@@ -801,3 +801,73 @@ describe('reseatGroupBatchTable（改派桌位）', () => {
     expect(r.error).toContain('已結束')
   })
 })
+
+describe('executeSweepActions（自動清檯執行層：前置重驗、冪等）', () => {
+  beforeEach(() => {
+    tableService.bulkWrite([mkTable('101', 4), mkTable('102', 6), mkTable('103', 6)])
+  })
+
+  it('finalize-booking：前置成立 → 釋桌+booking completed；桌已被別人改 → 跳過', () => {
+    const b = bookingService.create({ name: '散客', phone: '0911', guests: 2, date: '2026-06-10', timeSlot: '12:00', status: 'arrived', assignedTableId: '101' })
+    tableService.seatTable('101', b.id)
+    const acts = [
+      { type: 'finalize-booking', bookingId: b.id, tableNumber: '101', minutes: 301 },
+      { type: 'finalize-booking', bookingId: 'NOPE', tableNumber: '102', minutes: 301 }, // 102 不是 dining → 跳過
+    ]
+    const done = seating.executeSweepActions(acts)
+    expect(done.length).toBe(1)
+    expect(tableService.getByNumber('101').status).toBe('vacant')
+    expect(bookingService.getById(b.id).status).toBe('completed')
+  })
+
+  it('checkout-group-table：dining→cleaning、currentRef 保留 → 第二梯仍可接', () => {
+    const g = groupService.create({
+      date: '2026-06-10', counts: { total: 16 },
+      batches: [
+        { label: '第一梯', timeSlot: '11:30', tableNumbers: ['102'], guests: 8 },
+        { label: '第二梯', timeSlot: '13:00', tableNumbers: ['102'], guests: 8 },
+      ],
+    })
+    const [b1, b2] = groupService.getById(g.id).batches
+    seating.seatGroupBatch(g.id, b1.id)
+    const done = seating.executeSweepActions([
+      { type: 'checkout-group-table', tableNumber: '102', groupId: g.id, batchId: b1.id, minutes: 400 },
+    ])
+    expect(done.length).toBe(1)
+    const t = tableService.getByNumber('102')
+    expect(t.status).toBe('cleaning')
+    expect(t.currentRef).toEqual({ type: 'group', groupId: g.id, batchId: b1.id }) // 保留 → 接梯靠它
+    // 等同人工「此梯離席」：清桌完成＋接第二梯流程不受影響
+    const r = seating.seatNextBatchOnTable('102', g.id, b2.id)
+    expect(r.ok).toBe(true)
+    expect(tableService.getByNumber('102').currentRef.batchId).toBe(b2.id)
+  })
+
+  it('mark-noshow-auto：標 noshow 但不累計顧客罰則（繞過 recordNoshow）', () => {
+    const b = bookingService.create({ name: '王test', phone: '0912345678', guests: 2, date: '2026-06-09', timeSlot: '12:00', status: 'confirmed' })
+    const before = bookingService.getNoshowCount('0912345678')
+    const done = seating.executeSweepActions([{ type: 'mark-noshow-auto', bookingId: b.id }])
+    expect(done.length).toBe(1)
+    const after = bookingService.getById(b.id)
+    expect(after.status).toBe('noshow')
+    expect(after.autoFlag).toBe('rollover')
+    expect(bookingService.getNoshowCount('0912345678')).toBe(before) // 不+1
+  })
+
+  it('complete-group：已 completed 的團跳過（冪等）', () => {
+    const g = groupService.create({ date: '2026-06-09', counts: { total: 8 } })
+    groupService.setStatus(g.id, 'completed')
+    const done = seating.executeSweepActions([{ type: 'complete-group', groupId: g.id }])
+    expect(done.length).toBe(0)
+  })
+
+  it('clear-table：vacant 桌跳過、cleaning 桌清為 vacant', () => {
+    tableService.setStatus('103', 'cleaning')
+    const done = seating.executeSweepActions([
+      { type: 'clear-table', tableNumber: '103', reason: 'stale-day' },
+      { type: 'clear-table', tableNumber: '101', reason: 'stale-day' }, // vacant → 跳過
+    ])
+    expect(done.map(a => a.tableNumber)).toEqual(['103'])
+    expect(tableService.getByNumber('103').status).toBe('vacant')
+  })
+})
