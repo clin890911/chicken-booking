@@ -5,7 +5,7 @@ import SeatGauge from '../../ui/SeatGauge'
 import FloorMap from '../floormap/FloorMap'
 import GroupSheet from '../group/GroupSheet'
 import AgencyPicker from '../group/AgencyPicker'
-import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
+import { dayLabel, seatingForSlot, arrivalSlotsForSeating } from '../../../utils/timeSlots'
 import { groupTableNumbers, remainingTablesForSeating } from '../../../utils/capacity'
 import { suggestTablesForBatch } from '../../../utils/suggestTables'
 import * as groupReservationService from '../../../services/groupReservationService'
@@ -24,6 +24,24 @@ const PAGES = [
 ]
 
 const BATCH_LABELS = ['一', '二', '三', '四', '五', '六']
+
+// 抵達時間下拉：場次已知 → 場次窗內 15 分間隔選項（保證落窗內、不會誤跳場次）；
+// 無場次（未設定場次的店）→ 退回營業時段 grid。一律含現有值（舊資料 / off-grid 也顯示）。
+function ArrivalTimeSelect({ seating, slots = [], value, onChange, className = '' }) {
+  const options = useMemo(() => {
+    const base = seating ? arrivalSlotsForSeating(seating) : slots
+    if (value && !base.includes(value)) return [...base, value].sort()
+    return base
+  }, [seating, slots, value])
+  return (
+    <Select
+      value={value || seating?.start || ''}
+      onChange={e => onChange(e.target.value)}
+      options={options}
+      className={className}
+    />
+  )
+}
 
 // 場次卡剩餘色調
 function seatingTone(r) {
@@ -134,21 +152,11 @@ export default function GroupEditorStage({
     }))
   }
 
-  // 預選場次 → 鎖定主梯次的 timeSlot（= 場次.start，可再用詳細時間微調）
+  // 預選場次 → 鎖定主梯次的 timeSlot（= 場次.start，可再用抵達時間下拉微調）
   const selectSession = (s) => {
     if (!primaryBatch) return
     patchBatch(primaryBatch.id, { timeSlot: s.start })
     setActiveBatchId(primaryBatch.id)
-  }
-
-  // 詳細抵達時間：限制在該梯所屬場次的起訖內（超出會跳到別的場次、造成剩餘量誤判）
-  const setBatchTime = (batch, value) => {
-    if (!value || !batch) return
-    const sea = seatingForSlot(settings, batch.timeSlot)
-    if (sea && (value < sea.start || value >= sea.end)) {
-      return toast.error(`時間需在「${sea.name}」${sea.start}–${sea.end} 之間；要換場次請直接點場次卡`)
-    }
-    patchBatch(batch.id, { timeSlot: value })
   }
 
   // 一鍵推薦桌位（依本梯人數 + 場次，避開 blocked，取最少桌）
@@ -390,19 +398,21 @@ export default function GroupEditorStage({
                 <Select label="用餐時段" value={primaryBatch?.timeSlot || ''} onChange={e => primaryBatch && patchBatch(primaryBatch.id, { timeSlot: e.target.value })} options={slots} className="w-40" />
               </div>
             )}
-            {/* 詳細抵達時間：選好場次後可微調（例：午餐第一批 11:40 進場） */}
+            {/* 預計抵達時間：場次窗內的下拉選項（預設＝場次開始，可改成遊覽車實際抵達時間） */}
             {hasSeatings && primarySeating && primaryBatch && (
-              <div className="mt-3 flex items-end gap-3 flex-wrap">
-                <Input
-                  label="預計抵達 / 用餐時間"
-                  type="time"
-                  value={primaryBatch.timeSlot || primarySeating.start}
-                  onChange={e => setBatchTime(primaryBatch, e.target.value)}
-                  className="w-44"
-                />
-                <span className="text-xs text-chicken-brown/55 pb-2.5">
-                  可在「{primarySeating.name}」{primarySeating.start}–{primarySeating.end} 內微調，備餐與抵達時間軸都會用這個時間
-                </span>
+              <div className="mt-3">
+                <label className="label">預計抵達時間（選填）</label>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <ArrivalTimeSelect
+                    seating={primarySeating}
+                    value={primaryBatch.timeSlot}
+                    onChange={v => patchBatch(primaryBatch.id, { timeSlot: v })}
+                    className="w-32"
+                  />
+                  <span className="text-xs text-chicken-brown/55">
+                    預設＝場次開始（{primarySeating.start}）；可改成遊覽車實際抵達時間，備餐與抵達時間軸都會用這個時間
+                  </span>
+                </div>
               </div>
             )}
           </div>
@@ -440,8 +450,9 @@ export default function GroupEditorStage({
                       {sea && (
                         <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>
                       )}
-                      <label className="flex items-center gap-1 text-xs text-chicken-brown/60">時間
-                        <Input className="w-28 !py-1" type="time" value={b.timeSlot || ''} onChange={e => setBatchTime(b, e.target.value)} />
+                      <label className="flex items-center gap-1 text-xs text-chicken-brown/60">抵達
+                        <ArrivalTimeSelect seating={sea} slots={slots} value={b.timeSlot}
+                          onChange={v => patchBatch(b.id, { timeSlot: v })} className="w-28 !py-1" />
                       </label>
                       {single ? (
                         // 單梯人數 = 第一頁總人數，不重複填
