@@ -17,7 +17,6 @@ function mkTable(over = {}) {
     capacity: 4,
     floor: '1F',
     x: 100, y: 100, w: 80, h: 75,
-    fuel: null,
     isActive: true,
     status: 'vacant',
     currentBookingId: null,
@@ -514,11 +513,12 @@ describe('addTable', () => {
     expect(t.updatedAt).toBe(FIXED_NOW.toISOString())
   })
 
-  it('空店時第一張 6P → B1，高度 100', () => {
+  it('空店時第一張 6P → B1（橫式 90×75，較寬不較長）', () => {
     tableService.bulkWrite([])
     const t = tableService.addTable({ capacity: 6 })
     expect(t.number).toBe('B1')
-    expect(t.h).toBe(100)
+    expect(t.w).toBe(90) // 六人桌較寬
+    expect(t.h).toBe(75) // 高度與四人桌同
     expect(t.floor).toBe('1F') // 預設
   })
 
@@ -550,12 +550,11 @@ describe('addTable', () => {
     expect(tableService.listAll()).toHaveLength(53)
   })
 
-  it('帶入自訂座標與 fuel', () => {
+  it('帶入自訂座標', () => {
     tableService.bulkWrite([])
-    const t = tableService.addTable({ capacity: 4, floor: '2F', x: 333, y: 444, fuel: 'tank' })
+    const t = tableService.addTable({ capacity: 4, floor: '2F', x: 333, y: 444 })
     expect(t.x).toBe(333)
     expect(t.y).toBe(444)
-    expect(t.fuel).toBe('tank')
     expect(t.floor).toBe('2F')
   })
 
