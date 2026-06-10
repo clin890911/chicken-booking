@@ -3,12 +3,13 @@ import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast, useConfirm } from '../ui/Toast'
-import { searchNoshow, exportCSV } from '../../services/bookingService'
+import { searchNoshow } from '../../services/bookingService'
 import { generateTimeSlots, todayStr, slotsInSeating, seatingForSlot } from '../../utils/timeSlots'
 import TableGrid from './TableGrid'
 import LayoutEditor from './LayoutEditor'
 import TelegramSettings from './TelegramSettings'
 import StaffAdminSection from './StaffAdminSection'
+import ExportCenter from './ExportCenter'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -131,16 +132,6 @@ export default function SettingsView() {
   }
   const handleSearch = () => {
     setSearchResult(searchNoshow(searchPhone.trim()))
-  }
-  const handleExport = () => {
-    const csv = exportCSV()
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `chicken-booking-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
   }
   const handleResetAll = async () => {
     const ok = await confirm(
@@ -739,8 +730,8 @@ export default function SettingsView() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="資料匯出" description="下載目前快取內的訂位資料。">
-        <Button onClick={handleExport} variant="secondary" className="w-full">匯出全部訂位 CSV</Button>
+      <SettingsSection title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
+        <ExportCenter />
       </SettingsSection>
 
       {can('staff.manage') && (
