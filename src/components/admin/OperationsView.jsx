@@ -4,6 +4,8 @@ import StatusBar from './floormap/StatusBar'
 import TableDrawer from './floormap/TableDrawer'
 import ModeBanner from './ops/ModeBanner'
 import OpsRail from './ops/OpsRail'
+import OpsHintBar from './ops/OpsHintBar'
+import OpsLogModal from './ops/OpsLogModal'
 import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
@@ -32,6 +34,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const [justAssigned, setJustAssigned] = useState(null) // 剛指派的桌號（綠光）
   const [pendingConfirm, setPendingConfirm] = useState(null) // 指派/候位/換桌：待確認的桌號（二步確認）
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
+  const [showOpsLog, setShowOpsLog] = useState(false) // 系統自動處理紀錄（自動清檯留痕）
 
   // 今日團體 hold：今日（未取消/未完成）團體的桌位，若尚未實際入座（非 dining）則於圖上標示 🚌。
   // value = { agencyName, holds: [{ group, batch }] }（未入座梯次，依時段排序）：
@@ -237,7 +240,13 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
 
   return (
     <div className="space-y-3">
-      <StatusBar tables={tables} waitlist={waitlist} />
+      <StatusBar tables={tables} waitlist={waitlist} bookings={bookings} />
+
+      {/* 「現在該做什麼」提示列：過時未到 / 超時 / 待清 / 自動處理紀錄 / 節奏單句 */}
+      <OpsHintBar
+        onOpenUpcoming={() => { setSelectedTable(null); setRailTab('upcoming') }}
+        onOpenLog={() => setShowOpsLog(true)}
+      />
 
       {/* 樓層切換 + 模式 banner */}
       <div className="flex items-center gap-2 flex-wrap">
@@ -287,6 +296,8 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
             <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />用餐中</span>
             <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-600" />待清桌</span>
             <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-chicken-red" />超時</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded border-2 border-dashed border-indigo-500 bg-transparent" />🚌 團體保留</span>
+            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded border-2 border-chicken-red bg-transparent" />選中</span>
           </div>
           <FloorMap
             floor={floor}
@@ -345,6 +356,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
 
       {/* 桌位佈局編輯器 */}
       <LayoutEditor open={showLayoutEditor} onClose={() => setShowLayoutEditor(false)} />
+
+      {/* 系統自動處理紀錄（自動清檯留痕） */}
+      <OpsLogModal open={showOpsLog} onClose={() => setShowOpsLog(false)} />
     </div>
   )
 }

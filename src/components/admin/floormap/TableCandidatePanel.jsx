@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useToast } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
+import { fmtOverdueMin } from '../../../utils/bookingPulse'
 
 // 點空桌時顯示「可入座」候選名單
 // - 待指派訂位（今日 confirmed + assignedTableId=null + 人數 ≤ 桌容量）
@@ -126,7 +127,7 @@ export default function TableCandidatePanel({ table, onPicked }) {
     )
   }
 
-  // 訂位列：arrived=true 時加紅 badge「已到場 X 分」
+  // 訂位列：arrived=true 時加紅 badge「已過預約時間 X」（客人未必到場，別誤標已到場）
   const renderBookingRow = (b, { arrived } = {}) => {
     const imminent = !arrived && isImminent(b.timeSlot)
     const over = slotOverdueMin(b.timeSlot)
@@ -137,7 +138,7 @@ export default function TableCandidatePanel({ table, onPicked }) {
           <span className="text-sm font-bold text-chicken-brown truncate flex-1 min-w-0">{b.name}</span>
           {fitBadge(b.guests)}
           {arrived ? (
-            <span className="text-[10px] font-bold text-white bg-chicken-red px-1.5 py-0.5 rounded-full">已到場 {over} 分</span>
+            <span className="text-[10px] font-bold text-white bg-chicken-red px-1.5 py-0.5 rounded-full">{fmtOverdueMin(over)}</span>
           ) : imminent ? (
             <span className="text-[10px] font-bold text-amber-700">🔔 即將到</span>
           ) : null}
@@ -192,7 +193,7 @@ export default function TableCandidatePanel({ table, onPicked }) {
       {/* 1) 已到場、未入座的訂位（最高優先） */}
       {arrivedBookings.length > 0 && (
         <>
-          <div className="text-[10px] text-chicken-red font-bold mt-1 mb-1.5">⏰ 已到場未入座</div>
+          <div className="text-[10px] text-chicken-red font-bold mt-1 mb-1.5">⏰ 已過預約時間未到</div>
           <div className="space-y-1.5">
             {arrivedBookings.map(b => renderBookingRow(b, { arrived: true }))}
           </div>
@@ -220,7 +221,7 @@ export default function TableCandidatePanel({ table, onPicked }) {
       )}
 
       <div className="text-[10px] text-chicken-brown/40 text-center mt-2.5">
-        剛好表示桌型最貼近 · ⏰ 已過時段未入座優先 · 🔔 30 分內到達
+        剛好表示桌型最貼近 · ⏰ 過時未到優先 · 🔔 30 分內到達
       </div>
     </div>
   )

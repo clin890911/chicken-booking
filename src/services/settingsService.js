@@ -7,6 +7,11 @@ const DEFAULT = {
   maxDaysAhead: 30,
   diningDurationMin: 90,
   cleanupBufferMin: 10,
+  // 現場自動化（自動清檯）：超時自動釋桌 + 換日掃除；保守可關。
+  autoReleaseEnabled: true,
+  autoReleaseAfterMin: 300,     // 用餐超過 5 小時視為忘記清桌（clamp 120–720）
+  dayRolloverEnabled: true,
+  autoNoshowOnRollover: false,  // 預設關：自動標 noshow 會影響顧客罰則與報表口徑
   // 固定場次（批次）：地圖時間軸與「關閉整場次」依此；店家可在後台增刪。
   seatings: [
     { id: 'lunch1', name: '午餐第一批', start: '11:00', end: '12:30' },
@@ -75,6 +80,10 @@ function withDefaults(value = {}) {
     closures: normalizeClosures(merged.closures),
     diningDurationMin: Number(merged.diningDurationMin) || DEFAULT.diningDurationMin,
     cleanupBufferMin: Number(merged.cleanupBufferMin) || DEFAULT.cleanupBufferMin,
+    autoReleaseEnabled: merged.autoReleaseEnabled !== false,
+    autoReleaseAfterMin: Math.min(720, Math.max(120, Number(merged.autoReleaseAfterMin) || DEFAULT.autoReleaseAfterMin)),
+    dayRolloverEnabled: merged.dayRolloverEnabled !== false,
+    autoNoshowOnRollover: merged.autoNoshowOnRollover === true,
     lineOfficialUrl: merged.lineOfficialUrl || DEFAULT.lineOfficialUrl,
     lineOfficialName: merged.lineOfficialName || DEFAULT.lineOfficialName,
     lineUseLiff: !!merged.lineUseLiff,

@@ -10,6 +10,9 @@ import * as guideService from '../services/guideService'
 import * as groupReservationService from '../services/groupReservationService'
 import * as tg from '../services/telegramService'
 import * as cloudData from '../services/cloudDataService'
+import * as opsLogService from '../services/opsLogService'
+import { computeOvertimeActions, computeDayRolloverActions } from '../utils/opsSweep'
+import { todayStr } from '../utils/timeSlots'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
 
@@ -102,6 +105,85 @@ export function BookingProvider({ children }) {
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
+
+  // ── 現場自動清檯（sweep）編排 ──
+  // 規則計算在 utils/opsSweep（純函式）、執行在 seatingService.executeSweepActions（前置重驗、冪等）。
+  // 防重複：跨分頁 45 秒節流戳記 + 換日掃除每裝置每日 marker + action 前置條件重驗。
+  const sweepActionMsg = (a) => {
+    if (a.type === 'finalize-booking') return `${a.tableNumber} 用餐 ${a.minutes} 分未清桌，已自動釋出`
+    if (a.type === 'checkout-group-table') return `團體桌 ${a.tableNumber} 用餐 ${a.minutes} 分，已自動「此梯離席」待清`
+    if (a.type === 'clear-table') return `${a.tableNumber} ${a.reason === 'stale-day' ? '昨日殘留桌況' : '孤兒用餐狀態'}，已自動清為空桌`
+    if (a.type === 'complete-booking') return `昨日訂位 ${a.bookingId} 已自動標記完成`
+    if (a.type === 'complete-group') return `昨日已到店團體已自動整團結案`
+    if (a.type === 'mark-noshow-auto') return `昨日未到訂位 ${a.bookingId} 已自動標記 No-show（不計罰則）`
+    return a.type
+  }
+
+  const runSweeps = useCallback((opts = {}) => {
+    if (!isStaffRef.current) return
+    const nowMs = Date.now()
+    const last = Number(localStorage.getItem('chicken_ops_sweep_at') || 0)
+    if (!opts.force && nowMs - last < 45000) return // 跨分頁節流
+    localStorage.setItem('chicken_ops_sweep_at', String(nowMs))
+
+    const settings = settingsService.getSettings()
+    const today = todayStr()
+    const state = {
+      tables: tableService.listAll(),
+      bookings: bookingService.listAll(),
+      groupReservations: groupReservationService.listAll(),
+    }
+    let doneCount = 0
+
+    // 換日掃除：每裝置每日一次（跨午夜開著的分頁也會在 interval 中觸發）
+    if (settings.dayRolloverEnabled !== false && localStorage.getItem('chicken_ops_day_sweep_v1') !== today) {
+      const done = seatingService.executeSweepActions(
+        computeDayRolloverActions({ ...state, settings, today }))
+      localStorage.setItem('chicken_ops_day_sweep_v1', today)
+      if (done.length) {
+        done.forEach(a => opsLogService.append({ kind: 'day-rollover', ...a, message: sweepActionMsg(a) }))
+        doneCount += done.length
+        toastRef.current?.info?.(`🌅 換日掃除：已自動清理 ${done.length} 筆昨日殘留（詳見現場提示列）`)
+      }
+    }
+
+    // 超時釋桌（預設 5 小時：高概率忘記按清桌）
+    const done = seatingService.executeSweepActions(
+      computeOvertimeActions({ tables: state.tables, settings, now: nowMs }))
+    if (done.length) {
+      done.forEach(a => opsLogService.append({ kind: 'auto-release', ...a, message: sweepActionMsg(a) }))
+      doneCount += done.length
+      const hrs = Math.round((Number(settings.autoReleaseAfterMin) || 300) / 6) / 10
+      toastRef.current?.warning?.(`⏱ ${done.length} 桌用餐逾 ${hrs} 小時，已自動處理（疑似忘記清桌，詳見現場提示列）`)
+    }
+
+    if (doneCount) { refresh(); syncCloudSoon() }
+  }, [refresh, syncCloudSoon])
+
+  const runSweepsRef = useRef(runSweeps)
+  runSweepsRef.current = runSweeps
+
+  // 觸發點：(a) 首拉雲端成功後（避免用過期本機快照誤殺另一台裝置今天的桌）；
+  // 本機模式（未設 Firebase）無此風險、20 秒 fallback 給離線情境；(b) 每 60 秒（先換日再超時）。
+  const bootSweepDoneRef = useRef(false)
+  useEffect(() => {
+    if (!isStaff) return
+    if (!bootSweepDoneRef.current && (cloudStatus.state === 'synced' || !usingFirebase)) {
+      bootSweepDoneRef.current = true
+      runSweepsRef.current({ force: true })
+    }
+  }, [isStaff, cloudStatus.state, usingFirebase])
+  useEffect(() => {
+    if (!isStaff) return
+    const fallback = window.setTimeout(() => {
+      if (!bootSweepDoneRef.current) {
+        bootSweepDoneRef.current = true
+        runSweepsRef.current({ force: true })
+      }
+    }, 20000)
+    const id = window.setInterval(() => { runSweepsRef.current() }, 60000)
+    return () => { window.clearTimeout(fallback); window.clearInterval(id) }
+  }, [isStaff])
 
   useEffect(() => {
     // 客人端（未登入）不啟動全量同步：只用本機資料，避免他人個資外洩。

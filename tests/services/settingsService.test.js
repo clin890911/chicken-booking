@@ -11,6 +11,10 @@ const DEFAULT = {
   maxDaysAhead: 30,
   diningDurationMin: 90,
   cleanupBufferMin: 10,
+  autoReleaseEnabled: true,
+  autoReleaseAfterMin: 300,
+  dayRolloverEnabled: true,
+  autoNoshowOnRollover: false,
   seatings: [
     { id: 'lunch1', name: '午餐第一批', start: '11:00', end: '12:30' },
     { id: 'lunch2', name: '午餐第二批', start: '12:30', end: '14:30' },
@@ -328,5 +332,26 @@ describe('settingsService', () => {
       const result = saveSettings({ diningDurationMin: NaN })
       expect(result.diningDurationMin).toBe(DEFAULT.diningDurationMin)
     })
+  })
+})
+
+describe('現場自動化（自動清檯）設定欄位', () => {
+  it('預設值：開啟釋桌 300 分、開啟換日掃除、關閉自動 noshow', () => {
+    localStorage.removeItem('chicken_settings_v1')
+    const s = getSettings()
+    expect(s.autoReleaseEnabled).toBe(true)
+    expect(s.autoReleaseAfterMin).toBe(300)
+    expect(s.dayRolloverEnabled).toBe(true)
+    expect(s.autoNoshowOnRollover).toBe(false)
+  })
+  it('clamp：30 → 120、9999 → 720；布林正規化', () => {
+    saveSettings({ autoReleaseAfterMin: 30 })
+    expect(getSettings().autoReleaseAfterMin).toBe(120)
+    saveSettings({ autoReleaseAfterMin: 9999 })
+    expect(getSettings().autoReleaseAfterMin).toBe(720)
+    saveSettings({ autoReleaseEnabled: false, autoNoshowOnRollover: true })
+    const s = getSettings()
+    expect(s.autoReleaseEnabled).toBe(false)
+    expect(s.autoNoshowOnRollover).toBe(true)
   })
 })
