@@ -81,3 +81,17 @@ describe('lineOfficialUrl', () => {
     expect(lineOfficialUrl({ lineOfficialUrl: 'https://lin.ee/xxx' })).toBe('https://lin.ee/xxx')
   })
 })
+
+describe('lineMyBookingsEndpoint / fetchLineMyBookings', () => {
+  it('優先用 settings，未設定回預設端點', async () => {
+    const { lineMyBookingsEndpoint } = await import('../../src/services/lineService')
+    expect(lineMyBookingsEndpoint({ lineMyBookingsEndpoint: 'https://custom.example.com' })).toBe('https://custom.example.com')
+    expect(lineMyBookingsEndpoint({})).toBe('https://linemybookings-reaor76eyq-uc.a.run.app')
+  })
+
+  it('fetchLineMyBookings：無 idToken 直接回 not-configured，不打網路', async () => {
+    const { fetchLineMyBookings } = await import('../../src/services/lineService')
+    const result = await fetchLineMyBookings({}, '')
+    expect(result).toEqual({ ok: false, error: 'not-configured' })
+  })
+})

@@ -23,6 +23,10 @@ import {
   resolveStaffRole,
   validateStaffUpsert,
 } from './lib/staffAccess.js'
+import {
+  slotEpochMs,
+  buildMyBookingsList,
+} from './lib/myBookings.js'
 
 initializeApp()
 
@@ -918,6 +922,92 @@ export const lineGetBooking = onRequest({ cors: true, invoker: 'public' }, async
   }
 })
 
+// 驗證 LIFF ID token：交給 LINE 官方端點驗簽章/aud/exp，回 claims（sub = 已驗明的 userId）。
+// 絕不能信 client 自報的 userId——這是「列出某使用者全部訂位」端點的唯一身分依據。
+// AbortController 3.5s 逾時保護，仿 lineSend。
+async function verifyLineIdToken(idToken, channelId) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS)
+  try {
+    const res = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ id_token: idToken, client_id: channelId }).toString(),
+      signal: controller.signal,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const desc = String(data.error_description || data.error || '')
+      throw errorWithStatus(/expired/i.test(desc) ? 'expired-id-token' : 'invalid-id-token', 401)
+    }
+    // 防禦性複驗（LINE 已驗過簽章/aud/exp，這裡零成本重查一次）
+    if (data.iss !== 'https://access.line.me'
+      || String(data.aud) !== String(channelId)
+      || Number(data.exp) * 1000 <= Date.now()
+      || !data.sub) {
+      throw errorWithStatus('invalid-id-token', 401)
+    }
+    return data
+  } catch (err) {
+    if (err.status) throw err
+    throw errorWithStatus(err?.name === 'AbortError' ? 'line-verify-timeout' : 'line-verify-failed', 502)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 「LINE 我的訂位」：rich menu 連到 /line/my-bookings，LIFF 取 idToken 後打這裡。
+// 驗明 LINE 身分 → 列出該使用者綁定的訂位（即將在前、近期歷史在後、上限 10）。
+// 回傳不含姓名/電話；manageToken 只交給已驗明的綁定本人（信任等級同推播卡片與 guestLookup）。
+export const lineMyBookings = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  try {
+    await enforceRateLimit(req, 'lineMyBookings')
+    const idToken = String(req.body?.idToken || '').trim()
+    if (!idToken) return res.status(400).json({ ok: false, error: 'missing-id-token' })
+
+    const settingsSnap = await db.collection('settings').doc('main').get()
+    const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+    if (!settings.lineLoginChannelId) {
+      // 未設定 LINE Login channel ID → 前端優雅退回 /lookup 電話查詢
+      return res.status(503).json({ ok: false, error: 'not-configured' })
+    }
+
+    const claims = await verifyLineIdToken(idToken, settings.lineLoginChannelId)
+    const lineUserId = claims.sub
+    await enforceRateLimit(req, 'lineMyBookingsUser', `uid:${lineUserId}`)
+
+    const bindingsSnap = await db.collection('lineBookingBindings')
+      .where('lineUserId', '==', lineUserId)
+      .limit(30)
+      .get()
+
+    const entries = (await Promise.all(bindingsSnap.docs.map(async (doc) => {
+      // 逐筆權威重讀：清單以 bookings 現況為準，不信 binding 內的舊快照
+      const snap = await db.collection(COLLECTIONS.bookings).doc(doc.id).get()
+      if (!snap.exists) return null
+      const booking = { id: snap.id, ...snap.data() }
+      if (booking.lineUserId && booking.lineUserId !== lineUserId) return null // 已改綁他人
+      return { booking, manageToken: booking.manageToken || doc.data().manageToken || '' }
+    }))).filter(Boolean)
+
+    const items = buildMyBookingsList(entries, {
+      nowMs: Date.now(),
+      publicSiteUrl: settings.publicSiteUrl,
+    })
+    return res.json({
+      ok: true,
+      items,
+      store: publicStoreSettings(settings),
+      line: { displayName: bindingsSnap.docs[0]?.data()?.lineDisplayName || '' },
+    })
+  } catch (err) {
+    const code = err.status || 500
+    if (code >= 500) console.error('lineMyBookings failed:', err)
+    return res.status(code).json({ ok: false, error: err.message || 'line-my-bookings-failed' })
+  }
+})
+
 async function handleLineEvent(event) {
   if (event.type === 'follow') {
     // 加好友（含解除封鎖後重新加入）：先補發先前因「非好友」被擱置的訂位資訊，再回歡迎詞。
@@ -1280,6 +1370,10 @@ function normalizeStoreSettings(settings = {}) {
     lineBindEndpoint: settings.lineBindEndpoint || 'https://linebind-reaor76eyq-uc.a.run.app',
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
+    lineMyBookingsEndpoint: settings.lineMyBookingsEndpoint || 'https://linemybookings-reaor76eyq-uc.a.run.app',
+    // LINE Login channel ID（LIFF 所屬 channel，非 Messaging API channel）：
+    // lineMyBookings 驗 ID token 用；未設定時該端點回 not-configured、前端退回電話查詢。
+    lineLoginChannelId: String(settings.lineLoginChannelId || '').trim(),
     // 前端正式站網址：後端組 LINE 訊息「管理 / 修改訂位」按鈕連結用；未設定則該按鈕不顯示。
     publicSiteUrl: String(settings.publicSiteUrl || '').trim(),
     // 店員後台改期/取消時自動 LINE 通知客人（預設關，店內驗證後再開）。
@@ -1355,6 +1449,8 @@ function errorWithStatus(message, status) {
 const RATE_LIMITS = {
   guestLookupBooking: { limit: 30, windowMs: 10 * 60 * 1000 },
   guestCreateBooking: { limit: 20, windowMs: 10 * 60 * 1000 },
+  lineMyBookings: { limit: 30, windowMs: 10 * 60 * 1000 },      // per-IP（驗證前先擋）
+  lineMyBookingsUser: { limit: 20, windowMs: 10 * 60 * 1000 },  // per-LINE-userId（驗證後）
 }
 
 function clientIp(req) {
@@ -1363,10 +1459,11 @@ function clientIp(req) {
 }
 
 // 超限時丟出 429；節流器自身錯誤時「放行」(fail-open)，避免節流機制本身造成服務中斷。
-async function enforceRateLimit(req, name) {
+// key 可選：預設以來源 IP 計數；傳入自訂 key（如已驗證的 LINE userId）則以該身分計數。
+async function enforceRateLimit(req, name, key = '') {
   const cfg = RATE_LIMITS[name]
   if (!cfg) return
-  const ipHash = crypto.createHash('sha256').update(clientIp(req)).digest('hex').slice(0, 32)
+  const ipHash = crypto.createHash('sha256').update(key || clientIp(req)).digest('hex').slice(0, 32)
   const ref = db.collection('rateLimits').doc(`${name}_${ipHash}`)
   const now = Date.now()
   try {
@@ -1482,8 +1579,8 @@ function generateSlotsServer(settings = {}) {
 
 // 店家時區：台灣固定 UTC+8、無日光節約。Cloud Functions 預設以 UTC 執行，
 // 所有「營業時間/今天/時段是否已過」的牆鐘判斷都必須用台灣時間，否則會差 8 小時。
+// （slotEpochMs 已搬至 lib/myBookings.js 統一維護，index.js 由頂部 import。）
 const STORE_TZ = 'Asia/Taipei'
-const STORE_UTC_OFFSET = '+08:00'
 
 function todayServerStr() {
   // 以店家時區計算「今天」（YYYY-MM-DD），避免 UTC 伺服器在台灣午夜前後算錯日期。
@@ -1493,12 +1590,6 @@ function todayServerStr() {
     month: '2-digit',
     day: '2-digit',
   }).format(new Date())
-}
-
-// 把「店家時區的某日某時段」（如 2026-06-08 18:00）轉成絕對時間戳（ms），
-// 用來與 Date.now() 比較「該時段是否已過」。台灣固定 +08:00，故可直接帶偏移。
-function slotEpochMs(dateStr, timeSlot) {
-  return Date.parse(`${dateStr}T${timeSlot}:00${STORE_UTC_OFFSET}`)
 }
 
 // 驗證並正規化日期字串（YYYY-MM-DD），不合法回空字串
