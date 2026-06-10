@@ -217,33 +217,17 @@ export default function ConfirmPage() {
           </div>
         </div>
 
+        {/* LINE 通知：頁面第一順位 CTA——綁定流程自帶加好友引導（getFriendship 檢查 +
+            follow 事件自動補發），單一按鈕即可完成，不再拆「加好友/綁定」兩顆按鈕。 */}
         <div
-          className="animate-soft-enter mt-4 grid grid-cols-3 gap-2"
-        >
-          <MiniRule label="保留" value={`${cleanupBuffer} 分鐘`} />
-          <MiniRule label="用餐" value={`${diningDuration} 分鐘`} />
-          <MiniRule label="狀態" value="已確認" />
-        </div>
-
-        {/* 截圖提示 */}
-        <div
-          className="animate-soft-enter mt-4 text-center"
-        >
-          <p className="inline-flex items-center gap-1.5 text-xs font-bold text-chicken-brown/70 bg-white/60 px-3 py-1.5 rounded-full">
-            📸 到店時出示訂位編號；需修改可使用下方管理連結
-          </p>
-        </div>
-
-        {/* LINE 與訂位管理 */}
-        <div
-          className="animate-soft-enter mt-5 rounded-2xl border border-[#06C755]/25 bg-[#06C755]/5 p-4"
+          className="animate-soft-enter mt-4 rounded-2xl border-2 border-[#06C755]/35 bg-[#06C755]/5 p-4 shadow-sm"
         >
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#06C755] text-sm font-black text-white">LINE</div>
             <div className="flex-1">
-              <h2 className="text-base font-black text-chicken-brown">用 LINE 接收訂位通知</h2>
+              <h2 className="text-base font-black text-chicken-brown">別漏接訂位通知</h2>
               <p className="mt-1 text-xs leading-5 text-chicken-brown/60">
-                兩步驟完成：加入好友 → 綁定通知。之後訂位卡片、店家定位與任何異動都會自動傳到您的 LINE。
+                訂位卡片、店家定位與任何異動，自動傳到您的 LINE。
               </p>
             </div>
           </div>
@@ -265,41 +249,28 @@ export default function ConfirmPage() {
                   </a>
                 )}
               </>
-            ) : (
+            ) : lineReceiveUrl ? (
               <>
-                {lineFriendUrl ? (
-                  <a href={lineFriendUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755]">
-                    ① 加入 {lineOfficialName} 好友
-                  </a>
-                ) : (
-                  <button className="btn-primary w-full opacity-70" disabled>
-                    LINE 官方帳號尚未設定
-                  </button>
-                )}
-                {lineReceiveUrl && (
-                  <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
-                    ② 綁定訂位通知（自動傳送訂位卡片）
-                  </a>
-                )}
-                <div className="rounded-xl bg-white/80 px-3 py-2 text-xs font-bold leading-5 text-chicken-brown/60">
-                  先加好友再綁定，訂位卡片才能送達。若先綁定才加好友也沒關係——加入好友後會自動補發訂位資訊。
-                </div>
+                <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755] text-base">
+                  加入並綁定 LINE 通知
+                </a>
+                <p className="text-center text-[11px] font-bold leading-4 text-chicken-brown/50">
+                  會開啟 LINE 完成授權並加入官方帳號好友；先綁定才加好友也會自動補發訂位資訊。
+                </p>
               </>
+            ) : lineFriendUrl ? (
+              <a href={lineFriendUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755]">
+                加入 {lineOfficialName} 好友
+              </a>
+            ) : (
+              <button className="btn-primary w-full opacity-70" disabled>
+                LINE 官方帳號尚未設定
+              </button>
             )}
-            <Link to={`/manage/${b.id}?token=${encodeURIComponent(b.manageToken || '')}`} className="btn-yellow w-full text-center">
-              管理 / 修改我的訂位
-            </Link>
-            <button
-              type="button"
-              onClick={copyManageUrl}
-              className="rounded-2xl border border-chicken-brown/15 bg-white px-4 py-3 text-sm font-black text-chicken-brown transition hover:border-chicken-red/40"
-            >
-              {copiedManage ? '已複製管理連結' : '複製訂位管理連結'}
-            </button>
           </div>
         </div>
 
-        {/* 到店工具 */}
+        {/* 到店工具：上移到 LINE 卡之後，第一屏內就拿得到 */}
         <div
           className="animate-soft-enter mt-4 grid grid-cols-3 gap-2"
         >
@@ -336,6 +307,27 @@ export default function ConfirmPage() {
               <div className="mt-1 text-xs font-black text-chicken-brown">撥電話</div>
             </button>
           )}
+        </div>
+
+        {/* 訂位管理 */}
+        <div
+          className="animate-soft-enter mt-4 rounded-2xl border border-chicken-brown/10 bg-white/80 p-4"
+        >
+          <p className="mb-3 text-center text-xs font-bold text-chicken-brown/60">
+            📸 到店時出示訂位編號；需要改期或取消可用下方管理連結
+          </p>
+          <div className="grid gap-2">
+            <Link to={`/manage/${b.id}?token=${encodeURIComponent(b.manageToken || '')}`} className="btn-yellow w-full text-center">
+              管理 / 修改我的訂位
+            </Link>
+            <button
+              type="button"
+              onClick={copyManageUrl}
+              className="rounded-2xl border border-chicken-brown/15 bg-white px-4 py-3 text-sm font-black text-chicken-brown transition hover:border-chicken-red/40"
+            >
+              {copiedManage ? '已複製管理連結' : '複製訂位管理連結'}
+            </button>
+          </div>
         </div>
 
         {/* 注意事項 */}
@@ -384,15 +376,6 @@ function Tip({ icon, children }) {
       <span className="leading-6">{icon}</span>
       <span className="flex-1">{children}</span>
     </li>
-  )
-}
-
-function MiniRule({ label, value }) {
-  return (
-    <div className="rounded-xl border border-chicken-brown/10 bg-white px-2 py-3 text-center shadow-sm">
-      <div className="text-[11px] font-bold text-chicken-brown/50">{label}</div>
-      <div className="mt-1 text-sm font-black text-chicken-brown">{value}</div>
-    </div>
   )
 }
 
