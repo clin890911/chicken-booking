@@ -45,3 +45,18 @@ export function buildManageUrl(publicSiteUrl, bookingId, manageToken) {
   if (!/^https?:\/\//.test(base) || !bookingId || !manageToken) return ''
   return `${base}/manage/${encodeURIComponent(bookingId)}?token=${encodeURIComponent(manageToken)}`
 }
+
+// 店員端改動分類：只有「客人在意的變更」才通知，店內內務一律靜默。
+// - 取消（任何狀態 → cancelled）→ 'cancelled'
+// - 維持 confirmed 且改期/改時段/改人數 → 'updated'
+// - 其他（指派桌位、備註、入座 arrived、結帳 completed、noshow、新建文件）→ null 不通知
+export function classifyAdminBookingChange(before, after) {
+  if (!before || !after) return null
+  if (before.status !== 'cancelled' && after.status === 'cancelled') return 'cancelled'
+  if (before.status === 'confirmed' && after.status === 'confirmed') {
+    const structuralChanged = ['date', 'timeSlot', 'guests']
+      .some(key => String(after[key] ?? '') !== String(before[key] ?? ''))
+    if (structuralChanged) return 'updated'
+  }
+  return null
+}

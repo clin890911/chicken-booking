@@ -11,6 +11,7 @@ import {
   isRetryableLineStatus,
   dayLabelServer,
   buildManageUrl,
+  classifyAdminBookingChange,
 } from './lib/notify.js'
 
 initializeApp()
@@ -136,14 +137,80 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
       } })
     }
     ops.push({ ref: db.collection('system').doc('sync'), data: { lastAdminPushAt: new Date().toISOString() } })
+    // 店員端改訂位 LINE 通知（feature flag lineNotifyOnAdminChange，預設關）：
+    // 開關開啟時才在 commit「前」讀舊值（merge-upsert 不讀舊值，diff 需要 before 快照），
+    // commit「成功後」才分類入列——先寫成功才通知，避免通知了卻沒寫進去。
+    const notifySettings = await readSettingsForAdminNotify(dataset.settings)
+    const beforeBookings = notifySettings.lineNotifyOnAdminChange === true
+      ? await snapshotBookingsBefore(dataset.bookings)
+      : new Map()
     // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
     await commitInChunks(ops)
+    await notifyAdminBookingChanges(beforeBookings, dataset.bookings, notifySettings)
     return res.json({ ok: true })
   } catch (err) {
     console.error('adminPushData failed:', err)
     return res.status(500).json({ ok: false, error: err.message || 'admin-push-failed' })
   }
 })
+
+// 讀取本次推送涉及訂位的「commit 前」狀態（每批 ≤300 筆 getAll）。失敗回空 Map（通知靜默跳過，不影響同步）。
+async function snapshotBookingsBefore(bookings) {
+  const map = new Map()
+  try {
+    const ids = (Array.isArray(bookings) ? bookings : [])
+      .map(b => String(b?.id || '').trim())
+      .filter(Boolean)
+    if (!ids.length) return map
+    for (let i = 0; i < ids.length; i += 300) {
+      const refs = ids.slice(i, i + 300).map(id => db.collection(COLLECTIONS.bookings).doc(id))
+      const snaps = await db.getAll(...refs)
+      snaps.forEach(snap => { if (snap.exists) map.set(snap.id, snap.data()) })
+    }
+  } catch (err) {
+    console.error('snapshotBookingsBefore failed:', err?.message)
+  }
+  return map
+}
+
+// 讀取通知判斷用 settings：以 Firestore 現值為底、疊上本次一併推送的 settings（若有），
+// 確保「同一筆 push 裡打開開關」也立即生效。
+async function readSettingsForAdminNotify(incomingSettings) {
+  try {
+    const snap = await db.collection('settings').doc('main').get()
+    return normalizeStoreSettings({
+      ...(snap.exists ? snap.data() : {}),
+      ...(incomingSettings || {}),
+    })
+  } catch (err) {
+    console.error('readSettingsForAdminNotify failed:', err?.message)
+    return normalizeStoreSettings(incomingSettings || {})
+  }
+}
+
+// 店員端變更 → 客人 LINE 通知：只通知「客人在意的變更」（取消、改期/時段/人數），
+// 內務操作（指派桌位、入座、結帳、noshow、備註）一律靜默；見 classifyAdminBookingChange。
+// 入列走 queueOnly（不立即送、不需 LINE secret），由 retryNotifications ≤2 分鐘代送；
+// stateHash 防重擋雙裝置對同一變更的重複入列。錯誤只記 log，不影響同步回應。
+async function notifyAdminBookingChanges(beforeMap, bookings, settings) {
+  try {
+    if (settings.lineNotifyOnAdminChange !== true) return
+    if (!beforeMap.size || !Array.isArray(bookings) || !bookings.length) return
+    for (const incoming of bookings) {
+      const id = String(incoming?.id || '').trim()
+      if (!id) continue
+      const before = beforeMap.get(id)
+      const event = classifyAdminBookingChange(before, incoming)
+      if (!event) continue
+      // 通知內容以 commit 後的權威文件為準（merge-upsert 後可能含 client 沒帶齊的欄位）
+      const freshSnap = await db.collection(COLLECTIONS.bookings).doc(id).get()
+      if (!freshSnap.exists) continue
+      await notifyLineBookingChange(id, { id: freshSnap.id, ...freshSnap.data() }, event, settings, { queueOnly: true })
+    }
+  } catch (err) {
+    console.error('notifyAdminBookingChanges failed:', err?.message)
+  }
+}
 
 // 團體預排桌位的原子把關：多裝置可能在 5 秒同步空窗內把同一桌圈進不同團，純前端檢查不可靠。
 // 此端點在交易內讀取同日所有團、做「梯次時間窗重疊 + 桌號相同」衝突檢查，無衝突才寫入該團單。
@@ -800,8 +867,11 @@ function storeFromSettings(settings = {}) {
 // - 無綁定 / 已知拒推（封鎖、非好友）→ 沉默跳過，不入列必死訊息
 // - 事件級防重：同 event 同內容指紋（date|timeSlot|guests|status）90 秒內只送一次，
 //   擋下「functions 先部署、舊前端仍打 linePushBooking」共存窗口的重複推播與重送疊加
+//   （也擋雙店員裝置對同一變更各推一次）
 // - 任何錯誤只記 log，絕不影響主回應（與 outbox 哲學一致）
-async function notifyLineBookingChange(bookingId, booking, event, providedSettings = null) {
+// - opts.queueOnly：只入列、不立即試送——adminPushData 熱路徑用（該端點沒綁 LINE secret、
+//   也不該吃 3.5 秒 timeout），由 retryNotifications 排程在 ≤2 分鐘內代送。
+async function notifyLineBookingChange(bookingId, booking, event, providedSettings = null, { queueOnly = false } = {}) {
   try {
     const bindingRef = db.collection('lineBookingBindings').doc(bookingId)
     const snap = await bindingRef.get()
@@ -829,7 +899,7 @@ async function notifyLineBookingChange(bookingId, booking, event, providedSettin
       lastPushByEvent: { ...(binding.lastPushByEvent || {}), [event]: { at: now, stateHash } },
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true })
-    await enqueueAndTrySend({
+    const outboxDoc = {
       channel: 'line',
       event,
       bookingId,
@@ -841,7 +911,9 @@ async function notifyLineBookingChange(bookingId, booking, event, providedSettin
           event,
         ),
       },
-    })
+    }
+    if (queueOnly) await enqueueNotification(outboxDoc)
+    else await enqueueAndTrySend(outboxDoc)
     return { ok: true }
   } catch (err) {
     console.error('notifyLineBookingChange failed:', err?.message)
@@ -1088,6 +1160,8 @@ function normalizeStoreSettings(settings = {}) {
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
     // 前端正式站網址：後端組 LINE 訊息「管理 / 修改訂位」按鈕連結用；未設定則該按鈕不顯示。
     publicSiteUrl: String(settings.publicSiteUrl || '').trim(),
+    // 店員後台改期/取消時自動 LINE 通知客人（預設關，店內驗證後再開）。
+    lineNotifyOnAdminChange: settings.lineNotifyOnAdminChange === true,
     storeName: settings.storeName || '雞王涮涮鍋',
     storePhone: settings.storePhone || DEFAULT_STORE_PHONE,
     storeAddress: settings.storeAddress || DEFAULT_STORE_ADDRESS,
