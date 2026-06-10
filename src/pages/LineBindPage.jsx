@@ -5,7 +5,7 @@ import { CheckCircle2, ChevronLeft, Loader2, MessageCircle, ShieldCheck, Triangl
 import { Button, Card } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
-import { bookingLinePayload, decodeLinePayload, lineBindEndpoint, lineLiffId, lineLiffUrl, lineOfficialUrl, loadLiffSdk } from '../services/lineService'
+import { decodeLinePayload, fetchLineBooking, lineBindEndpoint, lineLiffId, lineLiffUrl, lineOfficialUrl, loadLiffSdk } from '../services/lineService'
 import { dayLabel } from '../utils/timeSlots'
 
 const LINE_BIND_STATE_KEY = 'chicken_line_bind_params_v1'
@@ -30,33 +30,43 @@ export default function LineBindPage() {
   const [state, setState] = useState('loading')
   const [message, setMessage] = useState('正在準備 LINE 訂位通知...')
   const [profile, setProfile] = useState(null)
+  const [remoteBooking, setRemoteBooking] = useState(null)
   const submittedRef = useRef(new Set())
+  const remoteFetchRef = useRef('')
 
+  // 顯示用訂位資料來源（依序）：本機 → 舊版連結的 payload（相容已寄出的連結）→ lineGetBooking 回讀。
+  // 新版連結不再夾帶個資 payload（會進 LINE 伺服器 log 與瀏覽器歷史），跨裝置/LINE 內開啟靠回讀補上。
   const booking = useMemo(() => {
     const localBooking = bookingId ? bookingService.ensureManageToken(bookingId) : null
     if (localBooking) return localBooking
-    return normalizePayloadBooking(decodedPayload?.booking)
-  }, [bookingId, decodedPayload])
-  const payload = useMemo(() => {
-    if (decodedPayload?.booking && booking?.id) {
-      return {
-        ...decodedPayload,
-        booking: {
-          ...decodedPayload.booking,
-          id: booking.id,
-          token: booking.manageToken || token,
-          manageUrl: manageUrl || decodedPayload.booking.manageUrl,
-        },
-      }
-    }
-    return booking ? bookingLinePayload(booking, settings, manageUrl) : null
-  }, [booking, decodedPayload, manageUrl, settings, token])
+    return normalizePayloadBooking(decodedPayload?.booking) || remoteBooking
+  }, [bookingId, decodedPayload, remoteBooking])
 
   useEffect(() => {
     let cancelled = false
     async function run() {
       let activeSubmitKey = ''
       if (!booking) {
+        // 回讀狀態機（''→pending→ok/failed）放 ref：StrictMode 下 effect 會連跑兩次，
+        // 第二次必須「等待中返回」而不是誤判成查無資料。
+        if (bookingId && token && remoteFetchRef.current !== 'failed') {
+          if (remoteFetchRef.current === '') {
+            remoteFetchRef.current = 'pending'
+            setMessage('正在讀取訂位資料...')
+            const remote = await fetchLineBooking(settings, bookingId, token)
+            if (remote.ok && remote.booking?.id) {
+              remoteFetchRef.current = 'ok'
+              // 即使本輪 effect 已被 cleanup（cancelled），仍要寫入結果：
+              // 另一輪正以 pending 返回等待，沒人寫 state 流程會卡死。
+              setRemoteBooking(normalizePayloadBooking(remote.booking))
+            } else {
+              remoteFetchRef.current = 'failed'
+              setState('error')
+              setMessage('找不到此訂位資料，請回到訂位成功頁重新按一次 LINE 接收按鈕。')
+            }
+          }
+          return // pending：booking 就緒後 effect 會重跑，繼續綁定流程
+        }
         setState('error')
         setMessage('找不到此訂位資料，請回到訂位成功頁重新按一次 LINE 接收按鈕。')
         return
@@ -95,6 +105,15 @@ export default function LineBindPage() {
         const nextProfile = await liff.getProfile()
         if (cancelled) return
         setProfile(nextProfile)
+        // 好友狀態檢查：未加好友的 push 必定被 LINE 拒絕。先知道、先引導，
+        // 後端也會據此跳過首封推播（加好友後由 follow 事件自動補發）。
+        let friendFlag = null
+        try {
+          const friendship = await liff.getFriendship?.()
+          if (typeof friendship?.friendFlag === 'boolean') friendFlag = friendship.friendFlag
+        } catch {
+          friendFlag = null // 查不到（channel 未連動 OA 等）視為未知，照舊流程走
+        }
         setMessage('正在綁定您的 LINE 訂位通知...')
         activeSubmitKey = `${booking.id}:${nextProfile.userId}`
         if (submittedRef.current.has(activeSubmitKey) || hasRecentlySubmittedBind(activeSubmitKey)) {
@@ -105,21 +124,28 @@ export default function LineBindPage() {
         submittedRef.current.add(activeSubmitKey)
         rememberSubmittedBind(activeSubmitKey)
 
+        // 後端 lineBind 會權威重讀訂位並以 settings 組店家資訊，這裡只需要 id + token + LINE profile。
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ...payload,
+            booking: { id: booking.id, token },
             line: {
               userId: nextProfile.userId,
               displayName: nextProfile.displayName,
               pictureUrl: nextProfile.pictureUrl,
+              ...(friendFlag === null ? {} : { friendFlag }),
             },
           }),
         })
         const data = await res.json().catch(() => ({}))
         if (!res.ok || data.ok === false) throw new Error(data.error || 'LINE 綁定失敗')
         clearPersistedBindParams()
+        if (data.needFriend || friendFlag === false) {
+          setState('need-friend')
+          setMessage('綁定已完成，但還沒加入官方帳號好友。請點下方按鈕加入好友，加入後會自動補發訂位資訊。')
+          return
+        }
         setState('success')
         setMessage(data.skippedPush
           ? 'LINE 訂位通知已完成設定；剛剛已傳送過訂位資訊，因此不重複發送。'
@@ -136,7 +162,7 @@ export default function LineBindPage() {
     }
     run()
     return () => { cancelled = true }
-  }, [bindParams, booking, endpoint, liffId, liffUrl, location.hash, location.search, payload, shouldUseLiff, token])
+  }, [bindParams, booking, bookingId, endpoint, liffId, liffUrl, location.hash, location.search, settings, shouldUseLiff, token])
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#06C755]/10 via-chicken-cream to-white pb-12">
@@ -349,6 +375,7 @@ function StatusIcon({ state }) {
   if (state === 'success') return <CheckCircle2 className="mx-auto text-chicken-green" size={46} />
   if (state === 'error') return <TriangleAlert className="mx-auto text-chicken-red" size={46} />
   if (state === 'setup') return <ShieldCheck className="mx-auto text-chicken-yellow" size={46} />
+  if (state === 'need-friend') return <MessageCircle className="mx-auto text-[#06C755]" size={46} />
   return <Loader2 className="mx-auto animate-spin text-[#06C755]" size={46} />
 }
 
@@ -356,5 +383,6 @@ function statusTitle(state) {
   if (state === 'success') return 'LINE 訂位通知已啟用'
   if (state === 'error') return 'LINE 綁定未完成'
   if (state === 'setup') return 'LINE 自動通知準備中'
+  if (state === 'need-friend') return '最後一步：加入官方帳號好友'
   return '正在連接 LINE'
 }

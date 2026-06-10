@@ -454,8 +454,8 @@ function ActionGrid({ setMode, booking, settings }) {
       <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="surface flex min-h-[118px] flex-col justify-between p-4 transition hover:-translate-y-0.5 hover:shadow-md">
         <MessageCircle className="text-[#06C755]" size={24} />
         <div>
-          <div className="font-black text-chicken-brown">加入 LINE 官方帳號</div>
-          <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">先加好友，未來接收提醒、定位與修改入口</div>
+          <div className="font-black text-chicken-brown">綁定 LINE 訂位通知</div>
+          <div className="mt-1 text-xs font-bold leading-5 text-chicken-brown/55">加好友 → 一鍵綁定，訂位卡片與異動自動傳到 LINE</div>
         </div>
       </a>
       {settings.storePhone ? (
@@ -586,9 +586,9 @@ function SuccessPanel({ booking, settings, onBack }) {
       <h2 className="mt-3 text-xl font-black text-chicken-brown">訂位已更新</h2>
       <p className="mt-2 text-sm leading-6 text-chicken-brown/60">同仁端已同步收到新的訂位內容。</p>
       <div className="mt-5 grid gap-2">
-        <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">加入 LINE 官方帳號</a>
+        <a href={lineBindUrl(settings, booking)} target="_blank" rel="noreferrer" className="btn-primary text-center">綁定 LINE 訂位通知</a>
         <p className="text-xs font-bold leading-5 text-chicken-brown/55">
-          目前按鈕會先開啟 LINE 官方帳號加好友；正式 LIFF 推播上線後，才會自動發送最新訂位與定位。
+          已綁定的訂位異動會自動推播到 LINE；尚未綁定可點上方按鈕（先加好友再綁定）。
         </p>
         <button onClick={onBack} className="text-sm font-bold text-chicken-brown/60 underline">回訂位管理中心</button>
       </div>

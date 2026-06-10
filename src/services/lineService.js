@@ -1,16 +1,12 @@
-import { dayLabel } from '../utils/timeSlots'
-
 const DEFAULT_LIFF_URL = 'https://liff.line.me/2009996489-f1SCb75q'
 const DEFAULT_LIFF_ID = '2009996489-f1SCb75q'
 const DEFAULT_BIND_ENDPOINT = 'https://linebind-reaor76eyq-uc.a.run.app'
 const DEFAULT_PUSH_ENDPOINT = 'https://linepushbooking-reaor76eyq-uc.a.run.app'
 const DEFAULT_MANAGE_ENDPOINT = 'https://linegetbooking-reaor76eyq-uc.a.run.app'
-const DEFAULT_STORE_ADDRESS = '南投縣鹿谷鄉中正路二段377號'
-const DEFAULT_STORE_MAP_URL = 'https://www.google.com/maps/search/?api=1&query=%E5%8D%97%E6%8A%95%E7%B8%A3%E9%B9%BF%E8%B0%B7%E9%84%89%E4%B8%AD%E6%AD%A3%E8%B7%AF%E4%BA%8C%E6%AE%B5377%E8%99%9F'
-const DEFAULT_STORE_LATITUDE = '23.7523874'
-const DEFAULT_STORE_LONGITUDE = '120.746746'
-const DEFAULT_STORE_PHONE = '049-2753377'
 
+// 綁定入口連結：只帶 bookingId + token，不再夾帶 base64 的姓名/電話 payload——
+// 那會把個資寫進 LINE 伺服器 log 與瀏覽器歷史。綁定頁顯示資料改由 lineGetBooking 端點回讀，
+// 後端 lineBind 本來就權威重讀訂位，payload 從頭到尾只剩顯示用途，可以安全移除。
 export function lineBindUrl(settings = {}, booking, manageUrl) {
   if (!booking) return ''
   const configuredLiff = settings.lineLiffUrl || import.meta.env.VITE_LINE_LIFF_URL || DEFAULT_LIFF_URL
@@ -21,7 +17,6 @@ export function lineBindUrl(settings = {}, booking, manageUrl) {
   url.searchParams.set('token', booking.manageToken || '')
   url.searchParams.set('manageUrl', targetManageUrl)
   if (settings.lineUseLiff && configuredLiff) url.searchParams.set('useLiff', '1')
-  url.searchParams.set('payload', encodeLinePayload(bookingLinePayload(booking, settings, targetManageUrl)))
   return url.toString()
 }
 
@@ -58,14 +53,7 @@ export function lineLiffId(settings = {}) {
   }
 }
 
-export function encodeLinePayload(payload) {
-  const json = JSON.stringify(payload)
-  const bytes = new TextEncoder().encode(json)
-  let binary = ''
-  bytes.forEach(byte => { binary += String.fromCharCode(byte) })
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
+// decode 保留：已寄出的舊版綁定連結仍帶 payload 參數，作為顯示資料的相容來源。
 export function decodeLinePayload(value = '') {
   if (!value) return null
   try {
@@ -76,34 +64,6 @@ export function decodeLinePayload(value = '') {
     return JSON.parse(new TextDecoder().decode(bytes))
   } catch {
     return null
-  }
-}
-
-export function bookingLinePayload(booking, settings = {}, manageUrl = '') {
-  return {
-    booking: {
-      id: booking.id,
-      token: booking.manageToken || '',
-      name: booking.name,
-      phone: booking.phone,
-      guests: Number(booking.guests) || 1,
-      date: booking.date,
-      dateLabel: dayLabel(booking.date),
-      timeSlot: booking.timeSlot,
-      notes: booking.notes || {},
-      manageUrl,
-    },
-    store: {
-      name: settings.storeName || '雞王涮涮鍋',
-      address: settings.storeAddress || DEFAULT_STORE_ADDRESS,
-      phone: settings.storePhone || DEFAULT_STORE_PHONE,
-      mapUrl: settings.storeMapUrl || DEFAULT_STORE_MAP_URL,
-      latitude: settings.storeLatitude || DEFAULT_STORE_LATITUDE,
-      longitude: settings.storeLongitude || DEFAULT_STORE_LONGITUDE,
-      lineOfficialUrl: lineOfficialUrl(settings),
-      diningDurationMin: Number(settings.diningDurationMin) || 90,
-      cleanupBufferMin: Number(settings.cleanupBufferMin) || 10,
-    },
   }
 }
 

@@ -33,11 +33,14 @@ In the admin settings page:
 ## LINE Developers console
 
 - Enable Messaging API.
-- Enable webhook.
+- Enable webhook（follow 事件用於「先綁定、後加好友」的自動補發，務必開啟）.
 - Set webhook URL to the deployed `lineWebhook` endpoint.
 - Create a LIFF app with `profile` scope.
 - Set the LIFF endpoint URL to the deployed frontend route or LIFF URL used by the app.
-- Enable the add-friend option for the LIFF app if available.
+- **Add friend option 設為 aggressive**：LINE Login channel 連結官方帳號後，授權畫面會同時出現
+  「加入好友」勾選，讓加好友與授權一步完成（綁定頁也會用 `liff.getFriendship()` 檢查好友狀態，
+  未加好友會跳過首封推播並引導加入，加入後由 follow 事件自動補發）。
+- 後台設定需填 `publicSiteUrl`（訂位網站正式網址），LINE 卡片才會有「管理 / 修改訂位」按鈕。
 
 ## Notes
 

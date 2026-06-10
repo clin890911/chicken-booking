@@ -6,7 +6,7 @@ import { dayLabel } from '../utils/timeSlots'
 import { copyText } from '../utils/clipboard'
 import { Card, Button, Badge } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
-import { lineBindUrl } from '../services/lineService'
+import { lineBindUrl, lineOfficialUrl } from '../services/lineService'
 import { guestGetBooking } from '../services/cloudDataService'
 
 export default function ConfirmPage() {
@@ -63,6 +63,7 @@ export default function ConfirmPage() {
     return `${window.location.origin}/manage/${b.id}?token=${encodeURIComponent(b.manageToken)}`
   }, [b])
   const lineOfficialName = settings.lineOfficialName || 'LINE 官方帳號'
+  const lineFriendUrl = lineOfficialUrl(settings)
   // 這兩個 URL 在 render 階段計算；任何例外（如異常日期）都不該讓整頁白屏，故 try/catch 後退成空字串。
   const lineReceiveUrl = useMemo(() => {
     try { return b ? lineBindUrl(settings, b, manageUrl) : '' } catch { return '' }
@@ -240,25 +241,30 @@ export default function ConfirmPage() {
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#06C755] text-sm font-black text-white">LINE</div>
             <div className="flex-1">
-              <h2 className="text-base font-black text-chicken-brown">加入雞王 LINE 官方帳號</h2>
+              <h2 className="text-base font-black text-chicken-brown">用 LINE 接收訂位通知</h2>
               <p className="mt-1 text-xs leading-5 text-chicken-brown/60">
-                先加好友，之後即可由官方帳號接收訂位提醒、店家定位與修改連結。
+                兩步驟完成：加入好友 → 綁定通知。之後訂位卡片、店家定位與任何異動都會自動傳到您的 LINE。
               </p>
             </div>
           </div>
 
           <div className="mt-3 grid gap-2">
-            {lineReceiveUrl ? (
-              <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
-                加入 LINE 官方帳號
+            {lineFriendUrl ? (
+              <a href={lineFriendUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755]">
+                ① 加入 {lineOfficialName} 好友
               </a>
             ) : (
               <button className="btn-primary w-full opacity-70" disabled>
                 LINE 官方帳號尚未設定
               </button>
             )}
+            {lineReceiveUrl && (
+              <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center">
+                ② 綁定訂位通知（自動傳送訂位卡片）
+              </a>
+            )}
             <div className="rounded-xl bg-white/80 px-3 py-2 text-xs font-bold leading-5 text-chicken-brown/60">
-              目前按鈕會先開啟 {lineOfficialName} 加好友；正式 LIFF 推播上線後，官方帳號才會自動發送訂位摘要與修改連結。在那之前，請以本頁訂位編號與下方管理連結為準。
+              先加好友再綁定，訂位卡片才能送達。若先綁定才加好友也沒關係——加入好友後會自動補發訂位資訊。
             </div>
             <Link to={`/manage/${b.id}?token=${encodeURIComponent(b.manageToken || '')}`} className="btn-yellow w-full text-center">
               管理 / 修改我的訂位
