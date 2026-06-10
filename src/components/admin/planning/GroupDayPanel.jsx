@@ -1,5 +1,5 @@
-import { EmptyState } from '../../../ui'
-import { dayLabel } from '../../../../utils/timeSlots'
+import { EmptyState } from '../../ui'
+import { dayLabel } from '../../../utils/timeSlots'
 import GroupArrivalTimeline from './GroupArrivalTimeline'
 import GroupPrepDigest from './GroupPrepDigest'
 

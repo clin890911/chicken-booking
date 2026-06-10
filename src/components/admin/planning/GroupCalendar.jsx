@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { todayStr, formatDate } from '../../../../utils/timeSlots'
+import { todayStr, formatDate } from '../../../utils/timeSlots'
 
 // Pane A：團體預排月曆。仿 CalendarView 月格，吃 monthSummary（團體彙總）視覺化整月忙閒。
 // 受控元件：value(選中日) / cursor(年月) 由容器持有；點日 onSelect、換月 onCursorChange。

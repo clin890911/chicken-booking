@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import GroupPlanningView from './GroupPlanningView'
+import GroupPlanningView from '../planning/PlanningView'
 import GroupDirectoryView from './GroupDirectoryView'
 
 const SUB = [
