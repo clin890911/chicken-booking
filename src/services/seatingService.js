@@ -5,6 +5,7 @@ import * as bookingService from './bookingService'
 import * as waitlistService from './waitlistService'
 import * as customerService from './customerService'
 import * as groupService from './groupReservationService'
+import { statusZh } from '../utils/tableStatus'
 
 // === 訂位 → 指派桌 ===
 // 客人線上訂位（assignedTableId: null）→ 到店時店長指派一張空桌
@@ -13,7 +14,7 @@ export function assignBookingToTable(bookingId, tableNumber) {
   const table = tableService.getByNumber(tableNumber)
   if (!booking) return { ok: false, error: '訂位不存在' }
   if (!table) return { ok: false, error: '桌位不存在' }
-  if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌（${table.status}）` }
+  if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌（${statusZh(table.status)}）` }
   if (booking.guests > table.capacity) return { ok: false, error: `${tableNumber} 容量不足（${table.capacity} < ${booking.guests}）` }
 
   bookingService.assignTable(bookingId, tableNumber)
@@ -192,22 +193,62 @@ export function suggestTable(partySize) {
 export function seatGroupBatch(groupId, batchId) {
   const group = groupService.getById(groupId)
   if (!group) return { ok: false, error: '團單不存在' }
+  if (group.status === 'completed') return { ok: false, error: '此團已整團完成，無法再入座' }
+  if (group.status === 'cancelled') return { ok: false, error: '此團已取消，無法入座' }
   const batch = (group.batches || []).find(b => b.id === batchId)
   if (!batch) return { ok: false, error: '梯次不存在' }
   const tables = batch.tableNumbers || []
   if (!tables.length) return { ok: false, error: '此梯次尚未圈桌' }
-  // 桌況檢查：必須 vacant 或 cleaning（接續同團前梯剛離席的桌）
+  // 桌況檢查：必須 vacant 或 cleaning（接續同團前梯剛離席的桌）。
+  // 收集「全部」被佔桌回傳 blocked，讓 UI 能進「改派桌位」流程逐桌處理。
+  const blocked = []
   for (const n of tables) {
     const t = tableService.getByNumber(n)
     if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
     const sameGroupSeated = t.currentRef?.groupId === groupId
     if (!['vacant', 'cleaning'].includes(t.status) && !sameGroupSeated) {
-      return { ok: false, error: `桌位 ${n} 目前為 ${t.status}，無法入座` }
+      blocked.push({ tableNumber: n, status: t.status })
+    }
+  }
+  if (blocked.length) {
+    return {
+      ok: false,
+      error: `${blocked.map(b => `${b.tableNumber}（${statusZh(b.status)}）`).join('、')}被佔用，無法整梯入座`,
+      blocked,
     }
   }
   tables.forEach(n => tableService.seatTableForGroup(n, groupId, batchId))
   if (group.status !== 'arrived') groupService.setStatus(groupId, 'arrived')
   return { ok: true, tableNumbers: tables }
+}
+
+// 改派桌位：團體梯次某張桌被佔時，把該梯圈桌中的 fromTable 換成 toTable，並立即重試整梯入座。
+// swap 成功即落地（不回滾）：就算其他桌仍被佔，已改派的進度保留，UI 繼續逐桌處理。
+export function reseatGroupBatchTable(groupId, batchId, fromTable, toTable) {
+  const group = groupService.getById(groupId)
+  if (!group) return { ok: false, error: '團單不存在' }
+  if (['completed', 'cancelled'].includes(group.status)) {
+    return { ok: false, error: '此團已結束，無法改派桌位' }
+  }
+  const batch = (group.batches || []).find(b => b.id === batchId)
+  if (!batch) return { ok: false, error: '梯次不存在' }
+  const nums = (batch.tableNumbers || []).map(String)
+  if (!nums.includes(String(fromTable))) return { ok: false, error: `${fromTable} 不在此梯圈桌內` }
+  if (nums.includes(String(toTable))) return { ok: false, error: `${toTable} 已在此梯圈桌內` }
+  const target = tableService.getByNumber(toTable)
+  if (!target) return { ok: false, error: '桌位不存在' }
+  if (target.status !== 'vacant') {
+    return { ok: false, error: `${toTable} 目前為${statusZh(target.status)}，無法改派` }
+  }
+  // 不可搶其他今日團體已圈的桌
+  const heldByOther = groupService.listActiveByDate(group.date).some(g =>
+    g.id !== groupId && (g.batches || []).some(b => (b.tableNumbers || []).map(String).includes(String(toTable))))
+  if (heldByOther) return { ok: false, error: `${toTable} 已被其他團體保留` }
+
+  groupService.swapBatchTable(groupId, batchId, fromTable, toTable)
+  const seat = seatGroupBatch(groupId, batchId)
+  if (seat.ok) return { ok: true, seated: true, tableNumbers: seat.tableNumbers }
+  return { ok: true, seated: false, blocked: seat.blocked || [], error: seat.error }
 }
 
 // 團體梯次離席：把該梯次的桌 dining→cleaning（仍佔位、保留 currentRef 供接第二梯）。
@@ -229,6 +270,11 @@ export function checkoutGroupBatch(groupId, batchId) {
 export function seatNextBatchOnTable(tableNumber, groupId, batchId) {
   const t = tableService.getByNumber(tableNumber)
   if (!t) return { ok: false, error: '桌位不存在' }
+  const group0 = groupService.getById(groupId)
+  if (!group0) return { ok: false, error: '團單不存在' }
+  if (['completed', 'cancelled'].includes(group0.status)) {
+    return { ok: false, error: '此團已結束，無法再入座' }
+  }
   tableService.clearTable(tableNumber)
   tableService.seatTableForGroup(tableNumber, groupId, batchId)
   const group = groupService.getById(groupId)

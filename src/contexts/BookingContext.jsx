@@ -192,8 +192,6 @@ export function BookingProvider({ children }) {
   const setTableStatus = (number, status, extra = {}) => { tableService.setStatus(number, status, extra); refresh(); syncCloudSoon() }
   const blockTable = (number, reason) => { tableService.blockTable(number, reason); refresh(); syncCloudSoon() }
   const unblockTable = (number) => { tableService.unblockTable(number); refresh(); syncCloudSoon() }
-  const mergeTables = (a, b) => { const r = tableService.mergeTables(a, b); refresh(); syncCloudSoon(); return r }
-  const unmergeTable = (number) => { tableService.unmergeTable(number); refresh(); syncCloudSoon() }
   const updateTablePosition = (number, pos) => { tableService.updatePosition(number, pos); refresh(); syncCloudSoon() }
   const bulkSaveTables = (list) => { tableService.bulkWrite(list); refresh(); syncCloudSoon() }
   const addTable = (data) => { const t = tableService.addTable(data); refresh(); syncCloudSoon(); return t }
@@ -385,6 +383,7 @@ export function BookingProvider({ children }) {
   const checkoutGroupBatch = (groupId, batchId) => { const r = seatingService.checkoutGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const seatNextBatchOnTable = (tableNumber, groupId, batchId) => { const r = seatingService.seatNextBatchOnTable(tableNumber, groupId, batchId); refresh(); syncCloudSoon(); return r }
   const finalizeGroup = (groupId) => { const r = seatingService.finalizeGroup(groupId); refresh(); syncCloudSoon(); return r }
+  const reseatGroupBatchTable = (groupId, batchId, fromTable, toTable) => { const r = seatingService.reseatGroupBatchTable(groupId, batchId, fromTable, toTable); refresh(); syncCloudSoon(); return r }
   const cancelGroup = (groupId) => { const r = seatingService.cancelGroup(groupId); refresh(); syncCloudSoon(); return r }
 
   const migrateLocalToCloud = async () => {
@@ -400,7 +399,7 @@ export function BookingProvider({ children }) {
     agencies, guides, groupReservations,
     refresh, pullCloud, migrateLocalToCloud,
     addBooking, updateBooking, cycleStatus, setStatus,
-    toggleTable, setTableStatus, blockTable, unblockTable, mergeTables, unmergeTable, updateTablePosition,
+    toggleTable, setTableStatus, blockTable, unblockTable, updateTablePosition,
     bulkSaveTables, addTable, removeTable, resetTables,
     assignBookingToTable, seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, moveTable, findSuitableTables, suggestTable,
     preassignBookingTable, clearBookingPreassign,
@@ -409,7 +408,7 @@ export function BookingProvider({ children }) {
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
     createAndReserveGroup, purgeBlankGroups,
-    seatGroupBatch, checkoutGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup,
+    seatGroupBatch, checkoutGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
     updateSettings,
   }
 

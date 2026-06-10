@@ -165,6 +165,20 @@ export function setBatchTables(id, batchId, tableNumbers) {
   return update(id, { batches })
 }
 
+// 換掉某梯次圈桌中的一張桌（現場「改派桌位」用）：fromTable → toTable，只動指定梯
+export function swapBatchTable(id, batchId, fromTable, toTable) {
+  const group = getById(id)
+  if (!group) return null
+  const batches = group.batches.map(b =>
+    b.id !== batchId ? b : {
+      ...b,
+      tableNumbers: (b.tableNumbers || []).map(n =>
+        String(n) === String(fromTable) ? String(toTable) : String(n)),
+    }
+  )
+  return update(id, { batches })
+}
+
 // === 平面圖規劃：桌位衝突偵測（前端即時提示；後端 groupReserveTables 為原子真相）===
 // 回傳 { tableNumber: { type, ... } }，列出在同日、時間窗與 candidateTimeSlot 重疊而不可選的桌號：
 //   - type:'group'   其他團佔用（{ groupId, agencyName, label }）

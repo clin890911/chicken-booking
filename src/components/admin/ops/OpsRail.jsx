@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { listUpcoming } from '../../../services/bookingService'
 import { todayStr } from '../../../utils/timeSlots'
-import { todayActiveGroups } from '../../../utils/groupLive'
+import { todayGroupsByState } from '../../../utils/groupLive'
 import UpcomingPanel from '../floormap/UpcomingPanel'
 import WaitlistPanel from './WaitlistPanel'
 import GroupTodayPanel from './GroupTodayPanel'
@@ -10,7 +10,7 @@ import GroupTodayPanel from './GroupTodayPanel'
 // 現場右側欄：籤切換（即將到達 / 候位 / 今日團體），每籤獨佔全高、badge 顯示待辦數。
 // 今日沒有團體時不渲染「今日團體」籤（一天 0~5 團的稀疏性，無團體日不佔空間）。
 // 選中桌時整欄被 TableDrawer 取代（由 OperationsView 控制），籤狀態保留在外層不重設。
-export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssignTable, onSeatWaitlist, onFocusTable }) {
+export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssignTable, onSeatWaitlist, onFocusTable, onReseatBatch }) {
   const { bookings, waitlist, groupReservations } = useBooking()
   const today = todayStr()
 
@@ -24,17 +24,17 @@ export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssi
     () => waitlist.filter(w => w.status === 'waiting' || w.status === 'called').length,
     [waitlist],
   )
-  const todayGroups = useMemo(
-    () => todayActiveGroups(groupReservations, today),
+  const { active: activeGroups, completed: completedGroups } = useMemo(
+    () => todayGroupsByState(groupReservations, today),
     [groupReservations, today],
   )
-  // badge＝今日尚未「整團完成」的團數
-  const openGroupCount = todayGroups.filter(g => g.status !== 'completed').length
 
   const tabs = [
     { key: 'upcoming', label: '即將到達', badge: upcomingCount },
     { key: 'waitlist', label: '候位', badge: waitingCount },
-    ...(todayGroups.length > 0 ? [{ key: 'groups', label: '今日團體', badge: openGroupCount }] : []),
+    // 全完成的日子籤仍在（badge 0），才能回去印回傳單
+    ...(activeGroups.length + completedGroups.length > 0
+      ? [{ key: 'groups', label: '今日團體', badge: activeGroups.length }] : []),
   ]
   const effective = tabs.some(t => t.key === activeTab) ? activeTab : tabs[0].key
 
@@ -68,7 +68,7 @@ export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssi
           <WaitlistPanel onSeatWaitlist={onSeatWaitlist} />
         )}
         {effective === 'groups' && (
-          <GroupTodayPanel onFocusTable={onFocusTable} />
+          <GroupTodayPanel onFocusTable={onFocusTable} onReseatBatch={onReseatBatch} />
         )}
       </div>
     </div>

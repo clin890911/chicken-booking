@@ -74,13 +74,13 @@ describe('seatingService 整合層', () => {
       expect(r).toEqual({ ok: false, error: '桌位不存在' })
     })
 
-    it('非空桌 → 擋（含目前狀態字串）', () => {
+    it('非空桌 → 擋（含目前狀態中文）', () => {
       const b = mkBooking()
       tableService.setStatus('101', 'reserved')
       const r = seating.assignBookingToTable(b.id, '101')
       expect(r.ok).toBe(false)
       expect(r.error).toContain('101')
-      expect(r.error).toContain('reserved')
+      expect(r.error).toContain('已預訂')
     })
 
     it('容量不足 → 擋', () => {
@@ -661,5 +661,143 @@ describe('seatingService 整合層', () => {
       expect(tableService.getByNumber('201').status).toBe('reserved')
       expect(bookingService.getById(b.id).status).toBe('confirmed')
     })
+  })
+})
+
+describe('seatGroupBatch — 已結束團體防線與 blocked 結構', () => {
+  beforeEach(() => {
+    tableService.bulkWrite([
+      mkTable('101', 6), mkTable('102', 6), mkTable('103', 6), mkTable('108', 4),
+    ])
+  })
+
+  const mkSeededGroup = (tables = ['101', '102']) => {
+    const g = groupService.create({ date: '2026-06-15', counts: { total: 10 } })
+    const batchId = g.batches[0].id
+    groupService.setBatchTables(g.id, batchId, tables)
+    return { g, batchId }
+  }
+
+  it('completed 團再入座 → 擋（根治側欄重複匯入）', () => {
+    const { g, batchId } = mkSeededGroup()
+    seating.seatGroupBatch(g.id, batchId)
+    seating.finalizeGroup(g.id)
+    const r = seating.seatGroupBatch(g.id, batchId)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('已整團完成')
+    // 團狀態不被翻回 arrived、桌仍空
+    expect(groupService.getById(g.id).status).toBe('completed')
+    expect(tableService.getByNumber('101').status).toBe('vacant')
+  })
+
+  it('cancelled 團入座 → 擋', () => {
+    const { g, batchId } = mkSeededGroup()
+    seating.cancelGroup(g.id)
+    const r = seating.seatGroupBatch(g.id, batchId)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('已取消')
+  })
+
+  it('seatNextBatchOnTable：completed 團 → 擋，不動桌況', () => {
+    const { g, batchId } = mkSeededGroup()
+    seating.seatGroupBatch(g.id, batchId)
+    seating.finalizeGroup(g.id)
+    const r = seating.seatNextBatchOnTable('101', g.id, batchId)
+    expect(r.ok).toBe(false)
+    expect(tableService.getByNumber('101').status).toBe('vacant')
+  })
+
+  it('桌被佔 → 回傳全部 blocked 桌與中文狀態錯誤', () => {
+    const { g, batchId } = mkSeededGroup(['101', '102', '103'])
+    tableService.setStatus('101', 'dining')
+    tableService.setStatus('103', 'reserved')
+    const r = seating.seatGroupBatch(g.id, batchId)
+    expect(r.ok).toBe(false)
+    expect(r.blocked).toEqual([
+      { tableNumber: '101', status: 'dining' },
+      { tableNumber: '103', status: 'reserved' },
+    ])
+    expect(r.error).toContain('101（用餐中）')
+    expect(r.error).toContain('103（已預訂）')
+    expect(r.error).not.toContain('dining')
+    // 沒坐任何桌（all-or-nothing 不變）
+    expect(tableService.getByNumber('102').status).toBe('vacant')
+  })
+
+  it('cleaning 的同團桌可接續，不算 blocked', () => {
+    const { g, batchId } = mkSeededGroup(['101'])
+    seating.seatGroupBatch(g.id, batchId)
+    seating.checkoutGroupBatch(g.id, batchId) // 101 → cleaning，currentRef 保留
+    const r = seating.seatGroupBatch(g.id, batchId)
+    expect(r.ok).toBe(true)
+  })
+})
+
+describe('reseatGroupBatchTable（改派桌位）', () => {
+  beforeEach(() => {
+    tableService.bulkWrite([
+      mkTable('101', 6), mkTable('102', 6), mkTable('103', 6), mkTable('108', 4),
+    ])
+  })
+
+  const mkSeededGroup = (tables = ['101', '102']) => {
+    const g = groupService.create({ date: '2026-06-15', counts: { total: 10 } })
+    const batchId = g.batches[0].id
+    groupService.setBatchTables(g.id, batchId, tables)
+    return { g, batchId }
+  }
+
+  it('成功：swap 圈桌 + 立即整梯入座', () => {
+    const { g, batchId } = mkSeededGroup(['101', '102'])
+    tableService.setStatus('101', 'dining') // 101 被散客佔走
+    const r = seating.reseatGroupBatchTable(g.id, batchId, '101', '103')
+    expect(r.ok).toBe(true)
+    expect(r.seated).toBe(true)
+    expect(r.tableNumbers).toEqual(['103', '102'])
+    expect(groupService.getById(g.id).batches[0].tableNumbers).toEqual(['103', '102'])
+    expect(tableService.getByNumber('103').status).toBe('dining')
+    expect(tableService.getByNumber('103').currentRef).toEqual({ type: 'group', groupId: g.id, batchId })
+    expect(groupService.getById(g.id).status).toBe('arrived')
+  })
+
+  it('swap 落地但其他桌仍被佔 → ok + seated:false + blocked', () => {
+    const { g, batchId } = mkSeededGroup(['101', '102'])
+    tableService.setStatus('101', 'dining')
+    tableService.setStatus('102', 'reserved')
+    const r = seating.reseatGroupBatchTable(g.id, batchId, '101', '103')
+    expect(r.ok).toBe(true)
+    expect(r.seated).toBe(false)
+    expect(r.blocked).toEqual([{ tableNumber: '102', status: 'reserved' }])
+    // swap 不回滾
+    expect(groupService.getById(g.id).batches[0].tableNumbers).toEqual(['103', '102'])
+  })
+
+  it('目標非空桌 → 擋（中文狀態）', () => {
+    const { g, batchId } = mkSeededGroup()
+    tableService.setStatus('101', 'dining')
+    tableService.setStatus('103', 'cleaning')
+    const r = seating.reseatGroupBatchTable(g.id, batchId, '101', '103')
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('清桌中')
+  })
+
+  it('目標被其他今日團體圈桌 → 擋', () => {
+    const { g, batchId } = mkSeededGroup(['101'])
+    const other = groupService.create({ date: '2026-06-15', counts: { total: 6 } })
+    groupService.setBatchTables(other.id, other.batches[0].id, ['103'])
+    tableService.setStatus('101', 'dining')
+    const r = seating.reseatGroupBatchTable(g.id, batchId, '101', '103')
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('其他團體保留')
+  })
+
+  it('fromTable 不在梯內 / toTable 已在梯內 / 已結束團 → 擋', () => {
+    const { g, batchId } = mkSeededGroup(['101', '102'])
+    expect(seating.reseatGroupBatchTable(g.id, batchId, '108', '103').ok).toBe(false)
+    expect(seating.reseatGroupBatchTable(g.id, batchId, '101', '102').ok).toBe(false)
+    seating.finalizeGroup(g.id)
+    const r = seating.reseatGroupBatchTable(g.id, batchId, '101', '103')
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('已結束')
   })
 })

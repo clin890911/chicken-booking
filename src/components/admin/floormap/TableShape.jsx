@@ -39,7 +39,6 @@ export default function TableShape({
   booking,                    // 對應的 reservation（reserved / dining 狀態才有）
   settings = {},
   isSelected = false,
-  isMergeCandidate = false,
   isHighlight = false,
   isDimmed = false,
   isAssignSuggestion = false,  // 指派模式：被推薦的最佳桌（綠閃）
@@ -53,7 +52,7 @@ export default function TableShape({
   occDimmed = false,           // 統一佔用視圖：場次已關閉時整體淡化
   onClick,
 }) {
-  const { x, y, w, h, capacity, status, mergedWith, isActive, number } = table
+  const { x, y, w, h, capacity, status, isActive, number } = table
 
   if (!isActive) {
     return (
@@ -132,14 +131,13 @@ export default function TableShape({
     fill = DINING_STAGE_FILL[stage]
   }
 
-  // 邊框：選中 / 併桌 / 高亮優先；超時也用紅邊
+  // 邊框：選中 / 高亮優先；超時也用紅邊
   let stroke = STATUS_COLOR[status]?.stroke || '#16a34a'
   let strokeWidth = 1
   let strokeDash = null
   let className = ''
 
   if (isSelected) { stroke = '#e60012'; strokeWidth = 3 }
-  else if (isMergeCandidate) { stroke = '#f29100'; strokeWidth = 3; strokeDash = '5 3' }
   else if (isPendingConfirm) { stroke = '#d97706'; strokeWidth = 4; className = 'animate-pulse' }
   else if (isAssignSuggestion) { stroke = '#9eb63a'; strokeWidth = 4; className = 'animate-pulse' }
   else if (isJustAssigned) { stroke = '#9eb63a'; strokeWidth = 4 }
@@ -211,11 +209,6 @@ export default function TableShape({
               fontSize={9} fontWeight={600} fill="white" textAnchor="middle" pointerEvents="none">
           可入座
         </text>
-      )}
-
-      {/* 併桌標示 */}
-      {mergedWith && (
-        <text x={x + 8} y={y + 14} fontSize={10} fill="white" pointerEvents="none">⇆</text>
       )}
     </g>
   )

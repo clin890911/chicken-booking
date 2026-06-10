@@ -187,3 +187,31 @@ describe('cloneGroupForDuplicate（複製團單為新草稿）', () => {
     expect(group.cloneGroupForDuplicate(null)).toBeNull()
   })
 })
+
+describe('groupReservationService.swapBatchTable（改派桌位：換掉梯內一張桌）', () => {
+  it('只動指定梯、字串化桌號', () => {
+    const g = group.create({
+      date: '2026-06-15',
+      counts: { total: 20 },
+      batches: [
+        { label: '第一梯', timeSlot: '11:30', tableNumbers: ['101', '102'], guests: 12 },
+        { label: '第二梯', timeSlot: '13:00', tableNumbers: ['101'], guests: 8 },
+      ],
+    })
+    const [b1, b2] = group.getById(g.id).batches
+    const r = group.swapBatchTable(g.id, b1.id, '101', 103)
+    expect(r.batches.find(b => b.id === b1.id).tableNumbers).toEqual(['103', '102'])
+    // 第二梯的 101 不受影響
+    expect(r.batches.find(b => b.id === b2.id).tableNumbers).toEqual(['101'])
+  })
+  it('團不存在回 null；fromTable 不在梯內則不變', () => {
+    expect(group.swapBatchTable('NOPE', 'B', '101', '102')).toBeNull()
+    const g = group.create({
+      date: '2026-06-15', counts: { total: 8 },
+      batches: [{ label: '第一梯', timeSlot: '11:30', tableNumbers: ['101'], guests: 8 }],
+    })
+    const b = group.getById(g.id).batches[0]
+    const r = group.swapBatchTable(g.id, b.id, '999', '103')
+    expect(r.batches[0].tableNumbers).toEqual(['101'])
+  })
+})
