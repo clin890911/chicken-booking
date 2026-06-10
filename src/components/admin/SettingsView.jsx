@@ -8,6 +8,7 @@ import { generateTimeSlots, todayStr, slotsInSeating, seatingForSlot } from '../
 import TableGrid from './TableGrid'
 import LayoutEditor from './LayoutEditor'
 import TelegramSettings from './TelegramSettings'
+import StaffAdminSection from './StaffAdminSection'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -741,6 +742,12 @@ export default function SettingsView() {
       <SettingsSection title="資料匯出" description="下載目前快取內的訂位資料。">
         <Button onClick={handleExport} variant="secondary" className="w-full">匯出全部訂位 CSV</Button>
       </SettingsSection>
+
+      {can('staff.manage') && (
+        <SettingsSection title="管理員帳號" description="新增同仁的 Google 帳號即可登入後台；毋須重新部署。">
+          <StaffAdminSection />
+        </SettingsSection>
+      )}
 
       <SettingsSection title="帳號" description="目前登入者與角色資訊。">
         <div className="text-sm text-chicken-brown/70 mb-3">
