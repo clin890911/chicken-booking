@@ -5,7 +5,7 @@ import { useToast } from '../../ui/Toast'
 import { Modal, Input, Textarea, Button, EmptyState } from '../../ui'
 
 // 旅行社 / 導遊名冊 + 即時彙算歷史 + 貢獻排名（依業績）
-export default function GroupDirectoryView() {
+export default function AgencyDirectoryView() {
   const { agencies, guides, groupReservations, addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide } = useBooking()
   const { can } = useAuth()
   const toast = useToast()
