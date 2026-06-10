@@ -23,6 +23,7 @@ import {
   resolveStaffRole,
   validateStaffUpsert,
 } from './lib/staffAccess.js'
+import { isTableUsableOnDate } from './lib/tableUsable.js'
 import {
   slotEpochMs,
   buildMyBookingsList,
@@ -455,7 +456,7 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
       const bookings = bookingsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       const groupReservations = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       const nowMs = Date.now()
-      const totalSeats = activeTotalSeatsServer(tables)
+      const totalSeats = activeTotalSeatsServer(tables, date)
       slots = generateSlotsServer(settings)
         // 濾掉「已過的時段」：今天已過的抵達時段不再顯示為可訂（其他日期的時段都在未來，不受影響）。
         .filter(time => slotEpochMs(date, time) > nowMs)
@@ -518,7 +519,7 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
 
       const remaining = calcSlotCapacityServer(tables, dayBookings, data.date, data.timeSlot, settings, dayGroups)
       // 滿座門檻自動關閉：已訂達總容量門檻 % 時，線上不再收（剩餘座位留給現場/電話）。
-      if (isOverAutoCloseThreshold({ totalSeats: activeTotalSeatsServer(tables), remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent })) {
+      if (isOverAutoCloseThreshold({ totalSeats: activeTotalSeatsServer(tables, data.date), remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent })) {
         throw errorWithStatus('此時段線上訂位已截止（接近滿座），歡迎來電洽詢', 409)
       }
       if (remaining < data.guests) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
@@ -651,7 +652,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         const dayGroups = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
         const remaining = calcSlotCapacityServer(tables, dayBookings, next.date, next.timeSlot, settings, dayGroups)
         // 滿座門檻自動關閉（排除自己後計算）：與 guestCreateBooking 同一道防線。
-        if (isOverAutoCloseThreshold({ totalSeats: activeTotalSeatsServer(tables), remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent })) {
+        if (isOverAutoCloseThreshold({ totalSeats: activeTotalSeatsServer(tables, next.date), remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent })) {
           throw errorWithStatus('此時段線上訂位已截止（接近滿座），歡迎來電洽詢', 409)
         }
         if (remaining < Number(next.guests || 1)) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
@@ -1720,9 +1721,9 @@ function sessionCutoffAnchorMs(settings, date, timeSlot) {
   return slotEpochMs(date, seating ? seating.start : timeSlot)
 }
 
-// 啟用中桌位的總座位數（與 calcSlotCapacityServer 的 totalSeats 同口徑）。
-function activeTotalSeatsServer(tables) {
-  return tables.filter(t => t.isActive !== false).reduce((sum, t) => sum + (Number(t.capacity) || 0), 0)
+// 某日可用桌的總座位數（啟用中且不在維修窗；與 calcSlotCapacityServer 的 totalSeats 同口徑）。
+function activeTotalSeatsServer(tables, date) {
+  return tables.filter(t => isTableUsableOnDate(t, date)).reduce((sum, t) => sum + (Number(t.capacity) || 0), 0)
 }
 
 // 與前端 calcSlotCapacity 位元級一致：散客逐筆 sum(guests)、團體整桌 sum(座位)。
@@ -1732,8 +1733,9 @@ function calcSlotCapacityServer(tables, bookings, date, timeSlot, settings = {},
   if (isSlotClosedServer(settings, date, timeSlot)) return 0
   const durationMin = (Number(settings.diningDurationMin) || DEFAULT_DINING_DURATION_MIN) + (Number(settings.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN)
   const targetMinutes = toMinutes(timeSlot)
+  // 可用桌 = 啟用中且該日不在維修窗（與前端 calcSlotCapacity 同口徑）。
   const totalSeats = tables
-    .filter(t => t.isActive !== false)
+    .filter(t => isTableUsableOnDate(t, date))
     .reduce((sum, t) => sum + (Number(t.capacity) || 0), 0)
   const reserved = bookings
     .filter(b => {

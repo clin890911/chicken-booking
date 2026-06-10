@@ -1,4 +1,5 @@
 import { seatingForSlot } from './timeSlots'
+import { isTableUsableOnDate } from './tableAvailability'
 
 const DEFAULT_DINING_DURATION_MIN = 90
 const DEFAULT_CLEANUP_BUFFER_MIN = 10
@@ -81,9 +82,10 @@ export function calcSlotCapacity(tables, bookings, date, timeSlot, settings = {}
   if (isSlotClosed(settings, date, timeSlot)) return 0
   const durationMin = occupancyMinutes(settings)
   const targetMinutes = toMinutes(timeSlot)
+  // 可用桌 = 啟用中且該日不在維修窗（與後端 calcSlotCapacityServer 同口徑）。
   const totalSeats = tables
-    .filter(t => t.isActive)
-    .reduce((sum, t) => sum + t.capacity, 0)
+    .filter(t => isTableUsableOnDate(t, date))
+    .reduce((sum, t) => sum + (Number(t.capacity) || 0), 0)
 
   const reserved = bookings
     .filter(b =>
@@ -162,7 +164,7 @@ export function resolveSlotOccupancy(tables = [], bookings = [], groupReservatio
     })
   })
 
-  const activeTables = (tables || []).filter(t => t.isActive !== false)
+  const activeTables = (tables || []).filter(t => isTableUsableOnDate(t, date))
   const totalSeats = activeTables.reduce((s, t) => s + (Number(t.capacity) || 0), 0)
   const totalTables = activeTables.length
   const occupiedTables = Object.keys(byTable).length // = walkinAssignedTables + groupTableCount（byTable 已去重）

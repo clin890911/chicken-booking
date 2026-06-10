@@ -1,7 +1,11 @@
 // tableService：桌位 CRUD + 即時運營狀態管理
-// schema: { number, capacity, floor, x, y, w, h, isActive,
+// schema: { number, capacity, floor, x, y, w, h, isActive, outage,
 //           status, currentBookingId, seatedAt, mergedWith, blockReason, updatedAt }
+// outage = null | { from:'YYYY-MM-DD', to:'YYYY-MM-DD'|''(無限期), reason }：維修停用（按日期），
+// 與 isActive（永久停用）為兩個獨立軸；可用性判定見 utils/tableAvailability.js。
 import { INITIAL_TABLES, tableDims } from '../data/tables'
+import { normalizeOutage, isTableOutOnDate } from '../utils/tableAvailability'
+import { todayStr } from '../utils/timeSlots'
 
 const STORAGE_KEY = 'chicken_tables_v3'   // v3: 改為「雞王座號圖」桌號（101–113 / 201–267）
 const LEGACY_KEYS = ['chicken_tables_v2', 'chicken_tables_v1']
@@ -20,6 +24,7 @@ function read() {
     // 防呆：若舊資料缺欄位，補上預設值
     return parsed.map(t => ({
       isActive: true,
+      outage: null,          // 維修停用窗 { from, to, reason }；null = 無
       status: 'vacant',
       currentBookingId: null,
       currentRef: null,      // 團體梯次入座時 = { type:'group', groupId, batchId }
@@ -61,14 +66,55 @@ export function listByFloor(floor) {
 }
 
 // === 啟用/停用 ===
+// 佔用守門：桌上有客人（用餐/已預訂/待清桌）或仍連著訂位/團體時不准停用——
+// 停用中的桌會從容量與自動清檯消失，帶著客人停用會變成掃不到的殭屍桌。
+function occupiedReason(t) {
+  if (['dining', 'reserved', 'cleaning'].includes(t.status)) {
+    const zh = { dining: '用餐中', reserved: '已預訂', cleaning: '待清桌' }[t.status]
+    return `${t.number} ${zh}，請先處理完畢再停用`
+  }
+  if (t.currentBookingId || t.currentRef) return `${t.number} 仍連結訂位/團體，請先清桌再停用`
+  return null
+}
+
 export function toggle(number) {
   const t = getByNumber(number)
-  if (!t) return null
-  return patchOne(number, { isActive: !t.isActive })
+  if (!t) return { ok: false, error: '桌位不存在' }
+  if (t.isActive) {
+    const reason = occupiedReason(t)
+    if (reason) return { ok: false, error: reason }
+  }
+  return { ok: true, table: patchOne(number, { isActive: !t.isActive }) }
 }
 
 export function setActive(number, isActive) {
-  return patchOne(number, { isActive })
+  const t = getByNumber(number)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  if (t.isActive && !isActive) {
+    const reason = occupiedReason(t)
+    if (reason) return { ok: false, error: reason }
+  }
+  return { ok: true, table: patchOne(number, { isActive }) }
+}
+
+// === 維修停用（按日期）===
+// 設定維修窗 { from, to, reason }；窗口含今天時套用與停用相同的佔用守門。
+export function setOutage(number, outage) {
+  const t = getByNumber(number)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  const clean = normalizeOutage(outage)
+  if (!clean) return { ok: false, error: '維修期間格式不正確' }
+  if (isTableOutOnDate({ outage: clean }, todayStr())) {
+    const reason = occupiedReason(t)
+    if (reason) return { ok: false, error: reason }
+  }
+  return { ok: true, table: patchOne(number, { outage: clean }) }
+}
+
+export function clearOutage(number) {
+  const t = getByNumber(number)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  return { ok: true, table: patchOne(number, { outage: null }) }
 }
 
 // === 即時狀態（vacant / reserved / dining / cleaning / blocked）===
@@ -161,14 +207,18 @@ export function unmergeTable(number) {
 // === 統計 ===
 export function summary() {
   const list = read()
+  const today = todayStr()
+  // 維修/停用只剔除空著的桌；有客人的桌照常計入（避免在席數憑空消失）。
+  const counted = (t) => (t.isActive && !isTableOutOnDate(t, today))
+    || ['dining', 'reserved', 'cleaning'].includes(t.status) || t.currentBookingId || t.currentRef
   const counts = { vacant: 0, reserved: 0, dining: 0, cleaning: 0, blocked: 0 }
   let occupiedSeats = 0
   list.forEach(t => {
-    if (!t.isActive) return
+    if (!counted(t)) return
     counts[t.status] = (counts[t.status] || 0) + 1
     if (t.status === 'dining') occupiedSeats += t.capacity
   })
-  return { counts, occupiedSeats, total: list.filter(t => t.isActive).length }
+  return { counts, occupiedSeats, total: list.filter(counted).length }
 }
 
 // === 重設 ===
@@ -201,8 +251,10 @@ export function addTable({ capacity = 4, floor = '1F', x = 200, y = 200 }) {
     x, y,
     ...tableDims(capacity),
     isActive: true,
+    outage: null,
     status: 'vacant',
     currentBookingId: null,
+    currentRef: null,
     seatedAt: null,
     mergedWith: null,
     blockReason: null,

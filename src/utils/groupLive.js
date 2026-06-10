@@ -2,6 +2,8 @@
 // 判斷梯次入座狀態、桌位的下一梯、今日 hold 桌對應。
 // 只依賴傳入參數、不碰 service 狀態，方便單測與跨元件共用
 // （OperationsView 地圖標記、OpsRail 今日團體籤、TableDrawer 團體操作區共用同一口徑）。
+import { isTableUsableOnDate } from './tableAvailability'
+import { todayStr } from './timeSlots'
 
 // 依時段排序梯次（時段缺失排最後）；回傳新陣列不動原資料
 export function sortedBatches(group) {
@@ -63,7 +65,7 @@ export function reseatCandidateTables({ tables, holds, group, batch, fromTable }
   const fromFloor = fromTable?.floor
   return (tables || [])
     .filter(t =>
-      t.isActive && t.status === 'vacant'
+      isTableUsableOnDate(t, todayStr()) && t.status === 'vacant'
       && !batchNums.includes(String(t.number))
       && !((holds?.[t.number]?.holds) || []).some(h => h.group.id !== group?.id))
     .sort((a, b) =>

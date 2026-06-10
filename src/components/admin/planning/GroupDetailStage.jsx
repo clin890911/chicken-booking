@@ -182,6 +182,7 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
               planningMode
               selectedTables={heldNumbers}
               blockedTables={[]}
+              mapDate={group?.date}
               onSelectTable={() => {}}
             />
           </div>

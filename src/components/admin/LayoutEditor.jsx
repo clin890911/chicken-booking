@@ -121,14 +121,21 @@ export default function LayoutEditor({ open, onClose }) {
     setFloor(newFloor)
   }
 
+  // 與 tableService 的佔用守門同口徑：桌上有客人/仍連結訂位團體時，不准在編輯器停用或刪除
+  // （停用佔用中的桌會變成自動清檯掃不到的殭屍桌）。
+  const isOccupied = (t) => ['dining', 'reserved', 'cleaning'].includes(t?.status) || t?.currentBookingId || t?.currentRef
+
   const handleActiveToggle = () => {
     if (!selected) return
+    if (selected.isActive && isOccupied(selected)) {
+      return toast.error(`${selected.number} 使用中（或仍連結訂位/團體），請先清桌再停用`)
+    }
     updateLocal(selected.number, { isActive: !selected.isActive })
   }
 
   const handleDelete = async () => {
     if (!selected) return
-    if (selected.currentBookingId) {
+    if (isOccupied(selected)) {
       return toast.error('此桌目前有訂位/用餐，無法刪除')
     }
     const ok = await confirmDialog(`刪除桌位 ${selected.number}？\n此動作不可復原`,
@@ -157,8 +164,10 @@ export default function LayoutEditor({ open, onClose }) {
       y: showAddDialog.y,
       ...tableDims(capacity),
       isActive: true,
+      outage: null,
       status: 'vacant',
       currentBookingId: null,
+      currentRef: null,
       seatedAt: null,
       mergedWith: null,
       blockReason: null,

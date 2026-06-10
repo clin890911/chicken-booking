@@ -4,14 +4,19 @@
 import { useMemo } from 'react'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse } from '../../../utils/bookingPulse'
+import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 
 export default function StatusBar({ tables, waitlist, bookings = [] }) {
   const counts = { vacant: 0, reserved: 0, dining: 0, cleaning: 0, blocked: 0 }
   const bookingById = {}
   bookings.forEach(b => { if (b.id) bookingById[b.id] = b })
   let occSeats = 0
+  const today = todayStr()
   tables.forEach(t => {
-    if (!t.isActive) return
+    // 維修/停用只剔除「空著的」桌；有客人的桌（跨午夜進維修窗等不一致狀態）必須照常計入，
+    // 否則在席人數與用餐桌數會憑空消失。
+    const occupied = ['dining', 'reserved', 'cleaning'].includes(t.status) || t.currentBookingId || t.currentRef
+    if (!isTableUsableOnDate(t, today) && !occupied) return
     counts[t.status] = (counts[t.status] || 0) + 1
     if (t.status === 'dining') {
       const b = t.currentBookingId ? bookingById[t.currentBookingId] : null

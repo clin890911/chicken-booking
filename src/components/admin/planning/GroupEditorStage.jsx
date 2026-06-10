@@ -164,7 +164,7 @@ export default function GroupEditorStage({
     if (!activeBatch) return toast.error('請先選一個梯次')
     const need = batchGuests(activeBatch) || Number(draft.counts?.total) || 0
     if (need <= 0) return toast.error('請先填本梯用餐人數')
-    const { tableNumbers, enough } = suggestTablesForBatch({ tables, headcount: need, blockedTables, capByNum })
+    const { tableNumbers, enough } = suggestTablesForBatch({ tables, headcount: need, blockedTables, capByNum, date })
     patchBatch(activeBatch.id, { tableNumbers })
     if (enough) toast.success('已自動推薦桌位，可再手動微調')
     else toast.info('本場次可用桌不足以容納本梯人數，已選滿可用桌，請改場次或拆梯次')
@@ -537,6 +537,7 @@ export default function GroupEditorStage({
                 planningMode
                 selectedTables={selectedTables}
                 blockedTables={blockedTables}
+                mapDate={date}
                 onSelectTable={toggleTable}
               />
             </div>

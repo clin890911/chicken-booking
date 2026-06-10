@@ -1,6 +1,8 @@
 import { useMemo, useState, useEffect } from 'react'
 import TableShape from './TableShape'
 import { FLOOR_VIEWBOX, FIXTURES } from '../../../data/tables'
+import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
+import { todayStr } from '../../../utils/timeSlots'
 
 // 渲染樓層設施（醬料台/出菜口/結帳口/冰箱/樓梯/洗手間…）— 純標示、不可點選
 function FixtureLayer({ floor }) {
@@ -62,6 +64,7 @@ export default function FloorMap({
   scopedByTable = {},       // 統一佔用視圖：{ 桌號: { kind:'walkin'|'group', booking?|group?+batch? } }
   scopedClosed = false,     // 統一佔用視圖：此日期/場次已關閉 → 整圖淡化
   scopedHighlightTables = [], // 統一佔用視圖：預先配桌模式中、可選的空桌（高亮）
+  mapDate = '',             // 地圖對應日期（規劃/統一視圖傳入；今日即時圖不傳 = 今天）：維修窗判定用
 }) {
   const [, setTick] = useState(0)
   // 每 5 秒重繪，讓桌位用餐計時即時跳動
@@ -74,6 +77,13 @@ export default function FloorMap({
     () => tables.filter(t => t.floor === floor),
     [tables, floor]
   )
+
+  // 維修窗判定：規劃/統一視圖看該日期；今日即時圖看今天。
+  const effectiveDate = mapDate || todayStr()
+  const outNoteFor = (t) => isTableOutOnDate(t, effectiveDate) ? outageLabel(t, effectiveDate) : ''
+  // 即時圖：桌上有客人（跨午夜進維修窗、或同步進來的不一致狀態）時，真實桌況優先於維修置灰，
+  // 否則用餐計時/超時警示會從地圖上消失。空桌才整塊置灰。
+  const isOccupied = (t) => ['dining', 'reserved', 'cleaning'].includes(t.status) || !!t.currentBookingId || !!t.currentRef
 
   const bookingMap = useMemo(() => {
     const m = {}
@@ -113,6 +123,7 @@ export default function FloorMap({
               occLabel={occLabel}
               occHighlight={scopedHighlightTables.includes(t.number)}
               occDimmed={scopedClosed}
+              outNote={outNoteFor(t)}
               onClick={() => onSelectTable(t.number)}
             />
           )
@@ -131,6 +142,7 @@ export default function FloorMap({
               settings={settings}
               isSelected={selectedTableNumber === t.number}
               planState={planState}
+              outNote={outNoteFor(t)}
               onClick={() => onSelectTable(t.number)}
             />
           )
@@ -159,6 +171,8 @@ export default function FloorMap({
             isJustAssigned={isJustAssigned}
             isDimmed={assignMode && !highlightTables.includes(t.number)}
             groupHoldLabel={holdLabel}
+            outNote={isOccupied(t) ? '' : outNoteFor(t)}
+            outClickable={!assignMode}
             onClick={() => onSelectTable(t.number)}
           />
         )

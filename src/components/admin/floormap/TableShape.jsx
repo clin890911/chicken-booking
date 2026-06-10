@@ -39,16 +39,26 @@ export default function TableShape({
   occHighlight = false,        // 統一佔用視圖：預先配桌模式中、可選的空桌高亮
   occDimmed = false,           // 統一佔用視圖：場次已關閉時整體淡化
   groupHoldLabel = null,       // 今日團體保留桌：vacant 桌面改顯示「HH:MM 團保」取代「可入座」
+  outNote = '',                // 維修停用（地圖日期落在維修窗內）：與永久停用同樣置灰，顯示 🛠 標籤
+  outClickable = false,        // 僅現場即時圖開啟：點維修桌可開抽屜「結束維修」；規劃/統一視圖維持不可點
   onClick,
 }) {
   const { x, y, w, h, capacity, status, isActive, number } = table
 
-  if (!isActive) {
+  // 永久停用或維修中：置灰虛線、不參與任何模式的狀態渲染。
+  // 預設不可點（規劃圈桌等流程的安全防線）；只有現場即時圖傳 outClickable 讓店員點開結束維修。
+  if (!isActive || outNote) {
+    const clickable = isActive && outNote && outClickable
     return (
-      <g style={{ opacity: 0.25 }}>
+      <g style={{ opacity: 0.35, cursor: clickable ? 'pointer' : 'default' }} onClick={clickable ? onClick : undefined}>
         <rect x={x} y={y} width={w} height={h} rx={6}
               fill="#e5e0d8" stroke="#3a2e26" strokeWidth={1} strokeDasharray="3 3"/>
-        <text x={x + w / 2} y={y + h / 2 + 4} fontSize={11} fill="#8a7e72" textAnchor="middle" pointerEvents="none">{number}</text>
+        <text x={x + w / 2} y={y + h / 2 - (outNote ? 4 : -4)} fontSize={11} fill="#8a7e72" textAnchor="middle" pointerEvents="none">{number}</text>
+        {outNote && (
+          <text x={x + w / 2} y={y + h / 2 + 12} fontSize={9} fontWeight={700} fill="#b45309" textAnchor="middle" pointerEvents="none">
+            🛠 {outNote.length > 7 ? '維修中' : outNote}
+          </text>
+        )}
       </g>
     )
   }
