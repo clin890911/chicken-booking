@@ -49,9 +49,10 @@ test('用戶端：選時段 → 填資料 → 送出 → 進入確認頁', async
   await page.getByPlaceholder('王小姐').fill('E2E 測試客')
   await page.getByPlaceholder('0912345678').fill('0912345678')
 
-  // 送出 → 導向確認頁
+  // 送出 → 導向確認頁；確認頁須有「截圖或綁定 LINE」引導（rich menu 查詢流程的入口文案）
   await page.getByRole('button', { name: '完成訂位' }).click()
   await expect(page).toHaveURL(/\/confirm\/E2E-CUS-1/)
+  await expect(page.getByText(/建議截圖保存此頁/)).toBeVisible()
 })
 
 test('用戶端：電話格式錯誤時擋下，無法送出', async ({ page }) => {

@@ -10,6 +10,7 @@ import ConfirmPage from './pages/ConfirmPage'
 import ManageBookingPage from './pages/ManageBookingPage'
 import LookupBookingPage from './pages/LookupBookingPage'
 import LineBindPage from './pages/LineBindPage'
+import LineMyBookingsPage from './pages/LineMyBookingsPage'
 import LoginPage from './pages/LoginPage'
 import AdminPage from './pages/AdminPage'
 import SlotMapDemoPage from './pages/SlotMapDemoPage'
@@ -33,6 +34,7 @@ function AppRoutes() {
         <Route path="/lookup" element={<LookupBookingPage />} />
         <Route path="/manage/:id" element={<ManageBookingPage />} />
         <Route path="/line/bind" element={<LineBindPage />} />
+        <Route path="/line/my-bookings" element={<LineMyBookingsPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
         <Route path="/demo/slot-map" element={<SlotMapDemoPage />} />

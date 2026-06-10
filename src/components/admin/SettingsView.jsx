@@ -525,6 +525,15 @@ export default function SettingsView() {
                 title="LINE Developers 後台的 LIFF App ID"
               />
             </Field>
+            <Field hint="LIFF 所屬「LINE Login channel」的 Channel ID（非 Messaging API channel）。位置：LINE Developers → LINE Login channel → Basic settings。「LINE 我的訂位」查詢頁驗證身分用；未填則查詢頁退回電話查詢。">
+              <Input
+                label="LINE Login Channel ID（選填）"
+                value={form.lineLoginChannelId || ''}
+                onChange={e => setForm(f => ({ ...f, lineLoginChannelId: e.target.value.trim() }))}
+                placeholder="1234567890"
+                title="LINE Login channel 的 Channel ID（我的訂位查詢驗證用）"
+              />
+            </Field>
           </FieldGroup>
 
           {/* 店員端改動通知客人（feature flag，預設關）*/}
@@ -576,6 +585,16 @@ export default function SettingsView() {
                 onChange={e => setForm(f => ({ ...f, lineManageEndpoint: e.target.value.trim() }))}
                 placeholder="https://.../lineGetBooking"
                 title="客人在 LINE 內查詢訂位的後端網址"
+              />
+            </Field>
+            <Field hint="「LINE 我的訂位」清單查詢的後端網址。">
+              <Input
+                label="LINE 我的訂位端點（選填）"
+                type="url"
+                value={form.lineMyBookingsEndpoint || ''}
+                onChange={e => setForm(f => ({ ...f, lineMyBookingsEndpoint: e.target.value.trim() }))}
+                placeholder="https://.../lineMyBookings"
+                title="LINE 我的訂位清單查詢端點"
               />
             </Field>
             <Field hint="訂位網站的正式網址。LINE 通知卡片的「管理 / 修改訂位」按鈕連結以此組成；未填則卡片不顯示該按鈕。">

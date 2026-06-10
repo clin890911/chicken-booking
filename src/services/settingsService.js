@@ -33,6 +33,10 @@ const DEFAULT = {
   lineBindEndpoint: 'https://linebind-reaor76eyq-uc.a.run.app',
   linePushEndpoint: 'https://linepushbooking-reaor76eyq-uc.a.run.app',
   lineManageEndpoint: 'https://linegetbooking-reaor76eyq-uc.a.run.app',
+  lineMyBookingsEndpoint: 'https://linemybookings-reaor76eyq-uc.a.run.app',
+  // LINE Login channel ID（LIFF 所屬 channel）：「LINE 我的訂位」驗 ID token 用；
+  // 空字串 = 功能未啟用，查詢頁自動退回電話查詢。★ 白名單成對。
+  lineLoginChannelId: '',
   // 前端正式站網址：後端組 LINE 訊息「管理 / 修改訂位」按鈕連結用（空字串 = 按鈕不顯示）。
   // ★ 與 functions 的 normalizeStoreSettings 白名單成對，兩邊都要有，否則同步時被靜默剝除。
   publicSiteUrl: '',
@@ -109,6 +113,8 @@ function withDefaults(value = {}) {
     lineBindEndpoint: merged.lineBindEndpoint || DEFAULT.lineBindEndpoint,
     linePushEndpoint: merged.linePushEndpoint || DEFAULT.linePushEndpoint,
     lineManageEndpoint: merged.lineManageEndpoint || DEFAULT.lineManageEndpoint,
+    lineMyBookingsEndpoint: merged.lineMyBookingsEndpoint || DEFAULT.lineMyBookingsEndpoint,
+    lineLoginChannelId: String(merged.lineLoginChannelId || '').trim(),
     publicSiteUrl: String(merged.publicSiteUrl || '').trim(),
     lineNotifyOnAdminChange: merged.lineNotifyOnAdminChange === true,
     storeName: merged.storeName || DEFAULT.storeName,
