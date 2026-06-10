@@ -2,12 +2,12 @@ import { useState, useRef, useMemo, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast, useConfirm } from '../ui/Toast'
-import { FLOOR_VIEWBOX, INITIAL_TABLES } from '../../data/tables'
+import { FLOOR_VIEWBOX, INITIAL_TABLES, tableDims } from '../../data/tables'
 
 // 全螢幕桌位佈局編輯器
 // 操作：
 // - 拖拉桌位移動位置（snap to grid 10）
-// - 點選桌位 → 右側編輯面板（容量、瓦斯、啟用、刪除）
+// - 點選桌位 → 右側編輯面板（容量、樓層、啟用、刪除）
 // - 點空白處 → 新增桌位於該位置
 // - 1F / 2F 切換
 // - 儲存（持久化所有變更） / 取消（捨棄）
@@ -111,15 +111,8 @@ export default function LayoutEditor({ open, onClose }) {
   // === Edit panel ops ===
   const handleCapacityChange = (capacity) => {
     if (!selected) return
-    // 自動調整尺寸
-    const w = 80
-    const h = capacity === 6 ? 100 : 75
-    updateLocal(selected.number, { capacity, w, h })
-  }
-
-  const handleFuelChange = (fuel) => {
-    if (!selected) return
-    updateLocal(selected.number, { fuel: fuel === 'none' ? null : fuel })
+    // 依容量自動帶入寬高（六人桌橫式 90×75、四人桌 80×75），與預設佈局同一來源。
+    updateLocal(selected.number, { capacity, ...tableDims(capacity) })
   }
 
   const handleFloorChange = (newFloor) => {
@@ -147,7 +140,7 @@ export default function LayoutEditor({ open, onClose }) {
   }
 
   // === Add new table ===
-  const [newTableForm, setNewTableForm] = useState({ capacity: 4, fuel: 'none' })
+  const [newTableForm, setNewTableForm] = useState({ capacity: 4 })
 
   const handleAddTable = () => {
     if (!showAddDialog) return
@@ -162,9 +155,7 @@ export default function LayoutEditor({ open, onClose }) {
       floor,
       x: showAddDialog.x,
       y: showAddDialog.y,
-      w: 80,
-      h: capacity === 6 ? 100 : 75,
-      fuel: newTableForm.fuel === 'none' ? null : newTableForm.fuel,
+      ...tableDims(capacity),
       isActive: true,
       status: 'vacant',
       currentBookingId: null,
@@ -329,9 +320,6 @@ export default function LayoutEditor({ open, onClose }) {
                               fill={t.isActive ? '#3a2e26' : '#64748b'} opacity={0.7} textAnchor="middle" pointerEvents="none">
                           {t.capacity} 人
                         </text>
-                        {t.fuel === 'tank' && (
-                          <circle cx={t.x + t.w - 8} cy={t.y + 8} r={4} fill="#f29100" pointerEvents="none" />
-                        )}
                       </g>
                     )
                   })}
@@ -362,29 +350,6 @@ export default function LayoutEditor({ open, onClose }) {
                           }`}
                         >
                           {c} 人
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-chicken-brown/70 block mb-2">瓦斯型態</label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {[
-                        { v: 'none', l: '無' },
-                        { v: 'natural-gas', l: '天然氣' },
-                        { v: 'tank', l: '瓦斯桶' },
-                      ].map(o => (
-                        <button
-                          key={o.v}
-                          onClick={() => handleFuelChange(o.v)}
-                          className={`py-2 rounded-lg border-2 text-xs font-bold ${
-                            (selected.fuel || 'none') === o.v
-                              ? 'border-chicken-yellow bg-chicken-yellow/10 text-chicken-yellow'
-                              : 'border-chicken-brown/15 bg-white text-chicken-brown/70'
-                          }`}
-                        >
-                          {o.l}
                         </button>
                       ))}
                     </div>
@@ -467,26 +432,6 @@ export default function LayoutEditor({ open, onClose }) {
                               : 'border-chicken-brown/15 bg-white text-chicken-brown'
                           }`}
                         >{c} 人</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-chicken-brown/70 block mb-1.5">瓦斯型態</label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {[
-                        { v: 'none', l: '無' },
-                        { v: 'natural-gas', l: '天然氣' },
-                        { v: 'tank', l: '瓦斯桶' },
-                      ].map(o => (
-                        <button
-                          key={o.v}
-                          onClick={() => setNewTableForm(f => ({ ...f, fuel: o.v }))}
-                          className={`py-2 rounded-lg border-2 text-xs font-bold ${
-                            newTableForm.fuel === o.v
-                              ? 'border-chicken-yellow bg-chicken-yellow/10 text-chicken-yellow'
-                              : 'border-chicken-brown/15 bg-white text-chicken-brown/70'
-                          }`}
-                        >{o.l}</button>
                       ))}
                     </div>
                   </div>
