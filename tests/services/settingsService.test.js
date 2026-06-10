@@ -15,6 +15,9 @@ const DEFAULT = {
   autoReleaseAfterMin: 300,
   dayRolloverEnabled: true,
   autoNoshowOnRollover: false,
+  onlineAutoCloseEnabled: false,
+  onlineAutoClosePercent: 80,
+  onlineSessionCutoffMin: 0,
   seatings: [
     { id: 'lunch1', name: '午餐第一批', start: '11:00', end: '12:30' },
     { id: 'lunch2', name: '午餐第二批', start: '12:30', end: '14:30' },
@@ -354,6 +357,26 @@ describe('現場自動化（自動清檯）設定欄位', () => {
     const s = getSettings()
     expect(s.autoReleaseEnabled).toBe(false)
     expect(s.autoNoshowOnRollover).toBe(true)
+  })
+})
+
+describe('線上訂位防線設定欄位', () => {
+  it('預設值：關閉、80%、0 分鐘（不啟用場次截止）', () => {
+    localStorage.removeItem('chicken_settings_v1')
+    const s = getSettings()
+    expect(s.onlineAutoCloseEnabled).toBe(false)
+    expect(s.onlineAutoClosePercent).toBe(80)
+    expect(s.onlineSessionCutoffMin).toBe(0)
+  })
+  it('enabled 只認布林 true；percent clamp 50–100；cutoff clamp 0–720', () => {
+    expect(saveSettings({ onlineAutoCloseEnabled: 'true' }).onlineAutoCloseEnabled).toBe(false)
+    expect(saveSettings({ onlineAutoCloseEnabled: true }).onlineAutoCloseEnabled).toBe(true)
+    expect(saveSettings({ onlineAutoClosePercent: 30 }).onlineAutoClosePercent).toBe(50)
+    expect(saveSettings({ onlineAutoClosePercent: 200 }).onlineAutoClosePercent).toBe(100)
+    expect(saveSettings({ onlineAutoClosePercent: 'abc' }).onlineAutoClosePercent).toBe(80)
+    expect(saveSettings({ onlineSessionCutoffMin: -5 }).onlineSessionCutoffMin).toBe(0)
+    expect(saveSettings({ onlineSessionCutoffMin: 9999 }).onlineSessionCutoffMin).toBe(720)
+    expect(saveSettings({ onlineSessionCutoffMin: 120 }).onlineSessionCutoffMin).toBe(120)
   })
 })
 

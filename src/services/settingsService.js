@@ -12,6 +12,10 @@ const DEFAULT = {
   autoReleaseAfterMin: 300,     // 用餐超過 5 小時視為忘記清桌（clamp 120–720）
   dayRolloverEnabled: true,
   autoNoshowOnRollover: false,  // 預設關：自動標 noshow 會影響顧客罰則與報表口徑
+  // 線上訂位防線（只擋線上客人端，店員後台/現場不受影響；★ 與 functions 白名單成對）：
+  onlineAutoCloseEnabled: false,   // 滿座門檻自動關閉（預設關，後台開啟後生效）
+  onlineAutoClosePercent: 80,      // 已訂達總容量 N% 即關閉該時段線上訂位（clamp 50–100）
+  onlineSessionCutoffMin: 0,       // 場次開始前 X 分鐘停止線上訂位（0 = 不啟用，clamp 0–720）
   // 固定場次（批次）：地圖時間軸與「關閉整場次」依此；店家可在後台增刪。
   seatings: [
     { id: 'lunch1', name: '午餐第一批', start: '11:00', end: '12:30' },
@@ -40,6 +44,13 @@ const DEFAULT = {
   storeMapUrl: 'https://www.google.com/maps/search/?api=1&query=%E5%8D%97%E6%8A%95%E7%B8%A3%E9%B9%BF%E8%B0%B7%E9%84%89%E4%B8%AD%E6%AD%A3%E8%B7%AF%E4%BA%8C%E6%AE%B5377%E8%99%9F',
   storeLatitude: '23.7523874',
   storeLongitude: '120.746746'
+}
+
+// 與 functions/lib/onlineGuards.js 的 clampInt 同邏輯（非法值回 fallback，再夾進範圍）。
+function clampInt(value, min, max, fallback) {
+  const n = Math.round(Number(value))
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(max, Math.max(min, n))
 }
 
 // 正規化「關閉設定」並深拷貝（避免與 DEFAULT.closures 共用參考被 mutate 污染）。
@@ -86,6 +97,10 @@ function withDefaults(value = {}) {
     autoReleaseAfterMin: Math.min(720, Math.max(120, Number(merged.autoReleaseAfterMin) || DEFAULT.autoReleaseAfterMin)),
     dayRolloverEnabled: merged.dayRolloverEnabled !== false,
     autoNoshowOnRollover: merged.autoNoshowOnRollover === true,
+    // 線上訂位防線：與 functions normalizeOnlineGuardSettings 同口徑（0 / false 有意義，不能用 ||）。
+    onlineAutoCloseEnabled: merged.onlineAutoCloseEnabled === true,
+    onlineAutoClosePercent: clampInt(merged.onlineAutoClosePercent, 50, 100, DEFAULT.onlineAutoClosePercent),
+    onlineSessionCutoffMin: clampInt(merged.onlineSessionCutoffMin, 0, 720, 0),
     lineOfficialUrl: merged.lineOfficialUrl || DEFAULT.lineOfficialUrl,
     lineOfficialName: merged.lineOfficialName || DEFAULT.lineOfficialName,
     lineUseLiff: !!merged.lineUseLiff,
