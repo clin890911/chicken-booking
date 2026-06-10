@@ -14,6 +14,7 @@ import {
   calcDayBookings,
   totalActiveSeats,
   findPreassignedBooking,
+  resolveSlotOccupancy,
 } from '../../src/utils/capacity'
 
 // ---- 假資料工廠 ----
@@ -633,5 +634,32 @@ describe('findPreassignedBooking — 預先配桌衝突偵測', () => {
     expect(findPreassignedBooking([mkBooking({ id: 'A', assignedTableId: '101' })], null, {})).toBeNull()
     expect(findPreassignedBooking([mkBooking({ id: 'A', assignedTableId: null })], '101', {})).toBeNull()
     expect(findPreassignedBooking(undefined, '101', {})).toBeNull()
+  })
+})
+
+// ============================================================
+// 維修停用（outage）× 容量：該日在維修窗內的桌不計入 totalSeats
+// （與後端 calcSlotCapacityServer 同口徑；窗外日期不受影響）
+// ============================================================
+describe('calcSlotCapacity — 維修停用（按日期）', () => {
+  const outTable = { ...mkTable('101', 4), outage: { from: '2026-06-15', to: '2026-06-16', reason: '維修' } }
+  const tables = [outTable, mkTable('102', 6)]
+
+  it('維修窗內：該桌座位不計入', () => {
+    expect(calcSlotCapacity(tables, [], DATE, '18:00', {}, [])).toBe(6)
+  })
+
+  it('維修窗外（隔週同桌）：照常計入', () => {
+    expect(calcSlotCapacity(tables, [], '2026-06-20', '18:00', {}, [])).toBe(10)
+  })
+
+  it('resolveSlotOccupancy：維修桌不計入 totalSeats / totalTables', () => {
+    const seating = { id: 'dinner1', name: '晚餐', start: '17:00', end: '19:00' }
+    const settings = { seatings: [seating] }
+    const r = resolveSlotOccupancy(tables, [], [], DATE, seating, settings)
+    expect(r.summary.totalSeats).toBe(6)
+    expect(r.summary.totalTables).toBe(1)
+    const r2 = resolveSlotOccupancy(tables, [], [], '2026-06-20', seating, settings)
+    expect(r2.summary.totalSeats).toBe(10)
   })
 })

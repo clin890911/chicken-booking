@@ -152,36 +152,95 @@ describe('listByFloor', () => {
 // ============================================================
 // 啟用/停用：toggle / setActive
 // ============================================================
-describe('toggle / setActive', () => {
+describe('toggle / setActive（含佔用守門）', () => {
   beforeEach(() => {
     tableService.bulkWrite([mkTable({ number: 'A', isActive: true })])
   })
 
-  it('toggle 反轉 isActive 並回傳更新後桌位', () => {
+  it('toggle 反轉 isActive 並回傳 { ok, table }', () => {
     const r1 = tableService.toggle('A')
-    expect(r1.isActive).toBe(false)
+    expect(r1.ok).toBe(true)
+    expect(r1.table.isActive).toBe(false)
     expect(tableService.getByNumber('A').isActive).toBe(false)
     const r2 = tableService.toggle('A')
-    expect(r2.isActive).toBe(true)
+    expect(r2.table.isActive).toBe(true)
     expect(tableService.getByNumber('A').isActive).toBe(true)
   })
 
   it('toggle 會更新 updatedAt 為目前時間', () => {
     const r = tableService.toggle('A')
-    expect(r.updatedAt).toBe(FIXED_NOW.toISOString())
+    expect(r.table.updatedAt).toBe(FIXED_NOW.toISOString())
   })
 
-  it('toggle 不存在的桌號回傳 null', () => {
-    expect(tableService.toggle('NOPE')).toBeNull()
+  it('toggle 不存在的桌號回傳 ok:false', () => {
+    expect(tableService.toggle('NOPE').ok).toBe(false)
   })
 
   it('setActive 直接設定 isActive', () => {
-    expect(tableService.setActive('A', false).isActive).toBe(false)
-    expect(tableService.setActive('A', true).isActive).toBe(true)
+    expect(tableService.setActive('A', false).table.isActive).toBe(false)
+    expect(tableService.setActive('A', true).table.isActive).toBe(true)
   })
 
-  it('setActive 不存在的桌號回傳 null', () => {
-    expect(tableService.setActive('NOPE', false)).toBeNull()
+  it('setActive 不存在的桌號回傳 ok:false', () => {
+    expect(tableService.setActive('NOPE', false).ok).toBe(false)
+  })
+
+  it('佔用守門：用餐中 / 已預訂 / 待清桌 / 連著訂位的桌不准停用（啟用不受限）', () => {
+    for (const status of ['dining', 'reserved', 'cleaning']) {
+      tableService.bulkWrite([mkTable({ number: 'A', isActive: true, status })])
+      const r = tableService.toggle('A')
+      expect(r.ok).toBe(false)
+      expect(tableService.getByNumber('A').isActive).toBe(true)
+    }
+    tableService.bulkWrite([mkTable({ number: 'A', isActive: true, status: 'vacant', currentBookingId: 'B1' })])
+    expect(tableService.setActive('A', false).ok).toBe(false)
+    // 已停用的桌可以照常重新啟用（守門只擋「停用」方向）
+    tableService.bulkWrite([mkTable({ number: 'A', isActive: false, status: 'dining' })])
+    expect(tableService.setActive('A', true).ok).toBe(true)
+  })
+
+  it('blocked（臨時保留）桌沒有客人 → 可以停用', () => {
+    tableService.bulkWrite([mkTable({ number: 'A', isActive: true, status: 'blocked' })])
+    expect(tableService.toggle('A').ok).toBe(true)
+  })
+})
+
+// ============================================================
+// 維修停用（按日期）：setOutage / clearOutage
+// ============================================================
+describe('setOutage / clearOutage', () => {
+  beforeEach(() => {
+    tableService.bulkWrite([mkTable({ number: 'A', isActive: true })])
+  })
+  const TODAY = FIXED_NOW.toISOString().slice(0, 10)
+
+  it('設定合法維修窗並正規化；read 後欄位存在', () => {
+    const r = tableService.setOutage('A', { from: TODAY, to: '', reason: ' 桌面破損 ' })
+    expect(r.ok).toBe(true)
+    expect(tableService.getByNumber('A').outage).toEqual({ from: TODAY, to: '', reason: '桌面破損' })
+  })
+
+  it('格式不正確回 ok:false 不寫入', () => {
+    expect(tableService.setOutage('A', { from: 'bad' }).ok).toBe(false)
+    expect(tableService.getByNumber('A').outage).toBe(null)
+  })
+
+  it('佔用守門：窗含今天且桌上有客人 → 拒絕；未來窗不受限', () => {
+    tableService.bulkWrite([mkTable({ number: 'A', isActive: true, status: 'dining' })])
+    expect(tableService.setOutage('A', { from: TODAY, to: '', reason: 'x' }).ok).toBe(false)
+    const future = tableService.setOutage('A', { from: '2099-01-01', to: '2099-01-02', reason: 'x' })
+    expect(future.ok).toBe(true)
+  })
+
+  it('clearOutage 清除維修窗', () => {
+    tableService.setOutage('A', { from: TODAY, to: '', reason: 'x' })
+    expect(tableService.clearOutage('A').ok).toBe(true)
+    expect(tableService.getByNumber('A').outage).toBe(null)
+  })
+
+  it('舊資料缺 outage 欄位：read 自動補 null', () => {
+    localStorage.setItem('chicken_tables_v3', JSON.stringify([{ number: 'Z', capacity: 4 }]))
+    expect(tableService.getByNumber('Z').outage).toBe(null)
   })
 })
 

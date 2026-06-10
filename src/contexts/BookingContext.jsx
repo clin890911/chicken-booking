@@ -270,7 +270,10 @@ export function BookingProvider({ children }) {
   }
 
   // ============ 桌位動作 ============
-  const toggleTable = (number) => { tableService.toggle(number); refresh(); syncCloudSoon() }
+  // toggle/setOutage 帶佔用守門：失敗回 { ok:false, error }，由 UI 顯示原因，不寫入也不同步。
+  const toggleTable = (number) => { const r = tableService.toggle(number); if (r?.ok) { refresh(); syncCloudSoon() } return r }
+  const setTableOutage = (number, outage) => { const r = tableService.setOutage(number, outage); if (r?.ok) { refresh(); syncCloudSoon() } return r }
+  const clearTableOutage = (number) => { const r = tableService.clearOutage(number); if (r?.ok) { refresh(); syncCloudSoon() } return r }
   const setTableStatus = (number, status, extra = {}) => { tableService.setStatus(number, status, extra); refresh(); syncCloudSoon() }
   const blockTable = (number, reason) => { tableService.blockTable(number, reason); refresh(); syncCloudSoon() }
   const unblockTable = (number) => { tableService.unblockTable(number); refresh(); syncCloudSoon() }
@@ -481,7 +484,7 @@ export function BookingProvider({ children }) {
     agencies, guides, groupReservations,
     refresh, pullCloud, migrateLocalToCloud,
     addBooking, updateBooking, cycleStatus, setStatus,
-    toggleTable, setTableStatus, blockTable, unblockTable, updateTablePosition,
+    toggleTable, setTableOutage, clearTableOutage, setTableStatus, blockTable, unblockTable, updateTablePosition,
     bulkSaveTables, addTable, removeTable, resetTables,
     assignBookingToTable, seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, moveTable, findSuitableTables, suggestTable,
     preassignBookingTable, clearBookingPreassign,

@@ -4,14 +4,16 @@
 import { useMemo } from 'react'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse } from '../../../utils/bookingPulse'
+import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 
 export default function StatusBar({ tables, waitlist, bookings = [] }) {
   const counts = { vacant: 0, reserved: 0, dining: 0, cleaning: 0, blocked: 0 }
   const bookingById = {}
   bookings.forEach(b => { if (b.id) bookingById[b.id] = b })
   let occSeats = 0
+  const today = todayStr()
   tables.forEach(t => {
-    if (!t.isActive) return
+    if (!isTableUsableOnDate(t, today)) return
     counts[t.status] = (counts[t.status] || 0) + 1
     if (t.status === 'dining') {
       const b = t.currentBookingId ? bookingById[t.currentBookingId] : null

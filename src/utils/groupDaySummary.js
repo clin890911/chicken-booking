@@ -14,6 +14,7 @@ import {
   CAPACITY_EXCLUDED_STATUSES,
 } from './capacity'
 import { seatingForSlot } from './timeSlots'
+import { isTableUsableOnDate } from './tableAvailability'
 
 const NO_SEATING = '__none__' // 對不到任何場次的梯次桶鍵
 
@@ -62,7 +63,7 @@ export function summarizeGroupDay(groupReservations = [], tables = [], date, set
   let totalSeats = 0
   ;(tables || []).forEach(t => {
     capByNum[t.number] = Number(t.capacity) || 0
-    if (t.isActive !== false) totalSeats += Number(t.capacity) || 0
+    if (isTableUsableOnDate(t, date)) totalSeats += Number(t.capacity) || 0
   })
 
   let guests = 0

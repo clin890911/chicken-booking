@@ -5,6 +5,7 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useToast } from '../../ui/Toast'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
 import { resolveSlotOccupancy, isSeatingClosed, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
+import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 
 // 排位地圖（自 SlotOverviewView 拆出、嵌入規劃主控台）：
 // 依「日期（受控 prop）+ 場次（內部 state）」呈現散客（暖色）×團客（冷色）佔位，
@@ -58,13 +59,13 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     )
   }, [bookings, date, seating, settings])
 
-  // 預先配桌模式：可選的空桌（此場次未被佔、啟用中、容量足夠）
+  // 預先配桌模式：可選的空桌（此場次未被佔、該日可用、容量足夠）
   const highlightTables = useMemo(() => {
     if (!assignBooking) return []
     return (tables || [])
-      .filter(t => t.isActive !== false && !byTable[t.number] && t.capacity >= (assignBooking.guests || 1))
+      .filter(t => isTableUsableOnDate(t, date) && !byTable[t.number] && t.capacity >= (assignBooking.guests || 1))
       .map(t => t.number)
-  }, [assignBooking, tables, byTable])
+  }, [assignBooking, tables, byTable, date])
 
   const startAssign = (booking) => { setAssignBooking(booking); setSelectedTable(null) }
   const cancelAssign = () => setAssignBooking(null)
@@ -73,7 +74,7 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     if (assignBooking) {
       if (byTable[number]) return toast.error(`${number} 在此場次已被佔用`)
       const t = tables.find(x => x.number === number)
-      if (!t || t.isActive === false) return toast.error(`${number} 停用中`)
+      if (!t || !isTableUsableOnDate(t, date)) return toast.error(`${number} 停用/維修中`)
       if (t.capacity < (assignBooking.guests || 1)) return toast.error(`${number} 容量不足（${t.capacity} < ${assignBooking.guests}）`)
       preassignBookingTable(assignBooking.id, number)
       toast.success(`✅ ${assignBooking.name} 已預先配到 ${number}`)
@@ -181,6 +182,7 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
               scopedByTable={byTable}
               scopedClosed={closed}
               scopedHighlightTables={highlightTables}
+              mapDate={date}
             />
           </div>
           <div className="text-center text-[11px] text-chicken-brown/45 mt-2">

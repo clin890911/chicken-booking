@@ -6,6 +6,8 @@ import { useAuth } from '../../../contexts/AuthContext'
 import TableCandidatePanel from './TableCandidatePanel'
 import GroupTableSection from './GroupTableSection'
 import { STATUS_ZH as STATUS_LABELS } from '../../../utils/tableStatus'
+import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
+import { todayStr } from '../../../utils/timeSlots'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -25,6 +27,12 @@ function fmtTime(d) {
 function diffMin(d) {
   return Math.floor((Date.now() - new Date(d).getTime()) / 60000)
 }
+// YYYY-MM-DD 往後加 n 天（本地時區安全：以中午起算避免 DST/時區邊界）
+function addDaysStr(dateStr, n) {
+  const d = new Date(`${dateStr}T12:00:00`)
+  d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 export default function TableDrawer({ table, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, mode }) {
   const { can } = useAuth()
@@ -33,12 +41,15 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const {
     setTableStatus, blockTable, unblockTable, walkInSeat,
     seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, setStatus,
+    setTableOutage, clearTableOutage,
     settings, groupReservations,
   } = useBooking()
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [showBlock, setShowBlock] = useState(false)
+  const [showOutage, setShowOutage] = useState(false)
   const [walkInForm, setWalkInForm] = useState({ name: '散客', phone: '', guests: 2, notes: '' })
   const [blockReason, setBlockReason] = useState('臨時保留')
+  const [outageForm, setOutageForm] = useState({ days: 0, reason: '桌椅維修' })
 
   // 用餐計時即時 tick（1 秒）
   const [, setNow] = useState(Date.now())
@@ -49,6 +60,12 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   }, [table?.number, table?.status])
 
   if (!table) return null
+
+  // 維修停用狀態（按日期）：今日維修中 → 接管整個抽屜；排定未來維修 → 顯示提示可取消。
+  const today = todayStr()
+  const outToday = isTableOutOnDate(table, today)
+  const upcomingOutage = !outToday && normalizeOutage(table.outage) && table.outage.from > today
+    ? normalizeOutage(table.outage) : null
 
   // 團體梯次入座的桌（currentRef 指向 group/batch，無散客 booking）
   const groupRef = table.currentRef?.type === 'group'
@@ -152,6 +169,25 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     setShowBlock(false)
   }
 
+  // 維修停用（按日期）：今天起算；days -1 = 無限期。容量（含線上可訂）即時扣除此桌。
+  const handleSetOutage = () => {
+    if (!outageForm.reason.trim()) return toast.error('請填維修原因')
+    const to = outageForm.days < 0 ? '' : addDaysStr(today, outageForm.days)
+    const r = setTableOutage(table.number, { from: today, to, reason: outageForm.reason })
+    if (!r?.ok) return toast.error(r?.error || '無法設定維修')
+    toast.success(`🛠 ${table.number} 已維修停用${to ? `（至 ${to}）` : '（直到手動結束）'}`)
+    setShowOutage(false)
+  }
+
+  const handleClearOutage = async () => {
+    const ok = await confirmDialog(`結束 ${table.number} 的維修？桌位將立即恢復可用並計回容量。`,
+      { title: '結束維修', confirmLabel: '結束維修' })
+    if (!ok) return
+    const r = clearTableOutage(table.number)
+    if (!r?.ok) return toast.error(r?.error || '無法結束維修')
+    toast.success(`✅ ${table.number} 維修結束，已恢復可用`)
+  }
+
   const handleUnblock = () => {
     unblockTable(table.number)
     toast.success(`${table.number} 已恢復可用`)
@@ -176,6 +212,11 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
         <span className={`inline-block mt-3 px-3 py-1 rounded-full text-xs font-bold text-white ${STATUS_PILL_BG[table.status]}`}>
           {STATUS_LABELS[table.status]}
         </span>
+        {outToday && (
+          <span className="inline-block mt-3 ml-2 px-3 py-1 rounded-full text-xs font-bold text-white bg-amber-700">
+            🛠 {outageLabel(table, today)}
+          </span>
+        )}
       </div>
 
       {/* Body */}
@@ -270,7 +311,22 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
             <p className="text-[11px] text-orange-700/70 mt-0.5">直接入座或指派他人會覆蓋此預留。</p>
           </div>
         )}
-        {table.status === 'vacant' && !activeHold && !mode?.assigning && (
+        {/* 維修中：接管空桌的預設引導，明確顯示原因與期間 */}
+        {outToday && (
+          <div className="px-3 py-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs space-y-1">
+            <div className="font-bold text-amber-800">🛠 此桌維修停用中（{outageLabel(table, today)}）</div>
+            {table.outage?.reason && <div className="text-amber-800/80">原因：{table.outage.reason}</div>}
+            <div className="text-amber-700/70">維修期間此桌不計入可訂容量、不出現在配桌建議；結束維修後立即恢復。</div>
+          </div>
+        )}
+        {/* 排定中的未來維修：提示 + 可取消 */}
+        {upcomingOutage && (
+          <div className="px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-xs flex items-center justify-between gap-2">
+            <span className="text-orange-700"><span className="font-bold">🛠 已排定維修：</span>{outageLabel(table, today)}{upcomingOutage.reason ? `（${upcomingOutage.reason}）` : ''}</span>
+            {canBlock && <button onClick={handleClearOutage} className="shrink-0 text-orange-700 font-bold underline underline-offset-2">取消排定</button>}
+          </div>
+        )}
+        {table.status === 'vacant' && !activeHold && !mode?.assigning && !outToday && (
           <>
             <p className="text-chicken-brown/40 text-center py-2 text-xs">此桌目前可使用</p>
             <TableCandidatePanel table={table} onPicked={onClose} />
@@ -282,10 +338,18 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
       {/* Action 按鈕 */}
       {canEdit && (
         <div className="px-5 pb-5 border-t border-chicken-brown/10 pt-3 space-y-2">
-          {table.status === 'vacant' && !activeHold && (
+          {outToday && canBlock && (
+            <button onClick={handleClearOutage} className="btn-primary w-full">✅ 結束維修，恢復可用</button>
+          )}
+          {table.status === 'vacant' && !activeHold && !outToday && (
             <>
               <button onClick={() => setShowWalkIn(true)} className="btn-primary w-full">✅ 散客直接入座</button>
-              {canBlock && <button onClick={() => setShowBlock(true)} className="btn-secondary text-sm w-full">🚫 設不可用</button>}
+              {canBlock && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => setShowBlock(true)} className="btn-secondary text-sm">🚫 設不可用</button>
+                  <button onClick={() => setShowOutage(true)} className="btn-secondary text-sm">🛠 維修停用</button>
+                </div>
+              )}
             </>
           )}
 
@@ -354,7 +418,35 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           <button onClick={handleBlock} className="btn-primary px-4 py-2">確認</button>
         </>
       }>
-        <Input label="原因" value={blockReason} onChange={e => setBlockReason(e.target.value)} placeholder="例：桌椅維修、瓦斯管線檢查" />
+        <div className="space-y-2">
+          <Input label="原因" value={blockReason} onChange={e => setBlockReason(e.target.value)} placeholder="例：保留給常客、暫不開放" />
+          <p className="text-xs text-chicken-brown/55">「不可用」是現場臨時保留，<span className="font-bold">不會</span>扣線上可訂容量；要修桌子請改用「🛠 維修停用」。</p>
+        </div>
+      </Modal>
+
+      {/* Outage Modal（維修停用，按日期、扣容量） */}
+      <Modal open={showOutage} onClose={() => setShowOutage(false)} title={`${table.number} · 維修停用`} footer={
+        <>
+          <button onClick={() => setShowOutage(false)} className="btn-secondary px-4 py-2">取消</button>
+          <button onClick={handleSetOutage} className="btn-primary px-4 py-2">確認停用</button>
+        </>
+      }>
+        <div className="space-y-3">
+          <Select
+            label="維修期間（今天起）"
+            value={outageForm.days}
+            onChange={e => setOutageForm(f => ({ ...f, days: Number(e.target.value) }))}
+            options={[
+              { value: 0, label: '僅今天' },
+              { value: 1, label: '到明天' },
+              { value: 2, label: '三天' },
+              { value: 6, label: '一週' },
+              { value: -1, label: '無限期（手動結束）' },
+            ]}
+          />
+          <Input label="原因" value={outageForm.reason} onChange={e => setOutageForm(f => ({ ...f, reason: e.target.value }))} placeholder="例：桌面破損、卡式爐送修" />
+          <p className="text-xs text-chicken-brown/55">維修期間此桌自動從可訂容量（含線上訂位）與配桌建議移除，到期自動恢復。</p>
+        </div>
       </Modal>
     </div>
   )

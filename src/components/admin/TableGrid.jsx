@@ -3,14 +3,18 @@ import { Card } from '../ui'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { totalActiveSeats } from '../../utils/capacity'
+import { isTableOutOnDate, outageLabel } from '../../utils/tableAvailability'
+import { todayStr } from '../../utils/timeSlots'
 
 export default function TableGrid() {
   const { tables, toggleTable } = useBooking()
   const toast = useToast()
+  const today = todayStr()
 
-  // 點擊切換啟用/停用 + 反饋（以點擊前狀態判斷切換後結果）
+  // 點擊切換啟用/停用 + 反饋；佔用守門失敗時顯示原因（桌上有客人不准停用）
   const handleToggle = (t) => {
-    toggleTable(t.number)
+    const r = toggleTable(t.number)
+    if (!r?.ok) return toast.error(r?.error || '無法切換')
     if (t.isActive) toast.warning(`已停用 ${t.number}`)
     else toast.success(`已啟用 ${t.number}`)
   }
@@ -21,11 +25,39 @@ export default function TableGrid() {
     const fourActive = four.filter(t => t.isActive).length
     const sixActive = six.filter(t => t.isActive).length
     const seats = totalActiveSeats(tables)
-    return { fourActive, fourTotal: four.length, sixActive, sixTotal: six.length, seats }
-  }, [tables])
+    const outToday = tables.filter(t => t.isActive && isTableOutOnDate(t, today)).length
+    return { fourActive, fourTotal: four.length, sixActive, sixTotal: six.length, seats, outToday }
+  }, [tables, today])
 
   const fourSeaters = tables.filter(t => t.capacity === 4)
   const sixSeaters = tables.filter(t => t.capacity === 6)
+  // 桌號範圍標籤由實際資料推導（避免重新編號後又留下過時文案）
+  const rangeLabel = (list) => {
+    const nums = list.map(t => String(t.number)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    return nums.length ? `${nums[0]}–${nums[nums.length - 1]}` : '—'
+  }
+
+  const renderTable = (t, activeClass) => {
+    const out = isTableOutOnDate(t, today)
+    const upcoming = !out && t.outage ? outageLabel(t, today) : ''
+    return (
+      <button
+        key={t.number}
+        onClick={() => handleToggle(t)}
+        className={`aspect-square min-h-[44px] rounded-lg border-2 flex flex-col items-center justify-center text-xs font-bold transition-all active:scale-95 ${
+          !t.isActive
+            ? 'border-chicken-brown/20 bg-chicken-brown/5 text-chicken-brown/30 line-through'
+            : out
+              ? 'border-orange-300 bg-orange-50 text-orange-700'
+              : activeClass
+        }`}
+        title={out || upcoming ? outageLabel(t, today) : undefined}
+      >
+        <span>{out ? '🛠' : ''}{t.number}</span>
+        <span className="text-[9px] opacity-70">{out ? '維修' : upcoming ? '🛠排定' : `${t.capacity}人`}</span>
+      </button>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -44,49 +76,26 @@ export default function TableGrid() {
             <div className="text-xl font-black text-chicken-red">{stats.seats}</div>
           </div>
         </div>
+        {stats.outToday > 0 && (
+          <p className="mt-2 text-center text-xs font-bold text-orange-600">🛠 今日有 {stats.outToday} 桌維修中（容量已自動扣除；到現場頁點該桌可結束維修）</p>
+        )}
       </Card>
 
       <Card>
-        <h3 className="font-bold text-chicken-brown mb-3">🪑 四人桌（A1 - A33）</h3>
+        <h3 className="font-bold text-chicken-brown mb-3">🪑 四人桌（{rangeLabel(fourSeaters)}）</h3>
         <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
-          {fourSeaters.map(t => (
-            <button
-              key={t.number}
-              onClick={() => handleToggle(t)}
-              className={`aspect-square min-h-[44px] rounded-lg border-2 flex flex-col items-center justify-center text-xs font-bold transition-all active:scale-95 ${
-                t.isActive
-                  ? 'border-chicken-green bg-chicken-green/15 text-chicken-brown'
-                  : 'border-chicken-brown/20 bg-chicken-brown/5 text-chicken-brown/30 line-through'
-              }`}
-            >
-              <span>{t.number}</span>
-              <span className="text-[9px] opacity-70">4人</span>
-            </button>
-          ))}
+          {fourSeaters.map(t => renderTable(t, 'border-chicken-green bg-chicken-green/15 text-chicken-brown'))}
         </div>
       </Card>
 
       <Card>
-        <h3 className="font-bold text-chicken-brown mb-3">🪑 六人桌（B1 - B19）</h3>
+        <h3 className="font-bold text-chicken-brown mb-3">🪑 六人桌（{rangeLabel(sixSeaters)}）</h3>
         <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
-          {sixSeaters.map(t => (
-            <button
-              key={t.number}
-              onClick={() => handleToggle(t)}
-              className={`aspect-square min-h-[44px] rounded-lg border-2 flex flex-col items-center justify-center text-xs font-bold transition-all active:scale-95 ${
-                t.isActive
-                  ? 'border-chicken-yellow bg-chicken-yellow/15 text-chicken-brown'
-                  : 'border-chicken-brown/20 bg-chicken-brown/5 text-chicken-brown/30 line-through'
-              }`}
-            >
-              <span>{t.number}</span>
-              <span className="text-[9px] opacity-70">6人</span>
-            </button>
-          ))}
+          {sixSeaters.map(t => renderTable(t, 'border-chicken-yellow bg-chicken-yellow/15 text-chicken-brown'))}
         </div>
       </Card>
 
-      <p className="text-center text-xs text-chicken-brown/50">點擊桌子可切換啟用 / 停用</p>
+      <p className="text-center text-xs text-chicken-brown/50">點擊桌子可切換啟用 / 停用（長期）；短期維修請在現場頁點桌設定「維修停用」</p>
     </div>
   )
 }

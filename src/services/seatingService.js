@@ -6,6 +6,8 @@ import * as waitlistService from './waitlistService'
 import * as customerService from './customerService'
 import * as groupService from './groupReservationService'
 import { statusZh } from '../utils/tableStatus'
+import { isTableUsableOnDate } from '../utils/tableAvailability'
+import { todayStr } from '../utils/timeSlots'
 
 // === 訂位 → 指派桌 ===
 // 客人線上訂位（assignedTableId: null）→ 到店時店長指派一張空桌
@@ -167,8 +169,9 @@ export function moveTable(bookingId, newTableNumber) {
 // 2) 1F 優先（行動方便、走道近）
 // 3) 天然氣優先（火力穩定、體驗較好）
 export function findSuitableTables(partySize) {
+  const today = todayStr()
   return tableService.listAll()
-    .filter(t => t.isActive && t.status === 'vacant' && t.capacity >= partySize)
+    .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && t.capacity >= partySize)
     .sort((a, b) => {
       const wasteA = a.capacity - partySize
       const wasteB = b.capacity - partySize
