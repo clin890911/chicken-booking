@@ -2,10 +2,12 @@ import { test, expect } from '@playwright/test'
 
 // 規劃分頁主線：同仁登入 → 規劃（月曆+當日總覽一頁式，預設選今日）→ 編輯精靈（2 頁式）。
 // 後台在「本機開發模式」(無 Firebase) 以 localStorage 為後端；攔截 admin* 雲端端點避免碰正式後端。
-// 覆蓋三個重點：
+// 覆蓋五個重點：
 //   1) 反覆「新增團單→返回」不會留下任何空白團單（草稿不落地）
 //   2) 空白團單過不了驗證（第一頁就擋：請選擇或新增旅行社）
 //   3) 當日總覽 ⇄ 排位地圖 三態切換（規劃分頁合併後的新動線）
+//   4) 點團卡 → 詳情頁（唯讀確認 + 回傳單）→ 編輯往返
+//   5) 散客名單出現在當日總覽，「→ 配桌」一鍵跳排位地圖預配模式
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/adminPullData', route =>
@@ -77,4 +79,69 @@ test('規劃：當日總覽 ⇄ 排位地圖 切換共享同一天', async ({ pa
   // 切回當日總覽 → 月曆與新增團單回來
   await page.getByRole('button', { name: /當日總覽/ }).first().click()
   await expect(page.getByRole("button", { name: /新增團單/ }).first()).toBeVisible()
+})
+
+test('規劃：點團卡進詳情頁（回傳單可見）→ 編輯往返 → 返回當日總覽', async ({ page }) => {
+  // 種一筆今日 confirmed 團單（覆寫 beforeEach 的空陣列；initScript 依加入順序執行）
+  await page.addInitScript(() => {
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_group_reservations_v1', JSON.stringify([{
+      id: 'GE2E_DETAIL', schemaVersion: 2, date: today,
+      agencyName: '快樂旅行社', guideName: '張導', guidePhone: '0911222333',
+      counts: { total: 22, vegetarian: 2, child: 0, mobility: 0, wheelchair: 0 },
+      allergyText: '兩位海鮮過敏', status: 'confirmed',
+      batches: [{ id: 'BE2E1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101', '102'], guests: 22, note: '' }],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }]))
+  })
+  await loginAndOpenPlanning(page)
+
+  // 點團卡 → 詳情頁（唯讀確認）：回傳單 + 編輯可見、不是編輯精靈
+  await page.getByRole('button', { name: /快樂旅行社/ }).first().click()
+  await expect(page.getByRole('button', { name: /回傳單/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /✏️ 編輯/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /下一步：圈選座位/ })).toHaveCount(0)
+  // 領位/備餐重點有呈現
+  await expect(page.getByText(/兩位海鮮過敏/)).toBeVisible()
+  await expect(page.getByText('梯次與桌位')).toBeVisible()
+
+  // 進編輯精靈 → 返回落回詳情頁
+  await page.getByRole('button', { name: /✏️ 編輯/ }).click()
+  await expect(page.getByRole('button', { name: /下一步：圈選座位/ })).toBeVisible()
+  await page.getByRole('button', { name: /返回當日總覽/ }).click()
+  await expect(page.getByRole('button', { name: /✏️ 編輯/ })).toBeVisible()
+
+  // 詳情頁返回 → 回當日總覽
+  await page.getByRole('button', { name: /返回當日總覽/ }).click()
+  await expect(page.getByRole("button", { name: /新增團單/ }).first()).toBeVisible()
+})
+
+test('規劃：散客名單出現在當日總覽，「→ 配桌」跳排位地圖預配模式', async ({ page }) => {
+  // 種一筆今日 confirmed 未配桌散客（11:30 落在預設「午餐第一批」場次）
+  await page.addInitScript(() => {
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify([{
+      id: 'BKE2E_WALKIN', name: '王小明', phone: '0987654321', guests: 4,
+      date: today, timeSlot: '11:30', status: 'confirmed', assignedTableId: null,
+      source: 'phone', notes: { pet: false, child: false, mobility: false, text: '' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }]))
+  })
+  await loginAndOpenPlanning(page)
+
+  // Hero 散客格 + 場次區塊內散客列可見
+  await expect(page.getByText('🧍 散客', { exact: true })).toBeVisible()
+  await expect(page.getByText(/🧍 散客 1 組 · 4 位/)).toBeVisible()
+  await expect(page.getByText('王小明')).toBeVisible()
+
+  // 點「→ 配桌」→ 跳排位地圖並自動進入預配模式
+  await page.getByRole('button', { name: /→ 配桌/ }).click()
+  await expect(page.getByText('場次（批次）')).toBeVisible()
+  await expect(page.getByText(/預先配桌：王小明/)).toBeVisible()
+
+  // 點地圖上的空桌 101（六人桌、容量足夠）完成預配
+  await page.locator('svg g:has(:text-is("101"))').first().click()
+  await expect(page.getByText(/已預先配到 101/)).toBeVisible()
 })

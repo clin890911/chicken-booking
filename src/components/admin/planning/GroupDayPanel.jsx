@@ -20,6 +20,35 @@ const QUICK_NEEDS = [
   { key: 'wheelchair', label: '輪椅', cls: 'bg-violet-100 text-violet-700' },
 ]
 
+// 散客狀態（CAPACITY_EXCLUDED 已被 buildWalkinDaySummary 過濾，只會出現這三種）
+const WALKIN_STATUS = {
+  pending: { label: '待確認', cls: 'bg-amber-100 text-amber-700' },
+  confirmed: { label: '待到', cls: 'bg-chicken-green/15 text-chicken-green' },
+  arrived: { label: '用餐中', cls: 'bg-orange-100 text-orange-700' },
+}
+
+// 場次內散客列（暖色系，對齊排位地圖「散客=暖色」的視覺語言）
+function WalkinRow({ row, onAssign }) {
+  const b = row.booking
+  const st = WALKIN_STATUS[row.status] || WALKIN_STATUS.confirmed
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-orange-200/60 bg-white px-2.5 py-1.5">
+      <span className="text-xs font-bold text-chicken-brown truncate">{b.name || '（未填姓名）'}</span>
+      <span className="text-[11px] font-bold text-chicken-brown/60 tabular-nums shrink-0">{row.guests} 位 · 🕐 {row.timeSlot || '未排'}</span>
+      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${st.cls}`}>{st.label}</span>
+      <div className="flex-1" />
+      {row.assignedTableId ? (
+        <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0">🪑 {row.assignedTableId}</span>
+      ) : onAssign ? (
+        <button onClick={() => onAssign(b)}
+          className="text-[11px] font-black px-2 py-1 rounded-lg bg-orange-600 text-white shrink-0">→ 配桌</button>
+      ) : (
+        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">未配桌</span>
+      )}
+    </div>
+  )
+}
+
 // 場次剩餘色調（summary 來自 resolveSlotOccupancy：remaining=席、remainingTables=桌）
 function seatingTone(summary) {
   if (!summary || summary.closed) return 'closed'
@@ -87,9 +116,10 @@ function GroupBatchCard({ row, onSelect, onDuplicate }) {
   )
 }
 
-function SessionSection({ seating, summary, rows, onNewGroup, onSelectGroup, onDuplicate }) {
+function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, onSelectGroup, onDuplicate, onAssignWalkin }) {
   const tone = seatingTone(summary)
   const closed = tone === 'closed'
+  const walkinGuests = walkinRows.reduce((s, r) => s + (r.guests || 0), 0)
   return (
     <div className="rounded-xl border border-chicken-brown/10 bg-chicken-cream/30 p-2.5">
       <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
@@ -112,23 +142,41 @@ function SessionSection({ seating, summary, rows, onNewGroup, onSelectGroup, onD
           ))}
         </div>
       )}
+      {/* 本場次散客名單（有才渲染，不增加無散客日的視覺噪音） */}
+      {walkinRows.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[11px] font-black text-orange-700/80 mb-1">🧍 散客 {walkinRows.length} 組 · {walkinGuests} 位</div>
+          <div className="space-y-1">
+            {walkinRows.map(r => (
+              <WalkinRow key={r.booking.id} row={r} onAssign={closed ? null : onAssignWalkin} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onDuplicate, onGoToday, onPrintSheet, onOpenMap }) {
+export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin }) {
   const s = daySummary || {}
   const counts = s.prep?.counts || {}
   const hasGroups = dayGroups.length > 0
   const noSeatings = (s.seatings || []).length === 0
+
+  // 散客名單（buildWalkinDaySummary）：依場次分桶，給領位看名單 + 一鍵跳地圖配桌
+  const walkins = s.walkins || { count: 0, guests: 0, unassignedCount: 0, unassignedGuests: 0, bySeating: [], unscheduled: [] }
+  const walkinRowsBySeating = {}
+  walkins.bySeating.forEach(x => { walkinRowsBySeating[x.seating.id] = x.rows })
 
   // 依場次分組：場次容量（含剩餘）對齊抵達時間軸的同場次梯次列。
   const timeline = s.timeline || []
   const sections = (s.seatings || []).map(({ seating, summary }) => ({
     seating, summary,
     rows: (timeline.find(b => b.seating?.id === seating.id)?.rows) || [],
+    walkinRows: walkinRowsBySeating[seating.id] || [],
   }))
   const unscheduled = timeline.find(b => b.seating === null)
+  const hasUnscheduled = (unscheduled?.rows?.length || 0) > 0 || walkins.unscheduled.length > 0
 
   return (
     <div className="space-y-3">
@@ -154,15 +202,24 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
           </div>
         </div>
 
-        {/* 三大數字 */}
-        <div className="grid grid-cols-3 gap-2">
+        {/* 四大數字（團數 / 團體人數 / 散客 / 保留桌） */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div className="rounded-xl bg-chicken-red/10 text-chicken-red p-2.5 text-center">
             <div className="text-[11px] font-bold opacity-80">🚌 團數</div>
             <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{s.groupCount || 0}</div>
           </div>
           <div className="rounded-xl bg-chicken-brown/10 text-chicken-brown p-2.5 text-center">
-            <div className="text-[11px] font-bold opacity-80">👥 總人數</div>
+            <div className="text-[11px] font-bold opacity-80">👥 團體人數</div>
             <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{s.guests || 0}</div>
+          </div>
+          <div className="rounded-xl bg-orange-50 text-orange-700 p-2.5 text-center">
+            <div className="text-[11px] font-bold opacity-80">🧍 散客</div>
+            <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">
+              {walkins.count}<span className="text-sm">組</span> <span className="text-sm">{walkins.guests} 位</span>
+            </div>
+            {walkins.unassignedCount > 0 && (
+              <div className="text-[10px] font-bold text-amber-600 mt-0.5">未配桌 {walkins.unassignedCount} 組</div>
+            )}
           </div>
           <div className="rounded-xl bg-chicken-yellow/15 text-chicken-yellow p-2.5 text-center">
             <div className="text-[11px] font-bold opacity-80">🪑 保留</div>
@@ -206,22 +263,35 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
           {hasGroups && <GroupArrivalTimeline timeline={s.timeline || []} />}
           {hasGroups && <GroupPrepDigest prep={s.prep} />}
 
-          {/* 依場次分組團卡 */}
+          {/* 依場次分組（團卡 + 散客名單） */}
           {!noSeatings && (
             <div className="space-y-2">
-              <div className="text-xs font-black text-chicken-brown/55 px-1">依場次分組（點卡編輯）</div>
+              <div className="text-xs font-black text-chicken-brown/55 px-1">依場次分組（點卡看詳情）</div>
               {sections.map(sec => (
                 <SessionSection key={sec.seating.id} {...sec}
-                  onNewGroup={onNewGroup} onSelectGroup={onSelectGroup} onDuplicate={onDuplicate} />
+                  onNewGroup={onNewGroup} onSelectGroup={onSelectGroup} onDuplicate={onDuplicate}
+                  onAssignWalkin={onAssignWalkin} />
               ))}
-              {unscheduled && unscheduled.rows.length > 0 && (
+              {hasUnscheduled && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-2.5">
                   <div className="text-sm font-black text-amber-700 mb-2">未排場次 / 其他</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {unscheduled.rows.map(r => (
-                      <GroupBatchCard key={`${r.group.id}:${r.batch?.id || r.timeSlot}`} row={r} onSelect={onSelectGroup} onDuplicate={onDuplicate} />
-                    ))}
-                  </div>
+                  {unscheduled && unscheduled.rows.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {unscheduled.rows.map(r => (
+                        <GroupBatchCard key={`${r.group.id}:${r.batch?.id || r.timeSlot}`} row={r} onSelect={onSelectGroup} onDuplicate={onDuplicate} />
+                      ))}
+                    </div>
+                  )}
+                  {walkins.unscheduled.length > 0 && (
+                    <div className={unscheduled && unscheduled.rows.length > 0 ? 'mt-2' : ''}>
+                      <div className="text-[11px] font-black text-orange-700/80 mb-1">🧍 散客（時段未對應場次，無法在地圖配桌）</div>
+                      <div className="space-y-1">
+                        {walkins.unscheduled.map(r => (
+                          <WalkinRow key={r.booking.id} row={r} onAssign={null} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

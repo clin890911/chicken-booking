@@ -1,23 +1,27 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useToast } from '../../ui/Toast'
-import { generateTimeSlots, todayStr, addDays, formatDate, dayLabel } from '../../../utils/timeSlots'
+import { generateTimeSlots, todayStr, addDays, formatDate, dayLabel, seatingForSlot } from '../../../utils/timeSlots'
 import { totalActiveSeats, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
 import { summarizeGroupMonth, buildGroupDaySummary } from '../../../utils/groupDaySummary'
 import * as groupReservationService from '../../../services/groupReservationService'
 import GroupCalendar from './GroupCalendar'
 import GroupDayPanel from './GroupDayPanel'
 import GroupDaySheet from './GroupDaySheet'
+import GroupDetailStage from './GroupDetailStage'
 import GroupEditorStage from './GroupEditorStage'
 import SlotMapPanel from './SlotMapPanel'
 
 const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 
-// 規劃：未來日一頁式主控台，三態同頁——
+// 規劃：未來日一頁式主控台，多態同頁——
 //   pane='day'（預設）：左月曆 + 右當日總覽（團體預排骨架）
 //   pane='map'：精簡日期列 + 排位地圖全寬（散客×團客同框、散客預先配桌；
 //               地圖塞 420px 右欄會不可用，故獨佔全寬）
+//   detailGroupId 有值：團單詳情頁（唯讀確認 + 回傳單；點團卡 / 儲存後落地於此）
 //   editorGroup 有值：團單編輯精靈整頁接管（優先級最高，照舊）
+// 詳情頁吃 live group（依 id 即時查 context），編輯器吃 draft 複本——
+// 編輯儲存回詳情頁時自動顯示新資料；團被刪/同步移除時詳情自動退回主控台。
 // 兩態共享 selectedDate；pane 切換用純條件渲染（外層 AdminPage 已有 key=tab 動畫，不再疊動畫）。
 // 草稿優先：新團單在記憶體編輯，填好按儲存才落地（杜絕空白團單）。
 // 編輯器以 key（new 或 group.id）強制 remount，故 draft 以 initialGroup 初始化即可。
@@ -38,7 +42,9 @@ export default function PlanningView({ onGoToday }) {
   })
   const [editorGroup, setEditorGroup] = useState(null) // 傳給編輯器的初始資料（既有團複本 或 空白範本）
   const [editorIsNew, setEditorIsNew] = useState(false)
+  const [detailGroupId, setDetailGroupId] = useState(null) // 詳情頁顯示的團單 id（live 查找）
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [mapAssign, setMapAssign] = useState(null) // { bookingId, seatingId }：跳排位地圖並自動進預配模式
 
   // map 態的前一日/後一日：同步月曆游標，回 day 態時月曆停在正確的月份
   const shiftDay = (delta) => {
@@ -99,11 +105,33 @@ export default function PlanningView({ onGoToday }) {
   )
 
   // === 轉場 ===
+  // 點團卡 → 詳情頁（唯讀確認 + 回傳單）；要改內容由詳情頁的「✏️ 編輯」進精靈。
   const openExisting = (id) => {
-    const g = groupReservations.find(x => x.id === id)
-    if (!g) return
-    setEditorGroup(g)
+    if (!groupReservations.some(x => x.id === id)) return
+    setDetailGroupId(id)
+  }
+
+  // 詳情頁 live 查找：被刪 / 雲端同步移除時自動退回主控台
+  const detailGroup = useMemo(
+    () => detailGroupId ? groupReservations.find(g => g.id === detailGroupId) || null : null,
+    [groupReservations, detailGroupId],
+  )
+  useEffect(() => {
+    if (detailGroupId && !detailGroup && !editorGroup) setDetailGroupId(null)
+  }, [detailGroupId, detailGroup, editorGroup])
+
+  const openEditorFromDetail = () => {
+    if (!detailGroup) return
+    setEditorGroup(detailGroup)
     setEditorIsNew(false)
+  }
+
+  // 當日總覽散客列「→ 配桌」：跳排位地圖該場次並自動進預配模式
+  const goAssignWalkin = (booking) => {
+    const sid = seatingForSlot(settings, booking.timeSlot)?.id
+    if (!sid) return
+    setMapAssign({ bookingId: booking.id, seatingId: sid })
+    setPane('map')
   }
 
   // seatingId 可選：由當日總覽的「某場次 ＋新增團單」帶入，預先鎖定主梯次的場次（= 場次.start）。
@@ -136,7 +164,17 @@ export default function PlanningView({ onGoToday }) {
     toast.info('已複製為新團單草稿，請重新圈桌後儲存')
   }
 
-  const backToConsole = () => { setEditorGroup(null); setEditorIsNew(false) }
+  // 編輯器返回：只清編輯器——從詳情進編輯時自然落回詳情頁；新增草稿（無詳情）回當日總覽。
+  const closeEditor = () => { setEditorGroup(null); setEditorIsNew(false) }
+  // 儲存後（新增與編輯一致）：進詳情頁，立即可印回傳單傳給導遊。
+  const handleSaved = (id) => {
+    closeEditor()
+    setDetailGroupId(id || null)
+  }
+  const handleDeleted = () => {
+    closeEditor()
+    setDetailGroupId(null)
+  }
 
   // 編輯精靈整頁接管（與既有 stage==='editor' 行為一致）。
   if (editorGroup) {
@@ -153,14 +191,27 @@ export default function PlanningView({ onGoToday }) {
         agencies={agencies}
         guides={guides}
         groupReservations={groupReservations}
-        onBack={backToConsole}
-        onSaved={backToConsole}
-        onDeleted={backToConsole}
+        onBack={closeEditor}
+        onSaved={handleSaved}
+        onDeleted={handleDeleted}
         reserveExisting={reserveGroupTables}
         createGroup={createAndReserveGroup}
         removeGroup={removeGroupReservation}
         addAgency={addAgency}
         addGuide={addGuide}
+      />
+    )
+  }
+
+  // 團單詳情頁（唯讀確認 + 回傳單）整頁接管
+  if (detailGroup) {
+    return (
+      <GroupDetailStage
+        group={detailGroup}
+        tables={tables}
+        settings={settings}
+        onBack={() => setDetailGroupId(null)}
+        onEdit={openEditorFromDetail}
       />
     )
   }
@@ -214,10 +265,11 @@ export default function PlanningView({ onGoToday }) {
             onGoToday={onGoToday}
             onPrintSheet={() => setSheetOpen(true)}
             onOpenMap={() => setPane('map')}
+            onAssignWalkin={goAssignWalkin}
           />
         </div>
       ) : (
-        <SlotMapPanel date={selectedDate} />
+        <SlotMapPanel date={selectedDate} assignRequest={mapAssign} onAssignHandled={() => setMapAssign(null)} />
       )}
 
       {sheetOpen && (

@@ -202,6 +202,50 @@ export function buildArrivalTimeline(groupReservations = [], date, settings = {}
   return ordered
 }
 
+// === (d2) 當日散客名單彙總 ===
+// 規劃當日總覽用：把當日散客訂位依場次分桶（seatingForSlot 委派），給領位看名單、配桌。
+// 回傳 { count, guests, unassignedCount, unassignedGuests, bySeating:[{ seating, rows }], unscheduled: rows }
+//  row = { booking, timeSlot, guests, assignedTableId, status }；rows 依 timeSlot 排序。
+// 篩選：b.date === date 且排除 CAPACITY_EXCLUDED_STATUSES（與容量引擎同口徑）。
+export function buildWalkinDaySummary(bookings = [], date, settings = {}) {
+  const seatings = Array.isArray(settings?.seatings) ? settings.seatings : []
+  const buckets = new Map() // sid -> rows
+
+  let count = 0
+  let guests = 0
+  let unassignedCount = 0
+  let unassignedGuests = 0
+  ;(bookings || []).forEach(b => {
+    if (b.date !== date) return
+    if (CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return
+    const g = Number(b.guests) || 0
+    count += 1
+    guests += g
+    if (!b.assignedTableId) {
+      unassignedCount += 1
+      unassignedGuests += g
+    }
+    const sid = seatingForSlot(settings, b.timeSlot)?.id || NO_SEATING
+    if (!buckets.has(sid)) buckets.set(sid, [])
+    buckets.get(sid).push({
+      booking: b,
+      timeSlot: b.timeSlot || '',
+      guests: g,
+      assignedTableId: b.assignedTableId || null,
+      status: b.status,
+    })
+  })
+
+  const sortRows = (rows) => rows.sort((a, b) => String(a.timeSlot).localeCompare(String(b.timeSlot)))
+  const bySeating = [...seatings]
+    .sort((a, b) => String(a.start).localeCompare(String(b.start)))
+    .filter(s => buckets.has(s.id))
+    .map(s => ({ seating: s, rows: sortRows(buckets.get(s.id)) }))
+  const unscheduled = buckets.has(NO_SEATING) ? sortRows(buckets.get(NO_SEATING)) : []
+
+  return { count, guests, unassignedCount, unassignedGuests, bySeating, unscheduled }
+}
+
 // === (d) 各場次散客×團客合併容量 ===
 // 每場次呼叫一次 resolveSlotOccupancy（與容量引擎同口徑）。回傳 [{ seating, summary }]。
 export function dayCapacityBySeating(tables = [], bookings = [], groupReservations = [], date, settings = {}) {
@@ -213,7 +257,7 @@ export function dayCapacityBySeating(tables = [], bookings = [], groupReservatio
 }
 
 // === 面板一次取用的彙整 ===
-// 回傳 { date, groupCount, guests, heldSeats, heldTableCount, prep, timeline, seatings, warnings, closed }
+// 回傳 { date, groupCount, guests, heldSeats, heldTableCount, prep, timeline, seatings, walkins, warnings, closed }
 //  warnings：
 //   overcapacity — 某場次 groupHeldSeats + walkinGuests > totalSeats（含散客；僅異常時跳，非常駐儀表）
 //   collision    — 同場次同時段 2+ 團
@@ -223,6 +267,7 @@ export function buildGroupDaySummary({ groupReservations = [], bookings = [], ta
   const prep = summarizeDayPrep(groupReservations, date)
   const timeline = buildArrivalTimeline(groupReservations, date, settings)
   const seatings = dayCapacityBySeating(tables, bookings, groupReservations, date, settings)
+  const walkins = buildWalkinDaySummary(bookings, date, settings)
   const hasSeatings = Array.isArray(settings?.seatings) && settings.seatings.length > 0
 
   const warnings = []
@@ -280,6 +325,7 @@ export function buildGroupDaySummary({ groupReservations = [], bookings = [], ta
     prep,
     timeline,
     seatings,
+    walkins,
     warnings,
     closed: day.closed,
   }

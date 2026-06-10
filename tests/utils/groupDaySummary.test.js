@@ -8,6 +8,7 @@ import {
   summarizeDayPrep,
   buildArrivalTimeline,
   dayCapacityBySeating,
+  buildWalkinDaySummary,
   buildGroupDaySummary,
   frequentAgencies,
 } from '../../src/utils/groupDaySummary'
@@ -257,6 +258,16 @@ describe('buildGroupDaySummary', () => {
     expect(out.seatings.map(s => s.seating.id)).toEqual(['lunch1', 'lunch2', 'dinner1'])
   })
 
+  it('含 walkins 散客彙總（給當日總覽散客區塊）', () => {
+    const bookings = [
+      mkBooking({ id: 'b1', timeSlot: '11:30', guests: 4 }),
+      mkBooking({ id: 'b2', timeSlot: '17:00', guests: 2, assignedTableId: '201' }),
+    ]
+    const out = buildGroupDaySummary({ groupReservations: [], bookings, tables: TABLES, date: DATE, settings: baseSettings() })
+    expect(out.walkins).toMatchObject({ count: 2, guests: 6, unassignedCount: 1, unassignedGuests: 4 })
+    expect(out.walkins.bySeating.map(x => x.seating.id)).toEqual(['lunch1', 'dinner1'])
+  })
+
   it('warning: overcapacity（團客保留席 + 散客人數 > 全店座位）', () => {
     const groups = [mkGroup({ counts: { total: 12 }, batches: [mkBatch({ timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12 })] })] // 12 席
     const bookings = [mkBooking({ timeSlot: '11:00', guests: 12, assignedTableId: null })] // 散客 12 人
@@ -295,6 +306,57 @@ describe('buildGroupDaySummary', () => {
     const settings = baseSettings({ closures: { closedDates: [], closedSlots: {}, closedSeatings: { [DATE]: ['lunch1'] } } })
     const out = buildGroupDaySummary({ groupReservations: groups, bookings, tables: TABLES, date: DATE, settings })
     expect(out.warnings.find(w => w.type === 'overcapacity')).toBeUndefined()
+  })
+})
+
+describe('buildWalkinDaySummary', () => {
+  it('依場次分桶、rows 依 timeSlot 排序', () => {
+    const bookings = [
+      mkBooking({ id: 'b1', timeSlot: '11:30', guests: 4, name: '甲' }),
+      mkBooking({ id: 'b2', timeSlot: '11:00', guests: 2, name: '乙' }),
+      mkBooking({ id: 'b3', timeSlot: '17:30', guests: 3, name: '丙' }),
+    ]
+    const out = buildWalkinDaySummary(bookings, DATE, baseSettings())
+    expect(out).toMatchObject({ count: 3, guests: 9, unassignedCount: 3, unassignedGuests: 9 })
+    expect(out.bySeating.map(x => x.seating.id)).toEqual(['lunch1', 'dinner1'])
+    expect(out.bySeating[0].rows.map(r => r.booking.name)).toEqual(['乙', '甲'])
+    expect(out.unscheduled).toEqual([])
+  })
+
+  it('排除 cancelled/noshow/completed 與他日訂位', () => {
+    const bookings = [
+      mkBooking({ id: 'b1', guests: 2 }),
+      mkBooking({ id: 'b2', guests: 4, status: 'cancelled' }),
+      mkBooking({ id: 'b3', guests: 4, status: 'noshow' }),
+      mkBooking({ id: 'b4', guests: 4, status: 'completed' }),
+      mkBooking({ id: 'b5', guests: 4, date: '2026-06-10' }),
+    ]
+    const out = buildWalkinDaySummary(bookings, DATE, baseSettings())
+    expect(out).toMatchObject({ count: 1, guests: 2 })
+    expect(out.bySeating[0].rows).toHaveLength(1)
+  })
+
+  it('已配桌不列入 unassigned 統計、row 帶 assignedTableId', () => {
+    const bookings = [
+      mkBooking({ id: 'b1', guests: 4, assignedTableId: '101' }),
+      mkBooking({ id: 'b2', timeSlot: '11:30', guests: 2 }),
+    ]
+    const out = buildWalkinDaySummary(bookings, DATE, baseSettings())
+    expect(out).toMatchObject({ count: 2, guests: 6, unassignedCount: 1, unassignedGuests: 2 })
+    expect(out.bySeating[0].rows[0].assignedTableId).toBe('101')
+  })
+
+  it('時段對不到場次 → 進 unscheduled 桶', () => {
+    const bookings = [mkBooking({ id: 'b1', timeSlot: '15:00', guests: 4 })]
+    const out = buildWalkinDaySummary(bookings, DATE, baseSettings())
+    expect(out.bySeating).toEqual([])
+    expect(out.unscheduled).toHaveLength(1)
+    expect(out.unscheduled[0]).toMatchObject({ timeSlot: '15:00', guests: 4 })
+  })
+
+  it('空輸入安全', () => {
+    expect(buildWalkinDaySummary(undefined, DATE, baseSettings()))
+      .toMatchObject({ count: 0, guests: 0, unassignedCount: 0, unassignedGuests: 0, bySeating: [], unscheduled: [] })
   })
 })
 
