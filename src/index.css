@@ -20,13 +20,14 @@ body {
   }
 }
 
+/* 進場動畫刻意只動 transform、不碰 opacity：
+   步驟/分頁切換的容器靠它顯示，若從 opacity:0 出發，動畫時鐘被凍結（背景分頁、
+   省電模式等）時內容會整片看不見；只動 transform 最壞只是位移 10px，內容永遠可見。 */
 @keyframes soft-enter {
   from {
-    opacity: 0;
-    transform: translateY(10px) scale(.98);
+    transform: translateY(10px) scale(.985);
   }
   to {
-    opacity: 1;
     transform: translateY(0) scale(1);
   }
 }

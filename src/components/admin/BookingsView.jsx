@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import TodayView from './TodayView'
 import CalendarView from './CalendarView'
 import AddBookingView from './AddBookingView'
@@ -36,20 +35,13 @@ export default function BookingsView({ onAssignTable, onCreated }) {
         ))}
       </div>
 
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={sub}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
-          transition={{ duration: 0.15 }}
-        >
+      {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
+      <div key={sub} className="animate-soft-enter">
           {sub === 'today' && <TodayView onAssignTable={onAssignTable} />}
           {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} />}
           {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} />}
           {sub === 'add' && <AddBookingView onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} />}
-        </motion.div>
-      </AnimatePresence>
+      </div>
     </div>
   )
 }
