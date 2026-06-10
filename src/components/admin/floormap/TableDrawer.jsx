@@ -4,6 +4,7 @@ import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import TableCandidatePanel from './TableCandidatePanel'
+import GroupTableSection from './GroupTableSection'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -31,7 +32,7 @@ function diffMin(d) {
   return Math.floor((Date.now() - new Date(d).getTime()) / 60000)
 }
 
-export default function TableDrawer({ table, booking, preassign, onClose, onStartMerge, onStartMove, mode }) {
+export default function TableDrawer({ table, booking, preassign, groupHold, onClose, onStartMerge, onStartMove, mode }) {
   const { can } = useAuth()
   const toast = useToast()
   const confirmDialog = useConfirm()
@@ -60,6 +61,8 @@ export default function TableDrawer({ table, booking, preassign, onClose, onStar
     ? (groupReservations || []).find(g => g.id === table.currentRef.groupId)
     : null
   const groupBatch = groupRef?.batches?.find(b => b.id === table.currentRef?.batchId) || null
+  // 空桌但被今日團體 hold（圈桌未入座）：接管「可使用／散客入座」的預設引導，防止散客坐掉團體桌
+  const activeHold = table.status === 'vacant' && groupHold?.holds?.length ? groupHold : null
 
   const canEdit = can('table.update')
   const canBlock = can('table.block')
@@ -242,24 +245,18 @@ export default function TableDrawer({ table, booking, preassign, onClose, onStar
           </div>
         )}
 
-        {/* 團體梯次佔用：顯示團資訊，操作引導至「團體 → 今日團體」 */}
-        {groupRef && (
-          <div className="space-y-2">
-            <div className="px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
-              <div className="font-bold text-indigo-700">🚌 {groupRef.agencyName || '旅行社團體'}</div>
-              <div className="text-xs text-indigo-700/80 mt-0.5">
-                {groupBatch ? `${groupBatch.label} ${groupBatch.timeSlot}` : ''} · 導遊 {groupRef.guideName || '—'}
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
-              <span className="px-2 py-0.5 rounded-full bg-chicken-red/10 text-chicken-red">總 {groupRef.counts?.total || 0}</span>
-              {groupRef.counts?.vegetarian > 0 && <span className="px-2 py-0.5 rounded-full bg-chicken-green/15 text-chicken-green">素 {groupRef.counts.vegetarian}</span>}
-              {groupRef.counts?.mobility > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">♿ {groupRef.counts.mobility}</span>}
-              {groupRef.counts?.wheelchair > 0 && <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">輪椅 {groupRef.counts.wheelchair}</span>}
-            </div>
-            {groupRef.allergyText && <div className="text-[11px] text-chicken-red font-bold">過敏：{groupRef.allergyText}</div>}
-            <p className="text-[11px] text-chicken-brown/50">梯次入座 / 離席 / 接第二梯，請至「團體 → 今日團體」操作。</p>
-          </div>
+        {/* 團體桌（dining/cleaning 的 currentRef 指向團，或 vacant 但被今日團體 hold）：
+            資訊與操作（梯次入座/離席/接下一梯/整團完成）就地完成 */}
+        {(groupRef || activeHold) && (
+          <GroupTableSection
+            table={table}
+            groupRef={groupRef}
+            groupBatch={groupBatch}
+            groupHold={activeHold}
+            canEdit={canEdit}
+            onWalkInOverride={() => setShowWalkIn(true)}
+            onClose={onClose}
+          />
         )}
 
         {table.status === 'cleaning' && !groupRef && (
@@ -278,7 +275,7 @@ export default function TableDrawer({ table, booking, preassign, onClose, onStar
             <p className="text-[11px] text-orange-700/70 mt-0.5">直接入座或指派他人會覆蓋此預留。</p>
           </div>
         )}
-        {table.status === 'vacant' && !mode?.assigning && (
+        {table.status === 'vacant' && !activeHold && !mode?.assigning && (
           <>
             <p className="text-chicken-brown/40 text-center py-2 text-xs">此桌目前可使用</p>
             <TableCandidatePanel table={table} onPicked={onClose} />
@@ -297,7 +294,7 @@ export default function TableDrawer({ table, booking, preassign, onClose, onStar
       {/* Action 按鈕 */}
       {canEdit && (
         <div className="px-5 pb-5 border-t border-chicken-brown/10 pt-3 space-y-2">
-          {table.status === 'vacant' && (
+          {table.status === 'vacant' && !activeHold && (
             <>
               <button onClick={() => setShowWalkIn(true)} className="btn-primary w-full">✅ 散客直接入座</button>
               <div className="grid grid-cols-2 gap-2">
@@ -337,7 +334,8 @@ export default function TableDrawer({ table, booking, preassign, onClose, onStar
             </>
           )}
 
-          {table.status === 'cleaning' && (
+          {/* 團體桌的清桌（含接下一梯）在 GroupTableSection 內處理 */}
+          {table.status === 'cleaning' && !groupRef && (
             <button onClick={handleClear} className="btn-primary w-full">✨ 清桌完成</button>
           )}
 

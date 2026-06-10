@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { Modal, Input, Select } from '../../ui'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
+import WaitlistHistorySheet from './WaitlistHistorySheet'
 
 function diffMin(d) {
   if (!d) return 0
@@ -10,18 +11,19 @@ function diffMin(d) {
   return Math.max(0, Math.floor((Date.now() - t) / 60000))
 }
 
-// 候位側欄（精簡版，現場營運頁右側顯示）
-// 完整候位管理在獨立的 WaitlistView
-export default function WaitlistMiniPanel({ onSeatWaitlist }) {
+// 現場右側欄「候位」籤：取號 → 叫號 → 入座全程在現場頁完成。
+// 歷史與統計屬低頻查閱，收在 WaitlistHistorySheet（Modal）不佔常駐欄位。
+export default function WaitlistPanel({ onSeatWaitlist }) {
   const { waitlist, addWaitlist, callWaitlist, leaveWaitlist } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
   const [showAdd, setShowAdd] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
   const [form, setForm] = useState({ name: '', phone: '', partySize: 2, notes: '' })
 
   const active = waitlist.filter(w => w.status === 'waiting' || w.status === 'called')
 
-  // 「前面還有 N 組」：與主 WaitlistView 一致，依取號先後排名（越早取號越前面）
+  // 「前面還有 N 組」：依取號先後排名（越早取號越前面）
   const aheadOf = useMemo(() => {
     const m = {}
     waitlist
@@ -31,9 +33,9 @@ export default function WaitlistMiniPanel({ onSeatWaitlist }) {
     return m
   }, [waitlist])
 
-  // C2：取號預估（與主 WaitlistView 一致）—— 活躍候位組數 × 每組平均，給門口透明估計
+  // C2：取號預估 —— 活躍候位組數 × 每組平均佔用估時，給門口透明、合理的等待估計
   const AVG_MIN_PER_GROUP = 12
-  const estPartyExtra = (size) => (Number(size) > 4 ? 8 : 0)
+  const estPartyExtra = (size) => (Number(size) > 4 ? 8 : 0)   // 大桌較難排，略加估時
   const estimatedWaitMin = useMemo(() => {
     const base = active.length * AVG_MIN_PER_GROUP + estPartyExtra(form.partySize)
     return Math.max(5, base)
@@ -50,10 +52,13 @@ export default function WaitlistMiniPanel({ onSeatWaitlist }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="font-bold text-chicken-brown text-sm">🚦 候位</h3>
-        <button onClick={() => setShowAdd(true)} className="text-xs px-2.5 py-1 bg-chicken-red text-white rounded-md font-bold">
-          + 取號
+      <div className="flex items-center justify-end gap-1.5 mb-2">
+        <button
+          onClick={() => setShowHistory(true)}
+          className="text-xs px-2.5 py-1.5 min-h-[32px] bg-white border border-chicken-brown/15 text-chicken-brown rounded-md font-bold"
+        >歷史</button>
+        <button onClick={() => setShowAdd(true)} className="text-xs px-2.5 py-1.5 min-h-[32px] bg-chicken-red text-white rounded-md font-bold">
+          + 新增取號
         </button>
       </div>
 
@@ -74,6 +79,7 @@ export default function WaitlistMiniPanel({ onSeatWaitlist }) {
                   <span className="text-sm font-black text-chicken-red flex-shrink-0">#{w.queueNumber}</span>
                   <span className="text-sm font-bold truncate">{w.name}</span>
                   <span className="text-[10px] text-chicken-brown/60">{w.partySize} 位</span>
+                  <span className="text-[10px] text-chicken-brown/45">建議{w.partySize > 4 ? '六人桌' : '四人桌'}</span>
                 </div>
                 {w.status === 'called' && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-bold">已叫號</span>}
               </div>
@@ -82,6 +88,7 @@ export default function WaitlistMiniPanel({ onSeatWaitlist }) {
                 {aheadOf[w.id] > 0
                   ? <span className="font-bold text-chicken-brown"> · 前面還有 {aheadOf[w.id]} 組</span>
                   : <span className="font-bold text-chicken-green"> · 🔔 輪到了</span>}
+                {w.notes && <span className="italic"> · 「{w.notes}」</span>}
               </div>
               <div className="flex gap-1 mt-2">
                 <button
@@ -99,7 +106,7 @@ export default function WaitlistMiniPanel({ onSeatWaitlist }) {
                   </button>
                 )}
                 <button
-                  onClick={async () => { if (await confirm('確定棄號？', { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
+                  onClick={async () => { if (await confirm(`確定讓 ${w.name || `#${w.queueNumber}`} 棄號？此動作會將其移出候位。`, { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
                   className="min-h-[44px] text-[11px] px-3 py-1 bg-white border border-chicken-red/40 text-chicken-red rounded-md font-bold hover:bg-chicken-red/5"
                   aria-label="棄號"
                   title="棄號"
@@ -112,7 +119,8 @@ export default function WaitlistMiniPanel({ onSeatWaitlist }) {
         </div>
       )}
 
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="現場候位取號" footer={
+      {/* 取號 Modal */}
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="🚦 候位取號" footer={
         <>
           <button onClick={() => setShowAdd(false)} className="btn-secondary px-4 py-2">取消</button>
           <button onClick={handleAdd} className="btn-primary px-4 py-2">取號</button>
@@ -134,6 +142,8 @@ export default function WaitlistMiniPanel({ onSeatWaitlist }) {
           <Input label="備註（選填）" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="例：靠窗、過敏" />
         </div>
       </Modal>
+
+      <WaitlistHistorySheet open={showHistory} onClose={() => setShowHistory(false)} />
     </div>
   )
 }

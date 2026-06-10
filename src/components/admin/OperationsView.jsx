@@ -2,19 +2,21 @@ import { useState, useMemo, useEffect } from 'react'
 import FloorMap from './floormap/FloorMap'
 import StatusBar from './floormap/StatusBar'
 import TableDrawer from './floormap/TableDrawer'
-import UpcomingPanel from './floormap/UpcomingPanel'
-import WaitlistMiniPanel from './floormap/WaitlistMiniPanel'
+import ModeBanner from './ops/ModeBanner'
+import OpsRail from './ops/OpsRail'
 import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
-import { groupTableNumbers, findPreassignedBooking } from '../../utils/capacity'
+import { findPreassignedBooking } from '../../utils/capacity'
+import { buildGroupHolds, todayActiveGroups } from '../../utils/groupLive'
 import { todayStr } from '../../utils/timeSlots'
 
 // 「現場營運」主畫面
 // 模式：normal | merge | assign-booking | seat-waitlist | move-table
 // 每個模式有對應的 banner、桌位 highlight、確認 toast
-export default function OperationsView({ pendingAssign, onAssignDone, pendingSeatWait, onSeatWaitDone }) {
+// 候位入座由右側欄（OpsRail > WaitlistPanel）頁內觸發；指派桌仍可由「訂位」分頁跨頁觸發（pendingAssign）
+export default function OperationsView({ pendingAssign, onAssignDone }) {
   const {
     tables, bookings, waitlist, settings, groupReservations,
     mergeTables, assignBookingToTable, seatWaitlist, moveTable,
@@ -25,27 +27,19 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
 
   const [floor, setFloor] = useState('1F')
   const [selectedTable, setSelectedTable] = useState(null)
+  const [railTab, setRailTab] = useState('upcoming') // 右側欄籤；ESC/關閉抽屜不重設
   const [mode, setMode] = useState(null)
   const [justAssigned, setJustAssigned] = useState(null) // 剛指派的桌號（綠光）
   const [pendingConfirm, setPendingConfirm] = useState(null) // 指派/候位/換桌：待確認的桌號（二步確認）
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
 
-  // 今日團體 hold：今日（未取消/未完成）團體的桌位，若尚未實際入座（非 dining）則於圖上標示 🚌
-  const groupHoldTables = useMemo(() => {
-    const today = todayStr()
-    const tableByNumber = {}
-    tables.forEach(t => { tableByNumber[t.number] = t })
-    const map = {}
-    ;(groupReservations || [])
-      .filter(g => g.date === today && !['cancelled', 'completed'].includes(g.status))
-      .forEach(g => {
-        groupTableNumbers(g).forEach(n => {
-          const t = tableByNumber[n]
-          if (t && t.status !== 'dining') map[n] = { agencyName: g.agencyName }
-        })
-      })
-    return map
-  }, [groupReservations, tables])
+  // 今日團體 hold：今日（未取消/未完成）團體的桌位，若尚未實際入座（非 dining）則於圖上標示 🚌。
+  // value = { agencyName, holds: [{ group, batch }] }（未入座梯次，依時段排序）：
+  // FloorMap 只讀 truthiness 畫標記；TableDrawer 用 holds 顯示團資訊與「梯次入座」
+  const groupHoldTables = useMemo(
+    () => buildGroupHolds(todayActiveGroups(groupReservations, todayStr()), tables),
+    [groupReservations, tables],
+  )
 
   // 進入指派桌模式（含自動建議）
   const startAssign = (booking) => {
@@ -132,7 +126,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
-      onSeatWaitDone?.()
       return
     }
     if (mode.type === 'move') {
@@ -172,6 +165,15 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
     return findPreassignedBooking(bookings, pendingConfirm, { date, excludeBookingId })
   }, [pendingConfirm, mode, bookings])
 
+  // 防呆：待確認桌是否被「今日團體」hold（圈桌未入座）。
+  // findSuitableTables 只看桌況（vacant），不知道團體圈桌 → 指派/換桌/候位入座前先示警，避免散客坐掉團體桌。
+  const pendingGroupHold = useMemo(() => {
+    if (!pendingConfirm || !mode) return null
+    if (!['assign', 'seat-waitlist', 'move'].includes(mode.type)) return null
+    const hold = groupHoldTables[pendingConfirm]
+    return hold?.holds?.length ? hold : null
+  }, [pendingConfirm, mode, groupHoldTables])
+
   // 桌位詳情用：選中的「空桌」是否已被別筆 booking 預先配走（被動提示，未進指派模式也看得到）。
   const selectedTablePreassign = useMemo(() => {
     if (!selectedTableObj || selectedTableObj.status !== 'vacant') return null
@@ -196,46 +198,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAssign?.id])
 
-  // 從外部觸發候位入座
-  useEffect(() => {
-    if (pendingSeatWait && (!mode || mode.wait?.id !== pendingSeatWait.id)) {
-      startSeatWaitlist(pendingSeatWait)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingSeatWait?.id])
-
   const cancelModeAndNotify = () => {
     if (mode?.type === 'assign') onAssignDone?.()
-    if (mode?.type === 'seat-waitlist') onSeatWaitDone?.()
     cancelMode()
   }
-
-  // === Mode banner 設定（依模式不同底色 + emoji，避免誤判模式）===
-  const BANNER_STYLE = {
-    merge:          { bg: 'bg-amber-500',  btn: 'text-amber-700',   emoji: '⇆' },
-    assign:         { bg: 'bg-sky-600',    btn: 'text-sky-700',     emoji: '📋' },
-    'seat-waitlist':{ bg: 'bg-emerald-600',btn: 'text-emerald-700', emoji: '🚦' },
-    move:           { bg: 'bg-indigo-600', btn: 'text-indigo-700',  emoji: '↔' },
-  }
-  const bannerStyle = mode ? BANNER_STYLE[mode.type] : null
-
-  // banner 主文案（建議桌另以底色塊突出，不放在這裡）
-  const bannerText = (() => {
-    if (!mode) return null
-    if (mode.type === 'merge') return mode.first
-      ? `併桌模式：已選 ${mode.first}，請點選另一張相鄰桌`
-      : '併桌模式：請點選第一張桌'
-    if (mode.type === 'assign') return `指派桌位：${mode.booking.name} ${mode.booking.guests} 位`
-    if (mode.type === 'seat-waitlist') return `候位入座：${mode.wait.name} #${mode.wait.queueNumber}（${mode.wait.partySize} 位）`
-    if (mode.type === 'move') return `換桌：${mode.booking.name} 從 ${mode.booking.assignedTableId} → 選新桌`
-    return null
-  })()
-
-  // 待確認的對象名稱（用於確認列文案）
-  const pendingTargetName = mode?.type === 'assign' ? mode.booking?.name
-    : mode?.type === 'seat-waitlist' ? mode.wait?.name
-    : mode?.type === 'move' ? mode.booking?.name
-    : ''
 
   return (
     <div className="space-y-3">
@@ -277,62 +243,15 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
       </div>
 
       {/* Mode banner — 依模式不同底色 + emoji，避免誤判 */}
-      {mode && bannerStyle && (
-        <div className={`${bannerStyle.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
-              <span className="text-base leading-none">{bannerStyle.emoji}</span>
-              <span>{bannerText}</span>
-              {/* C5：建議桌以底色塊 + 💡 突出 */}
-              {(mode.type === 'assign' || mode.type === 'seat-waitlist' || mode.type === 'move') && (
-                mode.suggestion ? (
-                  <span className="inline-flex items-center gap-1 bg-white/95 text-chicken-brown px-2.5 py-1 rounded-lg font-black text-sm shadow-sm">
-                    💡 建議 {mode.suggestion}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold">
-                    無建議桌
-                  </span>
-                )
-              )}
-            </div>
-            <button onClick={cancelModeAndNotify} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${bannerStyle.btn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
-          </div>
-
-          {/* A6：二步確認 — 待確認列 */}
-          {pendingConfirm && (mode.type === 'assign' || mode.type === 'seat-waitlist' || mode.type === 'move') && (
-            <div className="bg-white/15 rounded-lg px-3 py-2 space-y-2">
-              {/* 防呆：此桌已被別筆 booking 預先配走 → 紅底示警，確認鈕改為「仍要覆蓋」 */}
-              {pendingConflict && (
-                <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
-                  <span className="text-sm leading-none">⚠️</span>
-                  <span>
-                    此桌已於排位規劃預留給 <span className="underline">{pendingConflict.name}</span>
-                    （{pendingConflict.guests} 位{pendingConflict.timeSlot ? ` · ${pendingConflict.timeSlot}` : ''}）。
-                    確認後將覆蓋其預配，{pendingConflict.name} 將變回未配桌。
-                  </span>
-                </div>
-              )}
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="text-sm font-bold">
-                  確認指派 {pendingTargetName} 至桌 {pendingConfirm}？
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPendingConfirm(null)}
-                    className={`text-xs px-3 py-2 min-h-[44px] bg-white/90 ${bannerStyle.btn} rounded-lg font-bold whitespace-nowrap`}
-                  >取消</button>
-                  <button
-                    onClick={() => executeAssign(pendingConfirm)}
-                    className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-black whitespace-nowrap shadow-sm ${
-                      pendingConflict ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-                  >{pendingConflict ? '⚠️ 仍要覆蓋指派' : '✓ 確認指派'}</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      <ModeBanner
+        mode={mode}
+        pendingConfirm={pendingConfirm}
+        pendingConflict={pendingConflict}
+        pendingGroupHold={pendingGroupHold}
+        onCancel={cancelModeAndNotify}
+        onConfirm={() => executeAssign(pendingConfirm)}
+        onClearPending={() => setPendingConfirm(null)}
+      />
 
       {/* 主區：地圖 + 側邊 */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-3">
@@ -375,26 +294,27 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingSea
               table={selectedTableObj}
               booking={selectedBooking}
               preassign={selectedTablePreassign}
+              groupHold={groupHoldTables[selectedTable] || null}
               onClose={() => setSelectedTable(null)}
               onStartMerge={() => setMode({ type: 'merge', first: selectedTable })}
               onStartMove={() => startMove(selectedBooking)}
               mode={{ assigning: mode?.type === 'assign' }}
             />
           ) : (
-            <>
-              <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
-                <h3 className="font-bold text-chicken-brown mb-3 text-sm">即將到達</h3>
-                <UpcomingPanel
-                  onClickBooking={(b) => {
-                    if (b.assignedTableId) setSelectedTable(b.assignedTableId)
-                  }}
-                  onAssignTable={startAssign}
-                />
-              </div>
-              <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
-                <WaitlistMiniPanel onSeatWaitlist={startSeatWaitlist} />
-              </div>
-            </>
+            <OpsRail
+              activeTab={railTab}
+              onTabChange={setRailTab}
+              onClickBooking={(b) => {
+                if (b.assignedTableId) setSelectedTable(b.assignedTableId)
+              }}
+              onAssignTable={startAssign}
+              onSeatWaitlist={startSeatWaitlist}
+              onFocusTable={(n) => {
+                const t = tables.find(x => x.number === n)
+                if (t) setFloor(t.floor)
+                setSelectedTable(n)
+              }}
+            />
           )}
         </div>
       </div>
