@@ -217,6 +217,20 @@ function groupHoldConflict(tableNumber, from, to) {
   ) || null
 }
 
+// 批次寫入（佈局編輯器）前的整合守門：active→inactive 的桌若被今天起的有效團圈到 → 擋。
+// （tableService.bulkWrite 已有佔用守門；這層補上它看不到的團體資料。）
+export function bulkSaveTablesGuarded(list) {
+  const byNum = new Map(tableService.listAll().map(t => [t.number, t]))
+  for (const t of (list || [])) {
+    const prev = byNum.get(t.number)
+    if (prev && prev.isActive && t.isActive === false) {
+      const g = groupHoldConflict(t.number, todayStr(), '')
+      if (g) return { ok: false, error: `${t.number} 已被 ${g.date}「${g.agencyName || '團體'}」圈桌，請先調整該團再停用` }
+    }
+  }
+  return tableService.bulkWrite(list)
+}
+
 // 永久停用前的整合守門：今天起任何未來有效團圈到此桌 → 擋下並指名該團
 // （否則該團的保留席默默蒸發，入座當天才發現桌子不能用）。啟用方向不受限。
 export function toggleTableGuarded(number) {
@@ -301,6 +315,7 @@ export function reseatGroupBatchTable(groupId, batchId, fromTable, toTable) {
   if (nums.includes(String(toTable))) return { ok: false, error: `${toTable} 已在此梯圈桌內` }
   const target = tableService.getByNumber(toTable)
   if (!target) return { ok: false, error: '桌位不存在' }
+  if (!tableUsableToday(target)) return { ok: false, error: outOfServiceError(toTable) }
   if (target.status !== 'vacant') {
     return { ok: false, error: `${toTable} 目前為${statusZh(target.status)}，無法改派` }
   }
@@ -334,6 +349,7 @@ export function checkoutGroupBatch(groupId, batchId) {
 export function seatNextBatchOnTable(tableNumber, groupId, batchId) {
   const t = tableService.getByNumber(tableNumber)
   if (!t) return { ok: false, error: '桌位不存在' }
+  if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(tableNumber) }
   const group0 = groupService.getById(groupId)
   if (!group0) return { ok: false, error: '團單不存在' }
   if (['completed', 'cancelled'].includes(group0.status)) {

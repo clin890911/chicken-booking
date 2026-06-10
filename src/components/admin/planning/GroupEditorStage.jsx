@@ -81,9 +81,11 @@ export default function GroupEditorStage({
     () => guides.filter(g => !g.archived && g.agencyId === draft.agencyId),
     [guides, draft.agencyId],
   )
+  // 與容量引擎同口徑：此日期不可用（停用/維修）的桌不計席——SeatGauge 與儲存驗證才不會
+  // 把維修桌的座位算成「已圈到」。
   const capByNum = useMemo(() => {
-    const m = {}; tables.forEach(t => { m[t.number] = t.capacity }); return m
-  }, [tables])
+    const m = {}; tables.forEach(t => { m[t.number] = isTableUsableOnDate(t, date) ? t.capacity : 0 }); return m
+  }, [tables, date])
   const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (capByNum[n] || 0), 0)
   // 梯次人數單一來源：單梯 = 第一頁總人數（不重複填）；多梯 = 各梯拆批值
   const batchGuests = (b) => (draft.batches || []).length === 1

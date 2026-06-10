@@ -279,7 +279,7 @@ export function BookingProvider({ children }) {
   const blockTable = (number, reason) => { tableService.blockTable(number, reason); refresh(); syncCloudSoon() }
   const unblockTable = (number) => { tableService.unblockTable(number); refresh(); syncCloudSoon() }
   const updateTablePosition = (number, pos) => { tableService.updatePosition(number, pos); refresh(); syncCloudSoon() }
-  const bulkSaveTables = (list) => { const r = tableService.bulkWrite(list); if (r?.ok) { refresh(); syncCloudSoon() } return r }
+  const bulkSaveTables = (list) => { const r = seatingService.bulkSaveTablesGuarded(list); if (r?.ok) { refresh(); syncCloudSoon() } return r }
   const addTable = (data) => { const t = tableService.addTable(data); refresh(); syncCloudSoon(); return t }
   const removeTable = (number) => { const r = tableService.removeTable(number); refresh(); syncCloudSoon(); return r }
   const resetTables = () => { tableService.reset(); refresh(); syncCloudSoon() }

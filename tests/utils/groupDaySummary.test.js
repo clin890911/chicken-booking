@@ -123,18 +123,18 @@ describe('summarizeGroupDay', () => {
     expect(s.totalSeats).toBe(6)
   })
 
-  it('真爆量仍會被抓到：可用桌保留席 > 全店可用座位', () => {
+  it('邊界：圈滿全部可用桌（保留席 = totalSeats）不算爆量', () => {
+    // 註：保留席改與容量引擎同口徑後，「場次保留 > 全店可用」只剩跨裝置同步競態等
+    // 不一致狀態才可能出現（正常操作圈不到不可用的桌）；爆量旗標保留作為最後防線。
     const tables = [
       { number: '101', capacity: 6, floor: '1F', isActive: true },
       { number: '103', capacity: 4, floor: '1F', isActive: true },
       { number: '102', capacity: 6, floor: '1F', isActive: false },
     ]
-    // lunch1 圈走全部可用桌（10 席）> … 不會超過自身；爆量需保留 > totalSeats，
-    // 以兩場次重圈同桌不會發生——這裡用「圈走可用桌 + totalSeats 因停用縮小」已不可能 >。
-    // 改驗證邊界：保留 = totalSeats 時不爆量。
     const groups = [mkGroup({ counts: { total: 10 }, batches: [mkBatch({ timeSlot: '11:00', tableNumbers: ['101', '103'], guests: 10 })] })]
     const s = summarizeGroupDay(groups, tables, DATE, baseSettings())
     expect(s.bySeating.lunch1).toBe(10)
+    expect(s.totalSeats).toBe(10)
     expect(s.overCapacityGroupOnly).toBe(false)
   })
 
