@@ -13,6 +13,11 @@ import {
   buildManageUrl,
   classifyAdminBookingChange,
 } from './lib/notify.js'
+import {
+  normalizeOnlineGuardSettings,
+  isOverAutoCloseThreshold,
+  isPastSessionCutoff,
+} from './lib/onlineGuards.js'
 
 initializeApp()
 
@@ -356,16 +361,22 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
       const bookings = bookingsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       const groupReservations = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
       const nowMs = Date.now()
+      const totalSeats = activeTotalSeatsServer(tables)
       slots = generateSlotsServer(settings)
         // 濾掉「已過的時段」：今天已過的抵達時段不再顯示為可訂（其他日期的時段都在未來，不受影響）。
         .filter(time => slotEpochMs(date, time) > nowMs)
-        .map(time => ({
-          time,
+        .map(time => {
           // 團體預排佔位一併扣除（只回傳數值 remaining，絕不外洩 groupReservations 明細）。
-          remaining: calcSlotCapacityServer(tables, bookings, date, time, settings, groupReservations),
-          // 已關閉旗標：讓客人端把「店休/關閉」與「已滿」視覺區隔。
-          closed: isSlotClosedServer(settings, date, time),
-        }))
+          const remaining = calcSlotCapacityServer(tables, bookings, date, time, settings, groupReservations)
+          return {
+            time,
+            remaining,
+            // 已關閉旗標：店休/關閉、場次前截止、滿座門檻任一成立即對線上客人關閉。
+            closed: isSlotClosedServer(settings, date, time)
+              || isPastSessionCutoff({ nowMs, slotMs: slotEpochMs(date, time), sessionStartMs: sessionCutoffAnchorMs(settings, date, time), cutoffMin: settings.onlineSessionCutoffMin })
+              || isOverAutoCloseThreshold({ totalSeats, remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent }),
+          }
+        })
     }
 
     return res.json({ ok: true, date, slots, settings: publicStoreSettings(settings) })
@@ -412,6 +423,10 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       if (dup) throw errorWithStatus('您已有相同時段的訂位，無需重複預訂', 409)
 
       const remaining = calcSlotCapacityServer(tables, dayBookings, data.date, data.timeSlot, settings, dayGroups)
+      // 滿座門檻自動關閉：已訂達總容量門檻 % 時，線上不再收（剩餘座位留給現場/電話）。
+      if (isOverAutoCloseThreshold({ totalSeats: activeTotalSeatsServer(tables), remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent })) {
+        throw errorWithStatus('此時段線上訂位已截止（接近滿座），歡迎來電洽詢', 409)
+      }
       if (remaining < data.guests) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
 
       const record = {
@@ -518,6 +533,17 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
 
     const bookingRef = db.collection(COLLECTIONS.bookings).doc(booking.id)
     if (structural) {
+      // 改期目標時段須通過與新訂位相同的線上防線。
+      // （補既有缺口：過去只檢查容量，沒擋「已過 / 已關閉 / 場次截止」的目標時段。）
+      if (slotEpochMs(next.date, next.timeSlot) <= Date.now()) {
+        return res.status(409).json({ ok: false, error: '此時段已過，請選擇較晚的時段' })
+      }
+      if (isSlotClosedServer(settings, next.date, next.timeSlot)) {
+        return res.status(409).json({ ok: false, error: '此時段已關閉訂位，請改選其他時段' })
+      }
+      if (isPastSessionCutoff({ nowMs: Date.now(), slotMs: slotEpochMs(next.date, next.timeSlot), sessionStartMs: sessionCutoffAnchorMs(settings, next.date, next.timeSlot), cutoffMin: settings.onlineSessionCutoffMin })) {
+        return res.status(409).json({ ok: false, error: '此場次的線上訂位已截止，歡迎來電洽詢' })
+      }
       // F-E：容量檢查與寫入放進同一交易，與 guestCreateBooking 對齊，避免兩筆並發改期
       // 同時通過容量檢查造成超賣（TOCTOU）。
       await db.runTransaction(async (tx) => {
@@ -530,6 +556,10 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         const dayBookings = dateSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(b => b.id !== booking.id)
         const dayGroups = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
         const remaining = calcSlotCapacityServer(tables, dayBookings, next.date, next.timeSlot, settings, dayGroups)
+        // 滿座門檻自動關閉（排除自己後計算）：與 guestCreateBooking 同一道防線。
+        if (isOverAutoCloseThreshold({ totalSeats: activeTotalSeatsServer(tables), remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent })) {
+          throw errorWithStatus('此時段線上訂位已截止（接近滿座），歡迎來電洽詢', 409)
+        }
         if (remaining < Number(next.guests || 1)) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
         tx.set(bookingRef, updatePatch, { merge: true })
         if (booking.assignedTableId) {
@@ -1149,6 +1179,8 @@ function normalizeStoreSettings(settings = {}) {
     autoReleaseAfterMin: Math.min(720, Math.max(120, Number(settings.autoReleaseAfterMin) || 300)),
     dayRolloverEnabled: settings.dayRolloverEnabled !== false,
     autoNoshowOnRollover: settings.autoNoshowOnRollover === true,
+    // 線上訂位防線：滿座門檻自動關閉 + 場次前截止（與前端 settingsService withDefaults 成對）
+    ...normalizeOnlineGuardSettings(settings),
     heroBanners: Array.isArray(settings.heroBanners) ? settings.heroBanners : [],
     lineOfficialUrl: settings.lineOfficialUrl || 'https://lin.ee/8lECi4S',
     lineOfficialName: settings.lineOfficialName || '雞王涮涮鍋 LINE 官方帳號',
@@ -1445,6 +1477,10 @@ function validateNewBooking(body = {}, settings = {}) {
   if (isSlotClosedServer(settings, date, timeSlot)) {
     return { ok: false, error: '此時段已關閉訂位，請改選其他時段' }
   }
+  // 線上場次截止：場次開始前 X 分鐘起不再收線上訂位（店員後台不受此限）。
+  if (isPastSessionCutoff({ nowMs: Date.now(), slotMs: slotEpochMs(date, timeSlot), sessionStartMs: sessionCutoffAnchorMs(settings, date, timeSlot), cutoffMin: settings.onlineSessionCutoffMin })) {
+    return { ok: false, error: '此場次的線上訂位已截止，歡迎來電洽詢或現場候位' }
+  }
 
   const notes = {
     pet: !!body.notes?.pet,
@@ -1495,6 +1531,17 @@ function isSlotClosedServer(settings = {}, date, timeSlot) {
   const seating = seatingForSlotServer(settings, timeSlot)
   if (seating && Array.isArray(c.closedSeatings?.[date]) && c.closedSeatings[date].includes(seating.id)) return true
   return false
+}
+
+// 線上場次截止的錨點：時段所屬場次的開始時間（餐期）；不屬於任何場次時退回時段本身。
+function sessionCutoffAnchorMs(settings, date, timeSlot) {
+  const seating = seatingForSlotServer(settings, timeSlot)
+  return slotEpochMs(date, seating ? seating.start : timeSlot)
+}
+
+// 啟用中桌位的總座位數（與 calcSlotCapacityServer 的 totalSeats 同口徑）。
+function activeTotalSeatsServer(tables) {
+  return tables.filter(t => t.isActive !== false).reduce((sum, t) => sum + (Number(t.capacity) || 0), 0)
 }
 
 // 與前端 calcSlotCapacity 位元級一致：散客逐筆 sum(guests)、團體整桌 sum(座位)。

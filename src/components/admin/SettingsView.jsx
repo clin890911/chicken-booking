@@ -298,6 +298,60 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
+      <SettingsSection title="線上訂位防線" description="只限制線上客人端；店員後台、現場與團體預排完全不受影響。">
+        <div className="space-y-4">
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <div className="text-sm font-bold text-chicken-brown">滿座門檻自動關閉</div>
+              <div className="text-xs text-chicken-brown/55 mt-0.5">時段已訂人數達下方門檻時，線上自動顯示不可訂，剩餘座位保留給現場與電話客人。</div>
+            </div>
+            <input type="checkbox" className="w-5 h-5 accent-chicken-red"
+              checked={form.onlineAutoCloseEnabled === true}
+              onChange={e => setForm(f => ({ ...f, onlineAutoCloseEnabled: e.target.checked }))} />
+          </label>
+          <div>
+            <span className="label">關閉門檻（已訂佔總容量比例）</span>
+            <Select
+              className="mt-2"
+              value={Number(form.onlineAutoClosePercent) || 80}
+              onChange={e => setForm(f => ({ ...f, onlineAutoClosePercent: Number(e.target.value) }))}
+              options={[
+                { value: 70, label: '70%' },
+                { value: 75, label: '75%' },
+                { value: 80, label: '80%（建議）' },
+                { value: 85, label: '85%' },
+                { value: 90, label: '90%' },
+                { value: 95, label: '95%' },
+              ]}
+            />
+          </div>
+          <div>
+            <span className="label">場次開始前停止線上訂位</span>
+            <Select
+              className="mt-2"
+              value={Number(form.onlineSessionCutoffMin) || 0}
+              onChange={e => setForm(f => ({ ...f, onlineSessionCutoffMin: Number(e.target.value) }))}
+              options={[
+                { value: 0, label: '不啟用（時段到點才關）' },
+                { value: 30, label: '30 分鐘前' },
+                { value: 60, label: '1 小時前' },
+                { value: 90, label: '1.5 小時前' },
+                { value: 120, label: '2 小時前' },
+                { value: 180, label: '3 小時前' },
+                { value: 240, label: '4 小時前' },
+              ]}
+            />
+            <div className="mt-2 rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
+              到截止時間後，該場次（餐期）所有抵達時段都不再開放線上訂位與線上改期；電話與現場不受影響。
+            </div>
+          </div>
+          <div className="flex gap-2 items-center">
+            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存防線設定</Button>
+            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
+          </div>
+        </div>
+      </SettingsSection>
+
       <SettingsSection title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。">
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
@@ -419,7 +473,7 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="LINE 官方帳號" description="設定客人訂位成功後看到的 LINE 加好友入口與保存提醒。" defaultOpen>
+      <SettingsSection title="LINE 官方帳號" description="設定客人訂位成功後看到的 LINE 加好友入口與保存提醒。">
         <div className="space-y-4">
           {/* C11：基本 */}
           <FieldGroup title="基本" hint="客人訂位完成後看到的 LINE 加好友入口。">
