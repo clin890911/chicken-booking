@@ -14,11 +14,11 @@ import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
 
 const TABS = [
-  { key: 'ops',       label: '現場',  icon: '🪑', subtitle: '即時桌況 · 即將到達 · 候位', badgeKey: 'ops' },
+  { key: 'ops',       label: '現場',  icon: '🪑', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
   { key: 'slotmap',   label: '排位規劃', icon: '🗺️', subtitle: '日期 · 場次 · 散客團客同框' },
   { key: 'bookings',  label: '訂位',  icon: '📋', subtitle: '今日 · 日曆 · 新增',          badgeKey: 'bookings' },
   { key: 'customers', label: '顧客',  icon: '👥', subtitle: '顧客檔 · VIP · 黑名單' },
-  { key: 'group',     label: '團體',  icon: '🚌', subtitle: '預排規劃 · 今日團體 · 名冊歷史' },
+  { key: 'group',     label: '團體',  icon: '🚌', subtitle: '預排規劃 · 名冊歷史' },
   { key: 'settings',  label: '設定',  icon: '⚙️', subtitle: '營業時段 · 桌位 · 帳號' },
 ]
 
@@ -146,7 +146,7 @@ export default function AdminPage() {
                 <BookingsView onAssignTable={handleAssignTable} />
               )}
               {tab === 'customers' && <CustomersView />}
-              {tab === 'group' && <GroupView />}
+              {tab === 'group' && <GroupView onGoLive={() => setTab('ops')} />}
               {tab === 'settings' && <SettingsView />}
           </div>
         </main>

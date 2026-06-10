@@ -140,7 +140,7 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
               📅 {dayLabel(date)}{s.closed ? ' · 公休' : ''}
             </span>
             {isToday && onGoToday && (
-              <button onClick={onGoToday} className="text-xs font-bold text-chicken-red underline">→ 今日團體（現場帶位）</button>
+              <button onClick={onGoToday} className="text-xs font-bold text-chicken-red underline">→ 現場（今日帶位）</button>
             )}
           </div>
           <div className="flex gap-1.5">

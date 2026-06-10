@@ -8,7 +8,8 @@ import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
-import { groupTableNumbers, findPreassignedBooking } from '../../utils/capacity'
+import { findPreassignedBooking } from '../../utils/capacity'
+import { buildGroupHolds, todayActiveGroups } from '../../utils/groupLive'
 import { todayStr } from '../../utils/timeSlots'
 
 // 「現場營運」主畫面
@@ -32,22 +33,13 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const [pendingConfirm, setPendingConfirm] = useState(null) // 指派/候位/換桌：待確認的桌號（二步確認）
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
 
-  // 今日團體 hold：今日（未取消/未完成）團體的桌位，若尚未實際入座（非 dining）則於圖上標示 🚌
-  const groupHoldTables = useMemo(() => {
-    const today = todayStr()
-    const tableByNumber = {}
-    tables.forEach(t => { tableByNumber[t.number] = t })
-    const map = {}
-    ;(groupReservations || [])
-      .filter(g => g.date === today && !['cancelled', 'completed'].includes(g.status))
-      .forEach(g => {
-        groupTableNumbers(g).forEach(n => {
-          const t = tableByNumber[n]
-          if (t && t.status !== 'dining') map[n] = { agencyName: g.agencyName }
-        })
-      })
-    return map
-  }, [groupReservations, tables])
+  // 今日團體 hold：今日（未取消/未完成）團體的桌位，若尚未實際入座（非 dining）則於圖上標示 🚌。
+  // value = { agencyName, holds: [{ group, batch }] }（未入座梯次，依時段排序）：
+  // FloorMap 只讀 truthiness 畫標記；TableDrawer 用 holds 顯示團資訊與「梯次入座」
+  const groupHoldTables = useMemo(
+    () => buildGroupHolds(todayActiveGroups(groupReservations, todayStr()), tables),
+    [groupReservations, tables],
+  )
 
   // 進入指派桌模式（含自動建議）
   const startAssign = (booking) => {
@@ -173,6 +165,15 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     return findPreassignedBooking(bookings, pendingConfirm, { date, excludeBookingId })
   }, [pendingConfirm, mode, bookings])
 
+  // 防呆：待確認桌是否被「今日團體」hold（圈桌未入座）。
+  // findSuitableTables 只看桌況（vacant），不知道團體圈桌 → 指派/換桌/候位入座前先示警，避免散客坐掉團體桌。
+  const pendingGroupHold = useMemo(() => {
+    if (!pendingConfirm || !mode) return null
+    if (!['assign', 'seat-waitlist', 'move'].includes(mode.type)) return null
+    const hold = groupHoldTables[pendingConfirm]
+    return hold?.holds?.length ? hold : null
+  }, [pendingConfirm, mode, groupHoldTables])
+
   // 桌位詳情用：選中的「空桌」是否已被別筆 booking 預先配走（被動提示，未進指派模式也看得到）。
   const selectedTablePreassign = useMemo(() => {
     if (!selectedTableObj || selectedTableObj.status !== 'vacant') return null
@@ -246,6 +247,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
         mode={mode}
         pendingConfirm={pendingConfirm}
         pendingConflict={pendingConflict}
+        pendingGroupHold={pendingGroupHold}
         onCancel={cancelModeAndNotify}
         onConfirm={() => executeAssign(pendingConfirm)}
         onClearPending={() => setPendingConfirm(null)}
@@ -292,6 +294,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
               table={selectedTableObj}
               booking={selectedBooking}
               preassign={selectedTablePreassign}
+              groupHold={groupHoldTables[selectedTable] || null}
               onClose={() => setSelectedTable(null)}
               onStartMerge={() => setMode({ type: 'merge', first: selectedTable })}
               onStartMove={() => startMove(selectedBooking)}
@@ -306,6 +309,11 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
               }}
               onAssignTable={startAssign}
               onSeatWaitlist={startSeatWaitlist}
+              onFocusTable={(n) => {
+                const t = tables.find(x => x.number === n)
+                if (t) setFloor(t.floor)
+                setSelectedTable(n)
+              }}
             />
           )}
         </div>

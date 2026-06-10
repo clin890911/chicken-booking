@@ -1,16 +1,15 @@
 import { useState } from 'react'
 import GroupPlanningView from './GroupPlanningView'
-import GroupTodayView from './GroupTodayView'
 import GroupDirectoryView from './GroupDirectoryView'
 
 const SUB = [
   { key: 'planning', label: '預排規劃' },
-  { key: 'today', label: '今日團體' },
   { key: 'directory', label: '名冊 / 歷史' },
 ]
 
-// 旅行社團體：預排規劃 / 今日團體 / 名冊歷史
-export default function GroupView() {
+// 旅行社團體：預排規劃 / 名冊歷史
+// （「今日團體」現場帶位已併入「現場」分頁右側欄，onGoLive 用來跳過去）
+export default function GroupView({ onGoLive }) {
   const [sub, setSub] = useState('planning')
   return (
     <div className="space-y-3">
@@ -29,8 +28,7 @@ export default function GroupView() {
           </button>
         ))}
       </div>
-      {sub === 'planning' && <GroupPlanningView onGoToday={() => setSub('today')} />}
-      {sub === 'today' && <GroupTodayView />}
+      {sub === 'planning' && <GroupPlanningView onGoToday={onGoLive} />}
       {sub === 'directory' && <GroupDirectoryView />}
     </div>
   )

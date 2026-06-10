@@ -9,7 +9,7 @@ const BANNER_STYLE = {
 
 const CONFIRMABLE = ['assign', 'seat-waitlist', 'move']
 
-export default function ModeBanner({ mode, pendingConfirm, pendingConflict, onCancel, onConfirm, onClearPending }) {
+export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pendingGroupHold, onCancel, onConfirm, onClearPending }) {
   if (!mode) return null
   const style = BANNER_STYLE[mode.type]
   if (!style) return null
@@ -66,6 +66,18 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, onCa
               </span>
             </div>
           )}
+          {/* 防呆：此桌為今日團體圈桌未入座 → 紅底示警（桌況雖空，散客坐下去團體就沒桌了） */}
+          {pendingGroupHold && (
+            <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
+              <span className="text-sm leading-none">🚌</span>
+              <span>
+                此桌為今日團體 <span className="underline">{pendingGroupHold.agencyName || '旅行社'}</span> 預留
+                {pendingGroupHold.holds?.[0]?.batch ? (
+                  `（${pendingGroupHold.holds[0].batch.label} ${pendingGroupHold.holds[0].batch.timeSlot}）`
+                ) : ''}。確認後散客將佔用團體桌。
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="text-sm font-bold">
               確認指派 {pendingTargetName} 至桌 {pendingConfirm}？
@@ -78,8 +90,8 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, onCa
               <button
                 onClick={onConfirm}
                 className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-black whitespace-nowrap shadow-sm ${
-                  pendingConflict ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-              >{pendingConflict ? '⚠️ 仍要覆蓋指派' : '✓ 確認指派'}</button>
+                  (pendingConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
+              >{(pendingConflict || pendingGroupHold) ? '⚠️ 仍要覆蓋指派' : '✓ 確認指派'}</button>
             </div>
           </div>
         </div>
