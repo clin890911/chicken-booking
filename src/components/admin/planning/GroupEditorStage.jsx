@@ -66,6 +66,10 @@ export default function GroupEditorStage({
     const m = {}; tables.forEach(t => { m[t.number] = t.capacity }); return m
   }, [tables])
   const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (capByNum[n] || 0), 0)
+  // 梯次人數單一來源：單梯 = 第一頁總人數（不重複填）；多梯 = 各梯拆批值
+  const batchGuests = (b) => (draft.batches || []).length === 1
+    ? (Number(draft.counts?.total) || 0)
+    : (Number(b?.guests) || 0)
 
   // 各場次剩餘（排除本團自己的保留，避免改舊團時把自己算成滿）
   const otherGroups = useMemo(() => groupReservations.filter(g => g.id !== draft.id), [groupReservations, draft.id])
@@ -93,12 +97,22 @@ export default function GroupEditorStage({
 
   // === draft 編輯 helpers ===
   const patchDraft = (patch) => setDraft(d => ({ ...d, ...patch }))
-  const patchCount = (key, val) => setDraft(d => ({ ...d, counts: { ...d.counts, [key]: Number(val) || 0 } }))
+  // 總人數：單梯次時直接同步主梯 guests（圈位頁不再重複填人數）
+  const patchCount = (key, val) => setDraft(d => {
+    const counts = { ...d.counts, [key]: Number(val) || 0 }
+    const batches = (key === 'total' && (d.batches || []).length === 1)
+      ? d.batches.map(b => ({ ...b, guests: counts.total }))
+      : d.batches
+    return { ...d, counts, batches }
+  })
   const patchBatch = (batchId, patch) => setDraft(d => ({ ...d, batches: d.batches.map(b => b.id === batchId ? { ...b, ...patch } : b) }))
   const relabel = (batches) => batches.map((b, i) => ({ ...b, label: `第${BATCH_LABELS[i] || i + 1}梯` }))
   const addBatchForSeating = (s) => setDraft(d => {
     const n = d.batches.length + 1
-    const nb = { id: 'BT' + Date.now().toString(36) + n, label: `第${BATCH_LABELS[n - 1] || n}梯`, timeSlot: s.start, tableNumbers: [], guests: 0, note: '' }
+    // 新梯人數預設 = 總人數扣掉已分配（兩段輪替常見「先坐滿、剩的進第二梯」）
+    const total = Number(d.counts?.total) || 0
+    const assigned = d.batches.reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
+    const nb = { id: 'BT' + Date.now().toString(36) + n, label: `第${BATCH_LABELS[n - 1] || n}梯`, timeSlot: s.start, tableNumbers: [], guests: Math.max(0, total - assigned), note: '' }
     setActiveBatchId(nb.id)
     return { ...d, batches: [...d.batches, nb] }
   })
@@ -120,17 +134,27 @@ export default function GroupEditorStage({
     }))
   }
 
-  // 預選場次 → 鎖定主梯次的 timeSlot（= 場次.start）
+  // 預選場次 → 鎖定主梯次的 timeSlot（= 場次.start，可再用詳細時間微調）
   const selectSession = (s) => {
     if (!primaryBatch) return
     patchBatch(primaryBatch.id, { timeSlot: s.start })
     setActiveBatchId(primaryBatch.id)
   }
 
+  // 詳細抵達時間：限制在該梯所屬場次的起訖內（超出會跳到別的場次、造成剩餘量誤判）
+  const setBatchTime = (batch, value) => {
+    if (!value || !batch) return
+    const sea = seatingForSlot(settings, batch.timeSlot)
+    if (sea && (value < sea.start || value >= sea.end)) {
+      return toast.error(`時間需在「${sea.name}」${sea.start}–${sea.end} 之間；要換場次請直接點場次卡`)
+    }
+    patchBatch(batch.id, { timeSlot: value })
+  }
+
   // 一鍵推薦桌位（依本梯人數 + 場次，避開 blocked，取最少桌）
   const autoSuggest = () => {
     if (!activeBatch) return toast.error('請先選一個梯次')
-    const need = Number(activeBatch.guests) || Number(draft.counts?.total) || 0
+    const need = batchGuests(activeBatch) || Number(draft.counts?.total) || 0
     if (need <= 0) return toast.error('請先填本梯用餐人數')
     const { tableNumbers, enough } = suggestTablesForBatch({ tables, headcount: need, blockedTables, capByNum })
     patchBatch(activeBatch.id, { tableNumbers })
@@ -193,7 +217,11 @@ export default function GroupEditorStage({
   // === 儲存 / 刪除 ===
   const save = async () => {
     if (savingRef.current) return
-    const err0 = groupReservationService.validateGroupForSave(draft, capByNum)
+    // 單梯人數以第一頁總人數為準（圈位頁不重複填，存檔時強制同步；驗證也用同步後的版本）
+    const batchesToSave = draft.batches.length === 1
+      ? draft.batches.map(b => ({ ...b, guests: Number(draft.counts?.total) || 0 }))
+      : draft.batches
+    const err0 = groupReservationService.validateGroupForSave({ ...draft, batches: batchesToSave }, capByNum)
     if (err0) return toast.error(err0)
     const total = Number(draft.counts?.total) || 0
     if ((draft.batches || []).length > 1 && total > heldSeats) {
@@ -202,7 +230,7 @@ export default function GroupEditorStage({
     const patch = {
       agencyId: draft.agencyId || null, agencyName: draft.agencyName || '',
       guideId: draft.guideId || null, guideName: draft.guideName || '', guidePhone: draft.guidePhone || '',
-      batches: draft.batches, counts: draft.counts,
+      batches: batchesToSave, counts: draft.counts,
       allergyText: draft.allergyText || '', tableSideNeeds: draft.tableSideNeeds || '',
       busInfo: draft.busInfo || '', notes: draft.notes || '', spend: Number(draft.spend) || 0,
       status: draft.status === 'planned' ? 'confirmed' : draft.status,
@@ -312,8 +340,6 @@ export default function GroupEditorStage({
               ))}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-              <Input label="過敏" value={draft.allergyText || ''} onChange={e => patchDraft({ allergyText: e.target.value })} placeholder="例：花生、海鮮" />
-              <Input label="桌邊需求" value={draft.tableSideNeeds || ''} onChange={e => patchDraft({ tableSideNeeds: e.target.value })} placeholder="例：剪雞肉、長輩軟食" />
               <Input label="遊覽車 / 司機抵達" value={draft.busInfo || ''} onChange={e => patchDraft({ busInfo: e.target.value })} placeholder="車號 / 司機電話 / 抵達時間" />
               <Input label="消費金額（結帳後回填）" type="number" inputMode="numeric" min={0} value={draft.spend ?? 0} onChange={e => patchDraft({ spend: Number(e.target.value) || 0 })} />
             </div>
@@ -364,6 +390,21 @@ export default function GroupEditorStage({
                 <Select label="用餐時段" value={primaryBatch?.timeSlot || ''} onChange={e => primaryBatch && patchBatch(primaryBatch.id, { timeSlot: e.target.value })} options={slots} className="w-40" />
               </div>
             )}
+            {/* 詳細抵達時間：選好場次後可微調（例：午餐第一批 11:40 進場） */}
+            {hasSeatings && primarySeating && primaryBatch && (
+              <div className="mt-3 flex items-end gap-3 flex-wrap">
+                <Input
+                  label="預計抵達 / 用餐時間"
+                  type="time"
+                  value={primaryBatch.timeSlot || primarySeating.start}
+                  onChange={e => setBatchTime(primaryBatch, e.target.value)}
+                  className="w-44"
+                />
+                <span className="text-xs text-chicken-brown/55 pb-2.5">
+                  可在「{primarySeating.name}」{primarySeating.start}–{primarySeating.end} 內微調，備餐與抵達時間軸都會用這個時間
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -376,20 +417,40 @@ export default function GroupEditorStage({
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-bold text-chicken-brown text-sm">梯次（兩段用餐可加第二梯）</h3>
             </div>
+            {/* 多梯拆批提示：各梯人數總和應等於總人數 */}
+            {draft.batches.length > 1 && (() => {
+              const total = Number(draft.counts?.total) || 0
+              const assigned = draft.batches.reduce((s, b) => s + (Number(b.guests) || 0), 0)
+              if (assigned === total) return null
+              return (
+                <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs font-bold text-amber-800">
+                  各梯人數合計 {assigned} 人，與總人數 {total} 人不符（{assigned < total ? `還有 ${total - assigned} 人未分配` : `多出 ${assigned - total} 人`}）
+                </div>
+              )
+            })()}
             <div className="space-y-2">
               {draft.batches.map(b => {
                 const sea = seatingForSlot(settings, b.timeSlot)
                 const active = activeBatchId === b.id
+                const single = draft.batches.length === 1
                 return (
                   <div key={b.id} className={`rounded-lg border-2 p-2 ${active ? 'border-indigo-500 bg-indigo-50' : 'border-chicken-brown/10'}`}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-black text-chicken-brown">{b.label}</span>
-                      <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">
-                        {sea ? `${sea.name} ${sea.start}` : (b.timeSlot || '未排場次')}
-                      </span>
-                      <label className="flex items-center gap-1 text-xs text-chicken-brown/60">人數
-                        <Input className="w-16 !py-1" type="number" inputMode="numeric" min={0} value={b.guests} onChange={e => patchBatch(b.id, { guests: Number(e.target.value) || 0 })} />
+                      {sea && (
+                        <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>
+                      )}
+                      <label className="flex items-center gap-1 text-xs text-chicken-brown/60">時間
+                        <Input className="w-28 !py-1" type="time" value={b.timeSlot || ''} onChange={e => setBatchTime(b, e.target.value)} />
                       </label>
+                      {single ? (
+                        // 單梯人數 = 第一頁總人數，不重複填
+                        <span className="text-xs font-bold text-chicken-brown/70">{Number(draft.counts?.total) || 0} 人（同總人數）</span>
+                      ) : (
+                        <label className="flex items-center gap-1 text-xs text-chicken-brown/60">人數
+                          <Input className="w-16 !py-1" type="number" inputMode="numeric" min={0} value={b.guests} onChange={e => patchBatch(b.id, { guests: Number(e.target.value) || 0 })} />
+                        </label>
+                      )}
                       <span className="text-xs text-chicken-brown/60">桌 {(b.tableNumbers || []).join('、') || '未圈'}</span>
                       <div className="flex-1" />
                       <button onClick={() => setActiveBatchId(b.id)} className={`text-xs px-2.5 py-1 rounded-lg font-bold ${active ? 'bg-indigo-600 text-white' : 'bg-white border-2 border-chicken-brown/15 text-chicken-brown'}`}>
@@ -399,7 +460,7 @@ export default function GroupEditorStage({
                         <button onClick={() => removeBatch(b.id)} className="text-xs text-chicken-red font-bold">刪</button>
                       )}
                     </div>
-                    <SeatGauge size="xs" circled={seatsOf(b.tableNumbers)} needed={b.guests} className="mt-1.5" />
+                    <SeatGauge size="xs" circled={seatsOf(b.tableNumbers)} needed={batchGuests(b)} className="mt-1.5" />
                   </div>
                 )
               })}
@@ -452,7 +513,7 @@ export default function GroupEditorStage({
 
             {activeBatch && (
               <div className="mb-2 rounded-lg bg-white/70 px-3 py-2">
-                <SeatGauge circled={seatsOf(selectedTables)} needed={activeBatch.guests} />
+                <SeatGauge circled={seatsOf(selectedTables)} needed={batchGuests(activeBatch)} />
                 <div className="mt-1 text-[11px] font-bold text-indigo-600/70">全團保留 {heldSeats} 席</div>
               </div>
             )}
@@ -490,8 +551,8 @@ export default function GroupEditorStage({
               {draft.batches.map(b => {
                 const sea = seatingForSlot(settings, b.timeSlot)
                 return (
-                  <div key={b.id} className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">{b.label} {sea ? sea.name : b.timeSlot}</dt>
-                    <dd className="font-bold text-chicken-brown text-right">{b.guests} 人 · 桌 {(b.tableNumbers || []).join('、') || '未圈'}</dd></div>
+                  <div key={b.id} className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">{b.label} {sea ? `${sea.name} ` : ''}{b.timeSlot}</dt>
+                    <dd className="font-bold text-chicken-brown text-right">{batchGuests(b)} 人 · 桌 {(b.tableNumbers || []).join('、') || '未圈'}</dd></div>
                 )
               })}
               <div className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">保留席數</dt>
