@@ -13,7 +13,9 @@ export function computeOvertimeActions({ tables = [], settings = {}, now = Date.
   const limit = Number(settings.autoReleaseAfterMin) || 300
   const actions = []
   for (const t of tables) {
-    if (!t.isActive || t.status !== 'dining' || !t.seatedAt) continue
+    // 刻意不看 isActive/outage：停用或維修中但仍有人用餐的桌（同步進來的不一致狀態）
+    // 更需要被掃到，否則變成永遠不會釋出的殭屍桌。
+    if (t.status !== 'dining' || !t.seatedAt) continue
     const min = Math.floor((now - Date.parse(t.seatedAt)) / 60000)
     if (!(min >= limit)) continue
     if (t.currentBookingId) {
@@ -39,7 +41,8 @@ export function computeDayRolloverActions({ tables = [], bookings = [], groupRes
   groupReservations.forEach(g => { if (g.id) groupById[g.id] = g })
 
   for (const t of tables) {
-    if (!t.isActive || !['dining', 'cleaning', 'reserved'].includes(t.status)) continue
+    // 同上：換日掃除也涵蓋停用/維修中的佔用桌，避免昨日殘留卡死。
+    if (!['dining', 'cleaning', 'reserved'].includes(t.status)) continue
     const linkedDate = t.currentBookingId
       ? bookingById[t.currentBookingId]?.date
       : t.currentRef?.type === 'group'

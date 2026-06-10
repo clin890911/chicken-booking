@@ -39,17 +39,18 @@ describe('computeOvertimeActions（超時釋桌）', () => {
     expect(acts[0].type).toBe('clear-table')
   })
 
-  it('關閉開關 → 空；reserved/cleaning/blocked/停用桌不動', () => {
+  it('關閉開關 → 空；reserved/cleaning/blocked 不動；停用但用餐中的桌「照掃」（殭屍桌防線）', () => {
     const tables = [
       mkT('101', { status: 'dining', currentBookingId: 'B1', seatedAt: minAgo(400) }),
       mkT('102', { status: 'reserved' }),
       mkT('103', { status: 'cleaning' }),
       mkT('104', { status: 'blocked' }),
+      // 停用/維修中但仍在用餐（同步進來的不一致狀態）：必須被掃到，否則永遠不會釋出
       mkT('105', { status: 'dining', isActive: false, seatedAt: minAgo(400) }),
     ]
     expect(computeOvertimeActions({ tables, settings: { ...settings, autoReleaseEnabled: false }, now: NOW })).toEqual([])
     const acts = computeOvertimeActions({ tables, settings, now: NOW })
-    expect(acts.map(a => a.tableNumber)).toEqual(['101'])
+    expect(acts.map(a => a.tableNumber)).toEqual(['101', '105'])
   })
 })
 

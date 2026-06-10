@@ -1746,8 +1746,10 @@ function calcSlotCapacityServer(tables, bookings, date, timeSlot, settings = {},
     })
     .reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
 
+  // 團體保留席只計「該日可用」的桌：停用/維修桌不在 totalSeats 池中，
+  // 若仍按容量扣會雙重扣除（與前端 calcSlotCapacity 同口徑）。
   const tableCapByNumber = {}
-  tables.forEach(t => { tableCapByNumber[t.number] = Number(t.capacity) || 0 })
+  tables.forEach(t => { tableCapByNumber[t.number] = isTableUsableOnDate(t, date) ? (Number(t.capacity) || 0) : 0 })
   const groupHeld = (groupReservations || [])
     .filter(g => g.date === date && !CAPACITY_EXCLUDED_STATUSES.includes(g.status))
     .reduce((sum, g) => {

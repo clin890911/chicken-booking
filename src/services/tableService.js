@@ -232,8 +232,20 @@ export function updatePosition(number, { x, y, w, h }) {
 }
 
 // === 批次寫入（編輯器存檔用）===
+// 佔用守門（與 toggle/setActive 同口徑）：既有桌 active→inactive 且桌上有客人 → 整批拒絕，
+// 防止佈局編輯器（或任何批次路徑）繞過守門做出自動清檯掃不到的殭屍桌。
+// 新桌（原本不存在的桌號）不受此限——測試播種與全新佈局照常可寫。
 export function bulkWrite(list) {
+  const byNum = new Map(read().map(t => [t.number, t]))
+  for (const t of (list || [])) {
+    const prev = byNum.get(t.number)
+    if (prev && prev.isActive && t.isActive === false) {
+      const reason = occupiedReason(prev)
+      if (reason) return { ok: false, error: reason }
+    }
+  }
   write(list)
+  return { ok: true }
 }
 
 // === 新增桌位 ===

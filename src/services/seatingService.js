@@ -6,8 +6,18 @@ import * as waitlistService from './waitlistService'
 import * as customerService from './customerService'
 import * as groupService from './groupReservationService'
 import { statusZh } from '../utils/tableStatus'
-import { isTableUsableOnDate } from '../utils/tableAvailability'
+import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
+import { groupTableNumbers } from '../utils/capacity'
 import { todayStr } from '../utils/timeSlots'
+
+// === 停用/維修守門（service 層底線；UI 防線會被新介面或程式呼叫繞過）===
+// 所有「把客人放上桌」的入口共用：今日停用或維修中的桌一律拒絕。
+function outOfServiceError(tableNumber) {
+  return `${tableNumber} 停用/維修中，請改用其他桌`
+}
+function tableUsableToday(table) {
+  return isTableUsableOnDate(table, todayStr())
+}
 
 // === 訂位 → 指派桌 ===
 // 客人線上訂位（assignedTableId: null）→ 到店時店長指派一張空桌
@@ -16,6 +26,7 @@ export function assignBookingToTable(bookingId, tableNumber) {
   const table = tableService.getByNumber(tableNumber)
   if (!booking) return { ok: false, error: '訂位不存在' }
   if (!table) return { ok: false, error: '桌位不存在' }
+  if (!tableUsableToday(table)) return { ok: false, error: outOfServiceError(tableNumber) }
   if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌（${statusZh(table.status)}）` }
   if (booking.guests > table.capacity) return { ok: false, error: `${tableNumber} 容量不足（${table.capacity} < ${booking.guests}）` }
 
@@ -31,6 +42,11 @@ export function seatBooking(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
   if (!booking.assignedTableId) return { ok: false, error: '尚未指派桌位（請先指派）' }
+  // 預配後桌子才被設停用/維修：到店入座時擋下並提示改派（而非默默坐上維修桌）。
+  const table = tableService.getByNumber(booking.assignedTableId)
+  if (table && !tableUsableToday(table)) {
+    return { ok: false, error: `${booking.assignedTableId} 停用/維修中，請先改派其他桌再入座` }
+  }
 
   bookingService.setStatus(bookingId, 'arrived')   // setStatus 內會自動記 actualArrivalTime
   tableService.seatTable(booking.assignedTableId, bookingId)
@@ -87,6 +103,7 @@ export function seatWaitlist(waitId, tableNumber) {
   const table = tableService.getByNumber(tableNumber)
   if (!wait) return { ok: false, error: '候位記錄不存在' }
   if (!table) return { ok: false, error: '桌位不存在' }
+  if (!tableUsableToday(table)) return { ok: false, error: outOfServiceError(tableNumber) }
   if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌` }
   if (wait.partySize > table.capacity) return { ok: false, error: `${tableNumber} 容量不足` }
 
@@ -122,6 +139,7 @@ export function seatWaitlist(waitId, tableNumber) {
 export function walkInSeat(tableNumber, guestData) {
   const table = tableService.getByNumber(tableNumber)
   if (!table) return { ok: false, error: '桌位不存在' }
+  if (!tableUsableToday(table)) return { ok: false, error: outOfServiceError(tableNumber) }
   if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌` }
 
   const today = new Date().toISOString().slice(0, 10)
@@ -151,6 +169,7 @@ export function moveTable(bookingId, newTableNumber) {
   if (oldNumber === newTableNumber) return { ok: false, error: '同桌無需換桌' }
   const newTable = tableService.getByNumber(newTableNumber)
   if (!newTable) return { ok: false, error: '目標桌位不存在' }
+  if (!tableUsableToday(newTable)) return { ok: false, error: outOfServiceError(newTableNumber) }
   if (newTable.status !== 'vacant') return { ok: false, error: '目標桌位非空桌' }
   if (booking.guests > newTable.capacity) return { ok: false, error: '目標桌容量不足' }
 
@@ -187,6 +206,39 @@ export function suggestTable(partySize) {
   return list[0] || null
 }
 
+// === 停用/維修 × 團體圈桌的衝突檢查（integration 層：tableService 看不到團體資料）===
+// 找出「日期落在 [from, to] 窗內、仍有效（非取消/完成）、圈到此桌」的第一張團單；to 空 = 無限期。
+function groupHoldConflict(tableNumber, from, to) {
+  const num = String(tableNumber)
+  return groupService.listAll().find(g =>
+    g.date && g.date >= from && (!to || g.date <= to)
+    && !['cancelled', 'completed'].includes(g.status)
+    && groupTableNumbers(g).map(String).includes(num)
+  ) || null
+}
+
+// 永久停用前的整合守門：今天起任何未來有效團圈到此桌 → 擋下並指名該團
+// （否則該團的保留席默默蒸發，入座當天才發現桌子不能用）。啟用方向不受限。
+export function toggleTableGuarded(number) {
+  const t = tableService.getByNumber(number)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  if (t.isActive) {
+    const g = groupHoldConflict(number, todayStr(), '')
+    if (g) return { ok: false, error: `${number} 已被 ${g.date}「${g.agencyName || '團體'}」圈桌，請先調整該團再停用` }
+  }
+  return tableService.toggle(number)
+}
+
+// 維修停用前的整合守門：維修窗內任何有效團圈到此桌 → 擋下（先為該團改桌，再設維修）。
+export function setTableOutageGuarded(number, outage) {
+  const clean = normalizeOutage(outage)
+  if (clean) {
+    const g = groupHoldConflict(number, clean.from, clean.to)
+    if (g) return { ok: false, error: `${number} 已被 ${g.date}「${g.agencyName || '團體'}」圈桌，請先為該團改桌再設維修` }
+  }
+  return tableService.setOutage(number, outage)
+}
+
 // =====================================================================
 // 團體梯次入座流程（兩段用餐：第二梯可接續坐同一批桌）
 // 重要：團體生命週期內永不建立 booking 文件；桌位以 currentRef 連到 group/batch。
@@ -202,21 +254,30 @@ export function seatGroupBatch(groupId, batchId) {
   if (!batch) return { ok: false, error: '梯次不存在' }
   const tables = batch.tableNumbers || []
   if (!tables.length) return { ok: false, error: '此梯次尚未圈桌' }
-  // 桌況檢查：必須 vacant 或 cleaning（接續同團前梯剛離席的桌）。
-  // 收集「全部」被佔桌回傳 blocked，讓 UI 能進「改派桌位」流程逐桌處理。
+  // 桌況檢查：必須 vacant 或 cleaning（接續同團前梯剛離席的桌），且今日可用（非停用/維修）。
+  // 收集「全部」被佔/不可用桌回傳 blocked，讓 UI 能進「改派桌位」流程逐桌處理
+  // （reseatCandidateTables 已排除停用/維修桌，改派路徑天然安全）。
   const blocked = []
   for (const n of tables) {
     const t = tableService.getByNumber(n)
     if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    if (!tableUsableToday(t)) {
+      blocked.push({ tableNumber: n, status: 'outage' })
+      continue
+    }
     const sameGroupSeated = t.currentRef?.groupId === groupId
     if (!['vacant', 'cleaning'].includes(t.status) && !sameGroupSeated) {
       blocked.push({ tableNumber: n, status: t.status })
     }
   }
   if (blocked.length) {
+    const label = (b) => b.status === 'outage' ? '停用/維修中' : statusZh(b.status)
+    const listTxt = blocked.map(b => `${b.tableNumber}（${label(b)}）`).join('、')
+    // 純佔用沿用既有措辭「被佔用」（E2E 與店員習慣已釘住）；含維修桌時改用「無法使用」。
+    const hasOutage = blocked.some(b => b.status === 'outage')
     return {
       ok: false,
-      error: `${blocked.map(b => `${b.tableNumber}（${statusZh(b.status)}）`).join('、')}被佔用，無法整梯入座`,
+      error: hasOutage ? `${listTxt}無法使用，無法整梯入座` : `${listTxt}被佔用，無法整梯入座`,
       blocked,
     }
   }

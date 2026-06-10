@@ -96,8 +96,10 @@ export function calcSlotCapacity(tables, bookings, date, timeSlot, settings = {}
     )
     .reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
 
+  // 團體保留席只計「該日可用」的桌：停用/維修桌不在 totalSeats 池中，
+  // 若仍按容量扣會雙重扣除（線上可訂量憑空變少）。與後端 calcSlotCapacityServer 同口徑。
   const tableCapByNumber = {}
-  tables.forEach(t => { tableCapByNumber[t.number] = Number(t.capacity) || 0 })
+  tables.forEach(t => { tableCapByNumber[t.number] = isTableUsableOnDate(t, date) ? (Number(t.capacity) || 0) : 0 })
 
   const groupHeld = (groupReservations || [])
     .filter(g => g.date === date && !CAPACITY_EXCLUDED_STATUSES.includes(g.status))
@@ -132,8 +134,9 @@ export function totalActiveSeats(tables) {
 // 回傳 byTable={ 桌號: { kind, booking?|group?+batch? } } 與 summary。
 export function resolveSlotOccupancy(tables = [], bookings = [], groupReservations = [], date, seating, settings = {}) {
   const byTable = {}
+  // 與 calcSlotCapacity 同口徑：團體保留席只計該日可用的桌（防雙重扣除）。
   const capByNum = {}
-  tables.forEach(t => { capByNum[t.number] = Number(t.capacity) || 0 })
+  tables.forEach(t => { capByNum[t.number] = isTableUsableOnDate(t, date) ? (Number(t.capacity) || 0) : 0 })
   const belongs = (timeSlot) => !!seating && seatingForSlot(settings, timeSlot)?.id === seating.id
 
   let walkinGuests = 0

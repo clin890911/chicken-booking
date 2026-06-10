@@ -270,15 +270,16 @@ export function BookingProvider({ children }) {
   }
 
   // ============ 桌位動作 ============
-  // toggle/setOutage 帶佔用守門：失敗回 { ok:false, error }，由 UI 顯示原因，不寫入也不同步。
-  const toggleTable = (number) => { const r = tableService.toggle(number); if (r?.ok) { refresh(); syncCloudSoon() } return r }
-  const setTableOutage = (number, outage) => { const r = tableService.setOutage(number, outage); if (r?.ok) { refresh(); syncCloudSoon() } return r }
+  // toggle/setOutage 帶兩層守門（佔用 + 團體圈桌衝突）：失敗回 { ok:false, error }，
+  // 由 UI 顯示原因，不寫入也不同步。
+  const toggleTable = (number) => { const r = seatingService.toggleTableGuarded(number); if (r?.ok) { refresh(); syncCloudSoon() } return r }
+  const setTableOutage = (number, outage) => { const r = seatingService.setTableOutageGuarded(number, outage); if (r?.ok) { refresh(); syncCloudSoon() } return r }
   const clearTableOutage = (number) => { const r = tableService.clearOutage(number); if (r?.ok) { refresh(); syncCloudSoon() } return r }
   const setTableStatus = (number, status, extra = {}) => { tableService.setStatus(number, status, extra); refresh(); syncCloudSoon() }
   const blockTable = (number, reason) => { tableService.blockTable(number, reason); refresh(); syncCloudSoon() }
   const unblockTable = (number) => { tableService.unblockTable(number); refresh(); syncCloudSoon() }
   const updateTablePosition = (number, pos) => { tableService.updatePosition(number, pos); refresh(); syncCloudSoon() }
-  const bulkSaveTables = (list) => { tableService.bulkWrite(list); refresh(); syncCloudSoon() }
+  const bulkSaveTables = (list) => { const r = tableService.bulkWrite(list); if (r?.ok) { refresh(); syncCloudSoon() } return r }
   const addTable = (data) => { const t = tableService.addTable(data); refresh(); syncCloudSoon(); return t }
   const removeTable = (number) => { const r = tableService.removeTable(number); refresh(); syncCloudSoon(); return r }
   const resetTables = () => { tableService.reset(); refresh(); syncCloudSoon() }

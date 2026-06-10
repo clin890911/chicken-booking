@@ -693,3 +693,24 @@ describe('資料隔離', () => {
     expect(tableService.getByNumber('LEAK')).toBeNull()
   })
 })
+
+// ============================================================
+// bulkWrite 佔用守門：佈局編輯器等批次路徑不可把佔用中的桌停用
+// ============================================================
+describe('bulkWrite 佔用守門', () => {
+  it('既有桌 active→inactive 且桌上有客人 → 整批拒絕、不寫入', () => {
+    tableService.bulkWrite([mkTable({ number: 'A', isActive: true, status: 'dining', currentBookingId: 'B1' })])
+    const r = tableService.bulkWrite([mkTable({ number: 'A', isActive: false, status: 'dining', currentBookingId: 'B1' })])
+    expect(r.ok).toBe(false)
+    expect(tableService.getByNumber('A').isActive).toBe(true)
+  })
+
+  it('空桌停用 / 新桌直接帶 inactive / 啟用方向 → 照常寫入', () => {
+    tableService.bulkWrite([mkTable({ number: 'A', isActive: true, status: 'vacant' })])
+    expect(tableService.bulkWrite([mkTable({ number: 'A', isActive: false })]).ok).toBe(true)
+    // 新桌號（原本不存在）帶 inactive：測試播種與新佈局不受守門影響
+    expect(tableService.bulkWrite([mkTable({ number: 'NEW', isActive: false, status: 'dining' })]).ok).toBe(true)
+    // inactive → active 不受限
+    expect(tableService.bulkWrite([mkTable({ number: 'NEW', isActive: true, status: 'dining' })]).ok).toBe(true)
+  })
+})
