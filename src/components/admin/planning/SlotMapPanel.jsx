@@ -1,24 +1,29 @@
-import { useMemo, useState } from 'react'
-import FloorMap from './floormap/FloorMap'
-import StatsCard from './StatsCard'
-import DatePicker from '../booking/DatePicker'
-import { useBooking } from '../../contexts/BookingContext'
-import { useToast } from '../ui/Toast'
-import { todayStr, dayLabel, seatingForSlot } from '../../utils/timeSlots'
-import { resolveSlotOccupancy, isSeatingClosed, CAPACITY_EXCLUDED_STATUSES } from '../../utils/capacity'
+import { useMemo, useState, useEffect } from 'react'
+import FloorMap from '../floormap/FloorMap'
+import StatsCard from '../StatsCard'
+import { useBooking } from '../../../contexts/BookingContext'
+import { useToast } from '../../ui/Toast'
+import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
+import { resolveSlotOccupancy, isSeatingClosed, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
 
-// 統一座位地圖（規劃 / 總覽）：依「日期 + 場次」呈現散客（暖色）與團客（冷色）佔位。
-// 唯讀總覽為主，另支援「散客預先配桌」（只記 booking.assignedTableId，不動今日即時桌況）。
-export default function SlotOverviewView() {
+// 排位地圖（自 SlotOverviewView 拆出、嵌入規劃主控台）：
+// 依「日期（受控 prop）+ 場次（內部 state）」呈現散客（暖色）×團客（冷色）佔位，
+// 支援「散客預先配桌」（只記 booking.assignedTableId，不動今日即時桌況）。
+export default function SlotMapPanel({ date }) {
   const { settings, bookings, groupReservations, tables, preassignBookingTable, clearBookingPreassign } = useBooking()
   const toast = useToast()
 
   const seatings = Array.isArray(settings?.seatings) ? settings.seatings : []
-  const [date, setDate] = useState(todayStr())
   const [seatingId, setSeatingId] = useState(seatings[0]?.id || '')
   const [floor, setFloor] = useState('1F')
   const [selectedTable, setSelectedTable] = useState(null)
   const [assignBooking, setAssignBooking] = useState(null) // 預先配桌中的散客訂位
+
+  // date 由容器（PlanningView 月曆）控制：換日重置選桌與預配模式（場次保留，換日通常仍看同場次）
+  useEffect(() => {
+    setSelectedTable(null)
+    setAssignBooking(null)
+  }, [date])
 
   const seating = seatings.find(s => s.id === seatingId) || seatings[0] || null
   const closed = seating ? isSeatingClosed(settings, date, seating) : false
@@ -78,46 +83,25 @@ export default function SlotOverviewView() {
 
   return (
     <div className="space-y-3">
-      {/* 日期 + 場次選擇 */}
-      <div className="bg-white rounded-2xl border border-chicken-brown/10 p-3 sm:p-4 space-y-3">
-        <details className="group">
-          <summary className="flex cursor-pointer list-none items-center justify-between">
-            <span className="inline-flex items-center gap-1.5 rounded-lg bg-chicken-cream px-3 py-1.5 text-sm font-black text-chicken-brown">
-              📅 {dayLabel(date)}{settings?.closures?.closedDates?.includes(date) ? ' · 公休' : ''}
-            </span>
-            <span className="text-xs font-bold text-chicken-red">換日期 ⌄</span>
-          </summary>
-          <div className="mt-3">
-            <DatePicker
-              value={date}
-              onChange={(d) => { setDate(d); setSelectedTable(null); setAssignBooking(null) }}
-              maxDaysAhead={Number(settings?.maxDaysAhead) || 30}
-              compact
-              renderBadge={(d) => settings?.closures?.closedDates?.includes(d)
-                ? <span className="text-[10px]">🚫</span> : null}
-            />
-          </div>
-        </details>
-
-        <div>
-          <div className="text-xs font-bold text-chicken-brown/55 mb-1.5">場次（批次）</div>
-          <div className="flex gap-1.5 flex-wrap">
-            {seatings.map(s => {
-              const c = isSeatingClosed(settings, date, s)
-              return (
-                <button key={s.id}
-                  onClick={() => { setSeatingId(s.id); setSelectedTable(null); setAssignBooking(null) }}
-                  className={`px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
-                    seatingId === s.id
-                      ? 'bg-indigo-600 border-indigo-600 text-white shadow'
-                      : c ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
-                  {s.name}
-                  <span className="ml-1 text-[10px] opacity-70">{s.start}–{s.end}</span>
-                  {c && <span className="ml-1 text-[10px]">🚫</span>}
-                </button>
-              )
-            })}
-          </div>
+      {/* 場次選擇 */}
+      <div className="bg-white rounded-2xl border border-chicken-brown/10 p-3 sm:p-4">
+        <div className="text-xs font-bold text-chicken-brown/55 mb-1.5">場次（批次）</div>
+        <div className="flex gap-1.5 flex-wrap">
+          {seatings.map(s => {
+            const c = isSeatingClosed(settings, date, s)
+            return (
+              <button key={s.id}
+                onClick={() => { setSeatingId(s.id); setSelectedTable(null); setAssignBooking(null) }}
+                className={`px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
+                  seatingId === s.id
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow'
+                    : c ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
+                {s.name}
+                <span className="ml-1 text-[10px] opacity-70">{s.start}–{s.end}</span>
+                {c && <span className="ml-1 text-[10px]">🚫</span>}
+              </button>
+            )
+          })}
         </div>
       </div>
 

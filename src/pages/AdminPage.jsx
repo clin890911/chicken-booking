@@ -3,10 +3,10 @@ import Header from '../components/layout/Header'
 import SidebarNav from '../components/layout/SidebarNav'
 import BottomNav from '../components/layout/BottomNav'
 import OperationsView from '../components/admin/OperationsView'
-import SlotOverviewView from '../components/admin/SlotOverviewView'
+import PlanningView from '../components/admin/planning/PlanningView'
 import BookingsView from '../components/admin/BookingsView'
 import CustomersView from '../components/admin/CustomersView'
-import GroupView from '../components/admin/group/GroupView'
+import GroupDirectoryView from '../components/admin/group/GroupDirectoryView'
 import SettingsView from '../components/admin/SettingsView'
 import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
@@ -15,10 +15,10 @@ import { todayStr } from '../utils/timeSlots'
 
 const TABS = [
   { key: 'ops',       label: '現場',  icon: '🪑', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
-  { key: 'slotmap',   label: '排位規劃', icon: '🗺️', subtitle: '日期 · 場次 · 散客團客同框' },
-  { key: 'bookings',  label: '訂位',  icon: '📋', subtitle: '今日 · 日曆 · 新增',          badgeKey: 'bookings' },
+  { key: 'planning',  label: '規劃',  icon: '🗺️', subtitle: '月曆 · 當日總覽 · 排位地圖 · 團體預排' },
+  { key: 'bookings',  label: '訂位',  icon: '📋', subtitle: '散客 · 今日 · 日曆 · 新增',   badgeKey: 'bookings' },
   { key: 'customers', label: '顧客',  icon: '👥', subtitle: '顧客檔 · VIP · 黑名單' },
-  { key: 'group',     label: '團體',  icon: '🚌', subtitle: '預排規劃 · 名冊歷史' },
+  { key: 'group',     label: '團體',  icon: '🚌', subtitle: '旅行社名冊 · 歷史' },
   { key: 'settings',  label: '設定',  icon: '⚙️', subtitle: '營業時段 · 桌位 · 帳號' },
 ]
 
@@ -141,12 +141,12 @@ export default function AdminPage() {
                   onAssignDone={handleAssignDone}
                 />
               )}
-              {tab === 'slotmap' && <SlotOverviewView />}
+              {tab === 'planning' && <PlanningView onGoToday={() => setTab('ops')} />}
               {tab === 'bookings' && (
                 <BookingsView onAssignTable={handleAssignTable} />
               )}
               {tab === 'customers' && <CustomersView />}
-              {tab === 'group' && <GroupView onGoLive={() => setTab('ops')} />}
+              {tab === 'group' && <GroupDirectoryView />}
               {tab === 'settings' && <SettingsView />}
           </div>
         </main>
