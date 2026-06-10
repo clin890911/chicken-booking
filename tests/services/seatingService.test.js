@@ -871,3 +871,109 @@ describe('executeSweepActions（自動清檯執行層：前置重驗、冪等）
     expect(tableService.getByNumber('103').status).toBe('vacant')
   })
 })
+
+// ============================================================
+// 停用/維修守門（service 層底線）：所有「放客人上桌」入口拒絕今日不可用的桌；
+// 停用/設維修前的團體圈桌衝突檢查。
+// ============================================================
+describe('停用/維修守門（入座路徑）', () => {
+  const TODAY = '2026-06-15'
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(`${TODAY}T12:00:00`))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const outToday = { outage: { from: TODAY, to: '', reason: '維修' } }
+
+  it('assignBookingToTable：維修桌拒絕指派', () => {
+    tableService.bulkWrite([mkTable('101', 4, '1F', outToday)])
+    const b = mkBooking()
+    const r = seating.assignBookingToTable(b.id, '101')
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('停用/維修')
+  })
+
+  it('seatBooking：預配桌事後被設維修 → 到店入座被擋並提示改派', () => {
+    tableService.bulkWrite([mkTable('101', 4, '1F')])
+    const b = mkBooking()
+    expect(seating.assignBookingToTable(b.id, '101').ok).toBe(true)
+    // 直接改桌資料模擬「同步進來的維修窗」（繞過 setOutage 的佔用守門做出不一致狀態）
+    tableService.bulkWrite([mkTable('101', 4, '1F', { ...outToday, status: 'vacant' })])
+    const r = seating.seatBooking(b.id)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('改派')
+  })
+
+  it('walkInSeat / seatWaitlist / moveTable：維修桌一律拒絕', () => {
+    tableService.bulkWrite([mkTable('101', 4, '1F', outToday), mkTable('108', 6, '1F')])
+    expect(seating.walkInSeat('101', { name: '散客', guests: 2 }).ok).toBe(false)
+    const w = waitlistService.create({ name: '排隊', phone: '0911111111', partySize: 2 })
+    expect(seating.seatWaitlist(w.id, '101').ok).toBe(false)
+    // moveTable：先在可用桌入座，再嘗試換到維修桌
+    const r0 = seating.walkInSeat('108', { name: '散客', guests: 2 })
+    expect(r0.ok).toBe(true)
+    const r = seating.moveTable(r0.booking.id, '101')
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('停用/維修')
+  })
+
+  it('seatGroupBatch：圈到的維修桌進 blocked（接改派桌位流程），錯誤訊息標示維修', () => {
+    tableService.bulkWrite([mkTable('101', 4, '1F', outToday), mkTable('108', 6, '1F')])
+    const g = groupService.create({
+      date: TODAY, agencyName: '快樂旅行社',
+      batches: [{ id: 'BT1', label: '第一梯', timeSlot: '12:00', tableNumbers: ['101', '108'], guests: 8 }],
+      counts: { total: 8 }, status: 'confirmed',
+    })
+    const r = seating.seatGroupBatch(g.id, 'BT1')
+    expect(r.ok).toBe(false)
+    expect(r.blocked).toEqual([{ tableNumber: '101', status: 'outage' }])
+    expect(r.error).toContain('停用/維修中')
+  })
+})
+
+describe('停用/維修 × 團體圈桌衝突守門（toggleTableGuarded / setTableOutageGuarded）', () => {
+  const TODAY = '2026-06-15'
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(`${TODAY}T12:00:00`))
+    seedDefaultTables()
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const mkGroup = (over = {}) => groupService.create({
+    date: '2026-06-20', agencyName: '快樂旅行社',
+    batches: [{ id: 'BT1', label: '第一梯', timeSlot: '12:00', tableNumbers: ['101'], guests: 4 }],
+    counts: { total: 4 }, status: 'confirmed',
+    ...over,
+  })
+
+  it('永久停用：未來有效團圈到此桌 → 擋下並指名該團', () => {
+    mkGroup()
+    const r = seating.toggleTableGuarded('101')
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('快樂旅行社')
+    expect(tableService.getByNumber('101').isActive).toBe(true)
+  })
+
+  it('已取消/已完成的團不擋；無衝突的桌照常停用', () => {
+    mkGroup({ status: 'cancelled' })
+    expect(seating.toggleTableGuarded('101').ok).toBe(true)
+    expect(seating.toggleTableGuarded('108').ok).toBe(true)
+  })
+
+  it('設維修：窗內有團圈桌 → 擋；窗外的團不擋', () => {
+    mkGroup() // 2026-06-20
+    const inWindow = seating.setTableOutageGuarded('101', { from: TODAY, to: '2026-06-25', reason: 'x' })
+    expect(inWindow.ok).toBe(false)
+    expect(inWindow.error).toContain('改桌')
+    const outsideWindow = seating.setTableOutageGuarded('101', { from: TODAY, to: '2026-06-18', reason: 'x' })
+    expect(outsideWindow.ok).toBe(true)
+  })
+
+  it('無限期維修（to 空）：任何未來團圈桌都擋', () => {
+    mkGroup()
+    const r = seating.setTableOutageGuarded('101', { from: TODAY, to: '', reason: 'x' })
+    expect(r.ok).toBe(false)
+  })
+})

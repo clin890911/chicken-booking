@@ -14,12 +14,13 @@ export function pickHints({ pulse, tables, settings, groups, autoCount, now }) {
   if (pulse.overdue.length) {
     hints.push({ level: 'danger', text: `⚠ ${pulse.overdue.length} 組過時未到待處理`, action: 'open-upcoming' })
   }
-  const overtime = (tables || []).filter(t => t.isActive && t.status === 'dining' && t.seatedAt
+  // 刻意不過濾 isActive/outage：停用或維修中但仍佔用的桌（不一致狀態）更需要被提示處理。
+  const overtime = (tables || []).filter(t => t.status === 'dining' && t.seatedAt
     && ['overtime', 'buffer-overtime'].includes(stageOf(diffMin(t.seatedAt, now), settings)))
   if (overtime.length) {
     hints.push({ level: 'danger', text: `🔴 ${overtime.length} 桌已超時用餐，可禮貌詢問結帳` })
   }
-  const cleaning = (tables || []).filter(t => t.isActive && t.status === 'cleaning').length
+  const cleaning = (tables || []).filter(t => t.status === 'cleaning').length
   if (cleaning) hints.push({ level: 'warn', text: `🧹 ${cleaning} 桌待清` })
   if (autoCount > 0) {
     hints.push({ level: 'info', text: `🤖 系統今日自動處理 ${autoCount} 筆`, action: 'open-log' })

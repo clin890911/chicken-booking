@@ -17,6 +17,7 @@ import {
   toMinutes,
   CAPACITY_EXCLUDED_STATUSES,
 } from '../utils/capacity'
+import { isTableUsableOnDate } from '../utils/tableAvailability'
 
 const STORAGE_KEY = 'chicken_group_reservations_v1'
 export const GROUP_SCHEMA_VERSION = 1
@@ -271,7 +272,8 @@ export function purgeBlankGroups() {
 
 // 儲存前驗證（純函式，供 UI 與測試共用）。回傳錯誤訊息字串；null = 通過。
 // capByNum: { 桌號: 容量 } 用來計算各梯/全團保留席數。
-export function validateGroupForSave(group, capByNum = {}) {
+// tables（選填）：給定時檢查圈到的桌在 group.date 是否停用/維修中（擋住「圈了一張當天不存在的桌」）。
+export function validateGroupForSave(group, capByNum = {}, tables = null) {
   if (!group) return '尚未選取團單'
   if (!group.agencyId && !(group.agencyName || '').trim()) return '請選擇或新增旅行社'
   const total = Number(group.counts?.total) || 0
@@ -279,9 +281,18 @@ export function validateGroupForSave(group, capByNum = {}) {
   const batches = group.batches || []
   if (!batches.length) return '請至少新增一個梯次'
   const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (Number(capByNum[n]) || 0), 0)
+  const tableByNum = Array.isArray(tables) ? new Map(tables.map(t => [String(t.number), t])) : null
   for (const b of batches) {
     if ((Number(b.guests) || 0) <= 0) return `「${b.label}」用餐人數需大於 0`
     if (!(b.tableNumbers || []).length) return `「${b.label}」請至少圈一桌`
+    // 圈到當日停用/維修中的桌 → 擋下（否則入座當天才發現桌子不能用）
+    if (tableByNum && group.date) {
+      const bad = (b.tableNumbers || []).find(n => {
+        const t = tableByNum.get(String(n))
+        return t && !isTableUsableOnDate(t, group.date)
+      })
+      if (bad) return `「${b.label}」圈到的 ${bad} 在當日停用/維修中，請改圈其他桌`
+    }
     const seats = seatsOf(b.tableNumbers)
     if ((Number(b.guests) || 0) > seats) return `「${b.label}」人數 ${b.guests} 超過該梯保留席數 ${seats}，請再多圈桌`
   }

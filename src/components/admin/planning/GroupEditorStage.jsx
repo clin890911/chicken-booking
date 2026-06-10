@@ -7,6 +7,7 @@ import GroupSheet from '../group/GroupSheet'
 import AgencyPicker from '../group/AgencyPicker'
 import { dayLabel, seatingForSlot, arrivalSlotsForSeating } from '../../../utils/timeSlots'
 import { groupTableNumbers, remainingTablesForSeating } from '../../../utils/capacity'
+import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import { suggestTablesForBatch } from '../../../utils/suggestTables'
 import * as groupReservationService from '../../../services/groupReservationService'
 
@@ -80,9 +81,11 @@ export default function GroupEditorStage({
     () => guides.filter(g => !g.archived && g.agencyId === draft.agencyId),
     [guides, draft.agencyId],
   )
+  // 與容量引擎同口徑：此日期不可用（停用/維修）的桌不計席——SeatGauge 與儲存驗證才不會
+  // 把維修桌的座位算成「已圈到」。
   const capByNum = useMemo(() => {
-    const m = {}; tables.forEach(t => { m[t.number] = t.capacity }); return m
-  }, [tables])
+    const m = {}; tables.forEach(t => { m[t.number] = isTableUsableOnDate(t, date) ? t.capacity : 0 }); return m
+  }, [tables, date])
   const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (capByNum[n] || 0), 0)
   // 梯次人數單一來源：單梯 = 第一頁總人數（不重複填）；多梯 = 各梯拆批值
   const batchGuests = (b) => (draft.batches || []).length === 1
@@ -112,6 +115,22 @@ export default function GroupEditorStage({
   }, [activeBatch, date, settings, draft.id, selectedTables, bookings])
 
   const heldSeats = useMemo(() => groupTableNumbers(draft).reduce((s, n) => s + (capByNum[n] || 0), 0), [draft, capByNum])
+
+  // 本梯圈到、但在此日期停用/維修中的桌（圈完才被設維修的情況）：
+  // 地圖上這些桌已置灰不可點，提供橫幅一鍵移除，否則會卡死在「無法取消圈選」。
+  const outCircledTables = useMemo(() => {
+    const byNum = new Map((tables || []).map(t => [String(t.number), t]))
+    return selectedTables.filter(n => {
+      const t = byNum.get(String(n))
+      return t && !isTableUsableOnDate(t, date)
+    })
+  }, [selectedTables, tables, date])
+  const removeCircledTable = (number) => setDraft(d => ({
+    ...d,
+    batches: d.batches.map(b => b.id !== activeBatchId
+      ? b
+      : { ...b, tableNumbers: b.tableNumbers.filter(n => String(n) !== String(number)) }),
+  }))
 
   // === draft 編輯 helpers ===
   const patchDraft = (patch) => setDraft(d => ({ ...d, ...patch }))
@@ -229,7 +248,7 @@ export default function GroupEditorStage({
     const batchesToSave = draft.batches.length === 1
       ? draft.batches.map(b => ({ ...b, guests: Number(draft.counts?.total) || 0 }))
       : draft.batches
-    const err0 = groupReservationService.validateGroupForSave({ ...draft, batches: batchesToSave }, capByNum)
+    const err0 = groupReservationService.validateGroupForSave({ ...draft, date, batches: batchesToSave }, capByNum, tables)
     if (err0) return toast.error(err0)
     const total = Number(draft.counts?.total) || 0
     if ((draft.batches || []).length > 1 && total > heldSeats) {
@@ -526,6 +545,22 @@ export default function GroupEditorStage({
               <div className="mb-2 rounded-lg bg-white/70 px-3 py-2">
                 <SeatGauge circled={seatsOf(selectedTables)} needed={batchGuests(activeBatch)} />
                 <div className="mt-1 text-[11px] font-bold text-indigo-600/70">全團保留 {heldSeats} 席</div>
+              </div>
+            )}
+
+            {/* 圈到的桌事後被設停用/維修：地圖已置灰不可點，這裡提供一鍵移除（否則無法取消圈選） */}
+            {outCircledTables.length > 0 && (
+              <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
+                <span className="font-bold text-amber-800">🛠 本梯圈到的桌在此日期停用/維修中（不會供餐、儲存會被擋）：</span>
+                <span className="ml-1 inline-flex flex-wrap gap-1.5 align-middle">
+                  {outCircledTables.map(n => (
+                    <button key={n} onClick={() => removeCircledTable(n)}
+                      className="inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 font-bold text-amber-900 hover:bg-amber-300">
+                      {n} ✕
+                    </button>
+                  ))}
+                </span>
+                <span className="ml-1 text-amber-700/70">點桌號即移除。</span>
               </div>
             )}
 

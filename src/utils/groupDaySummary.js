@@ -59,11 +59,13 @@ export function activeGroupsOnDate(groupReservations = [], date) {
 //  - overCapacityGroupOnly：任一場次「團客保留席 > 全店座位」（純團爆量；月曆不碰 bookings，故只看團）
 export function summarizeGroupDay(groupReservations = [], tables = [], date, settings = {}) {
   const groups = activeGroupsOnDate(groupReservations, date)
+  // capByNum 與容量引擎同口徑：該日不可用的桌不算保留席（防爆量誤判與雙重扣除）。
   const capByNum = {}
   let totalSeats = 0
   ;(tables || []).forEach(t => {
-    capByNum[t.number] = Number(t.capacity) || 0
-    if (isTableUsableOnDate(t, date)) totalSeats += Number(t.capacity) || 0
+    const usable = isTableUsableOnDate(t, date)
+    capByNum[t.number] = usable ? (Number(t.capacity) || 0) : 0
+    if (usable) totalSeats += Number(t.capacity) || 0
   })
 
   let guests = 0

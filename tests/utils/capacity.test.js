@@ -495,12 +495,22 @@ describe('calcSlotCapacity — 團體佔位扣減', () => {
     expect(calcSlotCapacity(tables, [], DATE, '18:00', {}, null)).toBe(totalSeats)
   })
 
-  it('團體桌號的 capacity 取自 tables（含停用桌：tableCapByNumber 未過濾 isActive）', () => {
-    // 此處 A2 停用，故 totalSeats 不含 A2，但團體若保留 A2 仍以其 capacity 扣
+  it('團體保留「停用桌」不雙重扣除：該桌已不在 totalSeats 池，保留席以 0 計', () => {
+    // 舊行為（已修）：A2 停用，totalSeats 不含 A2，但團體保留 A2 仍按 capacity 扣 → 憑空少 4 位。
     const tbls = [mkTable('A1', 4), mkTable('A2', 4, false), mkTable('A3', 6)] // active 共 10
     const groups = [mkGroup({ batches: [{ timeSlot: '18:00', tableNumbers: ['A2'] }] })]
-    // active 座位 10，扣團體保留 A2(cap 4) → 6
-    expect(calcSlotCapacity(tbls, [], DATE, '18:00', {}, groups)).toBe(6)
+    expect(calcSlotCapacity(tbls, [], DATE, '18:00', {}, groups)).toBe(10)
+  })
+
+  it('團體保留「維修中的桌」同樣不雙重扣除（窗外日期照常扣）', () => {
+    const outA2 = { ...mkTable('A2', 4), outage: { from: DATE, to: DATE, reason: '維修' } }
+    const tbls = [mkTable('A1', 4), outA2, mkTable('A3', 6)]
+    const groups = [mkGroup({ batches: [{ timeSlot: '18:00', tableNumbers: ['A2'] }] })]
+    // 維修日：totalSeats 10（不含 A2）、保留席 0 → 10
+    expect(calcSlotCapacity(tbls, [], DATE, '18:00', {}, groups)).toBe(10)
+    // 窗外日期：totalSeats 14、保留 A2(4) → 10
+    const groups2 = [mkGroup({ date: '2026-06-20', batches: [{ timeSlot: '18:00', tableNumbers: ['A2'] }] })]
+    expect(calcSlotCapacity(tbls, [], '2026-06-20', '18:00', {}, groups2)).toBe(10)
   })
 })
 

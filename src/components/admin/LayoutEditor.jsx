@@ -182,7 +182,8 @@ export default function LayoutEditor({ open, onClose }) {
 
   // === Save / Cancel / Reset ===
   const handleSave = () => {
-    bulkSaveTables(localTables)
+    const r = bulkSaveTables(localTables)
+    if (!r?.ok) return toast.error(r?.error || '儲存失敗')
     toast.success(`✅ 已儲存 ${localTables.length} 張桌位`)
     onClose?.()
   }
