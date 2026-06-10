@@ -140,11 +140,8 @@ export default function ConfirmPage() {
       <main className="max-w-md w-full mx-auto pt-6 flex-1 relative z-10">
         {/* Hero：彈跳勾勾 + 招牌品牌字 */}
         <div className="text-center mb-6">
-          <motion.div
-            initial={{ scale: 0, rotate: -30 }}
-            animate={{ scale: 1, rotate: 0 }}
-            transition={{ type: 'spring', stiffness: 280, damping: 14 }}
-            className="inline-flex w-24 h-24 rounded-full items-center justify-center mb-3 shadow-lg relative"
+          <div
+            className="animate-check-pop inline-flex w-24 h-24 rounded-full items-center justify-center mb-3 shadow-lg relative"
             style={{ background: 'linear-gradient(135deg, #9eb63a 0%, #f29100 100%)' }}
           >
             <motion.svg
@@ -159,25 +156,14 @@ export default function ConfirmPage() {
                 transition={{ duration: 0.5, delay: 0.2, ease: 'easeOut' }}
               />
             </motion.svg>
-          </motion.div>
-          <motion.h1
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
-            className="text-2xl font-black text-chicken-brown"
-          >
-            訂位成功！
-          </motion.h1>
-          <motion.p
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.55 }}
-            className="text-sm text-chicken-brown/70 mt-1"
-          >
-            訂位已建立，到店出示訂位編號即可
-          </motion.p>
+          </div>
+          <h1 className="text-2xl font-black text-chicken-brown">訂位成功！</h1>
+          <p className="text-sm text-chicken-brown/70 mt-1">訂位已建立，到店出示訂位編號即可</p>
         </div>
 
         {/* 訂位券：品牌紅色 header + 票券感虛線分隔 */}
-        <motion.div
-          initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
-          className="bg-white rounded-3xl shadow-lg border border-chicken-brown/10 overflow-hidden"
+        <div
+          className="animate-soft-enter bg-white rounded-3xl shadow-lg border border-chicken-brown/10 overflow-hidden"
         >
           <div className="bg-chicken-red text-white px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -228,31 +214,28 @@ export default function ConfirmPage() {
             )}
             {b.notes?.text && <Row icon="📝" label="備註" value={<span className="text-sm">{b.notes.text}</span>} />}
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
-          className="mt-4 grid grid-cols-3 gap-2"
+        <div
+          className="animate-soft-enter mt-4 grid grid-cols-3 gap-2"
         >
           <MiniRule label="保留" value={`${cleanupBuffer} 分鐘`} />
           <MiniRule label="用餐" value={`${diningDuration} 分鐘`} />
           <MiniRule label="狀態" value="已確認" />
-        </motion.div>
+        </div>
 
         {/* 截圖提示 */}
-        <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }}
-          className="mt-4 text-center"
+        <div
+          className="animate-soft-enter mt-4 text-center"
         >
           <p className="inline-flex items-center gap-1.5 text-xs font-bold text-chicken-brown/70 bg-white/60 px-3 py-1.5 rounded-full">
             📸 到店時出示訂位編號；需修改可使用下方管理連結
           </p>
-        </motion.div>
+        </div>
 
         {/* LINE 與訂位管理 */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.58 }}
-          className="mt-5 rounded-2xl border border-[#06C755]/25 bg-[#06C755]/5 p-4"
+        <div
+          className="animate-soft-enter mt-5 rounded-2xl border border-[#06C755]/25 bg-[#06C755]/5 p-4"
         >
           <div className="flex items-start gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#06C755] text-sm font-black text-white">LINE</div>
@@ -288,12 +271,11 @@ export default function ConfirmPage() {
               {copiedManage ? '已複製管理連結' : '複製訂位管理連結'}
             </button>
           </div>
-        </motion.div>
+        </div>
 
         {/* 到店工具 */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.62 }}
-          className="mt-4 grid grid-cols-3 gap-2"
+        <div
+          className="animate-soft-enter mt-4 grid grid-cols-3 gap-2"
         >
           {calendarUrl ? (
             <a href={calendarUrl} target="_blank" rel="noreferrer" className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
@@ -328,12 +310,11 @@ export default function ConfirmPage() {
               <div className="mt-1 text-xs font-black text-chicken-brown">撥電話</div>
             </button>
           )}
-        </motion.div>
+        </div>
 
         {/* 注意事項 */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}
-          className="mt-5 rounded-2xl border-2 border-chicken-yellow/40 bg-chicken-yellow/5 overflow-hidden"
+        <div
+          className="animate-soft-enter mt-5 rounded-2xl border-2 border-chicken-yellow/40 bg-chicken-yellow/5 overflow-hidden"
         >
           <div className="px-4 py-2 bg-chicken-yellow/15 flex items-center gap-2">
             <span>⚠️</span>
@@ -345,7 +326,7 @@ export default function ConfirmPage() {
             <Tip icon="📞">用餐前 2 小時以前可用管理連結修改或取消；更近時間請來電</Tip>
             <Tip icon="🐔">本店使用 <strong>48 小時冷藏文昌雞</strong>，當日限量供應</Tip>
           </ul>
-        </motion.div>
+        </div>
 
         {/* 動作按鈕 */}
         <div className="mt-6 space-y-2">

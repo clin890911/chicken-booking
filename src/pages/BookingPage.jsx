@@ -376,8 +376,8 @@ function PartyPanel({ guests, onSetGuests }) {
         </button>
         <motion.div
           key={guests}
-          initial={{ scale: 0.92, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
+          initial={{ scale: 0.92 }}
+          animate={{ scale: 1 }}
           className="flex-1 rounded-xl border border-chicken-brown/10 bg-white px-4 py-3 text-center"
         >
           <span className="text-3xl font-black tabular-nums text-chicken-brown">{guests}</span>
@@ -473,12 +473,9 @@ function CalendarPicker({ dates, value, onChange }) {
         </div>
       </div>
 
-      <motion.div
+      <div
         key={monthKey}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.2 }}
-        className="mt-4 overflow-hidden rounded-xl border border-chicken-brown/10 bg-white"
+        className="animate-soft-enter mt-4 overflow-hidden rounded-xl border border-chicken-brown/10 bg-white"
       >
         <div className="flex items-center justify-between border-b border-chicken-brown/10 px-4 py-3">
           <div className="text-base font-black text-chicken-brown">{monthLabel}</div>
@@ -524,7 +521,7 @@ function CalendarPicker({ dates, value, onChange }) {
           )
         })}
         </div>
-      </motion.div>
+      </div>
 
       <div className="mt-3 flex flex-wrap gap-3 text-xs font-bold text-chicken-brown/50">
         <span className="inline-flex items-center gap-1"><i className="h-2 w-2 rounded-full bg-chicken-red" />已選日期</span>
@@ -595,14 +592,11 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
                           {scarce ? '少量名額' : '可訂位'}
                         </div>
                         {active && (
-                          <motion.span
-                            initial={{ scale: 0.5, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            transition={{ duration: 0.15 }}
-                            className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-white text-chicken-red"
+                          <span
+                            className="animate-check-pop absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-white text-chicken-red"
                           >
                             <Check size={14} strokeWidth={3} />
-                          </motion.span>
+                          </span>
                         )}
                       </motion.button>
                     )
