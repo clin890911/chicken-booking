@@ -462,6 +462,16 @@ export default function SettingsView() {
                 title="客人在 LINE 內查詢訂位的後端網址"
               />
             </Field>
+            <Field hint="訂位網站的正式網址。LINE 通知卡片的「管理 / 修改訂位」按鈕連結以此組成；未填則卡片不顯示該按鈕。">
+              <Input
+                label="訂位網站網址（選填）"
+                type="url"
+                value={form.publicSiteUrl || ''}
+                onChange={e => setForm(f => ({ ...f, publicSiteUrl: e.target.value.trim() }))}
+                placeholder="https://booking.example.com"
+                title="訂位網站正式網址（LINE 通知管理按鈕用）"
+              />
+            </Field>
           </FieldGroup>
 
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">

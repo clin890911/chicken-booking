@@ -24,6 +24,9 @@ const DEFAULT = {
   lineBindEndpoint: 'https://linebind-reaor76eyq-uc.a.run.app',
   linePushEndpoint: 'https://linepushbooking-reaor76eyq-uc.a.run.app',
   lineManageEndpoint: 'https://linegetbooking-reaor76eyq-uc.a.run.app',
+  // 前端正式站網址：後端組 LINE 訊息「管理 / 修改訂位」按鈕連結用（空字串 = 按鈕不顯示）。
+  // ★ 與 functions 的 normalizeStoreSettings 白名單成對，兩邊都要有，否則同步時被靜默剝除。
+  publicSiteUrl: '',
   storeName: '雞王涮涮鍋',
   storePhone: '049-2753377',
   storeAddress: '南投縣鹿谷鄉中正路二段377號',
@@ -80,6 +83,7 @@ function withDefaults(value = {}) {
     lineBindEndpoint: merged.lineBindEndpoint || DEFAULT.lineBindEndpoint,
     linePushEndpoint: merged.linePushEndpoint || DEFAULT.linePushEndpoint,
     lineManageEndpoint: merged.lineManageEndpoint || DEFAULT.lineManageEndpoint,
+    publicSiteUrl: String(merged.publicSiteUrl || '').trim(),
     storeName: merged.storeName || DEFAULT.storeName,
     storePhone: merged.storePhone || DEFAULT.storePhone,
     storeAddress: merged.storeAddress || DEFAULT.storeAddress,
