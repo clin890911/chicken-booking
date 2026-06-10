@@ -2,17 +2,20 @@ import { useMemo, useState, useEffect } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useToast } from '../../ui/Toast'
 import { generateTimeSlots, todayStr } from '../../../utils/timeSlots'
-import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
+import { totalActiveSeats } from '../../../utils/capacity'
+import { summarizeGroupMonth, buildGroupDaySummary } from '../../../utils/groupDaySummary'
 import * as groupReservationService from '../../../services/groupReservationService'
-import GroupDateStage from './planning/GroupDateStage'
-import GroupDayStage from './planning/GroupDayStage'
+import GroupCalendar from './planning/GroupCalendar'
+import GroupDayPanel from './planning/GroupDayPanel'
+import GroupDaySheet from './planning/GroupDaySheet'
 import GroupEditorStage from './planning/GroupEditorStage'
 
 const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 
-// 預排規劃：分階段導覽（選日期 → 當日總覽 → 編輯精靈）。
+// 預排規劃：一頁式主控台（月曆 + 當日總覽）⟷ 編輯精靈。
 // 草稿優先：新團單在記憶體編輯，填好按儲存才落地（杜絕空白團單）。
-export default function GroupPlanningView() {
+// 編輯器以 key（new 或 group.id）強制 remount，故 draft 以 initialGroup 初始化即可。
+export default function GroupPlanningView({ onGoToday }) {
   const {
     groupReservations, agencies, guides, tables, bookings, settings,
     reserveGroupTables, removeGroupReservation, addAgency, addGuide,
@@ -20,10 +23,15 @@ export default function GroupPlanningView() {
   } = useBooking()
   const toast = useToast()
 
-  const [stage, setStage] = useState('date')          // 'date' | 'day' | 'editor'
-  const [date, setDate] = useState(todayStr())
+  const today = todayStr()
+  const [selectedDate, setSelectedDate] = useState(today)
+  const [monthCursor, setMonthCursor] = useState(() => {
+    const d = new Date(today + 'T00:00:00')
+    return { year: d.getFullYear(), month: d.getMonth() }
+  })
   const [editorGroup, setEditorGroup] = useState(null) // 傳給編輯器的初始資料（既有團複本 或 空白範本）
   const [editorIsNew, setEditorIsNew] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   // 首次進入清除既有殘留空白團單（草稿優先改版前的舊資料），每裝置一次。
   useEffect(() => {
@@ -38,53 +46,39 @@ export default function GroupPlanningView() {
     () => generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval),
     [settings],
   )
-  const capByNum = useMemo(() => {
-    const m = {}; tables.forEach(t => { m[t.number] = t.capacity }); return m
-  }, [tables])
+  const totalSeats = useMemo(() => totalActiveSeats(tables), [tables])
 
   const dayGroups = useMemo(
     () => groupReservations
-      .filter(g => g.date === date)
+      .filter(g => g.date === selectedDate)
       .sort((a, b) => (a.agencyName || '').localeCompare(b.agencyName || '')),
-    [groupReservations, date],
+    [groupReservations, selectedDate],
   )
 
-  // 每日團數小標（排除已取消/已完成）
-  const dateBadges = useMemo(() => {
-    const m = {}
-    groupReservations.forEach(g => {
-      if (CAPACITY_EXCLUDED_STATUSES.includes(g.status)) return
-      m[g.date] = (m[g.date] || 0) + 1
-    })
-    return m
-  }, [groupReservations])
+  // 月曆：整月團體彙總（只吃 groups+tables，不碰 bookings）
+  const monthSummary = useMemo(
+    () => summarizeGroupMonth(groupReservations, tables, monthCursor.year, monthCursor.month, settings),
+    [groupReservations, tables, monthCursor, settings],
+  )
 
-  // 當日容量摘要（仍佔位的團所保留的相異桌/席）
-  const capacity = useMemo(() => {
-    const held = groupReservationService.tablesHeldOnDate(date)
-    const numbers = Object.keys(held)
-    const seats = numbers.reduce((s, n) => s + (capByNum[n] || 0), 0)
-    return { tables: numbers.length, seats }
-  }, [date, groupReservations, capByNum]) // eslint-disable-line react-hooks/exhaustive-deps
+  // 當日總覽：抵達時間軸 / 備餐重點 / 警示 / 各場次容量（吃 bookings 做散客×團客合併）
+  const daySummary = useMemo(
+    () => buildGroupDaySummary({ groupReservations, bookings, tables, date: selectedDate, settings }),
+    [groupReservations, bookings, tables, selectedDate, settings],
+  )
 
-  const maxDaysCap = Math.max(60, settings.maxDaysAhead || 30)
-
-  // === 階段轉場 ===
-  const pickDate = (d) => { setDate(d); setEditorGroup(null); setEditorIsNew(false); setStage('day') }
-  const backToDate = () => setStage('date')
-
+  // === 轉場 ===
   const openExisting = (id) => {
     const g = groupReservations.find(x => x.id === id)
     if (!g) return
     setEditorGroup(g)
     setEditorIsNew(false)
-    setStage('editor')
   }
 
   const openNewDraft = () => {
     const firstBatchId = 'BT' + Date.now().toString(36)
     setEditorGroup({
-      date,
+      date: selectedDate,
       schemaVersion: groupReservationService.GROUP_SCHEMA_VERSION,
       agencyId: null, agencyName: '', guideId: null, guideName: '', guidePhone: '',
       batches: [{ id: firstBatchId, label: '第一梯', timeSlot: slots[0] || '11:00', tableNumbers: [], guests: 0, note: '' }],
@@ -93,48 +87,65 @@ export default function GroupPlanningView() {
       status: 'planned',
     })
     setEditorIsNew(true)
-    setStage('editor')
   }
 
-  const backToDay = () => { setEditorGroup(null); setEditorIsNew(false); setStage('day') }
+  const backToConsole = () => { setEditorGroup(null); setEditorIsNew(false) }
+
+  // 編輯精靈整頁接管（與既有 stage==='editor' 行為一致）。
+  if (editorGroup) {
+    return (
+      <GroupEditorStage
+        key={editorIsNew ? 'new' : editorGroup.id}
+        initialGroup={editorGroup}
+        isNew={editorIsNew}
+        date={selectedDate}
+        slots={slots}
+        tables={tables}
+        settings={settings}
+        bookings={bookings}
+        agencies={agencies}
+        guides={guides}
+        onBack={backToConsole}
+        onSaved={backToConsole}
+        onDeleted={backToConsole}
+        reserveExisting={reserveGroupTables}
+        createGroup={createAndReserveGroup}
+        removeGroup={removeGroupReservation}
+        addAgency={addAgency}
+        addGuide={addGuide}
+      />
+    )
+  }
 
   return (
-    <div className="space-y-3">
-      {stage === 'date' && (
-        <GroupDateStage date={date} badges={dateBadges} maxDaysCap={maxDaysCap} onPick={pickDate} />
-      )}
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] gap-3 items-start">
+      <GroupCalendar
+        value={selectedDate}
+        onSelect={setSelectedDate}
+        cursor={monthCursor}
+        onCursorChange={setMonthCursor}
+        monthSummary={monthSummary}
+        settings={settings}
+        totalSeats={totalSeats}
+      />
+      <GroupDayPanel
+        date={selectedDate}
+        daySummary={daySummary}
+        dayGroups={dayGroups}
+        isToday={selectedDate === today}
+        onSelectGroup={openExisting}
+        onNewGroup={openNewDraft}
+        onGoToday={onGoToday}
+        onPrintSheet={() => setSheetOpen(true)}
+      />
 
-      {stage === 'day' && (
-        <GroupDayStage
-          date={date}
-          dayGroups={dayGroups}
-          capacity={capacity}
-          onChangeDate={backToDate}
-          onSelectGroup={openExisting}
-          onNewGroup={openNewDraft}
-        />
-      )}
-
-      {stage === 'editor' && editorGroup && (
-        <GroupEditorStage
-          key={editorIsNew ? 'new' : editorGroup.id}
-          initialGroup={editorGroup}
-          isNew={editorIsNew}
-          date={date}
-          slots={slots}
-          tables={tables}
-          settings={settings}
-          bookings={bookings}
-          agencies={agencies}
-          guides={guides}
-          onBack={backToDay}
-          onSaved={backToDay}
-          onDeleted={backToDay}
-          reserveExisting={reserveGroupTables}
-          createGroup={createAndReserveGroup}
-          removeGroup={removeGroupReservation}
-          addAgency={addAgency}
-          addGuide={addGuide}
+      {sheetOpen && (
+        <GroupDaySheet
+          date={selectedDate}
+          daySummary={daySummary}
+          groups={dayGroups}
+          store={settings}
+          onClose={() => setSheetOpen(false)}
         />
       )}
     </div>

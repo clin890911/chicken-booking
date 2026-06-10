@@ -29,7 +29,7 @@ export default function GroupView() {
           </button>
         ))}
       </div>
-      {sub === 'planning' && <GroupPlanningView />}
+      {sub === 'planning' && <GroupPlanningView onGoToday={() => setSub('today')} />}
       {sub === 'today' && <GroupTodayView />}
       {sub === 'directory' && <GroupDirectoryView />}
     </div>
