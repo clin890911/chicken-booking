@@ -67,7 +67,7 @@ export default function CalendarView({ onAssignTable, onOpenGroup }) {
   // 當月摘要（只計入本月日期）
   const monthSummary = useMemo(() => {
     const prefix = `${cursor.year}-${String(cursor.month + 1).padStart(2, '0')}-`
-    let groups = 0, guests = 0, unassigned = 0, groupCount = 0
+    let groups = 0, guests = 0, unassigned = 0, groupCount = 0, groupGuests = 0
     Object.entries(stats).forEach(([date, s]) => {
       if (!date.startsWith(prefix)) return
       groups += s.groups
@@ -77,8 +77,9 @@ export default function CalendarView({ onAssignTable, onOpenGroup }) {
     Object.entries(groupStats).forEach(([date, s]) => {
       if (!date.startsWith(prefix)) return
       groupCount += s.count
+      groupGuests += s.guests
     })
-    return { groups, guests, unassigned, groupCount }
+    return { groups, guests, unassigned, groupCount, groupGuests }
   }, [stats, groupStats, cursor])
 
   // 當日清單：散客（排除取消）+ 團體梯次，依時段排序同框
@@ -143,7 +144,7 @@ export default function CalendarView({ onAssignTable, onOpenGroup }) {
               </span>
               {monthSummary.groupCount > 0 && (
                 <span className="rounded-full bg-indigo-100 px-2.5 py-1 font-bold text-indigo-700 tabular-nums">
-                  🚌 {monthSummary.groupCount} 團
+                  🚌 {monthSummary.groupCount} 團 · {monthSummary.groupGuests} 位
                 </span>
               )}
               {monthSummary.unassigned > 0 && (
@@ -197,12 +198,9 @@ export default function CalendarView({ onAssignTable, onOpenGroup }) {
                   >
                     <div className="flex items-center justify-between leading-none">
                       <span className="text-sm font-black">{dayNum}</span>
-                      {gs ? (
-                        <span className={`text-[9px] font-black rounded px-1 leading-tight tabular-nums
-                          ${isSelected ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-700'}`}>🚌{gs.count}</span>
-                      ) : isToday && !isSelected ? (
+                      {isToday && !isSelected && (
                         <span className="w-1.5 h-1.5 rounded-full bg-chicken-yellow" />
-                      ) : null}
+                      )}
                     </div>
 
                     {hasAny ? (
@@ -224,12 +222,19 @@ export default function CalendarView({ onAssignTable, onOpenGroup }) {
                           ))}
                         </div>
 
-                        {/* 組數 + 人數（散客口徑） */}
+                        {/* 散客（暖色）+ 團體（冷色）各一行，口徑分開不混算（與當日清單一致） */}
                         {s.groups > 0 && (
                           <div className={`text-[10px] sm:text-[11px] font-bold tabular-nums leading-tight
-                            ${isSelected ? 'text-white' : 'text-chicken-brown/80'}`}>
-                            <span className="sm:hidden">{s.groups}組{s.guests}位</span>
-                            <span className="hidden sm:inline">{s.groups} 組 · {s.guests} 位</span>
+                            ${isSelected ? 'text-white' : 'text-orange-700'}`}>
+                            <span className="sm:hidden">🧍{s.groups}·{s.guests}</span>
+                            <span className="hidden sm:inline">🧍 {s.groups} 組 · {s.guests} 位</span>
+                          </div>
+                        )}
+                        {gs && (
+                          <div className={`text-[10px] sm:text-[11px] font-black tabular-nums leading-tight
+                            ${isSelected ? 'text-white' : 'text-indigo-700'}`}>
+                            <span className="sm:hidden">🚌{gs.count}·{gs.guests}</span>
+                            <span className="hidden sm:inline">🚌 {gs.count} 團 · {gs.guests} 位</span>
                           </div>
                         )}
 
@@ -285,7 +290,7 @@ export default function CalendarView({ onAssignTable, onOpenGroup }) {
                     <span className={`text-[10px] font-bold leading-none ${isSelected ? 'text-white/80' : 'text-chicken-brown/50'}`}>{w}</span>
                     <span className="text-sm font-black leading-none tabular-nums">{d.getDate()}</span>
                     <span className={`text-[9px] font-bold leading-none tabular-nums ${isSelected ? 'text-white/85' : 'text-chicken-brown/55'}`}>
-                      {s ? `${s.groups}組` : gs ? '' : '·'}{gs ? '🚌' : ''}
+                      {s?.groups ? `🧍${s.groups}` : ''}{gs ? `${s?.groups ? ' ' : ''}🚌${gs.count}` : ''}{!s?.groups && !gs ? '·' : ''}
                     </span>
                   </button>
                 )
