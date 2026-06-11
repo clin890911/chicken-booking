@@ -112,6 +112,12 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     onClose?.()
   }
 
+  // 這筆 booking 佔用的所有桌（大組併桌時 >1）：checkout/釋出要整組一起處理
+  const bookingTables = booking
+    ? [...new Set([booking.assignedTableId, ...(booking.extraTableIds || [])].filter(Boolean).map(String))]
+    : []
+  const isCombo = bookingTables.length > 1
+
   const minutesSeated = () => table.seatedAt
     ? Math.floor((Date.now() - new Date(table.seatedAt).getTime()) / 60000)
     : 0
@@ -122,7 +128,10 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
 
   const handleCheckout = async () => {
     if (!booking) return
-    const ok = await confirmDialog('客人已離席？桌位將進入「等待清桌」狀態',
+    const ok = await confirmDialog(
+      isCombo
+        ? `客人已離席？將同時把併桌的 ${bookingTables.length} 張桌（${bookingTables.join('、')}）一起進入「等待清桌」。`
+        : '客人已離席？桌位將進入「等待清桌」狀態',
       { title: '客人已離席', confirmLabel: '已離席' })
     if (!ok) return
     const min = minutesSeated()
@@ -135,7 +144,10 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   // 一鍵釋出：已離席 + 清桌完成（跳過待清桌）
   const handleFinalize = async () => {
     if (!booking) return
-    const ok = await confirmDialog('客人已離席且桌面已清理乾淨？桌位將立即可給下一組使用。',
+    const ok = await confirmDialog(
+      isCombo
+        ? `客人已離席且桌面已清理乾淨？將立即釋出併桌的 ${bookingTables.length} 張桌（${bookingTables.join('、')}）。`
+        : '客人已離席且桌面已清理乾淨？桌位將立即可給下一組使用。',
       { title: '一鍵釋出桌位', confirmLabel: '已離席+清桌' })
     if (!ok) return
     const min = minutesSeated()
@@ -251,6 +263,12 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
             <div className="flex justify-between"><span className="text-chicken-brown/60">客人</span><span className="font-bold">{booking.name}</span></div>
             <div className="flex justify-between"><span className="text-chicken-brown/60">電話</span><span>{booking.phone}</span></div>
             <div className="flex justify-between"><span className="text-chicken-brown/60">人數</span><span>{booking.guests} 位</span></div>
+            {isCombo && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs font-bold text-amber-800">
+                🪑 併桌（{bookingTables.length} 桌）：{bookingTables.join(' + ')}
+                <div className="text-[11px] font-normal text-amber-700/80 mt-0.5">離席/清桌會一起釋出這幾張桌。</div>
+              </div>
+            )}
             {table.status === 'reserved' && (
               <div className="flex justify-between"><span className="text-chicken-brown/60">預訂時間</span><span>{booking.timeSlot}</span></div>
             )}

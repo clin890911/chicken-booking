@@ -93,6 +93,7 @@ describe('create', () => {
     expect(b.source).toBe('online')
     expect(b.status).toBe('confirmed')
     expect(b.assignedTableId).toBeNull()
+    expect(b.extraTableIds).toEqual([])
     expect(b.lineUserId).toBeNull()
     expect(b.guestEditCount).toBe(0)
     expect(b.guestEditHistory).toEqual([])
@@ -110,6 +111,20 @@ describe('create', () => {
     expect(b.name).toBe('阿華')
     expect(b.phone).toBe('0922000111')
     expect(b.guests).toBe(1) // Number(0)||1 → 1
+  })
+
+  it('extraTableIds：帶入時正規化為字串陣列；未帶時為 []', () => {
+    const b = bookingService.create(baseInput({ assignedTableId: '101', extraTableIds: [102, '103'] }))
+    expect(b.assignedTableId).toBe('101')
+    expect(b.extraTableIds).toEqual(['102', '103'])
+    const b2 = bookingService.create(baseInput())
+    expect(b2.extraTableIds).toEqual([])
+  })
+
+  it('listAll：舊資料缺 extraTableIds → 補 []（向後相容）', () => {
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify([{ id: 'BOLD', name: '舊', date: '2026-06-20', timeSlot: '18:00', assignedTableId: '101' }]))
+    const [b] = bookingService.listAll()
+    expect(b.extraTableIds).toEqual([])
   })
 
   it('guests 非數字時退回 1', () => {

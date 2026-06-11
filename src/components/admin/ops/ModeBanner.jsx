@@ -10,8 +10,43 @@ const BANNER_STYLE = {
 
 const CONFIRMABLE = ['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat']
 
-export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pendingGroupHold, onCancel, onConfirm, onClearPending }) {
+export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pendingGroupHold, multiSeats = 0, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
   if (!mode) return null
+
+  // 多桌帶位（大組併桌）：累加式選桌，不走二步確認；席數夠才能確認
+  if (mode.type === 'walkin-multi') {
+    const need = mode.need || 0
+    const selected = mode.selected || []
+    const enough = multiSeats >= need
+    return (
+      <div className="bg-amber-600 text-white px-4 py-2.5 rounded-xl shadow-md space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
+            <span className="text-base leading-none">🪑</span>
+            <span>立即帶位（併桌）：{mode.guestData?.name || '散客'} {need} 位</span>
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-black text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
+              已選 {multiSeats}/{need} 席 · {selected.length} 桌
+            </span>
+            <span className="text-xs opacity-90">點桌加 / 減</span>
+          </div>
+          <button onClick={onCancel} className="text-xs px-3 py-2 min-h-[44px] bg-white text-amber-700 rounded-lg font-bold whitespace-nowrap">取消</button>
+        </div>
+        <div className="bg-white/15 rounded-lg px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-sm font-bold">
+            {selected.length ? `已選：${selected.join(' + ')}` : '尚未選桌（點空桌加入）'}
+            {!enough && need > multiSeats && <span className="ml-2 opacity-90">— 還差 {need - multiSeats} 席</span>}
+          </div>
+          <button
+            onClick={onConfirmMulti}
+            disabled={!enough}
+            className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-black whitespace-nowrap shadow-sm ${
+              enough ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
+          >✓ 確認併桌入座</button>
+        </div>
+      </div>
+    )
+  }
+
   const style = BANNER_STYLE[mode.type]
   if (!style) return null
 

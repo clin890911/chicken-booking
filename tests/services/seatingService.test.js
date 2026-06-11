@@ -7,6 +7,7 @@ import * as tableService from '../../src/services/tableService'
 import * as bookingService from '../../src/services/bookingService'
 import * as waitlistService from '../../src/services/waitlistService'
 import * as groupService from '../../src/services/groupReservationService'
+import { computeOvertimeActions } from '../../src/utils/opsSweep'
 
 // === 測試用桌位工廠 ===
 // 直接組出已知 schema 的桌位，透過 tableService.bulkWrite 寫入，狀態完全可控。
@@ -543,6 +544,152 @@ describe('seatingService 整合層', () => {
     it('無可用桌 → 回傳 null', () => {
       tableService.bulkWrite([mkTable('101', 2, '1F', { status: 'dining' })])
       expect(seating.suggestTable(2)).toBeNull()
+    })
+  })
+
+  // ===========================================================
+  // 大組多桌帶位（併桌）：suggestTableCombo / walkInSeatMulti / 多桌清桌
+  // ===========================================================
+  describe('大組多桌帶位', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-06-15T12:00:00'))
+    })
+    afterEach(() => vi.useRealTimers())
+
+    describe('suggestTableCombo', () => {
+      it('單桌裝不下 → 同層貪婪湊最少桌（容量大優先）', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 4, '1F'), mkTable('201', 6, '2F')])
+        const r = seating.suggestTableCombo(8)
+        expect(r.enough).toBe(true)
+        expect([...r.tableNumbers].sort()).toEqual(['101', '102']) // 1F 內 6+4，同層優先
+        expect(r.seats).toBe(10)
+      })
+
+      it('同層湊不夠 → 跨樓層貪婪', () => {
+        tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('201', 4, '2F'), mkTable('202', 4, '2F')])
+        const r = seating.suggestTableCombo(10) // 單層最多 8 < 10 → 跨層 4+4+4
+        expect(r.enough).toBe(true)
+        expect(r.tableNumbers).toHaveLength(3)
+        expect(r.seats).toBe(12)
+      })
+
+      it('全部空桌仍湊不夠 → enough:false + 最大集合', () => {
+        tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('102', 2, '1F')])
+        const r = seating.suggestTableCombo(20)
+        expect(r.enough).toBe(false)
+        expect(r.seats).toBe(6)
+      })
+
+      it('只計今日可用 + vacant 桌（停用/維修/非空排除）', () => {
+        tableService.bulkWrite([
+          mkTable('101', 6, '1F'),
+          mkTable('102', 6, '1F', { status: 'dining' }),
+          mkTable('103', 6, '1F', { isActive: false }),
+        ])
+        const r = seating.suggestTableCombo(8)
+        expect(r.enough).toBe(false)
+        expect(r.tableNumbers).toEqual(['101'])
+      })
+    })
+
+    describe('walkInSeatMulti', () => {
+      it('多桌入座：一筆 booking 佔多桌（主桌+extraTableIds），全部 dining 連同一 booking', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 4, '1F')])
+        const r = seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 8 })
+        expect(r.ok).toBe(true)
+        expect(r.booking.assignedTableId).toBe('101')
+        expect(r.booking.extraTableIds).toEqual(['102'])
+        expect(r.booking.guests).toBe(8)
+        expect(r.booking.source).toBe('walkin')
+        expect(tableService.getByNumber('101').status).toBe('dining')
+        expect(tableService.getByNumber('102').status).toBe('dining')
+        expect(tableService.getByNumber('101').currentBookingId).toBe(r.booking.id)
+        expect(tableService.getByNumber('102').currentBookingId).toBe(r.booking.id)
+      })
+
+      it('單桌 → 退回 walkInSeat（extraTableIds 空）', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F')])
+        const r = seating.walkInSeatMulti(['101'], { name: '小組', guests: 4 })
+        expect(r.ok).toBe(true)
+        expect(r.booking.extraTableIds).toEqual([])
+      })
+
+      it('任一桌非空 → 擋，不佔任何桌', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 4, '1F', { status: 'dining' })])
+        const r = seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 8 })
+        expect(r.ok).toBe(false)
+        expect(tableService.getByNumber('101').status).toBe('vacant')
+      })
+
+      it('合計席數不足人數 → 擋', () => {
+        tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('102', 4, '1F')])
+        const r = seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 10 })
+        expect(r.ok).toBe(false)
+        expect(r.error).toContain('不足')
+      })
+
+      it('維修桌 → 擋（service 層守門）', () => {
+        tableService.bulkWrite([
+          mkTable('101', 6, '1F'),
+          mkTable('102', 4, '1F', { outage: { from: '2026-06-15', to: '', reason: 'x' } }),
+        ])
+        const r = seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 8 })
+        expect(r.ok).toBe(false)
+        expect(r.error).toContain('停用/維修')
+      })
+    })
+
+    describe('多桌清桌（整組釋放）', () => {
+      const seatCombo = () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 4, '1F')])
+        return seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 8 }).booking
+      }
+
+      it('checkoutBooking：主桌 + 額外桌一起 → cleaning', () => {
+        const b = seatCombo()
+        seating.checkoutBooking(b.id)
+        expect(tableService.getByNumber('101').status).toBe('cleaning')
+        expect(tableService.getByNumber('102').status).toBe('cleaning')
+        expect(bookingService.getById(b.id).status).toBe('completed')
+      })
+
+      it('finalizeBooking：主桌 + 額外桌一起 → vacant', () => {
+        const b = seatCombo()
+        seating.finalizeBooking(b.id)
+        expect(tableService.getByNumber('101').status).toBe('vacant')
+        expect(tableService.getByNumber('102').status).toBe('vacant')
+      })
+
+      it('cancelBooking：整組釋放 + 清 assignedTableId/extraTableIds', () => {
+        const b = seatCombo()
+        seating.cancelBooking(b.id)
+        expect(tableService.getByNumber('101').status).toBe('vacant')
+        expect(tableService.getByNumber('102').status).toBe('vacant')
+        const after = bookingService.getById(b.id)
+        expect(after.assignedTableId).toBe(null)
+        expect(after.extraTableIds).toEqual([])
+      })
+
+      it('moveTable：併桌訂位擋換桌（先清桌再重帶）', () => {
+        const b = seatCombo()
+        const r = seating.moveTable(b.id, '999')
+        expect(r.ok).toBe(false)
+        expect(r.error).toContain('併桌')
+      })
+
+      it('超時釋桌掃描：併桌整組釋出（finalizeBooking 冪等，重複 action 自動跳過）', () => {
+        const b = seatCombo()
+        // 模擬入座已逾 autoReleaseAfterMin
+        const longAgo = new Date('2026-06-15T05:00:00').toISOString()
+        const list = tableService.listAll().map(t =>
+          ['101', '102'].includes(t.number) ? { ...t, seatedAt: longAgo } : t)
+        tableService.bulkWrite(list)
+        const actions = computeOvertimeActions({ tables: tableService.listAll(), settings: { autoReleaseAfterMin: 300 }, now: Date.now() })
+        seating.executeSweepActions(actions)
+        expect(tableService.getByNumber('101').status).toBe('vacant')
+        expect(tableService.getByNumber('102').status).toBe('vacant')
+      })
     })
   })
 

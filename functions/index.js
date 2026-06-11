@@ -1297,6 +1297,7 @@ function normalizeBookingForFirestore(booking = {}) {
   const id = String(booking.id || '').trim()
   return {
     assignedTableId: null,
+    extraTableIds: [],
     lineUserId: null,
     manageToken: booking.manageToken || booking.token || createServerToken(),
     lastGuestEditAt: null,
@@ -1309,6 +1310,8 @@ function normalizeBookingForFirestore(booking = {}) {
     ...booking,
     id,
     guests: Number(booking.guests) || 1,
+    // 大組併桌的額外桌：確保是字串陣列（與前端 bookingService 成對；缺欄位的舊資料 → []）
+    extraTableIds: Array.isArray(booking.extraTableIds) ? booking.extraTableIds.map(String) : [],
     phoneDigits: digits(booking.phone),
     manageToken: booking.manageToken || booking.token || createServerToken(),
     updatedAt: booking.updatedAt || new Date().toISOString(),

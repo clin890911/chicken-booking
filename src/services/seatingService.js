@@ -19,6 +19,19 @@ function tableUsableToday(table) {
   return isTableUsableOnDate(table, todayStr())
 }
 
+// 這筆 booking 佔用的所有桌（主桌 assignedTableId + 大組併桌的 extraTableIds），去重去空。
+export function bookingTableNumbers(booking) {
+  return [...new Set(
+    [booking?.assignedTableId, ...(booking?.extraTableIds || [])].filter(Boolean).map(String),
+  )]
+}
+
+// 現在時間的 30 分鐘抵達時段（walk-in 用）
+function nowTimeSlot() {
+  const now = new Date()
+  return `${String(now.getHours()).padStart(2, '0')}:${String(Math.floor(now.getMinutes() / 30) * 30).padStart(2, '0')}`
+}
+
 // === 訂位 → 指派桌 ===
 // 客人線上訂位（assignedTableId: null）→ 到店時店長指派一張空桌
 export function assignBookingToTable(bookingId, tableNumber) {
@@ -59,9 +72,8 @@ export function seatBooking(bookingId) {
 export function checkoutBooking(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
-  if (booking.assignedTableId) {
-    tableService.checkoutTable(booking.assignedTableId)
-  }
+  // 大組併桌：主桌 + 額外桌全部 checkout（dining → cleaning）。
+  bookingTableNumbers(booking).forEach(n => tableService.checkoutTable(n))
   bookingService.setStatus(bookingId, 'completed')
   return { ok: true }
 }
@@ -71,12 +83,11 @@ export function checkoutBooking(bookingId) {
 export function finalizeBooking(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
-  const tableNumber = booking.assignedTableId
+  const tableNumbers = bookingTableNumbers(booking)
   bookingService.setStatus(bookingId, 'completed')
-  if (tableNumber) {
-    tableService.clearTable(tableNumber)  // 直接 vacant，跳過 cleaning
-  }
-  return { ok: true, tableNumber }
+  // 大組併桌：主桌 + 額外桌全部直接釋出（跳過待清桌）。
+  tableNumbers.forEach(n => tableService.clearTable(n))
+  return { ok: true, tableNumber: booking.assignedTableId, tableNumbers }
 }
 
 // === 清桌完成 → 桌位釋出 ===
@@ -88,11 +99,11 @@ export function clearTable(tableNumber) {
 export function cancelBooking(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
-  if (booking.assignedTableId) {
-    tableService.clearTable(booking.assignedTableId)
-  }
+  // 大組併桌：主桌 + 額外桌全部釋出。
+  bookingTableNumbers(booking).forEach(n => tableService.clearTable(n))
   bookingService.setStatus(bookingId, 'cancelled')
-  bookingService.unassignTable(bookingId)
+  // 解除主桌與額外桌的指派（避免取消後仍掛著桌號）
+  bookingService.update(bookingId, { assignedTableId: null, extraTableIds: [] })
   return { ok: true }
 }
 
@@ -142,15 +153,12 @@ export function walkInSeat(tableNumber, guestData) {
   if (!tableUsableToday(table)) return { ok: false, error: outOfServiceError(tableNumber) }
   if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌` }
 
-  const today = new Date().toISOString().slice(0, 10)
-  const now = new Date()
-  const timeSlot = `${String(now.getHours()).padStart(2, '0')}:${String(Math.floor(now.getMinutes() / 30) * 30).padStart(2, '0')}`
   const booking = bookingService.create({
     name: guestData.name || '散客',
     phone: guestData.phone || '',
     guests: Number(guestData.guests) || 2,
-    date: today,
-    timeSlot,
+    date: todayStr(),
+    timeSlot: nowTimeSlot(),
     source: 'walkin',
     status: 'arrived',
     assignedTableId: tableNumber,
@@ -161,10 +169,52 @@ export function walkInSeat(tableNumber, guestData) {
   return { ok: true, booking }
 }
 
+// === 大組多桌入座（併桌）===
+// 散客大組（超過任何單桌容量）→ 一筆 walk-in booking 佔多張桌：tableNumbers[0]=主桌，其餘=額外桌。
+// 所有桌 dining + currentBookingId 指向同一 booking。單桌時退回 walkInSeat（維持單一路徑）。
+export function walkInSeatMulti(tableNumbers, guestData) {
+  const nums = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
+  if (nums.length === 0) return { ok: false, error: '請至少選一張桌' }
+  if (nums.length === 1) return walkInSeat(nums[0], guestData)
+
+  // 驗證每張桌：存在、可用、空桌；累計容量
+  let totalCap = 0
+  for (const n of nums) {
+    const t = tableService.getByNumber(n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(n) }
+    if (t.status !== 'vacant') return { ok: false, error: `${n} 目前不是空桌（${statusZh(t.status)}）` }
+    totalCap += Number(t.capacity) || 0
+  }
+  const guests = Number(guestData.guests) || 2
+  if (guests > totalCap) return { ok: false, error: `所選桌合計 ${totalCap} 席，不足 ${guests} 位` }
+
+  const [mainTable, ...extra] = nums
+  const booking = bookingService.create({
+    name: guestData.name || '散客',
+    phone: guestData.phone || '',
+    guests,
+    date: todayStr(),
+    timeSlot: nowTimeSlot(),
+    source: 'walkin',
+    status: 'arrived',
+    assignedTableId: mainTable,
+    extraTableIds: extra,
+    createdBy: 'staff',
+    notes: { text: guestData.notes || '' }
+  })
+  nums.forEach(n => tableService.seatTable(n, booking.id))
+  return { ok: true, booking, tableNumbers: nums }
+}
+
 // === 換桌（已入座的客人換到另一張空桌）===
 export function moveTable(bookingId, newTableNumber) {
   const booking = bookingService.getById(bookingId)
   if (!booking || !booking.assignedTableId) return { ok: false, error: '訂位無桌位資料' }
+  // 併桌（大組多桌）暫不支援單桌換位（會留下孤兒額外桌）；請先清桌再重新帶位。
+  if ((booking.extraTableIds || []).length) {
+    return { ok: false, error: '併桌的大組請先整組清桌，再重新帶位' }
+  }
   const oldNumber = booking.assignedTableId
   if (oldNumber === newTableNumber) return { ok: false, error: '同桌無需換桌' }
   const newTable = tableService.getByNumber(newTableNumber)
@@ -204,6 +254,42 @@ export function findSuitableTables(partySize) {
 export function suggestTable(partySize) {
   const list = findSuitableTables(partySize)
   return list[0] || null
+}
+
+// === 大組多桌組合建議（單桌裝不下時的併桌建議）===
+// 候選 = 今日可用 + vacant 桌。策略：先試在「單一樓層內」湊夠（併桌通常要同層相鄰），
+// 選浪費最少的樓層；單層都湊不夠才跨樓層貪婪（1F 優先）。容量大優先 → 最少張桌。
+// 回傳 { tableNumbers, seats, enough }；湊不滿時 enough:false 並給能湊到的最大集合。
+export function suggestTableCombo(partySize) {
+  const need = Math.max(0, Number(partySize) || 0)
+  const today = todayStr()
+  const pool = tableService.listAll()
+    .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && (Number(t.capacity) || 0) > 0)
+
+  const greedy = (list) => {
+    const sorted = [...list].sort((a, b) =>
+      (Number(b.capacity) || 0) - (Number(a.capacity) || 0) ||   // 容量大優先（最少桌）
+      String(a.number).localeCompare(String(b.number)))
+    const picked = []
+    let seats = 0
+    for (const t of sorted) {
+      if (seats >= need) break
+      picked.push(String(t.number))
+      seats += Number(t.capacity) || 0
+    }
+    return { tableNumbers: picked, seats, enough: seats >= need }
+  }
+
+  // 1) 同一樓層內湊夠 → 選浪費最少（座位最接近 need、桌數最少）的樓層
+  const floors = [...new Set(pool.map(t => t.floor))]
+  const sameFloor = floors
+    .map(f => greedy(pool.filter(t => t.floor === f)))
+    .filter(r => r.enough)
+    .sort((a, b) => a.seats - b.seats || a.tableNumbers.length - b.tableNumbers.length)
+  if (sameFloor.length) return sameFloor[0]
+
+  // 2) 單層都湊不夠 → 跨樓層貪婪（1F 優先）
+  return greedy([...pool].sort((a, b) => (a.floor === b.floor ? 0 : a.floor === '1F' ? -1 : 1)))
 }
 
 // === 停用/維修 × 團體圈桌的衝突檢查（integration 層：tableService 看不到團體資料）===
