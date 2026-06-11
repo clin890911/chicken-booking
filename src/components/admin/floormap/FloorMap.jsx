@@ -178,15 +178,16 @@ export default function FloorMap({
         )
       })}
 
-      {/* 今日團體 hold 唯讀疊加：今日已預排、尚未入座的團，於其桌位畫靛色虛線框 + 🚌 */}
+      {/* 今日團體 hold 唯讀疊加：空桌團保已由 TableShape 以實心靛色桌面表示，不再疊框；
+          只有「非空桌但被 hold」（如待清桌接下一梯）才畫靛色虛線提示 + 「團」標記。 */}
       {!planningMode && floorTables.map(t => {
         const hold = groupHoldTables[t.number]
-        if (!hold) return null
+        if (!hold || t.status === 'vacant') return null
         return (
           <g key={`hold-${t.number}`} pointerEvents="none">
             <rect x={t.x - 3} y={t.y - 3} width={t.w + 6} height={t.h + 6} rx={11}
                   fill="none" stroke="#6366f1" strokeWidth={2.5} strokeDasharray="5 3" opacity={0.9} />
-            <text x={t.x + t.w - 6} y={t.y + 14} fontSize={13} textAnchor="end" pointerEvents="none">🚌</text>
+            <text x={t.x + t.w - 7} y={t.y + 15} fontSize={11} fontWeight={800} fill="#4338ca" textAnchor="end" pointerEvents="none">團</text>
           </g>
         )
       })}
