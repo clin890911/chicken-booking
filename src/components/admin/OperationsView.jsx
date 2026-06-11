@@ -7,12 +7,14 @@ import OpsRail from './ops/OpsRail'
 import OpsHintBar from './ops/OpsHintBar'
 import OpsLogModal from './ops/OpsLogModal'
 import WalkInSeatModal from './ops/WalkInSeatModal'
+import TableScheduleView from './ops/TableScheduleView'
 import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
 import { findPreassignedBooking } from '../../utils/capacity'
 import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
+import { buildTableTurns } from '../../utils/tableTurns'
 import { todayStr } from '../../utils/timeSlots'
 
 // 「現場營運」主畫面
@@ -29,6 +31,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const { can } = useAuth()
 
   const [floor, setFloor] = useState('1F')
+  const [view, setView] = useState('map') // map=SVG 桌況圖 ｜ schedule=當日排程（每桌 turns）
   const [selectedTable, setSelectedTable] = useState(null)
   const [railTab, setRailTab] = useState('upcoming') // 右側欄籤；ESC/關閉抽屜不重設
   const [mode, setMode] = useState(null)
@@ -45,6 +48,15 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     () => buildGroupHolds(todayActiveGroups(groupReservations, todayStr()), tables),
     [groupReservations, tables],
   )
+
+  // 排程視圖資料：每張桌今天的各批用餐（turns）。散客（含預先配桌）+ 團體梯次合併、依時段排序。
+  const turnsByTable = useMemo(
+    () => buildTableTurns(tables, bookings, groupReservations, todayStr()),
+    [tables, bookings, groupReservations],
+  )
+
+  // 帶位/指派等模式一律在 SVG 桌況圖操作；排程視圖為總覽用途，模式進行中強制切回地圖。
+  const showSchedule = !mode && view === 'schedule'
 
   // 進入指派桌模式（含自動建議）
   const startAssign = (booking) => {
@@ -295,6 +307,22 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
             </button>
           ))}
         </div>
+
+        {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
+        {!mode && (
+          <div className="flex gap-1 rounded-xl bg-chicken-cream p-1 border-2 border-chicken-brown/10">
+            {[['map', '桌況'], ['schedule', '排程']].map(([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setView(k)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  view === k ? 'bg-chicken-red text-white shadow' : 'text-chicken-brown/70 hover:text-chicken-brown'
+                }`}
+              >{label}</button>
+            ))}
+          </div>
+        )}
+
         <div className="flex-1" />
         {!mode && (
           <button
@@ -323,33 +351,44 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
 
       {/* 主區：地圖 + 側邊 */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-3">
-        {/* 地圖區 */}
+        {/* 地圖區（桌況 SVG 圖）／排程視圖（每桌當日 turns） */}
         <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 min-h-[430px] sm:min-h-[560px] lg:min-h-[680px] overflow-hidden">
-          <div className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-emerald-600" />可入座</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-sky-600" />已預訂</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />用餐中</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-600" />待清桌</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-chicken-red" />超時</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded border-2 border-dashed border-indigo-500 bg-transparent" />🚌 團體保留</span>
-            <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded border-2 border-chicken-red bg-transparent" />選中</span>
-          </div>
-          <FloorMap
-            floor={floor}
-            tables={tables}
-            bookings={bookings}
-            settings={settings}
-            selectedTableNumber={selectedTable}
-            onSelectTable={handleTableClick}
-            assignMode={['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type)}
-            highlightTables={
-              ['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable : []
-            }
-            suggestionTable={mode?.suggestion || null}
-            pendingConfirmTable={pendingConfirm}
-            justAssignedTable={justAssigned}
-            groupHoldTables={groupHoldTables}
-          />
+          {showSchedule ? (
+            <TableScheduleView
+              tables={tables.filter(t => t.floor === floor)}
+              turnsByTable={turnsByTable}
+              selectedTableNumber={selectedTable}
+              onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
+            />
+          ) : (
+            <>
+              <div className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-emerald-600" />可入座</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-sky-600" />已預訂</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />用餐中</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-600" />待清桌</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-chicken-red" />超時</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded border-2 border-dashed border-indigo-500 bg-transparent" />🚌 團體保留</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded border-2 border-chicken-red bg-transparent" />選中</span>
+              </div>
+              <FloorMap
+                floor={floor}
+                tables={tables}
+                bookings={bookings}
+                settings={settings}
+                selectedTableNumber={selectedTable}
+                onSelectTable={handleTableClick}
+                assignMode={['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type)}
+                highlightTables={
+                  ['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable : []
+                }
+                suggestionTable={mode?.suggestion || null}
+                pendingConfirmTable={pendingConfirm}
+                justAssignedTable={justAssigned}
+                groupHoldTables={groupHoldTables}
+              />
+            </>
+          )}
         </div>
 
         {/* 右側：模式相關 / 詳情 / 候位 */}
