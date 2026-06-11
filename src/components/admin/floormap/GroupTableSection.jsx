@@ -8,7 +8,7 @@ import { nextBatchForTable } from '../../../utils/groupLive'
 // 2. dining 且 currentRef 指向團（groupRef）→ 「此梯離席」「整團完成」
 // 3. cleaning 且 currentRef 指向團 → 有下一梯圈此桌時「清桌完成＋接下一梯」，否則「清桌完成」
 export default function GroupTableSection({ table, groupRef, groupBatch, groupHold, canEdit, onWalkInOverride, onReseatBatch, onClose }) {
-  const { tables, seatGroupBatch, checkoutGroupBatch, finalizeGroup, seatNextBatchOnTable, clearTable } = useBooking()
+  const { tables, seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, seatNextBatchOnTable, clearTable } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -28,6 +28,14 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
   const nextBatch = table.status === 'cleaning' && groupRef
     ? nextBatchForTable(groupRef, table.number, tableByNumber, table.currentRef?.batchId)
     : null
+
+  // 本梯目前還有幾張「待清（cleaning）」桌（含本桌）→ 決定要不要提供「整梯一次清」
+  const batchCleaningCount = groupRef && batch
+    ? (batch.tableNumbers || []).filter(n => {
+        const t = tableByNumber[n]
+        return t && t.status === 'cleaning' && t.currentRef?.groupId === g.id && t.currentRef?.batchId === batch.id
+      }).length
+    : 0
 
   const handleSeatHold = async () => {
     const tablesTxt = (batch.tableNumbers || []).join('、')
@@ -86,6 +94,19 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
   const handleClearOnly = () => {
     clearTable(table.number)
     toast.success(`${table.number} 已清桌完成`)
+    onClose?.()
+  }
+
+  // 整梯清桌釋出：一次清掉本梯所有待清桌、釋放座位（不結束整團）
+  const handleReleaseBatch = async () => {
+    const ok = await confirm(
+      `整梯清桌釋出？將把 ${g.agencyName || '此團'} ${batch?.label || '此梯'} 的 ${batchCleaningCount} 張待清桌一次清為空桌、釋放座位。`,
+      { title: '整梯清桌釋出', confirmLabel: '清桌釋出' },
+    )
+    if (!ok) return
+    const r = releaseGroupBatch(g.id, batch.id)
+    if (!r.ok) return toast.error('清桌失敗：' + r.error)
+    toast.success(`✨ ${g.agencyName} ${batch?.label || ''} 已清桌釋出（${(r.cleared || []).length} 桌）`)
     onClose?.()
   }
 
@@ -163,6 +184,26 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
                   className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
                 >
                   只清桌（不接下一梯）
+                </button>
+                {batchCleaningCount > 1 && (
+                  <button
+                    onClick={handleReleaseBatch}
+                    className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
+                  >
+                    整梯清桌釋出（{batchCleaningCount} 桌）
+                  </button>
+                )}
+              </>
+            ) : batchCleaningCount > 1 ? (
+              <>
+                <button onClick={handleReleaseBatch} className="btn-primary w-full">
+                  ✨ 整梯清桌釋出（{batchCleaningCount} 桌）
+                </button>
+                <button
+                  onClick={handleClearOnly}
+                  className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
+                >
+                  只清此桌
                 </button>
               </>
             ) : (

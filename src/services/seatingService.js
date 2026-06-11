@@ -345,6 +345,26 @@ export function checkoutGroupBatch(groupId, batchId) {
   return { ok: true }
 }
 
+// 整梯清桌釋出：把該梯次目前「待清（cleaning）」的桌一次清成空桌（vacant）、釋放座位。
+// 與 finalizeGroup 不同：只釋放這一梯的桌、不結束整團；與 seatNextBatchOnTable 不同：不接下一梯。
+// 只動「currentRef 仍指向本梯且為 cleaning」的桌——已被下一梯接走（currentRef 改指）或仍在用餐的桌都不碰。
+export function releaseGroupBatch(groupId, batchId) {
+  const group = groupService.getById(groupId)
+  if (!group) return { ok: false, error: '團單不存在' }
+  const batch = (group.batches || []).find(b => b.id === batchId)
+  if (!batch) return { ok: false, error: '梯次不存在' }
+  const cleared = []
+  ;(batch.tableNumbers || []).forEach(n => {
+    const t = tableService.getByNumber(n)
+    if (t && t.status === 'cleaning' && t.currentRef?.groupId === groupId && t.currentRef?.batchId === batchId) {
+      tableService.clearTable(n)
+      cleared.push(n)
+    }
+  })
+  if (!cleared.length) return { ok: false, error: '此梯沒有待清桌可釋出' }
+  return { ok: true, cleared }
+}
+
 // 單桌「清桌完成 → 接第二梯入座」：先清空此桌，再把指定梯次坐進來（複合一鍵）。
 export function seatNextBatchOnTable(tableNumber, groupId, batchId) {
   const t = tableService.getByNumber(tableNumber)

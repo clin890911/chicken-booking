@@ -16,7 +16,7 @@ const STATUS_LABEL = {
 // 入座/離席/完成一次翻動多桌，誤觸成本高 → 一律 confirm（不走地圖二步確認，桌已預圈無選桌步驟）。
 // 已完成（status=completed）的卡片轉唯讀：灰階、無操作按鈕，僅保留回傳單列印。
 export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, onReseatBatch }) {
-  const { tables, seatGroupBatch, checkoutGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
+  const { tables, seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
   const isDone = g.status === 'completed'
@@ -53,6 +53,18 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
     const r = checkoutGroupBatch(g.id, b.id)
     if (!r.ok) return toast.error('離席失敗：' + r.error)
     toast.success(`${g.agencyName} ${b.label} 已離席，桌位待清`)
+  }
+
+  // 整梯清桌釋出：把該梯所有待清桌一次清成空桌、釋放座位（不結束整團）
+  const onRelease = async (b) => {
+    const ok = await confirm(
+      `${g.agencyName || '團體'} ${b.label} 整梯清桌、釋放座位？該梯待清桌將全部清為空桌、可再帶客。`,
+      { title: '整梯清桌釋出', confirmLabel: '清桌釋出' },
+    )
+    if (!ok) return
+    const r = releaseGroupBatch(g.id, b.id)
+    if (!r.ok) return toast.error('清桌失敗：' + r.error)
+    toast.success(`✨ ${g.agencyName} ${b.label} 已清桌釋出（${(r.cleared || []).length} 桌）`)
   }
 
   const onFinalize = async () => {
@@ -96,6 +108,11 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
       <div className="mt-2 space-y-1.5">
         {sortedBatches(g).map(b => {
           const seated = batchSeated(g, b, tableByNumber)
+          // 已離席待清：本梯仍有 cleaning 桌（currentRef 指向本梯）→ 提供「整梯清桌釋出」
+          const cleaning = !seated && (b.tableNumbers || []).some(n => {
+            const t = tableByNumber[n]
+            return t && t.status === 'cleaning' && t.currentRef?.groupId === g.id && t.currentRef?.batchId === b.id
+          })
           return (
             <div key={b.id} className="rounded-lg bg-chicken-cream/60 px-2.5 py-2">
               <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
@@ -122,6 +139,8 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
                   <span className="text-[10px] font-bold text-chicken-brown/45">已完成</span>
                 ) : seated ? (
                   <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
+                ) : cleaning ? (
+                  <button onClick={() => onRelease(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-sky-600 text-white">✨ 整梯清桌釋出</button>
                 ) : (
                   <button onClick={() => onSeat(b)} disabled={!(b.tableNumbers || []).length}
                     className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-chicken-green text-white disabled:opacity-40">✅ 梯次入座</button>
