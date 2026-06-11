@@ -623,6 +623,39 @@ describe('seatingService 整合層', () => {
       expect(tableService.getByNumber('101').status).toBe('vacant')
       expect(groupService.getById(g.id).status).toBe('cancelled')
     })
+
+    it('releaseGroupBatch：離席後整梯待清桌一次清為空桌、團仍 arrived（不結束整團）', () => {
+      const g = groupService.create({ date: '2026-06-15', counts: { total: 8 } })
+      const batchId = g.batches[0].id
+      groupService.setBatchTables(g.id, batchId, ['101', '108'])
+      seating.seatGroupBatch(g.id, batchId)
+      seating.checkoutGroupBatch(g.id, batchId)          // dining → cleaning
+      expect(tableService.getByNumber('101').status).toBe('cleaning')
+      const r = seating.releaseGroupBatch(g.id, batchId)
+      expect(r.ok).toBe(true)
+      expect(r.cleared).toEqual(['101', '108'])
+      expect(tableService.getByNumber('101').status).toBe('vacant')
+      expect(tableService.getByNumber('101').currentRef).toBeNull()
+      expect(tableService.getByNumber('108').status).toBe('vacant')
+      expect(groupService.getById(g.id).status).toBe('arrived')   // 只釋出桌、不結束整團
+    })
+
+    it('releaseGroupBatch：尚未離席（dining）→ 無待清桌可釋出、用餐中桌不被誤清', () => {
+      const g = groupService.create({ date: '2026-06-15', counts: { total: 8 } })
+      const batchId = g.batches[0].id
+      groupService.setBatchTables(g.id, batchId, ['101', '108'])
+      seating.seatGroupBatch(g.id, batchId)
+      const r = seating.releaseGroupBatch(g.id, batchId)
+      expect(r.ok).toBe(false)
+      expect(r.error).toBe('此梯沒有待清桌可釋出')
+      expect(tableService.getByNumber('101').status).toBe('dining')
+    })
+
+    it('releaseGroupBatch：團單 / 梯次不存在 → 擋', () => {
+      expect(seating.releaseGroupBatch('NOPE', 'BT1')).toEqual({ ok: false, error: '團單不存在' })
+      const g = groupService.create({ date: '2026-06-15', counts: { total: 8 } })
+      expect(seating.releaseGroupBatch(g.id, 'NO_BATCH')).toEqual({ ok: false, error: '梯次不存在' })
+    })
   })
 
   // ===========================================================

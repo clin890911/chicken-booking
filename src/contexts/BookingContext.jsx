@@ -467,6 +467,7 @@ export function BookingProvider({ children }) {
   // 團體梯次入座流程（含通知略過：團體現場操作頻繁，暫不發 TG）
   const seatGroupBatch = (groupId, batchId) => { const r = seatingService.seatGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const checkoutGroupBatch = (groupId, batchId) => { const r = seatingService.checkoutGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
+  const releaseGroupBatch = (groupId, batchId) => { const r = seatingService.releaseGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const seatNextBatchOnTable = (tableNumber, groupId, batchId) => { const r = seatingService.seatNextBatchOnTable(tableNumber, groupId, batchId); refresh(); syncCloudSoon(); return r }
   const finalizeGroup = (groupId) => { const r = seatingService.finalizeGroup(groupId); refresh(); syncCloudSoon(); return r }
   const reseatGroupBatchTable = (groupId, batchId, fromTable, toTable) => { const r = seatingService.reseatGroupBatchTable(groupId, batchId, fromTable, toTable); refresh(); syncCloudSoon(); return r }
@@ -494,7 +495,7 @@ export function BookingProvider({ children }) {
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
     createAndReserveGroup, purgeBlankGroups,
-    seatGroupBatch, checkoutGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
+    seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
     updateSettings,
   }
 
