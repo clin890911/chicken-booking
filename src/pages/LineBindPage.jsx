@@ -90,11 +90,20 @@ export default function LineBindPage() {
       try {
         persistBindParams(bindParams)
         if (shouldUseLiff && !isLikelyLiffCallback(location.search, location.hash) && !hasRecentlyRedirected(booking.id)) {
-          rememberLiffRedirect(booking.id)
-          setState('loading')
-          setMessage('正在開啟 LINE 授權，完成後官方帳號會傳送訂位資訊。')
-          window.location.href = buildLiffUrl(liffUrl, bindParams)
-          return
+          // 已在 LINE 內（LIFF/in-app browser 曾 init 成功）就不再重導 deep link——
+          // 避免被踢到外部瀏覽器的往返迴圈，直接走本地 init/login。
+          let alreadyInClient = false
+          try {
+            const liffProbe = await loadLiffSdk()
+            alreadyInClient = typeof liffProbe.isInClient === 'function' && liffProbe.isInClient()
+          } catch { alreadyInClient = false }
+          if (!alreadyInClient) {
+            rememberLiffRedirect(booking.id)
+            setState('loading')
+            setMessage('正在開啟 LINE 授權，完成後官方帳號會傳送訂位資訊。')
+            window.location.href = buildLiffUrl(liffUrl, bindParams)
+            return
+          }
         }
         const liff = await loadLiffSdk()
         await liff.init({ liffId })
@@ -348,8 +357,12 @@ function forgetSubmittedBind(key) {
   } catch {}
 }
 
+// Path-style deep link：liff.line.me/{id}/line/bind?{params}。
+// LIFF Endpoint=站根後，LINE 會把 path+query 編成 liff.state 帶到站根，
+// 由 main.jsx 的 resolveLiffStatePath shim 直接落地本頁（見 src/utils/liffState.js）。
 function buildLiffUrl(base, params) {
   const url = new URL(base)
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}/line/bind`
   params.forEach((value, key) => {
     if (!url.searchParams.get(key)) url.searchParams.set(key, value)
   })

@@ -45,20 +45,37 @@ In the admin settings page:
   未加好友會跳過首封推播並引導加入，加入後由 follow 事件自動補發）。
 - 後台設定需填 `publicSiteUrl`（訂位網站正式網址），LINE 卡片才會有「管理 / 修改訂位」按鈕。
 
-## 「LINE 我的訂位」查詢（rich menu）設定
+## LINE-first 訂位閉環（LIFF Endpoint = 站根）
 
-1. **LIFF 加開 `openid` scope**（LINE Developers → LIFF app → Scope 勾 `openid`）。
-   漏開的症狀：`liff.getIDToken()` 回 null，查詢頁全員退回電話查詢。
-2. **抄 LINE Login Channel ID**：LINE Developers → LIFF 所屬的 **LINE Login channel**
-   （⚠️ 不是 Messaging API channel）→ Basic settings → Channel ID。
-   填到後台「設定 → LINE → LINE Login Channel ID」。填錯 channel 的症狀：verify 全部 401、全員退回電話查詢。
-3. **Rich menu**：LINE Official Account Manager → 聊天室相關 → 圖文選單 → 動作「連結」→
-   `https://{訂位網站網址}/line/my-bookings`。LINE in-app browser 內 `liff.login()` 為無感自動登入。
-4. **上線前先實測**：先在 LINE 聊天室貼上該連結用真機驗證（自動登入、清單、管理連結、未綁定 fallback），
-   通過後再設 rich menu。
-5. **Plan B**：若 liff.login 因 LIFF Endpoint URL 範圍限制拒絕從 /line/my-bookings 發起，
-   另建第二個 LIFF app（Endpoint URL 直接指 `/line/my-bookings`），rich menu 改指該 app 的
-   deep link（`https://liff.line.me/{新liffId}`）——LIFF browser 內連登入跳轉都沒有。
+**架構（2026-06 重構）**：LIFF Endpoint URL 設為**站根**（`https://chicken-booking.zeabur.app/`），
+所有頁面用 path-style deep link 進入；LINE 會把 path+query 編進 `?liff.state=` 帶到站根，
+由 `src/main.jsx` 的 `resolveLiffStatePath` shim（`src/utils/liffState.js`）在 React 掛載前落地目標頁。
+
+Path-style deep link 清單（rich menu / 文宣用）：
+
+| 用途 | URL |
+|---|---|
+| **我要訂位**（主入口：LIFF 內訂位＝訂位即綁定＋確認卡即達） | `https://liff.line.me/2009996489-f1SCb75q/book` |
+| 查詢 / 管理訂位 | `https://liff.line.me/2009996489-f1SCb75q/line/my-bookings` |
+| 綁定通知（確認頁 CTA 自動產生，無需手設） | `https://liff.line.me/2009996489-f1SCb75q/line/bind?bookingId=...` |
+
+訂位即綁定的後端流：`guestCreateBooking` 收 `line.idToken`（LIFF 內前端靜默附帶）→
+`verifyLineIdToken` 驗明身分（userId 一律取 claims.sub）→ `attachLineBindingAndPush`
+（與 lineBind 端點共用 `lib/lineBinding.js` 的 record 形狀）→ 確認卡即時推播。
+全程 best-effort，綁定失敗絕不影響訂位成功。
+
+**Rich menu 建議版面**（LINE OA Manager → 圖文選單）：
+大格「我要訂位」＋「查詢訂位」＋「導航到店」（storeMapUrl）＋「撥打電話」（tel:）。
+
+**回退 SOP（順序不可反）**：先在 OA Manager 下架 rich menu → 再把 LIFF Endpoint 改回
+`/line/bind`。順序反了 path-style deep link 會全部落在綁定頁。
+
+## 「LINE 我的訂位」查詢設定（前置，均已於 2026-06-10 完成）
+
+1. **LIFF scopes = `openid` + `profile`**。漏開 openid 的症狀：`liff.getIDToken()` 回 null，全員退回電話查詢。
+2. **LINE Login Channel ID**（2009996489，抄自 LIFF 所屬 **LINE Login channel**、非 Messaging API channel）
+   填在後台「設定 → LINE → LINE Login Channel ID」。填錯 channel 的症狀：verify 全部 401。
+3. **上線前先實測**：在 LINE 聊天室貼 deep link 真機驗證，通過後再設 rich menu。
 
 ## Notes
 
