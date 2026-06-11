@@ -36,7 +36,6 @@ export default function SettingsView() {
   const toast = useToast()
   const confirm = useConfirm()
   const [form, setForm] = useState(settings)
-  const [savedMsg, setSavedMsg] = useState('')
   const [searchPhone, setSearchPhone] = useState('')
   const [searchResult, setSearchResult] = useState(null)
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
@@ -83,8 +82,7 @@ export default function SettingsView() {
 
   const persist = (patch) => {
     updateSettings(patch)
-    setSavedMsg('✅ 已儲存')
-    setTimeout(() => setSavedMsg(''), 2000)
+    toast.success('✅ 已儲存')
   }
 
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
@@ -111,8 +109,7 @@ export default function SettingsView() {
   }
   const saveBanners = () => {
     updateSettings({ heroBanners: form.heroBanners || [] })
-    setSavedMsg('✅ 首頁廣告已儲存')
-    setTimeout(() => setSavedMsg(''), 2000)
+    toast.success('✅ 首頁廣告已儲存')
   }
   const removeBanner = async (id) => {
     if (!(await confirm('確定刪除這張首頁廣告？', { title: '刪除廣告', confirmLabel: '刪除' }))) return
@@ -162,10 +159,9 @@ export default function SettingsView() {
     try {
       if (type === 'push') await migrateLocalToCloud()
       else await pullCloud()
-      setSavedMsg(type === 'push' ? '✅ 已上傳 Firestore' : '✅ 已從 Firestore 更新')
-      setTimeout(() => setSavedMsg(''), 2000)
+      toast.success(type === 'push' ? '✅ 已上傳 Firestore' : '✅ 已從 Firestore 更新')
     } catch (err) {
-      setSavedMsg(`⚠️ ${err.message || '同步失敗'}`)
+      toast.error(`⚠️ ${err.message || '同步失敗'}`)
     } finally {
       setCloudBusy(false)
     }
@@ -277,7 +273,6 @@ export default function SettingsView() {
           )}
           <div className="flex gap-2 items-center">
             <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存設定</Button>
-            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
         </div>
       </SettingsSection>
@@ -286,7 +281,6 @@ export default function SettingsView() {
         <SeatingsEditor form={form} setForm={setForm} />
         <div className="flex gap-2 items-center mt-3">
           <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存場次</Button>
-          {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
         </div>
       </SettingsSection>
 
@@ -339,7 +333,6 @@ export default function SettingsView() {
           </div>
           <div className="flex gap-2 items-center">
             <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存防線設定</Button>
-            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
         </div>
       </SettingsSection>
@@ -390,7 +383,6 @@ export default function SettingsView() {
           </label>
           <div className="flex gap-2 items-center">
             <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存自動化設定</Button>
-            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
         </div>
       </SettingsSection>
@@ -399,7 +391,6 @@ export default function SettingsView() {
         <ClosuresEditor form={form} setForm={setForm} bookings={bookings} />
         <div className="flex gap-2 items-center mt-3">
           <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存關閉設定</Button>
-          {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
         </div>
       </SettingsSection>
 
@@ -460,7 +451,6 @@ export default function SettingsView() {
 
           <div className="flex items-center gap-2">
             <Button onClick={saveBanners} className="flex-1 min-h-[44px]">儲存首頁廣告</Button>
-            {savedMsg && <span className="text-sm font-bold text-chicken-green">{savedMsg}</span>}
           </div>
         </div>
       </SettingsSection>
@@ -623,7 +613,6 @@ export default function SettingsView() {
                 測試開啟
               </a>
             )}
-            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
         </div>
       </SettingsSection>
@@ -671,7 +660,6 @@ export default function SettingsView() {
           </div>
           <div className="flex gap-2 items-center">
             <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存聯絡入口</Button>
-            {savedMsg && <span className="text-sm text-chicken-green font-bold">{savedMsg}</span>}
           </div>
         </div>
       </SettingsSection>
