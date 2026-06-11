@@ -61,7 +61,9 @@ export default function TodayView({ onAssignTable, onOpenGroup }) {
     const arrivedGroups = todayAll.filter(b => b.status === 'arrived' || b.status === 'completed').length
     const dining = todayAll.filter(b => b.status === 'arrived').length
     const unassigned = todayAll.filter(b => b.status === 'confirmed' && !b.assignedTableId).length
-    return { totalGroups, totalGuests, arrivedGroups, dining, unassigned }
+    // LINE 綁定率：LINE-first 重構的成效指標（rich menu 上線前後對比用）
+    const lineBound = todayAll.filter(b => b.lineUserId && !b.linePushBlocked).length
+    return { totalGroups, totalGuests, arrivedGroups, dining, unassigned, lineBound }
   }, [bookings, today])
 
   // 團體梯次同框（判斷時段用餐狀況）：source filter 只在「全部/團體」時顯示團體卡；
@@ -97,12 +99,13 @@ export default function TodayView({ onAssignTable, onOpenGroup }) {
   return (
     <div className="space-y-4">
       {/* 統計（散客口徑） */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
         <StatsCard label="今日訂位" value={`${stats.totalGroups}`} color="red" />
         <StatsCard label="總人數" value={`${stats.totalGuests}`} color="yellow" />
         <StatsCard label="未指派" value={`${stats.unassigned}`} color="red" />
         <StatsCard label="用餐中" value={`${stats.dining}`} color="brown" />
         <StatsCard label="已到/離" value={`${stats.arrivedGroups}`} color="green" />
+        <StatsCard label="LINE 已綁" value={`${stats.lineBound}/${stats.totalGroups}`} color="green" />
       </div>
 
       {/* 今日團體一覽（與散客分開計，避免口徑混淆） */}

@@ -19,6 +19,9 @@ test.beforeEach(async ({ page }) => {
   // 確保就算之後頁面多打了新端點，也絕不會送到正式 Cloud Functions。
   await page.route('**/guest*', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-blocked' }) }))
+  // BookingPage 的 LIFF 靜默偵測會嘗試載入 LINE SDK——攔掉確保離線確定性
+  // （載入失敗＝靜默降級，正是非 LIFF 環境的預期行為）。
+  await page.route('https://static.line-scdn.net/**', route => route.abort())
   // 攔截可訂時段查詢
   await page.route('**/guestGetAvailability', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(AVAILABILITY) }))

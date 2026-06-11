@@ -4,6 +4,7 @@ import { motion } from 'framer-motion'
 import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, Search, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { Input, Textarea, SlotSkeleton } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
+import { useLiffIdentity } from '../hooks/useLiffIdentity'
 import { guestGetAvailability, guestCreateBooking } from '../services/cloudDataService'
 import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
 import { bookingOccupancyLabel } from '../utils/capacity'
@@ -34,6 +35,10 @@ export default function BookingPage() {
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState({})
+
+  // LINE-first：客人從 LINE rich menu（LIFF 內）開本頁時靜默取得身分，
+  // 訂位送出即綁定＋立即收到確認卡。外部瀏覽器/未登入 → null，不影響任何流程。
+  const lineIdentity = useLiffIdentity(localSettings)
 
   // 可訂時段與公開店家設定，全部由後端 guestGetAvailability 提供（不含任何顧客個資）。
   const [settings, setSettings] = useState(localSettings)
@@ -157,6 +162,15 @@ export default function BookingPage() {
         date: data.date,
         timeSlot: data.timeSlot,
         notes: data.notes,
+        // LIFF 內訂位：附帶 LINE 身分（後端驗 idToken 後訂位即綁定＋推播確認卡）
+        ...(lineIdentity?.idToken ? {
+          line: {
+            idToken: lineIdentity.idToken,
+            displayName: lineIdentity.displayName,
+            pictureUrl: lineIdentity.pictureUrl,
+            ...(typeof lineIdentity.friendFlag === 'boolean' ? { friendFlag: lineIdentity.friendFlag } : {}),
+          },
+        } : {}),
       })
       const booking = res.booking
       // 後端回傳完整訂位（含 manageToken），用 route state 帶到確認頁。
@@ -306,6 +320,19 @@ export default function BookingPage() {
                 placeholder="例：靠窗、慶生、過敏、長輩需剪雞肉..."
               />
             </div>
+
+            {/* LINE-first 信任訊號：LIFF 內已識別身分 → 告知訂位卡片會自動送達 */}
+            {lineIdentity && (
+              lineIdentity.friendFlag === false ? (
+                <div className="rounded-2xl border border-chicken-yellow/40 bg-chicken-yellow/10 px-4 py-3 text-sm font-bold leading-6 text-chicken-brown">
+                  完成訂位後加入官方帳號好友，即可在 LINE 收到訂位卡片與異動通知。
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-[#06C755]/30 bg-[#06C755]/10 px-4 py-3 text-sm font-black leading-6 text-[#06A848]">
+                  ✓ 訂位卡片將自動傳送到您的 LINE{lineIdentity.displayName ? `（${lineIdentity.displayName}）` : ''}
+                </div>
+              )
+            )}
           </section>
         )}
 

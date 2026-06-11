@@ -28,6 +28,7 @@ import {
   slotEpochMs,
   buildMyBookingsList,
 } from './lib/myBookings.js'
+import { buildLineBindingRecord } from './lib/lineBinding.js'
 
 initializeApp()
 
@@ -85,7 +86,7 @@ const DEFAULT_STORE_LONGITUDE = '120.746746'
 const DEFAULT_STORE_PHONE = '049-2753377'
 const DEFAULT_DINING_DURATION_MIN = 90
 const DEFAULT_CLEANUP_BUFFER_MIN = 10
-const LINE_BIND_PUSH_DEDUPE_MS = 10 * 60 * 1000
+// LINE_BIND_PUSH_DEDUPE_MS 已搬至 lib/lineBinding.js 統一維護（record 組裝邏輯同檔）。
 const PUBLIC_CORS = true
 
 const COLLECTIONS = {
@@ -483,7 +484,7 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
 
 // 客人端「建立訂位」：含完整輸入驗證 + Firestore 交易內的原子容量檢查，
 // 確保不會超賣（兩組客人同時搶最後座位只會成立到容量上限）。
-export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID] }, async (req, res) => {
+export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     await enforceRateLimit(req, 'guestCreateBooking')
@@ -572,7 +573,31 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       payload: { text: tgBookingMessage('🆕 <b>新線上訂位</b>', booking, { event: 'booking_created', booking }) },
     })
 
-    return res.json({ ok: true, booking })
+    // LINE-first：LIFF 內訂位時前端附帶 idToken——驗明身分後「建立訂位即綁定＋立即推播確認卡」，
+    // 客人零額外動作。全程 best-effort：任何失敗只記 log，絕不影響訂位成功（訂位是主體，綁定是加值）。
+    let finalBooking = booking
+    const lineInput = req.body?.line
+    if (lineInput?.idToken && settings.lineLoginChannelId) {
+      try {
+        const claims = await verifyLineIdToken(String(lineInput.idToken), settings.lineLoginChannelId)
+        const result = await attachLineBindingAndPush({
+          authBooking: booking,
+          settings,
+          line: {
+            // 身分唯一以 LINE 驗過的 token claims 為準，絕不信 client 自報 userId
+            userId: claims.sub,
+            displayName: String(lineInput.displayName || '').slice(0, 80),
+            pictureUrl: String(lineInput.pictureUrl || '').slice(0, 500),
+            ...(typeof lineInput.friendFlag === 'boolean' ? { friendFlag: lineInput.friendFlag } : {}),
+          },
+        })
+        finalBooking = { ...booking, ...result.bookingPatch }
+      } catch (err) {
+        console.warn('line attach on create skipped:', err?.message)
+      }
+    }
+
+    return res.json({ ok: true, booking: finalBooking })
   } catch (err) {
     const code = err.status || 500
     if (code >= 500) console.error('guestCreateBooking failed:', err)
@@ -756,90 +781,68 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
   }
 })
 
+// LINE 綁定共用核心：lineBind 端點與 guestCreateBooking 的「訂位即綁定」共用。
+// 寫 binding + booking 鏡像（batch 雙寫），未被防重（10 分鐘）/needFriend 擋下時推播確認卡。
+// record 形狀由 lib/lineBinding.buildLineBindingRecord 統一（純函式可測）；
+// 店家資訊一律以當下 settings 為準（不信 client 快照）。
+async function attachLineBindingAndPush({ authBooking, settings, line, existing = null }) {
+  const manageUrl = buildManageUrl(settings.publicSiteUrl, authBooking.id, authBooking.manageToken)
+  const nextStore = storeFromSettings(settings)
+  const now = new Date().toISOString()
+  const { record, bookingPatch, needFriend, skipPush, recentlyPushed } = buildLineBindingRecord({
+    authBooking,
+    manageUrl,
+    store: nextStore,
+    line,
+    existing,
+    now,
+    nowMs: Date.now(),
+  })
+
+  const batch = db.batch()
+  batch.set(db.collection('lineBookingBindings').doc(authBooking.id), {
+    ...record,
+    updatedAt: FieldValue.serverTimestamp(),
+    createdAt: existing?.createdAt || FieldValue.serverTimestamp(),
+  }, { merge: true })
+  batch.set(db.collection(COLLECTIONS.bookings).doc(authBooking.id), bookingPatch, { merge: true })
+  await batch.commit()
+
+  if (!skipPush) {
+    await enqueueAndTrySend({
+      channel: 'line',
+      event: 'created',
+      bookingId: authBooking.id,
+      payload: {
+        to: line.userId,
+        messages: buildBookingMessages(
+          { ...authBooking, manageUrl, dateLabel: dayLabelServer(authBooking.date) },
+          nextStore,
+          'confirmed',
+        ),
+      },
+    })
+  }
+  return { needFriend, skipPush, recentlyPushed, bookingPatch }
+}
+
 export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
-    const { booking, store, line } = req.body || {}
+    const { booking, line } = req.body || {}
     if (!booking?.id || !booking?.token || !line?.userId) {
       return res.status(400).json({ ok: false, error: 'missing-required-fields' })
     }
 
     // 權威重讀：以 bookings 為準並驗證 manageToken（safeTokenEqual），不再整包信任 client 傳來的 booking。
     const authBooking = await getBookingByToken(booking.id, booking.token)
-    // manageUrl 由後端以 publicSiteUrl 設定組成（Firestore booking 沒有此欄位；
-    // 過去權威重讀後直接用 authBooking 組訊息，Flex 卡片因此缺「管理 / 修改訂位」按鈕）。
     const settingsSnap = await db.collection('settings').doc('main').get()
     const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
-    const manageUrl = buildManageUrl(settings.publicSiteUrl, authBooking.id, authBooking.manageToken)
-
-    const bindingRef = db.collection('lineBookingBindings').doc(authBooking.id)
-    const bookingRef = db.collection(COLLECTIONS.bookings).doc(authBooking.id)
-    const existingSnap = await bindingRef.get()
+    const existingSnap = await db.collection('lineBookingBindings').doc(authBooking.id).get()
     const existing = existingSnap.exists ? existingSnap.data() : null
-    const now = new Date().toISOString()
-    const lastPushAt = existing?.lastBindPushAt || existing?.lastPushedAt || ''
-    const lastPushMs = lastPushAt ? new Date(lastPushAt).getTime() : 0
-    const recentlyPushed = existing?.lineUserId === line.userId
-      && Number.isFinite(lastPushMs)
-      && Date.now() - lastPushMs < LINE_BIND_PUSH_DEDUPE_MS
 
-    // 店家資訊一律以當下 settings 為準（client 可不再傳 store；舊版前端傳了也照常容忍）。
-    const nextStore = store && Object.keys(store).length ? normalizeStore(store) : storeFromSettings(settings)
-    // 好友狀態：未加好友的 push 必定被 LINE 拒絕——標記 pushBlocked 並跳過首推，
-    // 待 follow 事件（顧客加好友）清旗標自動補發，不再產生「重試 6 次進 dead-letter」的必死訊息。
-    // 重新綁定且非 needFriend 則清除舊旗標（解除封鎖後重綁即可恢復通知）。
-    const needFriend = line.friendFlag === false
-    const skipPush = recentlyPushed || needFriend
-    const record = {
-      bookingId: authBooking.id,
-      manageToken: authBooking.manageToken,
-      lineUserId: line.userId,
-      lineDisplayName: line.displayName || '',
-      linePictureUrl: line.pictureUrl || '',
-      booking: manageUrl ? { ...authBooking, manageUrl } : authBooking,
-      store: nextStore,
-      updatedAt: FieldValue.serverTimestamp(),
-      createdAt: existing?.createdAt || FieldValue.serverTimestamp(),
-      lastBindAttemptAt: now,
-      ...(needFriend
-        ? { pushBlocked: true, pushBlockedReason: 'not-friend', pushBlockedAt: now }
-        : { pushBlocked: false, pushBlockedReason: null, pushBlockedAt: null }),
-      ...(skipPush ? {} : {
-        lastBindPushAt: now,
-        lastPushByEvent: {
-          ...(existing?.lastPushByEvent || {}),
-          confirmed: { at: now, stateHash: notificationStateHash(authBooking) },
-        },
-      }),
-    }
-
-    const batch = db.batch()
-    batch.set(bindingRef, record, { merge: true })
-    batch.set(bookingRef, {
-      lineUserId: line.userId,
-      lineDisplayName: line.displayName || '',
-      linePictureUrl: line.pictureUrl || '',
-      linePushBlocked: needFriend,
-      updatedAt: now,
-    }, { merge: true })
-    await batch.commit()
-    if (!skipPush) {
-      await enqueueAndTrySend({
-        channel: 'line',
-        event: 'created',
-        bookingId: authBooking.id,
-        payload: {
-          to: line.userId,
-          messages: buildBookingMessages(
-            { ...authBooking, manageUrl, dateLabel: dayLabelServer(authBooking.date) },
-            nextStore,
-            'confirmed',
-          ),
-        },
-      })
-    }
-
-    return res.json({ ok: true, skippedPush: recentlyPushed, ...(needFriend ? { needFriend: true } : {}) })
+    const result = await attachLineBindingAndPush({ authBooking, settings, line, existing })
+    return res.json({ ok: true, skippedPush: result.recentlyPushed, ...(result.needFriend ? { needFriend: true } : {}) })
   } catch (err) {
     const code = err.status || 500
     if (code >= 500) console.error('lineBind failed:', err)
