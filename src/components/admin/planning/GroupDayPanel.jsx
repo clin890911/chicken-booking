@@ -157,7 +157,7 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
   )
 }
 
-export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin }) {
+export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onNewWalkin, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin }) {
   const s = daySummary || {}
   const counts = s.prep?.counts || {}
   const hasGroups = dayGroups.length > 0
@@ -191,26 +191,27 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
               <button onClick={onGoToday} className="text-xs font-bold text-chicken-red underline">→ 現場（今日帶位）</button>
             )}
           </div>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5 flex-wrap justify-end">
             {onOpenMap && (
               <button onClick={onOpenMap} className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">🗺️ 排位地圖</button>
             )}
             {hasGroups && (
               <button onClick={onPrintSheet} className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">🖨 列印備餐單</button>
             )}
+            {onNewWalkin && (
+              <button onClick={onNewWalkin} className="px-3 py-2 rounded-xl text-xs font-bold bg-orange-500 text-white shadow">➕ 新增散客</button>
+            )}
             <button onClick={() => onNewGroup()} className="px-3 py-2 rounded-xl text-xs font-bold bg-chicken-red text-white shadow">➕ 新增團單</button>
           </div>
         </div>
 
-        {/* 四大數字（團數 / 團體人數 / 散客 / 保留桌） */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {/* 三大數字（團體 / 散客 / 保留桌）— 團體合併「團數 + 人數」，與散客同格式 */}
+        <div className="grid grid-cols-3 gap-2">
           <div className="rounded-xl bg-chicken-red/10 text-chicken-red p-2.5 text-center">
-            <div className="text-[11px] font-bold opacity-80">🚌 團數</div>
-            <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{s.groupCount || 0}</div>
-          </div>
-          <div className="rounded-xl bg-chicken-brown/10 text-chicken-brown p-2.5 text-center">
-            <div className="text-[11px] font-bold opacity-80">👥 團體人數</div>
-            <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{s.guests || 0}</div>
+            <div className="text-[11px] font-bold opacity-80">🚌 團體</div>
+            <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">
+              {s.groupCount || 0}<span className="text-sm">團</span> <span className="text-sm">{s.guests || 0} 位</span>
+            </div>
           </div>
           <div className="rounded-xl bg-orange-50 text-orange-700 p-2.5 text-center">
             <div className="text-[11px] font-bold opacity-80">🧍 散客</div>
