@@ -40,7 +40,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const confirmDialog = useConfirm()
   const {
     setTableStatus, blockTable, unblockTable, walkInSeat,
-    seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, setStatus,
+    assignBookingToTable, seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, setStatus,
     setTableOutage, clearTableOutage,
     settings, groupReservations,
   } = useBooking()
@@ -98,6 +98,18 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     const r = seatBooking(booking.id)
     if (!r.ok) return toast.error(r.error)
     toast.success(`${booking.name} 已入座 ${table.number}`)
+  }
+
+  // 預配（規劃頁預先配桌、桌仍 vacant）的訂位客人到場 → 一鍵指派+入座。
+  // 補缺口：過去這位客人已有 assignedTableId，反而不會出現在「可入座候選名單」，到場後無入座入口。
+  const handleSeatPreassigned = () => {
+    if (!preassign) return
+    const r1 = assignBookingToTable(preassign.id, table.number)
+    if (!r1.ok) return toast.error('入座失敗：' + r1.error)
+    const r2 = seatBooking(preassign.id)
+    if (!r2.ok) { toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return }
+    toast.success(`✅ ${preassign.name}（${preassign.guests} 位）入座 ${table.number}`)
+    onClose?.()
   }
 
   const minutesSeated = () => table.seatedAt
@@ -322,6 +334,14 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
             <span className="font-bold text-orange-700">🪑 已預留：</span>
             <span className="text-orange-700/90">排位規劃已預先配給 {preassign.name}（{preassign.guests} 位{preassign.timeSlot ? ` · ${preassign.timeSlot}` : ''}）</span>
             <p className="text-[11px] text-orange-700/70 mt-0.5">直接入座或指派他人會覆蓋此預留。</p>
+            {canEdit && (
+              <button
+                onClick={handleSeatPreassigned}
+                className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
+              >
+                ✅ {preassign.name} 到了，入座 {table.number}
+              </button>
+            )}
           </div>
         )}
         {/* 維修中：接管空桌的預設引導，明確顯示原因與期間 */}
