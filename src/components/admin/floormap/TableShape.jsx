@@ -3,16 +3,22 @@
 //   0-(用餐時間-30) 分：正常
 //   接近用餐時間：黃色光暈
 //   超過用餐時間/清桌緩衝：加深與警示
-// 填色加深以確保白字可讀（對比 ≥3:1）；色相語義維持：綠=可入座 / 藍=已預訂 / 橙=用餐 / 琥珀=清桌 / 灰=不可用
+// 配色原則「平靜 vs 需處理」：不需動作的桌（可入座/已預訂）用淡色低存在感，
+// 需要動作的桌（用餐中/待清/超時/團保）才用實心色跳出。色相語義：
+//   綠=可入座（淡）/ 藍=已預訂（淡）/ 橙=用餐 / 黃=待清（與橙以飽和度區隔）/ 紅=超時 / 靛=團保 / 灰=不可用
+// 每格 fill 各自帶 text 色，淡底用深字、實心用白字（對比 ≥4.5:1）。
 import { diffMin, stageOf } from '../../../utils/diningStage'
 
 const STATUS_COLOR = {
-  vacant:   { fill: '#059669', stroke: '#047857' },   // 加深綠：白字可讀、可入座最顯眼
-  reserved: { fill: '#0284c7', stroke: '#075985' },   // 沉穩鋼藍：尚不能入座，不與可入座綠爭視覺
-  dining:   { fill: '#f97316', stroke: '#c2410c' },
-  cleaning: { fill: '#d97706', stroke: '#b45309' },   // 加深琥珀：白字可讀
-  blocked:  { fill: '#6b7280', stroke: '#4b5563' },   // 加深灰
+  vacant:   { fill: '#ffffff', stroke: '#16a34a', text: '#15803d' },   // 可入座：淡色降噪（白底綠框綠字），不搶視覺
+  reserved: { fill: '#e6f1fb', stroke: '#2f86d6', text: '#0c447c' },   // 已預訂：淡藍，尚不能入座
+  dining:   { fill: '#f97316', stroke: '#c2410c', text: '#ffffff' },   // 用餐中：飽和橘實心
+  cleaning: { fill: '#fde68a', stroke: '#d97706', text: '#92400e' },   // 待清桌：淡黃，與用餐中橘以飽和度一眼區隔
+  blocked:  { fill: '#9ca3af', stroke: '#6b7280', text: '#ffffff' },   // 停用
 }
+
+// 團體保留（vacant 但今日被團 hold）：實心靛色，絕不與可入座綠混淆——忙碌時不會誤帶散客上保留桌
+const GROUP_HOLD = { fill: '#6366f1', stroke: '#4338ca', text: '#ffffff' }
 
 // dining 階段顏色：normal/late 為橘系（仍在用餐，警示但非超時），超時才轉紅
 const DINING_STAGE_FILL = {
@@ -124,15 +130,18 @@ export default function TableShape({
   const minutes = (status === 'dining' && table.seatedAt) ? diffMin(table.seatedAt) : 0
   const stage = status === 'dining' ? stageOf(minutes, settings) : null
 
-  // 填色：dining 用 stage 對應顏色，其他用基本 status color
-  let fill = STATUS_COLOR[status]?.fill || STATUS_COLOR.vacant.fill
+  // 填色：vacant 被團 hold → 實心靛色；dining 用 stage 對應顏色；其餘用基本 status color
+  const isGroupHold = status === 'vacant' && !!groupHoldLabel
+  const palette = isGroupHold ? GROUP_HOLD : (STATUS_COLOR[status] || STATUS_COLOR.vacant)
+  let fill = palette.fill
   if (status === 'dining' && stage) {
     fill = DINING_STAGE_FILL[stage]
   }
+  const textColor = palette.text   // 淡底用深字、實心用白字
 
-  // 邊框：選中 / 高亮優先；超時也用紅邊
-  let stroke = STATUS_COLOR[status]?.stroke || '#16a34a'
-  let strokeWidth = 1
+  // 邊框：選中 / 高亮優先；超時也用紅邊。base 2px 讓淡底狀態的色框讀得出語義
+  let stroke = palette.stroke
+  let strokeWidth = 2
   let strokeDash = null
   let className = ''
 
@@ -174,39 +183,39 @@ export default function TableShape({
 
       {/* 桌號 */}
       <text x={x + w / 2} y={y + (h <= 80 ? 24 : 28)}
-            fontSize={h <= 80 ? 14 : 16} fontWeight={800} fill="white" textAnchor="middle" pointerEvents="none">
+            fontSize={h <= 80 ? 14 : 16} fontWeight={800} fill={textColor} textAnchor="middle" pointerEvents="none">
         {number}
       </text>
       {/* 容量 */}
       <text x={x + w / 2} y={y + (h <= 80 ? 42 : 48)}
-            fontSize={10} fontWeight={600} fill="white" opacity={0.95} textAnchor="middle" pointerEvents="none">
+            fontSize={10} fontWeight={600} fill={textColor} opacity={0.9} textAnchor="middle" pointerEvents="none">
         {capacity} 人
       </text>
 
       {/* 時間/時長 */}
       {status === 'reserved' && booking && (
         <text x={x + w / 2} y={y + h - 8}
-              fontSize={10} fill="white" fontWeight={600} textAnchor="middle" pointerEvents="none">
+              fontSize={10} fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
           📋 {booking.timeSlot || ''}
         </text>
       )}
       {status === 'dining' && table.seatedAt && (
         <text x={x + w / 2} y={y + h - 8}
               fontSize={stage === 'overtime' || stage === 'buffer-overtime' ? 11 : 10}
-              fill="white" fontWeight={700} textAnchor="middle" pointerEvents="none">
+              fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
           {(stage === 'overtime' || stage === 'buffer-overtime') && '⚠ '}{minutes} 分
         </text>
       )}
       {status === 'cleaning' && (
         <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fontWeight={600} fill="white" textAnchor="middle" pointerEvents="none">
-          清桌中
+              fontSize={9} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
+          待清桌
         </text>
       )}
       {status === 'vacant' && (
         <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fontWeight={groupHoldLabel ? 800 : 600} fill="white" textAnchor="middle" pointerEvents="none">
-          {groupHoldLabel || '可入座'}
+              fontSize={9} fontWeight={groupHoldLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
+          {groupHoldLabel || '✓ 可入座'}
         </text>
       )}
     </g>

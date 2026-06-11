@@ -363,13 +363,13 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
           ) : (
             <>
               <div className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-emerald-600" />可入座</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-sky-600" />已預訂</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />用餐中</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-amber-600" />待清桌</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-full bg-chicken-red" />超時</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded border-2 border-dashed border-indigo-500 bg-transparent" />🚌 團體保留</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded border-2 border-chicken-red bg-transparent" />選中</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white border-2 border-green-600" />可入座</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-sky-100 border border-sky-500" />已預訂</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-orange-500" />用餐中</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-amber-200 border border-amber-600" />待清桌</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-red-600" />超時</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-500" />團體保留</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white ring-2 ring-chicken-red ring-inset" />選中</span>
               </div>
               <FloorMap
                 floor={floor}
