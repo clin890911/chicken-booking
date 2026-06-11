@@ -10,6 +10,7 @@ import GroupDayPanel from './GroupDayPanel'
 import GroupDaySheet from './GroupDaySheet'
 import GroupDetailStage from './GroupDetailStage'
 import GroupEditorStage from './GroupEditorStage'
+import AddWalkinModal from './AddWalkinModal'
 import SlotMapPanel from './SlotMapPanel'
 
 const PURGE_FLAG = 'chicken_group_blank_purge_v1'
@@ -47,6 +48,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   const [editorIsNew, setEditorIsNew] = useState(false)
   const [detailGroupId, setDetailGroupId] = useState(null) // 詳情頁顯示的團單 id（live 查找）
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [showAddWalkin, setShowAddWalkin] = useState(false) // 規劃頁快速新增散客
   const [mapAssign, setMapAssign] = useState(null) // { bookingId, seatingId }：跳排位地圖並自動進預配模式
 
   // map 態的前一日/後一日：同步月曆游標，回 day 態時月曆停在正確的月份
@@ -302,6 +304,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
             onPrintSheet={() => setSheetOpen(true)}
             onOpenMap={() => setPane('map')}
             onAssignWalkin={goAssignWalkin}
+            onNewWalkin={() => setShowAddWalkin(true)}
           />
         </div>
       ) : (
@@ -317,6 +320,9 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
           onClose={() => setSheetOpen(false)}
         />
       )}
+
+      {/* 快速新增散客（日期鎖定當日；建立後即現於當日散客名單） */}
+      <AddWalkinModal open={showAddWalkin} date={selectedDate} onClose={() => setShowAddWalkin(false)} />
     </div>
   )
 }
