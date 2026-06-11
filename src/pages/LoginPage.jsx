@@ -1,24 +1,33 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Input, Button, Card } from '../components/ui'
 
 export default function LoginPage() {
-  const { signIn, usingFirebase } = useAuth()
+  const { signIn, usingFirebase, user } = useAuth()
   const nav = useNavigate()
   const [email, setEmail] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // 登入成功後才導向，而且要「等 user 真的被設定」才導向：
+  // Google 登入時 signIn() 不直接 setUser（由 onAuthStateChanged 非同步接手，
+  // 動態管理員還要多一次後端確認）。若在 signIn() return 後立刻 nav('/admin')，
+  // 此刻 user 可能仍為 null，ProtectedRoute 會把人踢回 /login —— 就是「第一次沒反應、
+  // 要按第二次」的根因。改為響應 user 變化導向，第一次就成立；已登入訪問 /login 也會直接進後台。
+  useEffect(() => {
+    if (user) nav('/admin', { replace: true })
+  }, [user, nav])
 
   const doSignIn = async (value) => {
     setErr('')
     setBusy(true)
     try {
       await signIn(value)
-      nav('/admin', { replace: true })
+      // 成功後不在這裡 nav；交給上方 useEffect 等 user set 後導向（避免 race）。
+      // 維持 busy=true 直到 user set、元件因導向而卸載。
     } catch (ex) {
       setErr(ex.message || '登入失敗，請再試一次')
-    } finally {
       setBusy(false)
     }
   }
