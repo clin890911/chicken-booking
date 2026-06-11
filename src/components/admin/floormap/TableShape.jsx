@@ -59,7 +59,7 @@ export default function TableShape({
       <g style={{ opacity: 0.35, cursor: clickable ? 'pointer' : 'default' }} onClick={clickable ? onClick : undefined}>
         <rect x={x} y={y} width={w} height={h} rx={6}
               fill="#e5e0d8" stroke="#3a2e26" strokeWidth={1} strokeDasharray="3 3"/>
-        <text x={x + w / 2} y={y + h / 2 - (outNote ? 4 : -4)} fontSize={11} fill="#8a7e72" textAnchor="middle" pointerEvents="none">{number}</text>
+        <text x={x + w / 2} y={y + h / 2 - (outNote ? 4 : -4)} fontSize={16} fontWeight={800} fill="#8a7e72" textAnchor="middle" pointerEvents="none">{number}</text>
         {outNote && (
           <text x={x + w / 2} y={y + h / 2 + 12} fontSize={9} fontWeight={700} fill="#b45309" textAnchor="middle" pointerEvents="none">
             🛠 {outNote.length > 7 ? '維修中' : outNote}
@@ -84,12 +84,12 @@ export default function TableShape({
         <rect x={x} y={y} width={w} height={h} rx={8}
               fill={P.fill} stroke={stroke} strokeWidth={strokeWidth}
               strokeDasharray={planState === 'blocked' ? '4 3' : null} />
-        <text x={x + w / 2} y={y + (h <= 80 ? 24 : 28)}
-              fontSize={h <= 80 ? 14 : 16} fontWeight={800} fill={P.text} textAnchor="middle" pointerEvents="none">
+        <text x={x + w / 2} y={y + (h <= 80 ? 25 : 28)}
+              fontSize={h <= 80 ? 20 : 22} fontWeight={900} fill={P.text} textAnchor="middle" pointerEvents="none">
           {number}
         </text>
-        <text x={x + w / 2} y={y + (h <= 80 ? 42 : 48)}
-              fontSize={10} fontWeight={600} fill={P.text} opacity={0.95} textAnchor="middle" pointerEvents="none">
+        <text x={x + w / 2} y={y + (h <= 80 ? 44 : 48)}
+              fontSize={h <= 80 ? 13 : 14} fontWeight={700} fill={P.text} opacity={0.95} textAnchor="middle" pointerEvents="none">
           {capacity} 人
         </text>
         <text x={x + w / 2} y={y + h - 8}
@@ -115,8 +115,8 @@ export default function TableShape({
         <rect x={x} y={y} width={w} height={h} rx={8}
               fill={O.fill} stroke={stroke} strokeWidth={strokeWidth}
               strokeDasharray={occHighlight ? '4 2' : null} />
-        <text x={x + w / 2} y={y + (h <= 80 ? 22 : 26)} fontSize={h <= 80 ? 14 : 16} fontWeight={800} fill={O.text} textAnchor="middle" pointerEvents="none">{number}</text>
-        <text x={x + w / 2} y={y + (h <= 80 ? 36 : 41)} fontSize={9} fontWeight={600} fill={O.text} opacity={0.9} textAnchor="middle" pointerEvents="none">{capacity}人</text>
+        <text x={x + w / 2} y={y + (h <= 80 ? 24 : 26)} fontSize={h <= 80 ? 19 : 21} fontWeight={900} fill={O.text} textAnchor="middle" pointerEvents="none">{number}</text>
+        <text x={x + w / 2} y={y + (h <= 80 ? 40 : 41)} fontSize={h <= 80 ? 12 : 13} fontWeight={700} fill={O.text} opacity={0.95} textAnchor="middle" pointerEvents="none">{capacity}人</text>
         {occLabel && (
           <text x={x + w / 2} y={y + h - 8} fontSize={8.5} fontWeight={700} fill={O.text} textAnchor="middle" pointerEvents="none">
             {occLabel.length > 5 ? occLabel.slice(0, 5) : occLabel}
@@ -182,13 +182,13 @@ export default function TableShape({
             fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={strokeDash} />
 
       {/* 桌號 */}
-      <text x={x + w / 2} y={y + (h <= 80 ? 24 : 28)}
-            fontSize={h <= 80 ? 14 : 16} fontWeight={800} fill={textColor} textAnchor="middle" pointerEvents="none">
+      <text x={x + w / 2} y={y + (h <= 80 ? 25 : 28)}
+            fontSize={h <= 80 ? 20 : 22} fontWeight={900} fill={textColor} textAnchor="middle" pointerEvents="none">
         {number}
       </text>
       {/* 容量 */}
-      <text x={x + w / 2} y={y + (h <= 80 ? 42 : 48)}
-            fontSize={10} fontWeight={600} fill={textColor} opacity={0.9} textAnchor="middle" pointerEvents="none">
+      <text x={x + w / 2} y={y + (h <= 80 ? 44 : 48)}
+            fontSize={h <= 80 ? 13 : 14} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
         {capacity} 人
       </text>
 
