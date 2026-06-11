@@ -31,11 +31,29 @@ function overlapsSlot(booking, targetMinutes, durationMin) {
   return rangesOverlap(start, end, targetMinutes, durationMin)
 }
 
+// === 司領桌（司機+領隊桌）===
+// 司領桌以「特殊梯次」存在 group.batches 內，旗標 isEscort=true。
+// 實體佔桌一律照算（含司領桌→擋他人/維修守門），但旅客人數/保留席/「第N梯」標號只看旅客梯次。
+export function isEscortBatch(b) {
+  return !!b?.isEscort
+}
+// 旅客梯次（排除司領桌）— 旅客計數/保留席/梯次編號的單一來源
+export function guestBatches(group) {
+  return (group?.batches || []).filter(b => !isEscortBatch(b))
+}
+
 // === 團體佔位（整桌保留語意）===
-// 一個團在某日佔用的「相異桌號」集合（兩梯重用同桌只算一次）。
+// 一個團在某日佔用的「相異桌號」集合（兩梯重用同桌只算一次）。含司領桌（實體佔桌）。
 export function groupTableNumbers(group) {
   const seen = new Set()
   ;(group?.batches || []).forEach(b => (b.tableNumbers || []).forEach(n => { if (n) seen.add(String(n)) }))
+  return [...seen]
+}
+
+// 旅客梯次佔用的相異桌號（排除司領桌）— 算「旅客保留席」用，不含司領桌
+export function guestTableNumbers(group) {
+  const seen = new Set()
+  guestBatches(group).forEach(b => (b.tableNumbers || []).forEach(n => { if (n) seen.add(String(n)) }))
   return [...seen]
 }
 

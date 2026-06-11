@@ -3,7 +3,7 @@ import { Button } from '../../ui'
 import FloorMap from '../floormap/FloorMap'
 import GroupSheet from '../group/GroupSheet'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
-import { groupTableNumbers } from '../../../utils/capacity'
+import { groupTableNumbers, guestBatches } from '../../../utils/capacity'
 
 const STATUS_LABEL = {
   planned: { label: '已預排', cls: 'bg-chicken-brown/10 text-chicken-brown' },
@@ -28,8 +28,9 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
   const st = STATUS_LABEL[group.status] || STATUS_LABEL.planned
   const counts = group.counts || {}
   const batches = group.batches || []
-  const singleBatch = batches.length === 1
-  const batchGuests = (b) => singleBatch ? (Number(counts.total) || 0) : (Number(b?.guests) || 0)
+  const gBatches = guestBatches(group)            // 旅客梯次（排除司領桌）
+  const singleGuest = gBatches.length === 1
+  const batchGuests = (b) => (b && !b.isEscort && singleGuest) ? (Number(counts.total) || 0) : (Number(b?.guests) || 0)
 
   const capByNum = useMemo(() => {
     const m = {}; (tables || []).forEach(t => { m[t.number] = Number(t.capacity) || 0 }); return m
@@ -71,7 +72,7 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
         </div>
         <div className="rounded-xl bg-indigo-50 text-indigo-700 p-2.5 text-center">
           <div className="text-[11px] font-bold opacity-80">🚌 梯次</div>
-          <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{batches.length}</div>
+          <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{gBatches.length}</div>
         </div>
         <div className="rounded-xl bg-chicken-yellow/15 text-chicken-yellow p-2.5 text-center">
           <div className="text-[11px] font-bold opacity-80">🪑 保留</div>
@@ -89,9 +90,9 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
             const sea = seatingForSlot(settings, b.timeSlot)
             const nums = (b.tableNumbers || []).map(String)
             return (
-              <div key={b.id} className="rounded-lg border border-chicken-brown/10 bg-chicken-cream/30 p-2.5 flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-black text-chicken-brown">{b.label}</span>
-                {sea && <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>}
+              <div key={b.id} className={`rounded-lg border p-2.5 flex items-center gap-2 flex-wrap ${b.isEscort ? 'border-indigo-200 bg-indigo-50' : 'border-chicken-brown/10 bg-chicken-cream/30'}`}>
+                <span className={`text-sm font-black ${b.isEscort ? 'text-indigo-700' : 'text-chicken-brown'}`}>{b.isEscort ? '🚗 司領桌' : b.label}</span>
+                {sea && !b.isEscort && <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>}
                 <span className="px-2 py-0.5 rounded-full bg-white text-chicken-brown text-xs font-bold tabular-nums">🕐 {b.timeSlot || '未排'}</span>
                 <span className="px-2 py-0.5 rounded-full bg-white text-chicken-brown text-xs font-bold tabular-nums">👥 {batchGuests(b)} 位</span>
                 {nums.length > 0 ? (

@@ -14,6 +14,8 @@ import {
   occupancyMinutes,
   groupOccupancyWindow,
   groupTableNumbers,
+  guestBatches,
+  guestTableNumbers,
   toMinutes,
   CAPACITY_EXCLUDED_STATUSES,
 } from '../utils/capacity'
@@ -62,6 +64,7 @@ function normalizeBatch(b = {}) {
     tableNumbers: Array.isArray(b.tableNumbers) ? b.tableNumbers.map(String) : [],
     guests: Number(b.guests) || 0,
     note: b.note || '',
+    isEscort: !!b.isEscort,   // 司領桌（司機+領隊）特殊梯次；舊資料無此鍵 → false
   }
 }
 
@@ -234,6 +237,7 @@ export function cloneGroupForDuplicate(source, { date } = {}) {
     tableNumbers: [],
     guests: Number(b.guests) || 0,
     note: b.note || '',
+    isEscort: !!b.isEscort,
   }))
   if (!batches.length) batches.push({ id: batchUid(), label: '第一梯', timeSlot: '11:00', tableNumbers: [], guests: 0, note: '' })
   return {
@@ -279,11 +283,15 @@ export function validateGroupForSave(group, capByNum = {}, tables = null) {
   const total = Number(group.counts?.total) || 0
   if (total <= 0) return '請填寫總人數（需大於 0）'
   const batches = group.batches || []
-  if (!batches.length) return '請至少新增一個梯次'
+  // 旅客梯次（排除司領桌）：梯次數量、人數、保留席等旅客口徑只看旅客梯次
+  const gBatches = guestBatches(group)
+  if (!gBatches.length) return '請至少新增一個梯次'
   const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (Number(capByNum[n]) || 0), 0)
   const tableByNum = Array.isArray(tables) ? new Map(tables.map(t => [String(t.number), t])) : null
   for (const b of batches) {
-    if ((Number(b.guests) || 0) <= 0) return `「${b.label}」用餐人數需大於 0`
+    const escort = !!b.isEscort
+    // 司領桌：可填人數（預設不擋 0），只需 ≥1 桌；旅客梯次：人數需大於 0
+    if (!escort && (Number(b.guests) || 0) <= 0) return `「${b.label}」用餐人數需大於 0`
     if (!(b.tableNumbers || []).length) return `「${b.label}」請至少圈一桌`
     // 圈到當日停用/維修中的桌 → 擋下（否則入座當天才發現桌子不能用）
     if (tableByNum && group.date) {
@@ -296,10 +304,11 @@ export function validateGroupForSave(group, capByNum = {}, tables = null) {
     const seats = seatsOf(b.tableNumbers)
     if ((Number(b.guests) || 0) > seats) return `「${b.label}」人數 ${b.guests} 超過該梯保留席數 ${seats}，請再多圈桌`
   }
-  const held = seatsOf(groupTableNumbers(group))
+  // 旅客保留席（不含司領桌）
+  const held = seatsOf(guestTableNumbers(group))
   if (held <= 0) return '請至少圈一桌'
-  // 單梯：總人數不可超過保留席數（坐不下）。多梯次（兩段用餐）允許輪替，由 UI 端提示。
-  if (batches.length === 1 && total > held) return `總人數 ${total} 超過保留席數 ${held}，請多圈桌或調整人數`
+  // 單一旅客梯次：總人數不可超過旅客保留席（坐不下）。多梯次（兩段用餐）允許輪替，由 UI 端提示。
+  if (gBatches.length === 1 && total > held) return `總人數 ${total} 超過保留席數 ${held}，請多圈桌或調整人數`
   return null
 }
 
