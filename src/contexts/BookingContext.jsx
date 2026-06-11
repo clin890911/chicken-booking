@@ -305,6 +305,12 @@ export function BookingProvider({ children }) {
     }
     return r
   }
+  // 「一鍵釋出」復原：把整組桌（含併桌的額外桌）重新入座
+  const reseatBookingTables = (bookingId) => {
+    const r = seatingService.reseatBookingTables(bookingId)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
   const checkoutBooking = (bookingId) => {
     // 取用餐分鐘需在 checkout 前計算（之後 seatedAt 會被清掉）
     const before = bookingService.getById(bookingId)
@@ -497,7 +503,7 @@ export function BookingProvider({ children }) {
     addBooking, updateBooking, cycleStatus, setStatus,
     toggleTable, setTableOutage, clearTableOutage, setTableStatus, blockTable, unblockTable, updateTablePosition,
     bulkSaveTables, addTable, removeTable, resetTables,
-    assignBookingToTable, seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
+    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
     preassignBookingTable, clearBookingPreassign,
     addWaitlist, callWaitlist, seatWaitlist, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,

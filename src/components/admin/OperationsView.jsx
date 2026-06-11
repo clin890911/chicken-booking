@@ -97,7 +97,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     // 無單桌容納（大組）→ 多桌帶位（併桌）：系統建議組合，店員可在地圖加減桌後確認
     const combo = suggestTableCombo(guests)
     if (!combo.enough) {
-      toast.error(`目前空桌合計 ${combo.seats} 席，不足 ${guests} 位（可改用候位取號）`)
+      toast.error(`目前沒有單一樓層能容納 ${guests} 位（同層最多 ${combo.seats} 席），可改用候位取號或分成兩組`)
       return false
     }
     const vacantNums = findSuitableTables(1).map(t => t.number) // 所有今日可用空桌（容量≥1）= 可加減的池
@@ -156,9 +156,16 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     // 多桌帶位（大組併桌）：點桌加入/移除已選集合，不走二步確認（確認在 banner 按鈕）
     if (mode.type === 'walkin-multi') {
       if (!mode.suitable.includes(number)) return toast.error('此桌目前不可加入（非空桌或維修中）')
-      const selected = mode.selected.includes(number)
-        ? mode.selected.filter(n => n !== number)
-        : [...mode.selected, number]
+      const isRemove = mode.selected.includes(number)
+      // 同樓層守門：切樓層後若想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
+      if (!isRemove && mode.selected.length) {
+        const selFloor = tables.find(x => x.number === mode.selected[0])?.floor
+        const thisFloor = tables.find(x => x.number === number)?.floor
+        if (selFloor && thisFloor && selFloor !== thisFloor) {
+          return toast.error('併桌需在同一樓層，請改選同層的桌')
+        }
+      }
+      const selected = isRemove ? mode.selected.filter(n => n !== number) : [...mode.selected, number]
       setMode({ ...mode, selected })
       return
     }

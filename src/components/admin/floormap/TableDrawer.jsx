@@ -40,7 +40,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const confirmDialog = useConfirm()
   const {
     setTableStatus, blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, setStatus,
+    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, setStatus,
     setTableOutage, clearTableOutage,
     settings, groupReservations,
   } = useBooking()
@@ -135,10 +135,12 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
       { title: '客人已離席', confirmLabel: '已離席' })
     if (!ok) return
     const min = minutesSeated()
+    // 併桌時快照整組桌（onClose 後 booking/table 可能變）；單桌則用當前桌
+    const releasedTables = bookingTables.length ? bookingTables : [table.number]
     const r = checkoutBooking(booking.id)
     if (!r.ok) return toast.error(r.error)
     toast.action(`${booking.name} 已離席（用餐 ${min} 分）· 桌位待清桌`,
-      { label: '一鍵釋出', onClick: () => { clearTable(table.number); toast.success(`${table.number} 已釋出`) } })
+      { label: '一鍵釋出', onClick: () => { releasedTables.forEach(n => clearTable(n)); toast.success(`${releasedTables.join('、')} 已釋出`) } })
   }
 
   // 一鍵釋出：已離席 + 清桌完成（跳過待清桌）
@@ -152,14 +154,14 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     if (!ok) return
     const min = minutesSeated()
     const releasedBooking = booking
-    const tableNumber = table.number
+    const releasedTables = bookingTables.length ? bookingTables : [table.number]
     const r = finalizeBooking(releasedBooking.id)
     if (!r.ok) return toast.error(r.error)
-    // 復原窗口：把該桌與 booking 還原為釋出前（重新入座 → dining）
-    toast.action(`✨ ${releasedBooking.name} 已離席且 ${tableNumber} 已釋出（用餐 ${min} 分）`,
+    // 復原窗口：把整組桌（含併桌額外桌）還原為釋出前（重新入座 → dining）
+    toast.action(`✨ ${releasedBooking.name} 已離席且 ${releasedTables.join('、')} 已釋出（用餐 ${min} 分）`,
       { label: '↩ 復原', onClick: () => {
-        const back = seatBooking(releasedBooking.id)
-        if (back.ok) toast.success(`已復原 ${releasedBooking.name} 至 ${tableNumber}`)
+        const back = reseatBookingTables(releasedBooking.id)
+        if (back.ok) toast.success(`已復原 ${releasedBooking.name} 至 ${releasedTables.join('、')}`)
         else toast.error('無法復原：' + back.error)
       } },
       { duration: 8000 })

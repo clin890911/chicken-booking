@@ -566,12 +566,12 @@ describe('seatingService 整合層', () => {
         expect(r.seats).toBe(10)
       })
 
-      it('同層湊不夠 → 跨樓層貪婪', () => {
+      it('同層都湊不夠 → enough:false + 回座位最多的單層 partial（不跨樓層）', () => {
         tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('201', 4, '2F'), mkTable('202', 4, '2F')])
-        const r = seating.suggestTableCombo(10) // 單層最多 8 < 10 → 跨層 4+4+4
-        expect(r.enough).toBe(true)
-        expect(r.tableNumbers).toHaveLength(3)
-        expect(r.seats).toBe(12)
+        const r = seating.suggestTableCombo(10) // 1F 最多 4、2F 最多 8，都 < 10 → 不跨層
+        expect(r.enough).toBe(false)
+        expect(r.seats).toBe(8)
+        expect(r.floor).toBe('2F')
       })
 
       it('全部空桌仍湊不夠 → enough:false + 最大集合', () => {
@@ -637,6 +637,39 @@ describe('seatingService 整合層', () => {
         const r = seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 8 })
         expect(r.ok).toBe(false)
         expect(r.error).toContain('停用/維修')
+      })
+
+      it('跨樓層 → 擋（一組客人不可能分坐兩層）', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('201', 6, '2F')])
+        const r = seating.walkInSeatMulti(['101', '201'], { name: '大組', guests: 8 })
+        expect(r.ok).toBe(false)
+        expect(r.error).toContain('同一樓層')
+        expect(tableService.getByNumber('101').status).toBe('vacant')
+      })
+    })
+
+    describe('reseatBookingTables（一鍵釋出的復原）', () => {
+      const seatCombo = () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 4, '1F')])
+        return seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 8 }).booking
+      }
+      it('釋出後復原：整組桌重新入座（不只主桌）', () => {
+        const b = seatCombo()
+        seating.finalizeBooking(b.id) // 兩桌 → vacant、booking completed
+        const r = seating.reseatBookingTables(b.id)
+        expect(r.ok).toBe(true)
+        expect(tableService.getByNumber('101').status).toBe('dining')
+        expect(tableService.getByNumber('102').status).toBe('dining') // 副桌也還原（修復原孤兒 bug）
+        expect(bookingService.getById(b.id).status).toBe('arrived')
+      })
+      it('復原時某桌已被別組佔用 → 拒絕（不搶桌）', () => {
+        const b = seatCombo()
+        seating.finalizeBooking(b.id)
+        // 副桌 102 被別組帶位
+        seating.walkInSeat('102', { name: '別組', guests: 2 })
+        const r = seating.reseatBookingTables(b.id)
+        expect(r.ok).toBe(false)
+        expect(r.error).toContain('已被佔用')
       })
     })
 
