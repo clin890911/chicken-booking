@@ -656,6 +656,33 @@ describe('seatingService 整合層', () => {
       const g = groupService.create({ date: '2026-06-15', counts: { total: 8 } })
       expect(seating.releaseGroupBatch(g.id, 'NO_BATCH')).toEqual({ ok: false, error: '梯次不存在' })
     })
+
+    it('司領桌（isEscort 梯次）入座/離席/清桌與旅客梯次一致、互不影響', () => {
+      // 旅客梯次坐 101、司領桌（isEscort）坐 108
+      const g = groupService.create({
+        date: '2026-06-15', counts: { total: 4 },
+        batches: [
+          { label: '第一梯', timeSlot: '11:00', tableNumbers: ['101'], guests: 4 },
+          { label: '司領桌', timeSlot: '11:00', tableNumbers: ['108'], guests: 2, isEscort: true },
+        ],
+      })
+      const guestB = g.batches[0].id
+      const escortB = g.batches[1].id
+      seating.seatGroupBatch(g.id, guestB)
+      seating.seatGroupBatch(g.id, escortB)
+      expect(tableService.getByNumber('108').status).toBe('dining')
+      expect(tableService.getByNumber('108').currentRef).toEqual({ type: 'group', groupId: g.id, batchId: escortB })
+      // 司領桌離席 → 待清；旅客桌不受影響
+      seating.checkoutGroupBatch(g.id, escortB)
+      expect(tableService.getByNumber('108').status).toBe('cleaning')
+      expect(tableService.getByNumber('101').status).toBe('dining')
+      // 司領桌整梯清桌釋出 → 空桌
+      const r = seating.releaseGroupBatch(g.id, escortB)
+      expect(r.ok).toBe(true)
+      expect(r.cleared).toEqual(['108'])
+      expect(tableService.getByNumber('108').status).toBe('vacant')
+      expect(tableService.getByNumber('101').status).toBe('dining')
+    })
   })
 
   // ===========================================================

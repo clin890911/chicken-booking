@@ -8,6 +8,9 @@ import {
   occupancyMinutes,
   calcSlotCapacity,
   groupTableNumbers,
+  guestTableNumbers,
+  guestBatches,
+  isEscortBatch,
   groupOccupancyWindow,
   groupHeldSeats,
   bookingOccupancyLabel,
@@ -174,6 +177,37 @@ describe('groupTableNumbers', () => {
   it('batch 缺 tableNumbers 欄位 → 視為空', () => {
     const g = mkGroup({ batches: [{ timeSlot: '18:00' }, { timeSlot: '19:00', tableNumbers: ['B1'] }] })
     expect(groupTableNumbers(g)).toEqual(['B1'])
+  })
+
+  it('司領桌（isEscort）桌號仍計入 groupTableNumbers（實體佔桌）', () => {
+    const g = mkGroup({
+      batches: [
+        { timeSlot: '11:00', tableNumbers: ['A1', 'A2'] },
+        { timeSlot: '11:00', tableNumbers: ['E1'], isEscort: true },
+      ],
+    })
+    expect(groupTableNumbers(g).sort()).toEqual(['A1', 'A2', 'E1'])
+  })
+})
+
+// =========================================================
+describe('司領桌 helper：guestBatches / guestTableNumbers / isEscortBatch', () => {
+  const g = mkGroup({
+    batches: [
+      { timeSlot: '11:00', tableNumbers: ['A1', 'A2'], guests: 10 },
+      { timeSlot: '11:00', tableNumbers: ['E1'], guests: 2, isEscort: true },
+    ],
+  })
+  it('isEscortBatch 判定旗標', () => {
+    expect(isEscortBatch({ isEscort: true })).toBe(true)
+    expect(isEscortBatch({})).toBe(false)
+    expect(isEscortBatch(null)).toBe(false)
+  })
+  it('guestBatches 排除司領桌', () => {
+    expect(guestBatches(g).map(b => b.tableNumbers[0])).toEqual(['A1'])
+  })
+  it('guestTableNumbers 排除司領桌（旅客保留席用）', () => {
+    expect(guestTableNumbers(g).sort()).toEqual(['A1', 'A2'])
   })
 })
 

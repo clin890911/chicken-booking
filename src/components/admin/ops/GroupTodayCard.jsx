@@ -114,10 +114,10 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
             return t && t.status === 'cleaning' && t.currentRef?.groupId === g.id && t.currentRef?.batchId === b.id
           })
           return (
-            <div key={b.id} className="rounded-lg bg-chicken-cream/60 px-2.5 py-2">
+            <div key={b.id} className={`rounded-lg px-2.5 py-2 ${b.isEscort ? 'bg-indigo-50 border border-indigo-200' : 'bg-chicken-cream/60'}`}>
               <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
                 <span className="text-sm font-black text-chicken-brown tabular-nums">{b.timeSlot}</span>
-                <span className="font-bold text-chicken-brown">{b.label}</span>
+                <span className={`font-bold ${b.isEscort ? 'text-indigo-700' : 'text-chicken-brown'}`}>{b.isEscort ? '🚗 司領桌' : b.label}</span>
                 <span className="text-chicken-brown/60">{b.guests} 人</span>
               </div>
               <div className="mt-1 flex items-center justify-between gap-1.5 flex-wrap">

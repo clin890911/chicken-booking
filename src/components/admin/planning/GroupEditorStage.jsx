@@ -6,7 +6,7 @@ import FloorMap from '../floormap/FloorMap'
 import GroupSheet from '../group/GroupSheet'
 import AgencyPicker from '../group/AgencyPicker'
 import { dayLabel, seatingForSlot, arrivalSlotsForSeating } from '../../../utils/timeSlots'
-import { groupTableNumbers, remainingTablesForSeating } from '../../../utils/capacity'
+import { groupTableNumbers, guestTableNumbers, guestBatches, isEscortBatch, remainingTablesForSeating } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import { suggestTablesForBatch } from '../../../utils/suggestTables'
 import * as groupReservationService from '../../../services/groupReservationService'
@@ -87,8 +87,8 @@ export default function GroupEditorStage({
     const m = {}; tables.forEach(t => { m[t.number] = isTableUsableOnDate(t, date) ? t.capacity : 0 }); return m
   }, [tables, date])
   const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (capByNum[n] || 0), 0)
-  // 梯次人數單一來源：單梯 = 第一頁總人數（不重複填）；多梯 = 各梯拆批值
-  const batchGuests = (b) => (draft.batches || []).length === 1
+  // 梯次人數單一來源：單一「旅客梯次」= 第一頁總人數（不重複填）；多梯/司領桌 = 各自 guests。
+  const batchGuests = (b) => (b && !b.isEscort && guestBatches(draft).length === 1)
     ? (Number(draft.counts?.total) || 0)
     : (Number(b?.guests) || 0)
 
@@ -106,6 +106,11 @@ export default function GroupEditorStage({
   const activeBatch = draft.batches?.find(b => b.id === activeBatchId) || null
   const selectedTables = activeBatch?.tableNumbers || []
 
+  // 旅客梯次 / 司領桌分流：旅客計數、梯次編號、「單梯=總人數」只看旅客梯次
+  const gBatches = guestBatches(draft)
+  const singleGuest = gBatches.length === 1
+  const escortBatch = (draft.batches || []).find(isEscortBatch) || null
+
   const blockedTables = useMemo(() => {
     if (!activeBatch) return []
     const conflictMap = groupReservationService.tableConflictsForBatch({
@@ -114,7 +119,8 @@ export default function GroupEditorStage({
     return Object.keys(conflictMap).filter(n => !selectedTables.includes(n))
   }, [activeBatch, date, settings, draft.id, selectedTables, bookings])
 
-  const heldSeats = useMemo(() => groupTableNumbers(draft).reduce((s, n) => s + (capByNum[n] || 0), 0), [draft, capByNum])
+  // 旅客保留席（不含司領桌）— SeatGauge 與總人數對比用
+  const heldSeats = useMemo(() => guestTableNumbers(draft).reduce((s, n) => s + (capByNum[n] || 0), 0), [draft, capByNum])
 
   // 本梯圈到、但在此日期停用/維修中的桌（圈完才被設維修的情況）：
   // 地圖上這些桌已置灰不可點，提供橫幅一鍵移除，否則會卡死在「無法取消圈選」。
@@ -137,18 +143,28 @@ export default function GroupEditorStage({
   // 總人數：單梯次時直接同步主梯 guests（圈位頁不再重複填人數）
   const patchCount = (key, val) => setDraft(d => {
     const counts = { ...d.counts, [key]: Number(val) || 0 }
-    const batches = (key === 'total' && (d.batches || []).length === 1)
-      ? d.batches.map(b => ({ ...b, guests: counts.total }))
+    // 只有「單一旅客梯次」時把總人數同步進該旅客梯次（司領桌不同步）
+    const batches = (key === 'total' && guestBatches(d).length === 1)
+      ? d.batches.map(b => (b.isEscort ? b : { ...b, guests: counts.total }))
       : d.batches
     return { ...d, counts, batches }
   })
   const patchBatch = (batchId, patch) => setDraft(d => ({ ...d, batches: d.batches.map(b => b.id === batchId ? { ...b, ...patch } : b) }))
-  const relabel = (batches) => batches.map((b, i) => ({ ...b, label: `第${BATCH_LABELS[i] || i + 1}梯` }))
+  // 只重編旅客梯次序號（第N梯）；司領桌保留 label
+  const relabel = (batches) => {
+    let n = 0
+    return batches.map(b => {
+      if (b.isEscort) return b
+      n += 1
+      return { ...b, label: `第${BATCH_LABELS[n - 1] || n}梯` }
+    })
+  }
   const addBatchForSeating = (s) => setDraft(d => {
-    const n = d.batches.length + 1
-    // 新梯人數預設 = 總人數扣掉已分配（兩段輪替常見「先坐滿、剩的進第二梯」）
+    const gb = d.batches.filter(b => !b.isEscort)
+    const n = gb.length + 1
+    // 新梯人數預設 = 總人數扣掉已分配（兩段輪替常見「先坐滿、剩的進第二梯」）；司領桌不計
     const total = Number(d.counts?.total) || 0
-    const assigned = d.batches.reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
+    const assigned = gb.reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
     const nb = { id: 'BT' + Date.now().toString(36) + n, label: `第${BATCH_LABELS[n - 1] || n}梯`, timeSlot: s.start, tableNumbers: [], guests: Math.max(0, total - assigned), note: '' }
     setActiveBatchId(nb.id)
     return { ...d, batches: [...d.batches, nb] }
@@ -156,6 +172,22 @@ export default function GroupEditorStage({
   const removeBatch = (batchId) => setDraft(d => {
     const batches = relabel(d.batches.filter(b => b.id !== batchId))
     if (activeBatchId === batchId) setActiveBatchId(batches[0]?.id || null)
+    return { ...d, batches }
+  })
+  // 司領桌（司機+領隊）：一團一個 isEscort 梯次，可圈多張桌、guests 預設 2、time 同主梯
+  const addEscort = () => setDraft(d => {
+    if (d.batches.some(b => b.isEscort)) return d
+    const eb = {
+      id: 'BT' + Date.now().toString(36) + 'E',
+      label: '司領桌', timeSlot: d.batches[0]?.timeSlot || '11:00',
+      tableNumbers: [], guests: 2, note: '', isEscort: true,
+    }
+    setActiveBatchId(eb.id)
+    return { ...d, batches: [...d.batches, eb] }
+  })
+  const removeEscort = (id) => setDraft(d => {
+    const batches = d.batches.filter(b => b.id !== id)
+    if (activeBatchId === id) setActiveBatchId(batches[0]?.id || null)
     return { ...d, batches }
   })
   const toggleTable = (number) => {
@@ -244,9 +276,9 @@ export default function GroupEditorStage({
   // === 儲存 / 刪除 ===
   const save = async () => {
     if (savingRef.current) return
-    // 單梯人數以第一頁總人數為準（圈位頁不重複填，存檔時強制同步；驗證也用同步後的版本）
-    const batchesToSave = draft.batches.length === 1
-      ? draft.batches.map(b => ({ ...b, guests: Number(draft.counts?.total) || 0 }))
+    // 單一旅客梯次以第一頁總人數為準（圈位頁不重複填，存檔時強制同步；司領桌不同步）
+    const batchesToSave = guestBatches(draft).length === 1
+      ? draft.batches.map(b => (b.isEscort ? b : { ...b, guests: Number(draft.counts?.total) || 0 }))
       : draft.batches
     const err0 = groupReservationService.validateGroupForSave({ ...draft, date, batches: batchesToSave }, capByNum, tables)
     if (err0) return toast.error(err0)
@@ -446,10 +478,10 @@ export default function GroupEditorStage({
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-bold text-chicken-brown text-sm">梯次（兩段用餐可加第二梯）</h3>
             </div>
-            {/* 多梯拆批提示：各梯人數總和應等於總人數 */}
-            {draft.batches.length > 1 && (() => {
+            {/* 多梯拆批提示：各旅客梯次人數總和應等於總人數（司領桌不計） */}
+            {gBatches.length > 1 && (() => {
               const total = Number(draft.counts?.total) || 0
-              const assigned = draft.batches.reduce((s, b) => s + (Number(b.guests) || 0), 0)
+              const assigned = gBatches.reduce((s, b) => s + (Number(b.guests) || 0), 0)
               if (assigned === total) return null
               return (
                 <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs font-bold text-amber-800">
@@ -458,10 +490,10 @@ export default function GroupEditorStage({
               )
             })()}
             <div className="space-y-2">
-              {draft.batches.map(b => {
+              {gBatches.map(b => {
                 const sea = seatingForSlot(settings, b.timeSlot)
                 const active = activeBatchId === b.id
-                const single = draft.batches.length === 1
+                const single = singleGuest
                 return (
                   <div key={b.id} className={`rounded-lg border-2 p-2 ${active ? 'border-indigo-500 bg-indigo-50' : 'border-chicken-brown/10'}`}>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -486,7 +518,7 @@ export default function GroupEditorStage({
                       <button onClick={() => setActiveBatchId(b.id)} className={`text-xs px-2.5 py-1 rounded-lg font-bold ${active ? 'bg-indigo-600 text-white' : 'bg-white border-2 border-chicken-brown/15 text-chicken-brown'}`}>
                         {active ? '圈桌中' : '圈此梯桌'}
                       </button>
-                      {draft.batches.length > 1 && (
+                      {gBatches.length > 1 && (
                         <button onClick={() => removeBatch(b.id)} className="text-xs text-chicken-red font-bold">刪</button>
                       )}
                     </div>
@@ -520,6 +552,32 @@ export default function GroupEditorStage({
                 <button onClick={() => setAddingBatch(true)} className="text-xs text-chicken-red font-bold">＋ 新增梯次（兩段用餐輪替）</button>
               )}
             </div>
+
+            {/* 司領桌（司機 + 領隊）：獨立小桌，可圈多張、人數獨立不計入總人數 */}
+            <div className="mt-3 pt-3 border-t border-chicken-brown/10">
+              {escortBatch ? (
+                <div className={`rounded-lg border-2 p-2 ${activeBatchId === escortBatch.id ? 'border-indigo-500 bg-indigo-50' : 'border-indigo-200 bg-indigo-50/40'}`}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-black text-indigo-700">🚗 司領桌</span>
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">司機+領隊</span>
+                    <label className="flex items-center gap-1 text-xs text-chicken-brown/60">人數
+                      <Input className="w-16 !py-1" type="number" inputMode="numeric" min={0} value={escortBatch.guests}
+                        onChange={e => patchBatch(escortBatch.id, { guests: Number(e.target.value) || 0 })} />
+                    </label>
+                    <span className="text-xs text-chicken-brown/60">桌 {(escortBatch.tableNumbers || []).join('、') || '未圈'}</span>
+                    <div className="flex-1" />
+                    <button onClick={() => setActiveBatchId(escortBatch.id)}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-bold ${activeBatchId === escortBatch.id ? 'bg-indigo-600 text-white' : 'bg-white border-2 border-indigo-200 text-indigo-700'}`}>
+                      {activeBatchId === escortBatch.id ? '圈桌中' : '圈司領桌'}
+                    </button>
+                    <button onClick={() => removeEscort(escortBatch.id)} className="text-xs text-chicken-red font-bold">刪</button>
+                  </div>
+                  <div className="mt-1 text-[11px] text-indigo-600/70">司領桌人數不計入團體總人數與旅客保留席；可圈多張（多輛長途車）。</div>
+                </div>
+              ) : (
+                <button onClick={addEscort} className="text-xs text-indigo-700 font-bold">＋ 加司領桌（司機 / 領隊）</button>
+              )}
+            </div>
           </div>
 
           {/* 規劃地圖 */}
@@ -544,7 +602,7 @@ export default function GroupEditorStage({
             {activeBatch && (
               <div className="mb-2 rounded-lg bg-white/70 px-3 py-2">
                 <SeatGauge circled={seatsOf(selectedTables)} needed={batchGuests(activeBatch)} />
-                <div className="mt-1 text-[11px] font-bold text-indigo-600/70">全團保留 {heldSeats} 席</div>
+                <div className="mt-1 text-[11px] font-bold text-indigo-600/70">旅客保留 {heldSeats} 席（不含司領桌）</div>
               </div>
             )}
 
