@@ -6,7 +6,7 @@ import { useToast } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
 
-function BookingCard({ b, now, onClickBooking, onAssignTable, onNoshow }) {
+function BookingCard({ b, now, onClickBooking, onAssignTable, onSeat, onNoshow }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
   const overdue = overdueMin > 15 // 與 classifyTodayPulse graceMin 同口徑
   const assigned = !!b.assignedTableId
@@ -41,9 +41,18 @@ function BookingCard({ b, now, onClickBooking, onAssignTable, onNoshow }) {
 
       <div className="mt-2 flex items-center gap-2 flex-wrap">
         {assigned ? (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-chicken-green/15 text-chicken-green rounded-md text-[11px] font-bold">
-            ✓ 已指派 {b.assignedTableId}
-          </span>
+          <>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-chicken-green/15 text-chicken-green rounded-md text-[11px] font-bold">
+              ✓ 已指派 {b.assignedTableId}
+            </span>
+            {/* 客人到了（含遲到後才到）：直接入座，免再點桌位 → 抽屜 */}
+            <button
+              onClick={(e) => { e.stopPropagation(); onSeat?.(b) }}
+              className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-[11px] font-bold hover:opacity-90"
+            >
+              ✅ 客人到了
+            </button>
+          </>
         ) : (
           <button
             onClick={(e) => { e.stopPropagation(); onAssignTable?.(b) }}
@@ -74,7 +83,7 @@ function BookingCard({ b, now, onClickBooking, onAssignTable, onNoshow }) {
 }
 
 export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
-  const { bookings, setStatus } = useBooking()
+  const { bookings, setStatus, seatBooking } = useBooking()
   const toast = useToast()
   const today = todayStr()
   const [showLater, setShowLater] = useState(false)
@@ -98,6 +107,13 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
       { duration: 8000 })
   }
 
+  // 客人到了（含遲到後才到）：對已指派的訂位直接入座（status→arrived、桌→用餐中）
+  const handleSeat = (b) => {
+    const r = seatBooking(b.id)
+    if (!r?.ok) return toast.error('入座失敗：' + (r?.error || '未知錯誤'))
+    toast.success(`✅ ${b.name} 已入座 ${b.assignedTableId}`)
+  }
+
   if (overdue.length + soon.length + later.length === 0) {
     return (
       <div className="text-center py-6 text-xs text-chicken-brown/40">
@@ -113,7 +129,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
           <div className="text-[11px] font-black text-chicken-red">⚠ 過時未到（{overdue.length} 組）— 請聯絡或標記</div>
           {overdue.map(b => (
             <BookingCard key={b.id} b={b} now={now}
-              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onNoshow={handleNoshow} />
+              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow} />
           ))}
         </div>
       )}
@@ -123,7 +139,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
           <div className="text-[11px] font-black text-chicken-brown/65">🔜 90 分內將到（{soon.length} 組）</div>
           {soon.map(b => (
             <BookingCard key={b.id} b={b} now={now}
-              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onNoshow={handleNoshow} />
+              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow} />
           ))}
         </div>
       )}
@@ -141,7 +157,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
             <div className="mt-2 space-y-2">
               {later.map(b => (
                 <BookingCard key={b.id} b={b} now={now}
-                  onClickBooking={onClickBooking} onAssignTable={onAssignTable} onNoshow={handleNoshow} />
+                  onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow} />
               ))}
             </div>
           )}
