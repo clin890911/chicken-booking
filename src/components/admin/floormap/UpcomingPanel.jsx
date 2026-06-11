@@ -2,9 +2,11 @@
 // 之前只看未來 90 分窗：晚上時早上的 no-show 完全消失、無人處理 → 改為全日三段。
 import { useMemo, useState, useEffect } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
-import { useToast } from '../../ui/Toast'
+import { useToast, useConfirm } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
+import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
+import { findPreassignedBooking } from '../../../utils/capacity'
 
 function BookingCard({ b, now, onClickBooking, onAssignTable, onSeat, onNoshow }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
@@ -83,10 +85,17 @@ function BookingCard({ b, now, onClickBooking, onAssignTable, onSeat, onNoshow }
 }
 
 export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
-  const { bookings, setStatus, seatBooking } = useBooking()
+  const { bookings, tables, groupReservations, setStatus, seatBooking } = useBooking()
   const toast = useToast()
+  const confirm = useConfirm()
   const today = todayStr()
   const [showLater, setShowLater] = useState(false)
+
+  // 今日團體圈桌（未入座）→ 散客直接入座前用來防呆，避免坐掉團體保留桌
+  const groupHoldTables = useMemo(
+    () => buildGroupHolds(todayActiveGroups(groupReservations, today), tables),
+    [groupReservations, tables, today],
+  )
 
   // 30 秒 tick：時間推移會讓卡片從「將到」掉進「過時未到」
   const [now, setNow] = useState(Date.now())
@@ -107,11 +116,26 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
       { duration: 8000 })
   }
 
-  // 客人到了（含遲到後才到）：對已指派的訂位直接入座（status→arrived、桌→用餐中）
-  const handleSeat = (b) => {
+  // 客人到了（含遲到後才到）：對已指派的訂位直接入座（status→arrived、桌→用餐中）。
+  // 防呆：指派桌若被今日團體保留、或已預先配給別筆訂位，先跳確認再覆蓋（與指派模式同口徑）。
+  const handleSeat = async (b) => {
+    const tableNo = b.assignedTableId
+    const hold = groupHoldTables[tableNo]
+    const conflict = findPreassignedBooking(bookings, tableNo, { date: today, excludeBookingId: b.id })
+    if (hold?.holds?.length || conflict) {
+      const lines = []
+      if (hold?.holds?.length) {
+        const h = hold.holds[0]
+        lines.push(`此桌為今日團體「${hold.agencyName || '旅行社'}」預留${h?.batch ? `（${h.batch.label} ${h.batch.timeSlot}）` : ''}`)
+      }
+      if (conflict) lines.push(`此桌已預先配給 ${conflict.name}（${conflict.guests} 位${conflict.timeSlot ? ` · ${conflict.timeSlot}` : ''}）`)
+      const ok = await confirm(`${lines.join('；')}。\n仍要讓 ${b.name} 入座 ${tableNo}？`,
+        { title: '桌位有預留', confirmLabel: '仍要入座', danger: true })
+      if (!ok) return
+    }
     const r = seatBooking(b.id)
     if (!r?.ok) return toast.error('入座失敗：' + (r?.error || '未知錯誤'))
-    toast.success(`✅ ${b.name} 已入座 ${b.assignedTableId}`)
+    toast.success(`✅ ${b.name} 已入座 ${tableNo}`)
   }
 
   if (overdue.length + soon.length + later.length === 0) {
