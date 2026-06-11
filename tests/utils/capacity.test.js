@@ -707,3 +707,28 @@ describe('calcSlotCapacity — 維修停用（按日期）', () => {
     expect(r2.summary.totalSeats).toBe(10)
   })
 })
+
+// =========================================================
+describe('resolveSlotOccupancy — 大組併桌（extraTableIds）', () => {
+  const seating = { id: 'dinner1', name: '晚餐', start: '17:00', end: '19:00' }
+  const settings = { seatings: [seating] }
+  const tables = [mkTable('101', 6), mkTable('102', 4), mkTable('103', 4)]
+
+  it('併桌的額外桌也算這組佔用（不被當空桌）', () => {
+    const booking = mkBooking({ guests: 8, timeSlot: '18:00', source: 'walkin', status: 'arrived', assignedTableId: '101', extraTableIds: ['102'] })
+    const r = resolveSlotOccupancy(tables, [booking], [], DATE, seating, settings)
+    // 主桌 + 副桌都落 byTable，指向同一 booking；副桌標 isExtra
+    expect(r.byTable['101']?.booking).toBe(booking)
+    expect(r.byTable['102']?.booking).toBe(booking)
+    expect(r.byTable['102']?.isExtra).toBe(true)
+    // 佔 2 桌 → 剩 1 桌（103）
+    expect(r.summary.occupiedTables).toBe(2)
+    expect(r.summary.remainingTables).toBe(1)
+  })
+
+  it('人數只算一次（walkinGuests 不因多桌重複）', () => {
+    const booking = mkBooking({ guests: 8, timeSlot: '18:00', source: 'walkin', status: 'arrived', assignedTableId: '101', extraTableIds: ['102'] })
+    const r = resolveSlotOccupancy(tables, [booking], [], DATE, seating, settings)
+    expect(r.summary.walkinGuests).toBe(8)
+  })
+})

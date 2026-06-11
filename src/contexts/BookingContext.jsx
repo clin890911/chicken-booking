@@ -305,6 +305,12 @@ export function BookingProvider({ children }) {
     }
     return r
   }
+  // 「一鍵釋出」復原：把整組桌（含併桌的額外桌）重新入座
+  const reseatBookingTables = (bookingId) => {
+    const r = seatingService.reseatBookingTables(bookingId)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
   const checkoutBooking = (bookingId) => {
     // 取用餐分鐘需在 checkout 前計算（之後 seatedAt 會被清掉）
     const before = bookingService.getById(bookingId)
@@ -342,6 +348,14 @@ export function BookingProvider({ children }) {
     if (r.ok) safeNotify(() => tg.notifyWalkInSeated(r.booking))
     return r
   }
+  // 大組多桌入座（併桌）：一筆 booking 佔多張桌。
+  const walkInSeatMulti = (tableNumbers, guestData) => {
+    const r = seatingService.walkInSeatMulti(tableNumbers, guestData)
+    refresh()
+    syncCloudSoon()
+    if (r.ok) safeNotify(() => tg.notifyWalkInSeated(r.booking))
+    return r
+  }
   const moveTable = (bookingId, newTableNumber) => {
     const before = bookingService.getById(bookingId)
     const fromTable = before?.assignedTableId
@@ -356,6 +370,7 @@ export function BookingProvider({ children }) {
   }
   const findSuitableTables = (partySize) => seatingService.findSuitableTables(partySize)
   const suggestTable = (partySize) => seatingService.suggestTable(partySize)
+  const suggestTableCombo = (partySize) => seatingService.suggestTableCombo(partySize)
 
   // 統一座位地圖的「預先配桌」：僅在 booking 上記錄 assignedTableId（per-date），
   // ★ 不更動 live tables（currentBookingId/status），故未來日期預排不會誤佔今日現場桌況。
@@ -488,7 +503,7 @@ export function BookingProvider({ children }) {
     addBooking, updateBooking, cycleStatus, setStatus,
     toggleTable, setTableOutage, clearTableOutage, setTableStatus, blockTable, unblockTable, updateTablePosition,
     bulkSaveTables, addTable, removeTable, resetTables,
-    assignBookingToTable, seatBooking, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, moveTable, findSuitableTables, suggestTable,
+    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
     preassignBookingTable, clearBookingPreassign,
     addWaitlist, callWaitlist, seatWaitlist, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,

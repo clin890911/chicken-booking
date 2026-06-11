@@ -44,8 +44,9 @@ export default function TableScheduleView({ tables, turnsByTable, selectedTableN
   const [period, setPeriod] = useState('all')
   const floorTables = [...(tables || [])].sort((a, b) => String(a.number).localeCompare(String(b.number)))
 
+  // 桌次統計排除併桌的「副桌」turn（isExtra）——副桌只是被併入，當天無獨立翻台，計入會灌水
   const totalTurns = floorTables.reduce(
-    (sum, t) => sum + (turnsByTable[t.number] || []).filter(x => turnInPeriod(x, period)).length, 0)
+    (sum, t) => sum + (turnsByTable[t.number] || []).filter(x => turnInPeriod(x, period) && !x.isExtra).length, 0)
   const seatedNow = floorTables.filter(t => t.status === 'dining').length
 
   return (
@@ -93,7 +94,7 @@ export default function TableScheduleView({ tables, turnsByTable, selectedTableN
               <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-chicken-brown/10">
                 <i className={`h-2 w-2 rounded-full ${STATUS_DOT[t.status] || 'bg-emerald-500'}`} />
                 <span className="text-sm font-black text-chicken-brown">{t.number}</span>
-                <span className="ml-auto text-[10px] font-bold text-chicken-brown/50">{t.capacity} 位 · 今日 {all.length} 轉</span>
+                <span className="ml-auto text-[10px] font-bold text-chicken-brown/50">{t.capacity} 位 · 今日 {all.filter(x => !x.isExtra).length} 轉</span>
               </div>
               <div className="p-1.5 space-y-1">
                 {blocked ? (

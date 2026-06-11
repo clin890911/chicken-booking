@@ -1,7 +1,9 @@
 // bookingService：統一封裝訂位 CRUD
 // schema: { id, name, phone, guests, date, timeSlot, notes, source, status,
-//           assignedTableId, lineUserId, manageToken, lastGuestEditAt,
+//           assignedTableId, extraTableIds, lineUserId, manageToken, lastGuestEditAt,
 //           guestEditCount, guestEditHistory, cancellationReason, createdAt, updatedAt, createdBy }
+// extraTableIds：大組併桌的「額外桌」（主桌仍是 assignedTableId）；一般單桌為 []。
+//   清桌/容量/統計都要把主桌 + extraTableIds 一起當這筆 booking 佔用的桌。
 // 後端：localStorage（v0），未來切到 Firestore 只改本檔
 import * as customerService from './customerService'
 import * as tableService from './tableService'
@@ -71,6 +73,7 @@ export function listAll() {
   // 補上新欄位的預設值（向後相容）
   return read().map(b => ({
     assignedTableId: null,
+    extraTableIds: [],
     lineUserId: null,
     manageToken: null,
     lastGuestEditAt: null,
@@ -78,6 +81,8 @@ export function listAll() {
     guestEditHistory: [],
     cancellationReason: null,
     ...b,
+    // ...b 在前會帶入舊資料；確保 extraTableIds 一定是陣列（舊資料缺欄位 → []）
+    extraTableIds: Array.isArray(b.extraTableIds) ? b.extraTableIds : [],
   }))
 }
 
@@ -119,6 +124,7 @@ export function create(data) {
     source: data.source || 'online',
     status: data.status || 'confirmed',
     assignedTableId: data.assignedTableId || null,
+    extraTableIds: Array.isArray(data.extraTableIds) ? data.extraTableIds.map(String) : [],
     lineUserId: data.lineUserId || null,
     manageToken: data.manageToken || createManageToken(),
     lastGuestEditAt: data.lastGuestEditAt || null,
@@ -171,6 +177,7 @@ export function upsertFromRemote(data) {
     source: 'line',
     status: 'confirmed',
     assignedTableId: null,
+    extraTableIds: [],
     lineUserId: null,
     manageToken: data.manageToken || data.token || null,
     lastGuestEditAt: null,

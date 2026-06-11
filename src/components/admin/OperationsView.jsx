@@ -24,8 +24,8 @@ import { todayStr } from '../../utils/timeSlots'
 export default function OperationsView({ pendingAssign, onAssignDone }) {
   const {
     tables, bookings, waitlist, settings, groupReservations,
-    assignBookingToTable, seatWaitlist, walkInSeat, moveTable, reseatGroupBatchTable,
-    findSuitableTables, suggestTable,
+    assignBookingToTable, seatWaitlist, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
+    findSuitableTables, suggestTable, suggestTableCombo,
   } = useBooking()
   const toast = useToast()
   const { can } = useAuth()
@@ -84,16 +84,35 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const startWalkin = (guestData) => {
     const guests = Number(guestData?.guests) || 0
     const suitable = findSuitableTables(guests).map(t => t.number)
-    if (suitable.length === 0) {
-      toast.error(`目前無符合 ${guests} 位的空桌（可改用候位取號）`)
+    if (suitable.length > 0) {
+      // 有單桌容納 → 既有單桌帶位流程
+      const suggestion = suggestTable(guests)
+      setMode({ type: 'walkin', guestData: { ...guestData, guests }, suitable, suggestion: suggestion?.number })
+      setSelectedTable(null)
+      setPendingConfirm(null)
+      setShowWalkIn(false)
+      if (suggestion) setFloor(suggestion.floor)
+      return true
+    }
+    // 無單桌容納（大組）→ 多桌帶位（併桌）：系統建議組合，店員可在地圖加減桌後確認
+    const combo = suggestTableCombo(guests)
+    if (!combo.enough) {
+      toast.error(`目前沒有單一樓層能容納 ${guests} 位（同層最多 ${combo.seats} 席），可改用候位取號或分成兩組`)
       return false
     }
-    const suggestion = suggestTable(guests)
-    setMode({ type: 'walkin', guestData: { ...guestData, guests }, suitable, suggestion: suggestion?.number })
+    const vacantNums = findSuitableTables(1).map(t => t.number) // 所有今日可用空桌（容量≥1）= 可加減的池
+    setMode({
+      type: 'walkin-multi',
+      guestData: { ...guestData, guests },
+      need: guests,
+      selected: combo.tableNumbers,  // 預選建議組合
+      suitable: vacantNums,
+    })
     setSelectedTable(null)
     setPendingConfirm(null)
     setShowWalkIn(false)
-    if (suggestion) setFloor(suggestion.floor)
+    const firstTable = tables.find(t => t.number === combo.tableNumbers[0])
+    if (firstTable) setFloor(firstTable.floor)
     return true
   }
 
@@ -132,6 +151,22 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const handleTableClick = (number) => {
     if (!mode) {
       setSelectedTable(prev => prev === number ? null : number)
+      return
+    }
+    // 多桌帶位（大組併桌）：點桌加入/移除已選集合，不走二步確認（確認在 banner 按鈕）
+    if (mode.type === 'walkin-multi') {
+      if (!mode.suitable.includes(number)) return toast.error('此桌目前不可加入（非空桌或維修中）')
+      const isRemove = mode.selected.includes(number)
+      // 同樓層守門：切樓層後若想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
+      if (!isRemove && mode.selected.length) {
+        const selFloor = tables.find(x => x.number === mode.selected[0])?.floor
+        const thisFloor = tables.find(x => x.number === number)?.floor
+        if (selFloor && thisFloor && selFloor !== thisFloor) {
+          return toast.error('併桌需在同一樓層，請改選同層的桌')
+        }
+      }
+      const selected = isRemove ? mode.selected.filter(n => n !== number) : [...mode.selected, number]
+      setMode({ ...mode, selected })
       return
     }
     // 指派 / 候位入座 / 換桌 / 團體改派：二步確認
@@ -218,6 +253,24 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const flashAssigned = (number) => {
     setJustAssigned(number)
     setTimeout(() => setJustAssigned(null), 3500)
+  }
+
+  // 多桌帶位：已選桌的合計席數（給 banner 顯示 + 確認門檻）
+  const walkinMultiSeats = useMemo(() => {
+    if (mode?.type !== 'walkin-multi') return 0
+    return (mode.selected || []).reduce((s, n) => s + (tables.find(t => t.number === n)?.capacity || 0), 0)
+  }, [mode, tables])
+
+  // 多桌帶位確認：席數夠 → 一筆 walk-in 佔多桌入座
+  const confirmWalkinMulti = () => {
+    if (mode?.type !== 'walkin-multi') return
+    if (walkinMultiSeats < mode.need) return toast.error(`還差 ${mode.need - walkinMultiSeats} 席，請再加桌`)
+    const r = walkInSeatMulti(mode.selected, mode.guestData)
+    if (!r.ok) return toast.error('入座失敗：' + r.error)
+    toast.success(`✅ ${r.booking?.name || '散客'}（${mode.need} 位）併桌入座 ${mode.selected.join(' + ')}`)
+    flashAssigned(mode.selected[0])
+    cancelMode()
+    setSelectedTable(mode.selected[0])
   }
 
   // 當前選中桌的物件 + 對應 booking
@@ -344,8 +397,10 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
         pendingConfirm={pendingConfirm}
         pendingConflict={pendingConflict}
         pendingGroupHold={pendingGroupHold}
+        multiSeats={walkinMultiSeats}
         onCancel={cancelModeAndNotify}
         onConfirm={() => executeAssign(pendingConfirm)}
+        onConfirmMulti={confirmWalkinMulti}
         onClearPending={() => setPendingConfirm(null)}
       />
 
@@ -378,9 +433,11 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
                 settings={settings}
                 selectedTableNumber={selectedTable}
                 onSelectTable={handleTableClick}
-                assignMode={['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type)}
+                assignMode={['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat', 'walkin-multi'].includes(mode?.type)}
                 highlightTables={
-                  ['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable : []
+                  mode?.type === 'walkin-multi' ? mode.selected   // 多桌：已選桌高亮（其餘空桌 dimmed 但可點加入）
+                    : ['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable
+                    : []
                 }
                 suggestionTable={mode?.suggestion || null}
                 pendingConfirmTable={pendingConfirm}

@@ -167,6 +167,11 @@ export function resolveSlotOccupancy(tables = [], bookings = [], groupReservatio
     const tn = b.assignedTableId ? String(b.assignedTableId) : null
     if (tn) {
       if (!byTable[tn]) { byTable[tn] = { kind: 'walkin', booking: b }; walkinAssignedTables++ }
+      // 大組併桌的額外桌也算這組佔用——否則副桌會被當空桌、被別組預配/帶位。
+      ;(b.extraTableIds || []).forEach(n => {
+        const key = String(n)
+        if (key && !byTable[key]) { byTable[key] = { kind: 'walkin', booking: b, isExtra: true }; walkinAssignedTables++ }
+      })
     } else {
       unassignedWalkinGuests += Number(b.guests) || 0
     }

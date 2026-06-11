@@ -20,7 +20,14 @@ export default function StatusBar({ tables, waitlist, bookings = [] }) {
     counts[t.status] = (counts[t.status] || 0) + 1
     if (t.status === 'dining') {
       const b = t.currentBookingId ? bookingById[t.currentBookingId] : null
-      occSeats += Number(b?.guests) || t.capacity
+      // 大組併桌：主桌 + 副桌 currentBookingId 都指向同一 booking。guests 只在主桌算一次，
+      // 副桌（在 extraTableIds）不重複加，否則 8 人會被算成 16。團體桌（無 booking）按桌容量估。
+      if (b) {
+        const isExtra = (b.extraTableIds || []).map(String).includes(String(t.number)) && String(b.assignedTableId) !== String(t.number)
+        if (!isExtra) occSeats += Number(b.guests) || t.capacity
+      } else {
+        occSeats += t.capacity
+      }
     }
   })
   const waiting = waitlist.filter(w => w.status === 'waiting').length

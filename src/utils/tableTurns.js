@@ -55,6 +55,20 @@ export function buildTableTurns(tables, bookings, groupReservations, today) {
       bookingId: b.id,
       source: b.source || null,
     })
+    // 大組併桌的額外桌：放一個輕量 turn 標示「併入主桌」，排程視圖才不會看起來空。
+    // guests:0 → 人數只算在主桌，不重複；isExtra 供統計（翻台次數）排除。
+    ;(b.extraTableIds || []).forEach(n => {
+      push(String(n), {
+        kind: 'solo',
+        status: soloTurnStatus(b, byNumber[String(n)]),
+        time: b.timeSlot || '',
+        guests: 0,
+        label: `${b.name || '訂位'}（併${b.assignedTableId}）`,
+        bookingId: b.id,
+        source: b.source || null,
+        isExtra: true,
+      })
+    })
   })
 
   // 2) 旅行社團體梯次（含已完成團 → 仍以「已離席」呈現當日歷程）
