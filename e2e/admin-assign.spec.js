@@ -68,3 +68,28 @@ test('管理端：登入 → 指派桌位（二步確認）→ 指派成功', as
   await page.getByRole('button', { name: /確認指派/ }).click()
   await expect(page.getByText(new RegExp(`指派至 ${tableNo}.*可指派下一組`))).toBeVisible()
 })
+
+// 預配標記（2026-06-12）：預先配桌只記在訂位上、不動桌況（桌仍 vacant 綠色）——
+// 地圖須顯示「📌 時段 預配」視覺線索，否則店員要到帶位確認那步才被警告撞桌。
+test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、桌仍可入座色', async ({ page }) => {
+  await page.addInitScript(b => {
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify([b, {
+      ...b,
+      id: 'E2E-PRE-1',
+      name: '鄭年亨',
+      phone: '0939350329',
+      timeSlot: '18:00',
+      assignedTableId: '113',   // 預配：只寫 booking、桌況不動
+    }]))
+  }, BOOKING)
+
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+  await page.locator('aside').getByRole('button', { name: '現場' }).click()
+
+  // 113 顯示預配標籤（取代「✓ 可入座」），其他空桌不受影響
+  await expect(page.getByText('📌 18:00 預配')).toBeVisible()
+  await expect(page.locator('svg g:has(:text-is("112"))').getByText('✓ 可入座')).toBeVisible()
+})

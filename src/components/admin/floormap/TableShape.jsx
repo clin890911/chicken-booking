@@ -46,6 +46,7 @@ export default function TableShape({
   occDimmed = false,           // 統一佔用視圖：場次已關閉時整體淡化
   focusRing = false,           // 統一佔用視圖：時間軸點團 → 白圈脈動標示該團座位
   groupHoldLabel = null,       // 今日團體保留桌：vacant 桌面改顯示「HH:MM 團保」取代「可入座」
+  preassignLabel = null,       // 今日預配桌：vacant 桌面改顯示「📌 HH:MM 預配」（預配不動桌況，僅視覺提示）
   outNote = '',                // 維修停用（地圖日期落在維修窗內）：與永久停用同樣置灰，顯示 🛠 標籤
   outClickable = false,        // 僅現場即時圖開啟：點維修桌可開抽屜「結束維修」；規劃/統一視圖維持不可點
   onClick,
@@ -224,8 +225,8 @@ export default function TableShape({
       )}
       {status === 'vacant' && (
         <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fontWeight={groupHoldLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
-          {groupHoldLabel || '✓ 可入座'}
+              fontSize={9} fontWeight={groupHoldLabel || preassignLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
+          {groupHoldLabel || preassignLabel || '✓ 可入座'}
         </text>
       )}
     </g>
