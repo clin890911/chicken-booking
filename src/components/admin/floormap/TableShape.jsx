@@ -44,6 +44,7 @@ export default function TableShape({
   occSub = '',                 // 統一佔用視圖：次要說明（人數·時段 / 梯次·時段）
   occHighlight = false,        // 統一佔用視圖：預先配桌模式中、可選的空桌高亮
   occDimmed = false,           // 統一佔用視圖：場次已關閉時整體淡化
+  focusRing = false,           // 統一佔用視圖：時間軸點團 → 白圈脈動標示該團座位
   groupHoldLabel = null,       // 今日團體保留桌：vacant 桌面改顯示「HH:MM 團保」取代「可入座」
   outNote = '',                // 維修停用（地圖日期落在維修窗內）：與永久停用同樣置灰，顯示 🛠 標籤
   outClickable = false,        // 僅現場即時圖開啟：點維修桌可開抽屜「結束維修」；規劃/統一視圖維持不可點
@@ -112,6 +113,15 @@ export default function TableShape({
     const strokeWidth = isSelected ? 3 : occHighlight ? 3 : 1.5
     return (
       <g onClick={onClick} style={{ cursor: 'pointer', opacity: occDimmed ? 0.5 : 1 }} className={occHighlight ? 'animate-pulse' : ''}>
+        {/* 時間軸點團跳地圖：白圈脈動標示這團坐哪（深靛外暈撐在淺底/靛底都讀得出，白環在其上吸睛） */}
+        {focusRing && (
+          <>
+            <rect x={x - 6} y={y - 6} width={w + 12} height={h + 12} rx={13}
+                  fill="none" stroke="#312e81" strokeWidth={6} opacity={0.5} className="animate-pulse" />
+            <rect x={x - 6} y={y - 6} width={w + 12} height={h + 12} rx={13}
+                  fill="none" stroke="#ffffff" strokeWidth={3} className="animate-pulse" />
+          </>
+        )}
         <rect x={x} y={y} width={w} height={h} rx={8}
               fill={O.fill} stroke={stroke} strokeWidth={strokeWidth}
               strokeDasharray={occHighlight ? '4 2' : null} />

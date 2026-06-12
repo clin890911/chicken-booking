@@ -1,6 +1,7 @@
 // 遊覽車抵達時間軸：依場次分區、時間排序，外場一眼看出帶位節奏。
 // 吃 daySummary.timeline（buildArrivalTimeline 結果）。對不到場次的梯次以琥珀色提醒確認帶位。
-export default function GroupArrivalTimeline({ timeline = [] }) {
+// onFocusBatch(row)：點某團某梯次 → 容器跳排位地圖，在這團的桌位畫白圈標示「坐這邊」（已圈桌才可點）。
+export default function GroupArrivalTimeline({ timeline = [], onFocusBatch }) {
   if (!timeline.length) return null
 
   return (
@@ -31,9 +32,15 @@ export default function GroupArrivalTimeline({ timeline = [] }) {
               <div className="space-y-1.5">
                 {bucket.rows.map((r, ri) => {
                   const collide = collisionSlots.has(r.timeSlot)
+                  const hasTables = (r.tableNumbers || []).length > 0
+                  const clickable = !!onFocusBatch && hasTables
+                  const RowTag = clickable ? 'button' : 'div'
                   return (
-                    <div key={`${r.group.id}-${r.batch.id}-${ri}`}
-                      className="flex items-center gap-2 flex-wrap rounded-lg bg-white px-2.5 py-1.5 border border-chicken-brown/5">
+                    <RowTag key={`${r.group.id}-${r.batch.id}-${ri}`}
+                      type={clickable ? 'button' : undefined}
+                      onClick={clickable ? () => onFocusBatch(r) : undefined}
+                      title={clickable ? '在排位地圖上標示這團座位' : undefined}
+                      className={`w-full text-left flex items-center gap-2 flex-wrap rounded-lg bg-white px-2.5 py-1.5 border transition-all ${clickable ? 'border-chicken-brown/5 hover:border-indigo-400 hover:bg-indigo-50/40 cursor-pointer' : 'border-chicken-brown/5'}`}>
                       <span className={`text-sm font-black tabular-nums px-1.5 py-0.5 rounded ${collide ? 'bg-chicken-red text-white' : 'text-chicken-brown'}`}>
                         {r.timeSlot || '—'}
                       </span>
@@ -42,7 +49,8 @@ export default function GroupArrivalTimeline({ timeline = [] }) {
                       <div className="flex-1" />
                       <span className="text-xs font-bold text-chicken-brown/70 tabular-nums">{r.guests} 位</span>
                       <span className="text-[11px] text-chicken-brown/55">桌 {r.tableNumbers.join('、') || '未圈'}</span>
-                    </div>
+                      {clickable && <span className="text-[11px] font-bold text-indigo-500 shrink-0">看地圖 ›</span>}
+                    </RowTag>
                   )
                 })}
               </div>
