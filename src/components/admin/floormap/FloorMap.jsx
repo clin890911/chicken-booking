@@ -60,6 +60,7 @@ export default function FloorMap({
   selectedTables = [],      // 規劃模式：本梯次已選桌號
   blockedTables = [],       // 規劃模式：他團佔用/已被指派、不可選的桌號
   groupHoldTables = {},     // 今日即時圖疊加：{ 桌號: { agencyName } } 唯讀標示今日團體 hold
+  preassignTables = {},     // 今日即時圖疊加：{ 桌號: { timeSlot } } 空桌已被今日訂位預先配走（📌 標籤）
   scopedMode = false,       // 統一佔用視圖（日期+場次）：散客暖色 / 團客冷色 / 空桌淺色
   scopedByTable = {},       // 統一佔用視圖：{ 桌號: { kind:'walkin'|'group', booking?|group?+batch? } }
   scopedClosed = false,     // 統一佔用視圖：此日期/場次已關閉 → 整圖淡化
@@ -162,6 +163,12 @@ export default function FloorMap({
         const holdLabel = t.status === 'vacant' && hold?.holds?.length
           ? (holdBatch?.isEscort ? '司領桌' : `${holdBatch?.timeSlot || ''} 團保`.trim())
           : null
+        // 預配標記：空桌但已被今日訂位預先配走（預配不動桌況、桌仍綠色可入座）。
+        // 團保優先（實心靛色已表達更強的保留語意）；桌面下緣以「📌 時段 預配」提示。
+        const pre = preassignTables[t.number]
+        const preassignLabel = t.status === 'vacant' && !holdLabel && pre
+          ? `📌 ${pre.timeSlot} 預配`.trim()
+          : null
         return (
           <TableShape
             key={t.number}
@@ -175,6 +182,7 @@ export default function FloorMap({
             isJustAssigned={isJustAssigned}
             isDimmed={assignMode && !highlightTables.includes(t.number)}
             groupHoldLabel={holdLabel}
+            preassignLabel={preassignLabel}
             outNote={isOccupied(t) ? '' : outNoteFor(t)}
             outClickable={!assignMode}
             onClick={() => onSelectTable(t.number)}
