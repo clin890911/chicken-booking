@@ -69,6 +69,35 @@ test('管理端：登入 → 指派桌位（二步確認）→ 指派成功', as
   await expect(page.getByText(new RegExp(`指派至 ${tableNo}.*可指派下一組`))).toBeVisible()
 })
 
+// 大組多桌指派（2026-06-12）：散客訂位人數超過任何單桌容量（最大 6 人桌）時，
+// 指派桌不再卡死，改進「併桌」模式——累加選多張同層空桌湊滿席數後一鍵指派。
+test('管理端：12 人訂位無單桌可容 → 併桌指派（選多張桌）成功', async ({ page }) => {
+  // 只種一筆 12 人訂位（覆蓋 beforeEach 的 4 人種子，避免列表有多個「指派桌位」鈕）
+  await page.addInitScript(b => {
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify([{
+      ...b, id: 'E2E-BIG-1', name: '李大團', phone: '0922333444', guests: 12, assignedTableId: null,
+    }]))
+  }, BOOKING)
+
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+  await expect(page.getByText('李大團').first()).toBeVisible()
+
+  // 點「指派桌位」→ 無單桌容納 12 人 → 進入「併桌」指派模式
+  await page.getByRole('button', { name: '指派桌位' }).click()
+  await expect(page.getByText(/指派桌位（併桌）：李大團\s*12\s*位/)).toBeVisible()
+
+  // 系統已預選建議組合，席數湊滿（≥12）→「確認併桌指派」可按
+  const confirmBtn = page.getByRole('button', { name: /確認併桌指派/ })
+  await expect(confirmBtn).toBeEnabled()
+
+  // 確認 → 併桌指派成功
+  await confirmBtn.click()
+  await expect(page.getByText(/併桌指派至.*可指派下一組/)).toBeVisible()
+})
+
 // 預配標記（2026-06-12）：預先配桌只記在訂位上、不動桌況（桌仍 vacant 綠色）——
 // 地圖須顯示「📌 時段 預配」視覺線索，否則店員要到帶位確認那步才被警告撞桌。
 test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、桌仍可入座色', async ({ page }) => {

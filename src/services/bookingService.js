@@ -329,8 +329,18 @@ export function assignTable(bookingId, tableNumber) {
   return update(bookingId, { assignedTableId: tableNumber })
 }
 
+// 多桌指派（大組併桌）：tableNumbers[0]=主桌（assignedTableId），其餘=額外桌（extraTableIds）。
+// 去重去空；單桌時 extraTableIds 自然為 []。只記錄在 booking 上（不動桌況），
+// 現場帶位的桌況佔用由 seatingService.assignBookingTablesMulti 另行處理。
+export function assignTables(bookingId, tableNumbers) {
+  const nums = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
+  const [main = null, ...extra] = nums
+  return update(bookingId, { assignedTableId: main, extraTableIds: extra })
+}
+
+// 解除指派：主桌與額外桌一起清（併桌預配解除時不留孤兒額外桌）。
 export function unassignTable(bookingId) {
-  return update(bookingId, { assignedTableId: null })
+  return update(bookingId, { assignedTableId: null, extraTableIds: [] })
 }
 
 // === No-show 記錄 ===

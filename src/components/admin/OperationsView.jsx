@@ -24,7 +24,7 @@ import { todayStr } from '../../utils/timeSlots'
 export default function OperationsView({ pendingAssign, onAssignDone }) {
   const {
     tables, bookings, waitlist, settings, groupReservations,
-    assignBookingToTable, seatWaitlist, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
+    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
     findSuitableTables, suggestTable, suggestTableCombo,
   } = useBooking()
   const toast = useToast()
@@ -77,15 +77,36 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   // 帶位/指派等模式一律在 SVG 桌況圖操作；排程視圖為總覽用途，模式進行中強制切回地圖。
   const showSchedule = !mode && view === 'schedule'
 
-  // 進入指派桌模式（含自動建議）
+  // 進入指派桌模式（含自動建議）。無單桌容納（大組）→ 改走多桌指派（併桌）。
   const startAssign = (booking) => {
-    const suitable = findSuitableTables(booking.guests).map(t => t.number)
-    if (suitable.length === 0) return toast.error('目前無符合容量的空桌')
-    const suggestion = suggestTable(booking.guests)
-    setMode({ type: 'assign', booking, suitable, suggestion: suggestion?.number })
+    const guests = Number(booking.guests) || 0
+    const suitable = findSuitableTables(guests).map(t => t.number)
+    if (suitable.length > 0) {
+      // 有單桌容納 → 既有單桌指派流程
+      const suggestion = suggestTable(guests)
+      setMode({ type: 'assign', booking, suitable, suggestion: suggestion?.number })
+      setSelectedTable(null)
+      setPendingConfirm(null)
+      if (suggestion) setFloor(suggestion.floor)
+      return
+    }
+    // 無單桌容納（大組）→ 多桌指派（併桌）：系統建議組合，店員可在地圖加減桌後確認
+    const combo = suggestTableCombo(guests)
+    if (!combo.enough) {
+      return toast.error(`目前沒有單一樓層能容納 ${guests} 位（同層最多 ${combo.seats} 席），可改用候位取號或分成兩組`)
+    }
+    const vacantNums = findSuitableTables(1).map(t => t.number) // 所有今日可用空桌（容量≥1）= 可加減的池
+    setMode({
+      type: 'assign-multi',
+      booking,
+      need: guests,
+      selected: combo.tableNumbers, // 預選建議組合
+      suitable: vacantNums,
+    })
     setSelectedTable(null)
     setPendingConfirm(null)
-    if (suggestion) setFloor(suggestion.floor)
+    const firstTable = tables.find(t => t.number === combo.tableNumbers[0])
+    if (firstTable) setFloor(firstTable.floor)
   }
 
   const startSeatWaitlist = (wait) => {
@@ -172,8 +193,8 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
       setSelectedTable(prev => prev === number ? null : number)
       return
     }
-    // 多桌帶位（大組併桌）：點桌加入/移除已選集合，不走二步確認（確認在 banner 按鈕）
-    if (mode.type === 'walkin-multi') {
+    // 多桌帶位/指派（大組併桌）：點桌加入/移除已選集合，不走二步確認（確認在 banner 按鈕）
+    if (mode.type === 'walkin-multi' || mode.type === 'assign-multi') {
       if (!mode.suitable.includes(number)) return toast.error('此桌目前不可加入（非空桌或維修中）')
       const isRemove = mode.selected.includes(number)
       // 同樓層守門：切樓層後若想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
@@ -274,16 +295,26 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     setTimeout(() => setJustAssigned(null), 3500)
   }
 
-  // 多桌帶位：已選桌的合計席數（給 banner 顯示 + 確認門檻）
+  // 多桌帶位/指派：已選桌的合計席數（給 banner 顯示 + 確認門檻）
   const walkinMultiSeats = useMemo(() => {
-    if (mode?.type !== 'walkin-multi') return 0
+    if (mode?.type !== 'walkin-multi' && mode?.type !== 'assign-multi') return 0
     return (mode.selected || []).reduce((s, n) => s + (tables.find(t => t.number === n)?.capacity || 0), 0)
   }, [mode, tables])
 
-  // 多桌帶位確認：席數夠 → 一筆 walk-in 佔多桌入座
+  // 多桌帶位/指派確認：席數夠 → 一筆 booking 佔多桌（帶位＝立即入座；指派＝預訂該訂位）
   const confirmWalkinMulti = () => {
-    if (mode?.type !== 'walkin-multi') return
+    if (mode?.type !== 'walkin-multi' && mode?.type !== 'assign-multi') return
     if (walkinMultiSeats < mode.need) return toast.error(`還差 ${mode.need - walkinMultiSeats} 席，請再加桌`)
+    if (mode.type === 'assign-multi') {
+      const r = assignBookingTablesMulti(mode.booking.id, mode.selected)
+      if (!r.ok) return toast.error('指派失敗：' + r.error)
+      toast.success(`✅ ${mode.booking.name}（${mode.need} 位）併桌指派至 ${mode.selected.join(' + ')} · 可指派下一組`)
+      flashAssigned(mode.selected[0])
+      cancelMode()
+      setSelectedTable(mode.selected[0])
+      onAssignDone?.()
+      return
+    }
     const r = walkInSeatMulti(mode.selected, mode.guestData)
     if (!r.ok) return toast.error('入座失敗：' + r.error)
     toast.success(`✅ ${r.booking?.name || '散客'}（${mode.need} 位）併桌入座 ${mode.selected.join(' + ')}`)
@@ -347,7 +378,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   }, [pendingAssign?.id])
 
   const cancelModeAndNotify = () => {
-    if (mode?.type === 'assign') onAssignDone?.()
+    if (mode?.type === 'assign' || mode?.type === 'assign-multi') onAssignDone?.()
     cancelMode()
   }
 
@@ -459,9 +490,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
                 settings={settings}
                 selectedTableNumber={selectedTable}
                 onSelectTable={handleTableClick}
-                assignMode={['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat', 'walkin-multi'].includes(mode?.type)}
+                assignMode={['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat', 'walkin-multi', 'assign-multi'].includes(mode?.type)}
                 highlightTables={
-                  mode?.type === 'walkin-multi' ? mode.selected   // 多桌：已選桌高亮（其餘空桌 dimmed 但可點加入）
+                  (mode?.type === 'walkin-multi' || mode?.type === 'assign-multi') ? mode.selected   // 多桌：已選桌高亮（其餘空桌 dimmed 但可點加入）
                     : ['assign', 'seat-waitlist', 'walkin', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable
                     : []
                 }

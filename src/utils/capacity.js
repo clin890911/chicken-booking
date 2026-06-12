@@ -224,16 +224,18 @@ export function remainingTablesForSeating(tables = [], bookings = [], groupReser
 // 用途：現場「指派桌」防呆 — 指派到一張已被別筆預配的桌前，先示警「此桌已預留給 ○○」。
 //   預配只記 booking.assignedTableId、不動 table.status，故被預配的桌仍是 vacant，
 //   會照常出現在現場可指派清單，若不示警就會默默覆蓋前者預配。
+// 大組併桌預配時，桌可能落在 extraTableIds（額外桌），亦視為「此桌已被預配」。
 // 參數：
 //   - excludeBookingId：正在指派的這筆自己。現場指派的就是被預配的那位客人時，傳入其 id 以免自我示警。
 //   - date：限定同日比對，避免跨日的預配誤報（不傳則不限日）。
 export function findPreassignedBooking(bookings = [], tableNumber, { date, excludeBookingId } = {}) {
   if (tableNumber == null) return null
-  return (bookings || []).find(b =>
-    b.assignedTableId != null &&
-    String(b.assignedTableId) === String(tableNumber) &&
-    b.id !== excludeBookingId &&
-    (date == null || b.date === date) &&
-    !CAPACITY_EXCLUDED_STATUSES.includes(b.status),
-  ) || null
+  const target = String(tableNumber)
+  return (bookings || []).find(b => {
+    if (b.id === excludeBookingId) return false
+    if (date != null && b.date !== date) return false
+    if (CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return false
+    const nums = [b.assignedTableId, ...(b.extraTableIds || [])].filter(n => n != null).map(String)
+    return nums.includes(target)
+  }) || null
 }

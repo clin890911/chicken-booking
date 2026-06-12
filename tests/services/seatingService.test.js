@@ -120,6 +120,86 @@ describe('seatingService 整合層', () => {
   })
 
   // ===========================================================
+  // assignBookingTablesMulti（散客大組多桌指派／併桌）
+  // ===========================================================
+  describe('assignBookingTablesMulti', () => {
+    beforeEach(() => { seedDefaultTables() })
+
+    it('多桌指派：一筆 booking 佔多桌（主桌+extraTableIds），全部 reserved 連同一 booking', () => {
+      // 108(6) + 101(4) = 10 席容納 10 人（無單桌可容）
+      const b = mkBooking({ guests: 10 })
+      const r = seating.assignBookingTablesMulti(b.id, ['108', '101'])
+      expect(r.ok).toBe(true)
+      const updated = bookingService.getById(b.id)
+      expect(updated.assignedTableId).toBe('108')
+      expect(updated.extraTableIds).toEqual(['101'])
+      expect(tableService.getByNumber('108').status).toBe('reserved')
+      expect(tableService.getByNumber('101').status).toBe('reserved')
+      expect(tableService.getByNumber('108').currentBookingId).toBe(b.id)
+      expect(tableService.getByNumber('101').currentBookingId).toBe(b.id)
+    })
+
+    it('單桌 → 退回 assignBookingToTable（extraTableIds 空）', () => {
+      const b = mkBooking({ guests: 4 })
+      const r = seating.assignBookingTablesMulti(b.id, ['108'])
+      expect(r.ok).toBe(true)
+      expect(bookingService.getById(b.id).extraTableIds).toEqual([])
+      expect(tableService.getByNumber('108').status).toBe('reserved')
+    })
+
+    it('訂位不存在 → 擋', () => {
+      const r = seating.assignBookingTablesMulti('NOPE', ['108', '101'])
+      expect(r).toEqual({ ok: false, error: '訂位不存在' })
+    })
+
+    it('任一桌非空 → 擋，不佔任何桌', () => {
+      const b = mkBooking({ guests: 10 })
+      tableService.setStatus('101', 'dining')
+      const r = seating.assignBookingTablesMulti(b.id, ['108', '101'])
+      expect(r.ok).toBe(false)
+      expect(tableService.getByNumber('108').status).toBe('vacant')
+      expect(bookingService.getById(b.id).assignedTableId).toBeFalsy()
+    })
+
+    it('合計席數不足人數 → 擋', () => {
+      const b = mkBooking({ guests: 12 })
+      const r = seating.assignBookingTablesMulti(b.id, ['108', '101']) // 6+4=10 < 12
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain('不足')
+    })
+
+    it('跨樓層 → 擋（一組客人不可能分坐兩層）', () => {
+      const b = mkBooking({ guests: 10 })
+      const r = seating.assignBookingTablesMulti(b.id, ['108', '208']) // 1F + 2F
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain('同一樓層')
+      expect(tableService.getByNumber('108').status).toBe('vacant')
+    })
+
+    it('停用桌 → 擋（service 層守門）', () => {
+      tableService.bulkWrite([
+        mkTable('108', 6, '1F'),
+        mkTable('101', 4, '1F', { isActive: false }),
+      ])
+      const b = mkBooking({ guests: 10 })
+      const r = seating.assignBookingTablesMulti(b.id, ['108', '101'])
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain('停用/維修')
+    })
+
+    it('指派後 checkout/cancel 整組桌一起處理（沿用 bookingTableNumbers）', () => {
+      const b = mkBooking({ guests: 10 })
+      seating.assignBookingTablesMulti(b.id, ['108', '101'])
+      seating.cancelBooking(b.id)
+      expect(tableService.getByNumber('108').status).toBe('vacant')
+      expect(tableService.getByNumber('101').status).toBe('vacant')
+      const after = bookingService.getById(b.id)
+      expect(after.assignedTableId).toBe(null)
+      expect(after.extraTableIds).toEqual([])
+    })
+  })
+
+  // ===========================================================
   // seatBooking
   // ===========================================================
   describe('seatBooking', () => {

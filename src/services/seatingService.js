@@ -48,6 +48,39 @@ export function assignBookingToTable(bookingId, tableNumber) {
   return { ok: true, booking, table }
 }
 
+// === 訂位 → 指派多桌（大組併桌）===
+// 散客訂位人數超過任何單桌容量 → 一筆 booking 佔多張桌：tableNumbers[0]=主桌，其餘=額外桌。
+// 全部桌 reserved + currentBookingId 指向同一 booking。單桌時退回 assignBookingToTable（維持單一路徑）。
+// 與 walkInSeatMulti 同口徑：每張桌須存在/今日可用/空桌、合計容量≥人數、且同一樓層（一組不分坐兩層）。
+export function assignBookingTablesMulti(bookingId, tableNumbers) {
+  const nums = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
+  if (nums.length === 0) return { ok: false, error: '請至少選一張桌' }
+  if (nums.length === 1) return assignBookingToTable(bookingId, nums[0])
+
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+
+  let totalCap = 0
+  const floors = new Set()
+  for (const n of nums) {
+    const t = tableService.getByNumber(n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(n) }
+    if (t.status !== 'vacant') return { ok: false, error: `${n} 目前不是空桌（${statusZh(t.status)}）` }
+    totalCap += Number(t.capacity) || 0
+    floors.add(t.floor)
+  }
+  // ★ 併桌必須同一樓層——service 層硬擋，繞過 UI 也擋得住
+  if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
+  const guests = Number(booking.guests) || 0
+  if (guests > totalCap) return { ok: false, error: `所選桌合計 ${totalCap} 席，不足 ${guests} 位` }
+
+  const [mainTable, ...extra] = nums
+  bookingService.update(bookingId, { assignedTableId: mainTable, extraTableIds: extra })
+  nums.forEach(n => tableService.reserveTable(n, bookingId))
+  return { ok: true, booking, tableNumbers: nums }
+}
+
 // === 客人到了 → 入座 ===
 // reserved + 客人到了 → dining
 // 自動記錄 actualArrivalTime + 同步桌位狀態
