@@ -191,3 +191,33 @@ describe('buildGroupHolds', () => {
     expect(buildGroupHolds([g], [mkTable('101')])).toEqual({})
   })
 })
+
+describe('releasedAt（整梯清桌釋出標記，2026-06-12 bug 防回歸）', () => {
+  it('buildGroupHolds：已釋出的梯不再 hold 桌（桌況不得畫回「團保」）', () => {
+    const g = {
+      ...GROUP,
+      status: 'arrived',
+      batches: [
+        { id: 'B1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101'], guests: 12, releasedAt: '2026-06-10T13:00:00.000Z' },
+        { id: 'B2', label: '第二梯', timeSlot: '13:00', tableNumbers: ['102'], guests: 10 },
+      ],
+    }
+    const holds = buildGroupHolds([g], [mkTable('101'), mkTable('102')])
+    expect(holds['101']).toBeUndefined()            // 釋出梯的桌完全自由
+    expect(holds['102'].holds.map(h => h.batch.id)).toEqual(['B2']) // 未消化的梯照常 hold
+  })
+
+  it('nextBatchForTable：已釋出的梯不可再被「接下一梯」選中', () => {
+    const g = {
+      ...GROUP,
+      status: 'arrived',
+      batches: [
+        { id: 'B1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101'], guests: 12, releasedAt: '2026-06-10T13:00:00.000Z' },
+        { id: 'B2', label: '第二梯', timeSlot: '13:00', tableNumbers: ['101'], guests: 10 },
+      ],
+    }
+    const tables = byNumber([mkTable('101', 'cleaning')])
+    // 從頭掃也只會找到未消化的 B2，不會回到已釋出的 B1
+    expect(nextBatchForTable(g, '101', tables)?.id).toBe('B2')
+  })
+})

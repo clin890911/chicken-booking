@@ -107,9 +107,12 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
 
       <div className="mt-2 space-y-1.5">
         {sortedBatches(g).map(b => {
-          const seated = batchSeated(g, b, tableByNumber)
+          // 已清桌釋出的梯：桌位痕跡已清空，releasedAt 是唯一判定來源——
+          // 顯示「此梯完成」，不再提供任何操作（防止整輪流程重跑）。
+          const released = !!b.releasedAt
+          const seated = !released && batchSeated(g, b, tableByNumber)
           // 已離席待清：本梯仍有 cleaning 桌（currentRef 指向本梯）→ 提供「整梯清桌釋出」
-          const cleaning = !seated && (b.tableNumbers || []).some(n => {
+          const cleaning = !released && !seated && (b.tableNumbers || []).some(n => {
             const t = tableByNumber[n]
             return t && t.status === 'cleaning' && t.currentRef?.groupId === g.id && t.currentRef?.batchId === b.id
           })
@@ -137,6 +140,8 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
                 </div>
                 {isDone ? (
                   <span className="text-[10px] font-bold text-chicken-brown/45">已完成</span>
+                ) : released ? (
+                  <span className="text-[10px] font-bold text-chicken-green">✓ 此梯完成</span>
                 ) : seated ? (
                   <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
                 ) : cleaning ? (

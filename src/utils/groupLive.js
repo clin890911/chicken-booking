@@ -51,6 +51,7 @@ export function nextBatchForTable(group, tableNumber, tableByNumber, afterBatchI
   const fromIdx = afterBatchId ? batches.findIndex(b => b.id === afterBatchId) + 1 : 0
   for (let i = Math.max(0, fromIdx); i < batches.length; i++) {
     const b = batches[i]
+    if (b.releasedAt) continue // 已清桌釋出的梯不可再接（消化過的梯不得重跑）
     if ((b.tableNumbers || []).includes(tableNumber) && !batchSeated(group, b, tableByNumber)) return b
   }
   return null
@@ -85,6 +86,9 @@ export function buildGroupHolds(groups, tables) {
     .filter(g => !['cancelled', 'completed'].includes(g.status))
     .forEach(g => {
       sortedBatches(g).forEach(b => {
+        // 已清桌釋出的梯不再 hold 桌：桌位痕跡已清空，沒有這個檢查，
+        // 釋出後的桌會被畫回「團保」、按鈕也會復活（梯次永遠看起來「尚未入座」）。
+        if (b.releasedAt) return
         ;(b.tableNumbers || []).forEach(n => {
           const t = tableByNumber[n]
           if (!t || t.status === 'dining') return
