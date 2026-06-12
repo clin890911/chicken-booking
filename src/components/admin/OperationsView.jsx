@@ -333,7 +333,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col h-full min-h-0">
+      {/* 上部チップ群：高さ固定（捲動しない）。地図＋右側欄に最大高さを譲る */}
+      <div className="flex-shrink-0 space-y-3">
       <StatusBar tables={tables} waitlist={waitlist} bookings={bookings} />
 
       {/* 「現在該做什麼」提示列：過時未到 / 超時 / 待清 / 自動處理紀錄 / 節奏單句 */}
@@ -403,21 +405,25 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
         onConfirmMulti={confirmWalkinMulti}
         onClearPending={() => setPendingConfirm(null)}
       />
+      </div>
 
-      {/* 主區：地圖 + 側邊 */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-3">
-        {/* 地圖區（桌況 SVG 圖）／排程視圖（每桌當日 turns） */}
-        <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 min-h-[430px] sm:min-h-[560px] lg:min-h-[680px] overflow-hidden">
+      {/* 主區：地圖 + 側邊（剩餘高度全填，2 欄從 md=直向 iPad 起；捲動只在右側欄內） */}
+      <div className="flex-1 min-h-0 mt-3 grid grid-cols-1 md:grid-cols-[1fr_300px] lg:grid-cols-[1fr_360px] gap-3">
+        {/* 地圖區（桌況 SVG 圖）／排程視圖（每桌當日 turns）。高度填滿剩餘空間，SVG 自動縮放 */}
+        <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 h-full min-h-[260px] overflow-hidden flex flex-col">
           {showSchedule ? (
-            <TableScheduleView
-              tables={tables.filter(t => t.floor === floor)}
-              turnsByTable={turnsByTable}
-              selectedTableNumber={selectedTable}
-              onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
-            />
+            // 排程視圖＝縱向堆疊卡片，會長 → 內部捲動避免裁切
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              <TableScheduleView
+                tables={tables.filter(t => t.floor === floor)}
+                turnsByTable={turnsByTable}
+                selectedTableNumber={selectedTable}
+                onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
+              />
+            </div>
           ) : (
             <>
-              <div className="mb-2 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
+              <div className="mb-2 flex-shrink-0 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white border-2 border-green-600" />可入座</span>
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-sky-100 border border-sky-500" />已預訂</span>
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-orange-500" />用餐中</span>
@@ -426,6 +432,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-500" />團體保留</span>
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white ring-2 ring-chicken-red ring-inset" />選中</span>
               </div>
+              <div className="flex-1 min-h-0">
               <FloorMap
                 floor={floor}
                 tables={tables}
@@ -444,12 +451,13 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
                 justAssignedTable={justAssigned}
                 groupHoldTables={groupHoldTables}
               />
+              </div>
             </>
           )}
         </div>
 
-        {/* 右側：模式相關 / 詳情 / 候位 */}
-        <div className="space-y-3">
+        {/* 右側：模式相關 / 詳情 / 候位（高度填滿、內部捲動，不撐高整頁） */}
+        <div className="h-full min-h-0 overflow-y-auto space-y-3">
           {selectedTableObj ? (
             <TableDrawer
               table={selectedTableObj}
@@ -481,7 +489,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
         </div>
       </div>
 
-      <div className="text-center text-[11px] text-chicken-brown/45 mt-2">
+      <div className="flex-shrink-0 hidden sm:block text-center text-[11px] text-chicken-brown/45 mt-2">
         點桌位看詳情 · 訂位「指派桌位」進指派模式 · 紅色超時桌可禮貌詢問結帳 · ESC 取消
       </div>
 

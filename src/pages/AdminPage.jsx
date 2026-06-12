@@ -103,14 +103,14 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-chicken-cream flex">
+    <div className="h-[100dvh] overflow-hidden bg-chicken-cream flex">
       {/* 桌面版側邊導航 */}
       <SidebarNav tabs={TABS} active={tab} onChange={setTab} badges={badges} />
 
       {/* 主區 */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* 手機版頂部 Header */}
-        <div className="lg:hidden">
+        <div className="lg:hidden flex-shrink-0">
           <Header
             title="雞王管理後台"
             subtitle={tabInfo.label}
@@ -124,7 +124,7 @@ export default function AdminPage() {
         </div>
 
         {/* 桌面版頁面標題（不重複 Header bar） */}
-        <div className="hidden lg:block bg-white border-b border-chicken-brown/10 px-6 py-3">
+        <div className="hidden lg:block flex-shrink-0 bg-white border-b border-chicken-brown/10 px-6 py-3">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="text-xl font-black text-chicken-brown">{tabInfo.label}</h1>
@@ -137,9 +137,9 @@ export default function AdminPage() {
           </div>
         </div>
 
-        <main className="flex-1 px-3 sm:px-6 py-4 pb-32 lg:pb-6 overflow-x-hidden max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 py-4 overflow-x-hidden max-w-[1600px] w-full mx-auto">
           {!usingFirebase && (
-            <div className="mb-4 rounded-xl border-2 border-chicken-red bg-red-50 px-4 py-3">
+            <div className="mb-4 flex-shrink-0 rounded-xl border-2 border-chicken-red bg-red-50 px-4 py-3">
               <p className="text-sm font-black text-chicken-red">⚠️ 雲端同步未啟用</p>
               <p className="text-xs text-chicken-red/80 mt-1 leading-5">
                 未偵測到 Firebase 設定（VITE_FIREBASE_*），系統以本機開發模式運行：資料只存在這台裝置、
@@ -148,7 +148,8 @@ export default function AdminPage() {
             </div>
           )}
           {/* 分頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
-          <div key={tab} className="animate-soft-enter">
+          {/* 現場分頁＝一面式（不整頁捲動，捲動只發生在右側欄內）；其他分頁＝內容內部捲動、側邊欄固定 */}
+          <div key={tab} className={`animate-soft-enter flex-1 min-h-0 ${tab === 'ops' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'}`}>
               {tab === 'ops' && (
                 <OperationsView
                   pendingAssign={pendingAssign}
