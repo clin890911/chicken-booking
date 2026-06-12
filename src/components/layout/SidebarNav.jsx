@@ -9,7 +9,7 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
   const confirm = useConfirm()
 
   return (
-    <aside className="hidden lg:flex flex-col w-20 xl:w-56 bg-white border-r border-chicken-brown/10 sticky top-0 h-screen">
+    <aside className="hidden lg:flex flex-col w-20 xl:w-56 bg-white border-r border-chicken-brown/10 sticky top-0 h-[100dvh]">
       {/* Logo */}
       <div className="px-3 py-4 border-b border-chicken-brown/10 flex items-center gap-2">
         <div className="w-10 h-10 bg-chicken-red rounded-full flex items-center justify-center text-white font-black text-xl flex-shrink-0">
@@ -62,8 +62,8 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
         })}
       </nav>
 
-      {/* User card */}
-      <div className="border-t border-chicken-brown/10 p-2">
+      {/* User card；底部加 home indicator 安全區（iPad 直/橫向手勢列不蓋住登出） */}
+      <div className="border-t border-chicken-brown/10 p-2 pb-[calc(0.5rem_+_env(safe-area-inset-bottom))]">
         <div className="hidden xl:block px-3 py-2 mb-1">
           <div className="text-xs text-chicken-brown/50">登入身份</div>
           <div className="text-sm font-bold text-chicken-brown truncate">{user?.displayName}</div>
