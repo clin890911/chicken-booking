@@ -65,6 +65,9 @@ function normalizeBatch(b = {}) {
     guests: Number(b.guests) || 0,
     note: b.note || '',
     isEscort: !!b.isEscort,   // 司領桌（司機+領隊）特殊梯次；舊資料無此鍵 → false
+    // 整梯清桌釋出時間：桌位 currentRef 清空後，這是「此梯已消化」的唯一持久證據。
+    // 面板按鈕、團保推導（buildGroupHolds）、排程視圖都靠它——白名單制，漏了會被剝除。
+    releasedAt: b.releasedAt || null,
   }
 }
 
@@ -165,6 +168,18 @@ export function setBatchTables(id, batchId, tableNumbers) {
   if (!group) return null
   const batches = group.batches.map(b =>
     b.id === batchId ? { ...b, tableNumbers: tableNumbers.map(String) } : b
+  )
+  return update(id, { batches })
+}
+
+// 梯次釋出標記：整梯清桌釋出後在 batch 留下持久痕跡。
+// 沒有它，桌清空（currentRef=null）的瞬間「此梯消化過」的證據就消失——
+// 面板會再次顯示「梯次入座」、桌況圖會把桌畫回「團保」（2026-06-12 店長實測 bug 根因）。
+export function markBatchReleased(id, batchId, releasedAt = new Date().toISOString()) {
+  const group = getById(id)
+  if (!group) return null
+  const batches = (group.batches || []).map(b =>
+    b.id === batchId ? { ...b, releasedAt } : b
   )
   return update(id, { batches })
 }

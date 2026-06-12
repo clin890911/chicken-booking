@@ -23,6 +23,7 @@ function soloTurnStatus(booking, table) {
 
 // 團體梯次 → 這張桌上的 turn 狀態
 function groupTurnStatus(group, batch, table) {
+  if (batch.releasedAt) return 'done' // 整梯清桌釋出：桌位痕跡已清空，靠 releasedAt 判定消化完
   const refMatch = table?.currentRef?.groupId === group.id && table?.currentRef?.batchId === batch.id
   if (refMatch && table.status === 'dining') return 'seated'
   if (refMatch && table.status === 'cleaning') return 'done' // 此梯已離席、待清（currentRef 保留供接下梯）

@@ -804,7 +804,7 @@ describe('seatingService 整合層', () => {
       expect(groupService.getById(g.id).status).toBe('cancelled')
     })
 
-    it('releaseGroupBatch：離席後整梯待清桌一次清為空桌、團仍 arrived（不結束整團）', () => {
+    it('releaseGroupBatch：整梯待清桌清為空桌＋落 releasedAt；單梯團全消化 → 自動結團', () => {
       const g = groupService.create({ date: '2026-06-15', counts: { total: 8 } })
       const batchId = g.batches[0].id
       groupService.setBatchTables(g.id, batchId, ['101', '108'])
@@ -814,10 +814,80 @@ describe('seatingService 整合層', () => {
       const r = seating.releaseGroupBatch(g.id, batchId)
       expect(r.ok).toBe(true)
       expect(r.cleared).toEqual(['101', '108'])
+      expect(r.groupCompleted).toBe(true)
       expect(tableService.getByNumber('101').status).toBe('vacant')
       expect(tableService.getByNumber('101').currentRef).toBeNull()
       expect(tableService.getByNumber('108').status).toBe('vacant')
-      expect(groupService.getById(g.id).status).toBe('arrived')   // 只釋出桌、不結束整團
+      const after = groupService.getById(g.id)
+      // 釋出留下持久痕跡（2026-06-12 bug 根因：桌清空後梯次「消化過」的證據消失）
+      expect(after.batches[0].releasedAt).toBeTruthy()
+      // 唯一可執行梯已消化 → 整團自動收斂，今日團體卡片移到「已完成」區
+      expect(after.status).toBe('completed')
+    })
+
+    it('releaseGroupBatch：多梯團只釋出第一梯 → 團仍 arrived（逐梯釋出不提早結團）', () => {
+      const g = groupService.create({
+        date: '2026-06-15', counts: { total: 20 },
+        batches: [
+          { label: '第一梯', timeSlot: '11:00', tableNumbers: ['101'], guests: 10 },
+          { label: '第二梯', timeSlot: '13:00', tableNumbers: ['108'], guests: 10 },
+        ],
+      })
+      const [b1, b2] = g.batches.map(b => b.id)
+      seating.seatGroupBatch(g.id, b1)
+      seating.checkoutGroupBatch(g.id, b1)
+      const r = seating.releaseGroupBatch(g.id, b1)
+      expect(r.ok).toBe(true)
+      expect(r.groupCompleted).toBeUndefined()
+      const after = groupService.getById(g.id)
+      expect(after.status).toBe('arrived')                       // 第二梯還沒跑，不結團
+      expect(after.batches.find(b => b.id === b1).releasedAt).toBeTruthy()
+      expect(after.batches.find(b => b.id === b2).releasedAt).toBeNull()
+
+      // 第二梯也跑完 → 自動結團
+      seating.seatGroupBatch(g.id, b2)
+      seating.checkoutGroupBatch(g.id, b2)
+      const r2 = seating.releaseGroupBatch(g.id, b2)
+      expect(r2.ok).toBe(true)
+      expect(r2.groupCompleted).toBe(true)
+      expect(groupService.getById(g.id).status).toBe('completed')
+    })
+
+    it('releaseGroupBatch：空圈桌的占位梯不擋自動結團', () => {
+      const g = groupService.create({
+        date: '2026-06-15', counts: { total: 10 },
+        batches: [
+          { label: '第一梯', timeSlot: '11:00', tableNumbers: ['101'], guests: 10 },
+          { label: '備用梯', timeSlot: '13:00', tableNumbers: [], guests: 0 },
+        ],
+      })
+      const b1 = g.batches[0].id
+      seating.seatGroupBatch(g.id, b1)
+      seating.checkoutGroupBatch(g.id, b1)
+      const r = seating.releaseGroupBatch(g.id, b1)
+      expect(r.groupCompleted).toBe(true)
+      expect(groupService.getById(g.id).status).toBe('completed')
+    })
+
+    it('已釋出的梯不得重跑：seatGroupBatch / reseat / seatNextBatchOnTable 全擋', () => {
+      const g = groupService.create({
+        date: '2026-06-15', counts: { total: 20 },
+        batches: [
+          { label: '第一梯', timeSlot: '11:00', tableNumbers: ['101'], guests: 10 },
+          { label: '第二梯', timeSlot: '13:00', tableNumbers: ['108'], guests: 10 },
+        ],
+      })
+      const b1 = g.batches[0].id
+      seating.seatGroupBatch(g.id, b1)
+      seating.checkoutGroupBatch(g.id, b1)
+      seating.releaseGroupBatch(g.id, b1)
+      // 2026-06-12 bug：釋出後按鈕復活、可重跑整輪——service 層必須擋死
+      expect(seating.seatGroupBatch(g.id, b1))
+        .toEqual({ ok: false, error: '此梯已清桌釋出完成，無法重複入座' })
+      expect(seating.reseatGroupBatchTable(g.id, b1, '101', '102').error)
+        .toBe('此梯已清桌釋出完成，無法改派桌位')
+      expect(seating.seatNextBatchOnTable('101', g.id, b1).error)
+        .toBe('此梯已清桌釋出完成，無法再入座')
     })
 
     it('releaseGroupBatch：尚未離席（dining）→ 無待清桌可釋出、用餐中桌不被誤清', () => {

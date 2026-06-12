@@ -373,6 +373,9 @@ export function seatGroupBatch(groupId, batchId) {
   if (group.status === 'cancelled') return { ok: false, error: '此團已取消，無法入座' }
   const batch = (group.batches || []).find(b => b.id === batchId)
   if (!batch) return { ok: false, error: '梯次不存在' }
+  // 已清桌釋出的梯不得重跑：桌位痕跡已清空，releasedAt 是唯一防線
+  //（缺了它，店員可對同一梯重複「入座→離席→清桌」整輪，2026-06-12 實測 bug）。
+  if (batch.releasedAt) return { ok: false, error: '此梯已清桌釋出完成，無法重複入座' }
   const tables = batch.tableNumbers || []
   if (!tables.length) return { ok: false, error: '此梯次尚未圈桌' }
   // 桌況檢查：必須 vacant 或 cleaning（接續同團前梯剛離席的桌），且今日可用（非停用/維修）。
@@ -417,6 +420,7 @@ export function reseatGroupBatchTable(groupId, batchId, fromTable, toTable) {
   }
   const batch = (group.batches || []).find(b => b.id === batchId)
   if (!batch) return { ok: false, error: '梯次不存在' }
+  if (batch.releasedAt) return { ok: false, error: '此梯已清桌釋出完成，無法改派桌位' }
   const nums = (batch.tableNumbers || []).map(String)
   if (!nums.includes(String(fromTable))) return { ok: false, error: `${fromTable} 不在此梯圈桌內` }
   if (nums.includes(String(toTable))) return { ok: false, error: `${toTable} 已在此梯圈桌內` }
@@ -455,6 +459,8 @@ export function checkoutGroupBatch(groupId, batchId) {
 // 整梯清桌釋出：把該梯次目前「待清（cleaning）」的桌一次清成空桌（vacant）、釋放座位。
 // 與 finalizeGroup 不同：只釋放這一梯的桌、不結束整團；與 seatNextBatchOnTable 不同：不接下一梯。
 // 只動「currentRef 仍指向本梯且為 cleaning」的桌——已被下一梯接走（currentRef 改指）或仍在用餐的桌都不碰。
+// 釋出同時在 batch 落 releasedAt 持久標記（桌位痕跡清空後「此梯已消化」的唯一證據）；
+// 全部「有圈桌」的梯都釋出後自動結團——單梯團跑完整輪即收斂，多梯團維持逐梯釋出不提早結束。
 export function releaseGroupBatch(groupId, batchId) {
   const group = groupService.getById(groupId)
   if (!group) return { ok: false, error: '團單不存在' }
@@ -469,6 +475,16 @@ export function releaseGroupBatch(groupId, batchId) {
     }
   })
   if (!cleared.length) return { ok: false, error: '此梯沒有待清桌可釋出' }
+  groupService.markBatchReleased(groupId, batchId)
+
+  // 自動結團：所有可執行（有圈桌）的梯都已釋出 → 團收斂為 completed。
+  // 空圈桌的梯本來就不可入座，不擋結團；finalizeGroup 順帶防禦性清掉任何殘留 currentRef。
+  const after = groupService.getById(groupId)
+  const executable = (after?.batches || []).filter(b => (b.tableNumbers || []).length)
+  if (executable.length && executable.every(b => b.releasedAt) && after.status !== 'completed') {
+    finalizeGroup(groupId)
+    return { ok: true, cleared, groupCompleted: true }
+  }
   return { ok: true, cleared }
 }
 
@@ -482,6 +498,8 @@ export function seatNextBatchOnTable(tableNumber, groupId, batchId) {
   if (['completed', 'cancelled'].includes(group0.status)) {
     return { ok: false, error: '此團已結束，無法再入座' }
   }
+  const nextBatch = (group0.batches || []).find(b => b.id === batchId)
+  if (nextBatch?.releasedAt) return { ok: false, error: '此梯已清桌釋出完成，無法再入座' }
   tableService.clearTable(tableNumber)
   tableService.seatTableForGroup(tableNumber, groupId, batchId)
   const group = groupService.getById(groupId)

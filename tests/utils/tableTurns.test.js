@@ -89,3 +89,19 @@ describe('turnInPeriod — 時段篩選', () => {
     expect(turnInPeriod(noTime, 'dinner')).toBe(false)
   })
 })
+
+describe('buildTableTurns — 整梯清桌釋出（releasedAt）', () => {
+  it('已釋出的梯 = done（桌位痕跡清空後仍判定消化完，不回 upcoming）', () => {
+    const groupReleased = {
+      id: 'g1', date: TODAY, agencyName: '大發旅行社', status: 'arrived',
+      batches: [{
+        id: 'ba1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['103'], guests: 6,
+        releasedAt: '2026-06-15T13:00:00.000Z',
+      }],
+    }
+    const map = buildTableTurns(
+      [{ ...tables[0], number: '103', status: 'vacant', currentRef: null }],
+      [], [groupReleased], TODAY)
+    expect(map['103'][0].status).toBe('done')
+  })
+})
