@@ -50,6 +50,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   const [sheetOpen, setSheetOpen] = useState(false)
   const [showAddWalkin, setShowAddWalkin] = useState(false) // 規劃頁快速新增散客
   const [mapAssign, setMapAssign] = useState(null) // { bookingId, seatingId }：跳排位地圖並自動進預配模式
+  const [mapFocus, setMapFocus] = useState(null) // { tableNumbers, seatingId, agencyName, batchLabel }：時間軸點團 → 跳地圖白圈標示
 
   // map 態的前一日/後一日：同步月曆游標，回 day 態時月曆停在正確的月份
   const shiftDay = (delta) => {
@@ -169,6 +170,20 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     const sid = seatingForSlot(settings, booking.timeSlot)?.id
     if (!sid) return
     setMapAssign({ bookingId: booking.id, seatingId: sid })
+    setPane('map')
+  }
+
+  // 抵達時間軸點某團某梯次 → 跳排位地圖該場次，並在這團的桌位畫白圈標示「坐這邊」
+  const focusBatchOnMap = (row) => {
+    const nums = row?.batch?.tableNumbers || row?.tableNumbers || []
+    if (!nums.length) return
+    setMapAssign(null)
+    setMapFocus({
+      tableNumbers: nums,
+      seatingId: seatingForSlot(settings, row.timeSlot || row.batch?.timeSlot)?.id || null,
+      agencyName: row.group?.agencyName || '',
+      batchLabel: row.batch?.label || '',
+    })
     setPane('map')
   }
 
@@ -304,11 +319,18 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
             onPrintSheet={() => setSheetOpen(true)}
             onOpenMap={() => setPane('map')}
             onAssignWalkin={goAssignWalkin}
+            onFocusBatch={focusBatchOnMap}
             onNewWalkin={() => setShowAddWalkin(true)}
           />
         </div>
       ) : (
-        <SlotMapPanel date={selectedDate} assignRequest={mapAssign} onAssignHandled={() => setMapAssign(null)} />
+        <SlotMapPanel
+          date={selectedDate}
+          assignRequest={mapAssign}
+          onAssignHandled={() => setMapAssign(null)}
+          focusRequest={mapFocus}
+          onFocusHandled={() => setMapFocus(null)}
+        />
       )}
 
       {sheetOpen && (

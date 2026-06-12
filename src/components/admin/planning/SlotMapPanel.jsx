@@ -12,7 +12,9 @@ import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 // 支援「散客預先配桌」（只記 booking.assignedTableId，不動今日即時桌況）。
 // assignRequest（{ bookingId, seatingId }）：容器要求自動切場次並進入該散客的預配模式
 // （來源：當日總覽散客列「→ 配桌」、訂位頁未來日「指派桌位（預配）」跨頁導向）。
-export default function SlotMapPanel({ date, assignRequest = null, onAssignHandled }) {
+// focusRequest（{ tableNumbers, seatingId, agencyName, batchLabel }）：時間軸點團 → 自動切場次/樓層
+// 並在那些桌畫白圈脈動，幫外場一眼定位「這團坐哪」。
+export default function SlotMapPanel({ date, assignRequest = null, onAssignHandled, focusRequest = null, onFocusHandled }) {
   const { settings, bookings, groupReservations, tables, preassignBookingTable, clearBookingPreassign } = useBooking()
   const toast = useToast()
 
@@ -21,11 +23,13 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
   const [floor, setFloor] = useState('1F')
   const [selectedTable, setSelectedTable] = useState(null)
   const [assignBooking, setAssignBooking] = useState(null) // 預先配桌中的散客訂位
+  const [focus, setFocus] = useState(null) // 時間軸點團標示：{ tables:[], agencyName, batchLabel }
 
   // date 由容器（PlanningView 月曆）控制：換日重置選桌與預配模式（場次保留，換日通常仍看同場次）
   useEffect(() => {
     setSelectedTable(null)
     setAssignBooking(null)
+    setFocus(null)
   }, [date])
 
   // 消費 assignRequest：切場次 + 自動進預配模式（宣告在換日 reset 之後——mount 同輪執行時本 effect 勝出）
@@ -40,6 +44,20 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     onAssignHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignRequest])
+
+  // 消費 focusRequest：切到該團場次、切到含焦點桌的樓層，點亮白圈標示（宣告在換日 reset 之後勝出）
+  useEffect(() => {
+    if (!focusRequest) return
+    const nums = focusRequest.tableNumbers || []
+    if (focusRequest.seatingId) setSeatingId(focusRequest.seatingId)
+    const first = (tables || []).find(t => nums.includes(t.number))
+    if (first?.floor) setFloor(first.floor)
+    setAssignBooking(null)
+    setSelectedTable(null)
+    setFocus(nums.length ? { tables: nums, agencyName: focusRequest.agencyName || '', batchLabel: focusRequest.batchLabel || '' } : null)
+    onFocusHandled?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest])
 
   const seating = seatings.find(s => s.id === seatingId) || seatings[0] || null
   const closed = seating ? isSeatingClosed(settings, date, seating) : false
@@ -107,7 +125,7 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
             const c = isSeatingClosed(settings, date, s)
             return (
               <button key={s.id}
-                onClick={() => { setSeatingId(s.id); setSelectedTable(null); setAssignBooking(null) }}
+                onClick={() => { setSeatingId(s.id); setSelectedTable(null); setAssignBooking(null); setFocus(null) }}
                 className={`px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
                   seatingId === s.id
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow'
@@ -142,6 +160,14 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
       {summary.unassignedWalkinGuests > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">
           ⚠️ 尚有 <span className="text-base">{summary.unassignedWalkinGuests}</span> 位散客已訂位但未配桌（可在右側清單點選 → 於地圖預先配桌）
+        </div>
+      )}
+
+      {/* 時間軸點團標示橫幅（團客冷色系，呼應地圖團客＝靛色） */}
+      {focus && (
+        <div className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl shadow-md flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-sm font-bold">🎯 標示 🚌 {focus.agencyName || '團體'}{focus.batchLabel ? ` · ${focus.batchLabel}` : ''} 的座位（桌 {focus.tables.join('、')}）</div>
+          <button onClick={() => setFocus(null)} className="text-xs px-3 py-2 bg-white text-indigo-700 rounded-lg font-bold">關閉標示</button>
         </div>
       )}
 
@@ -182,6 +208,7 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
               scopedByTable={byTable}
               scopedClosed={closed}
               scopedHighlightTables={highlightTables}
+              scopedFocusTables={focus?.tables || []}
               mapDate={date}
             />
           </div>

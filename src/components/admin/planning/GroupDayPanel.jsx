@@ -157,7 +157,7 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
   )
 }
 
-export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onNewWalkin, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin }) {
+export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onNewWalkin, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin, onFocusBatch }) {
   const s = daySummary || {}
   const counts = s.prep?.counts || {}
   const hasGroups = dayGroups.length > 0
@@ -261,7 +261,7 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
       {/* 內容 */}
       {hasGroups || !noSeatings ? (
         <>
-          {hasGroups && <GroupArrivalTimeline timeline={s.timeline || []} />}
+          {hasGroups && <GroupArrivalTimeline timeline={s.timeline || []} onFocusBatch={onFocusBatch} />}
           {hasGroups && <GroupPrepDigest prep={s.prep} />}
 
           {/* 依場次分組（團卡 + 散客名單） */}

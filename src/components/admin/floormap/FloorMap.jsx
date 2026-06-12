@@ -64,6 +64,7 @@ export default function FloorMap({
   scopedByTable = {},       // 統一佔用視圖：{ 桌號: { kind:'walkin'|'group', booking?|group?+batch? } }
   scopedClosed = false,     // 統一佔用視圖：此日期/場次已關閉 → 整圖淡化
   scopedHighlightTables = [], // 統一佔用視圖：預先配桌模式中、可選的空桌（高亮）
+  scopedFocusTables = [],   // 統一佔用視圖：時間軸點團 → 白圈脈動標示該團座位
   mapDate = '',             // 地圖對應日期（規劃/統一視圖傳入；今日即時圖不傳 = 今天）：維修窗判定用
 }) {
   const [, setTick] = useState(0)
@@ -123,6 +124,7 @@ export default function FloorMap({
               occLabel={occLabel}
               occHighlight={scopedHighlightTables.includes(t.number)}
               occDimmed={scopedClosed}
+              focusRing={scopedFocusTables.includes(t.number)}
               outNote={outNoteFor(t)}
               onClick={() => onSelectTable(t.number)}
             />
