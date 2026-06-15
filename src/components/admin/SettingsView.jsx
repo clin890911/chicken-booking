@@ -497,7 +497,7 @@ export default function SettingsView() {
                 type="url"
                 value={form.lineLoginCallbackUrl || ''}
                 onChange={e => setForm(f => ({ ...f, lineLoginCallbackUrl: e.target.value.trim() }))}
-                placeholder="https://linelogincallback-xxxx-uc.a.run.app"
+                placeholder="https://us-central1-chicken-booking-tw.cloudfunctions.net/lineLoginCallback"
                 title="OAuth 回呼網址（lineLoginCallback 函式 URL）"
               />
             </Field>

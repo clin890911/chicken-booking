@@ -1,7 +1,9 @@
 const DEFAULT_LIFF_URL = 'https://liff.line.me/2009996489-f1SCb75q'
 const DEFAULT_LIFF_ID = '2009996489-f1SCb75q'
 const DEFAULT_BIND_ENDPOINT = 'https://linebind-reaor76eyq-uc.a.run.app'
-const DEFAULT_LOGIN_START_ENDPOINT = 'https://lineloginstart-reaor76eyq-uc.a.run.app'
+// 新端點預設用穩定的 cloudfunctions.net 形式（函式名一一對應），避免「猜 run.app hash」部署後 404。
+const DEFAULT_FUNCTION_BASE = import.meta.env.VITE_FUNCTION_BASE_URL || 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
+const DEFAULT_LOGIN_START_ENDPOINT = `${DEFAULT_FUNCTION_BASE}/lineLoginStart`
 const DEFAULT_PUSH_ENDPOINT = 'https://linepushbooking-reaor76eyq-uc.a.run.app'
 const DEFAULT_MANAGE_ENDPOINT = 'https://linegetbooking-reaor76eyq-uc.a.run.app'
 const DEFAULT_MYBOOKINGS_ENDPOINT = 'https://linemybookings-reaor76eyq-uc.a.run.app'

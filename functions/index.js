@@ -97,6 +97,9 @@ const DEFAULT_STORE_LONGITUDE = '120.746746'
 const DEFAULT_STORE_PHONE = '049-2753377'
 const DEFAULT_DINING_DURATION_MIN = 90
 const DEFAULT_CLEANUP_BUFFER_MIN = 10
+// 新 LINE Login 端點預設用穩定的 cloudfunctions.net 形式（函式名一一對應），
+// 避免「猜 run.app hash」部署後對不上 → 404。admin 可在後台覆寫。
+const DEFAULT_FUNCTION_BASE = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
 // LINE_BIND_PUSH_DEDUPE_MS 已搬至 lib/lineBinding.js 統一維護（record 組裝邏輯同檔）。
 const PUBLIC_CORS = true
 
@@ -1548,9 +1551,10 @@ function normalizeStoreSettings(settings = {}) {
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
     lineMyBookingsEndpoint: settings.lineMyBookingsEndpoint || 'https://linemybookings-reaor76eyq-uc.a.run.app',
-    // LINE Login network 綁定（新路徑）入口端點與 OAuth 回呼網址。空字串 = 沿用前端預設 / 尚未設定。
-    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || '').trim(),
-    lineLoginCallbackUrl: String(settings.lineLoginCallbackUrl || '').trim(),
+    // LINE Login 網頁授權綁定（新路徑）入口端點與 OAuth 回呼網址。未設定時預設指向本專案
+    // cloudfunctions.net 對應函式，讓 redirect_uri（授權與換 token 共用）自動正確；admin 可覆寫。
+    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || `${DEFAULT_FUNCTION_BASE}/lineLoginStart`).trim(),
+    lineLoginCallbackUrl: String(settings.lineLoginCallbackUrl || `${DEFAULT_FUNCTION_BASE}/lineLoginCallback`).trim(),
     // LINE Login channel ID（LIFF / Login 所屬 channel，非 Messaging API channel）：
     // lineLoginStart/Callback 與 lineMyBookings 驗 ID token 共用；未設定時相關功能停用。
     lineLoginChannelId: String(settings.lineLoginChannelId || '').trim(),
