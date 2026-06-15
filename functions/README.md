@@ -4,8 +4,14 @@ This folder contains Firebase Cloud Functions for the LINE integration.
 
 ## Functions
 
-- `lineBind`: called by the LIFF binding page. It stores the booking + LINE user binding in Firestore and pushes a booking Flex Message plus a location message.
-- `lineWebhook`: LINE Messaging API webhook with signature verification.
+- `lineLoginStart` / `lineLoginCallback`（**目前主要綁定方式**）：LINE Login（OAuth 2.0）網頁授權綁定，
+  取代易卡「一直載入」的 LIFF 自動綁定。`lineLoginStart` 驗證訂位後寫一次性 `state` 並 302 導去
+  LINE 授權頁（`scope=profile openid`、`bot_prompt=aggressive` 同步加好友）；`lineLoginCallback`
+  以授權碼換 token、驗 `id_token` 取 userId/profile、查 friendFlag，沿用 `attachLineBindingAndPush`
+  寫綁定並推播確認卡，最後 302 導回 SPA `/line/bind?bound=1`（未加好友帶 `&needFriend=1`）。
+  全程純伺服器重導，不依賴 client SDK。
+- `lineBind`（**舊版 LIFF 路徑，保留相容**）：LIFF 綁定頁呼叫，存綁定 + 推播。新流程不使用。
+- `lineWebhook`: LINE Messaging API webhook with signature verification（follow 事件自動補發未加好友期間的訂位卡）。
 - `linePushBooking`: reusable endpoint for pushing the latest booking notification after edits/cancellations.
 - `lineMyBookings`: 「LINE 我的訂位」清單查詢（rich menu 入口）。輸入 LIFF `idToken`，
   後端打 `https://api.line.me/oauth2/v2.1/verify` 驗明身分後列出該 LINE 使用者綁定的訂位。
@@ -14,8 +20,9 @@ This folder contains Firebase Cloud Functions for the LINE integration.
 ## Required Firebase secrets
 
 ```bash
-firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN
-firebase functions:secrets:set LINE_CHANNEL_SECRET
+firebase functions:secrets:set LINE_CHANNEL_ACCESS_TOKEN   # Messaging API channel access token（push）
+firebase functions:secrets:set LINE_CHANNEL_SECRET         # Messaging API channel secret（webhook 驗簽）
+firebase functions:secrets:set LINE_LOGIN_CHANNEL_SECRET   # LINE Login channel secret（OAuth 換 token）
 ```
 
 ## Required app settings
@@ -23,27 +30,27 @@ firebase functions:secrets:set LINE_CHANNEL_SECRET
 In the admin settings page:
 
 - LINE Official Account URL
-- LIFF URL
-- LIFF ID
-- LINE bind endpoint URL, for example `https://<region>-<project>.cloudfunctions.net/lineBind`
+- **LINE Login Channel ID**（綁定 + 我的訂位查詢共用）
+- **LINE Login 回呼網址** `lineLoginCallbackUrl`，= 部署後的 `lineLoginCallback` 函式網址
+  （例：`https://<region>-<project>.cloudfunctions.net/lineLoginCallback`）
+- LINE Login 綁定入口 `lineLoginStartEndpoint`（選填；未填用前端預設，建議部署後填入
+  `https://<region>-<project>.cloudfunctions.net/lineLoginStart`）
+- `publicSiteUrl`（訂位網站正式網址）：OAuth 完成後導回 SPA、以及 LINE 卡片「管理 / 修改訂位」按鈕都需要它
 - LINE push endpoint URL, for example `https://<region>-<project>.cloudfunctions.net/linePushBooking`
-- Store name
-- Store address
-- Store phone
-- Google Maps URL
-- Store latitude and longitude
+- Store name / address / phone / Google Maps URL / latitude / longitude
+- （LIFF URL / LIFF ID / 「使用 LIFF 自動綁定」為舊版，建議保持關閉）
 
 ## LINE Developers console
 
 - Enable Messaging API.
 - Enable webhook（follow 事件用於「先綁定、後加好友」的自動補發，務必開啟）.
 - Set webhook URL to the deployed `lineWebhook` endpoint.
-- Create a LIFF app with `profile` scope.
-- Set the LIFF endpoint URL to the deployed frontend route or LIFF URL used by the app.
-- **Add friend option 設為 aggressive**：LINE Login channel 連結官方帳號後，授權畫面會同時出現
-  「加入好友」勾選，讓加好友與授權一步完成（綁定頁也會用 `liff.getFriendship()` 檢查好友狀態，
-  未加好友會跳過首封推播並引導加入，加入後由 follow 事件自動補發）。
-- 後台設定需填 `publicSiteUrl`（訂位網站正式網址），LINE 卡片才會有「管理 / 修改訂位」按鈕。
+- **LINE Login channel**：
+  - scopes 需含 `openid` + `profile`。
+  - **Callback URL** 一字不差加入部署後的 `lineLoginCallback` 函式網址（與後台 `lineLoginCallbackUrl` 相同）。
+  - **Linked OA**：把此 Login channel 連動到 Messaging API 官方帳號，`bot_prompt=aggressive` 的「加入好友」
+    勾選才會生效（綁定與加好友一步完成）。未加好友時後端跳過首封推播並引導加入，加入後由 follow 事件自動補發。
+- （舊版 LIFF：如需保留，建立 `profile` scope 的 LIFF app 並設 endpoint；新流程不依賴。）
 
 ## LINE-first 訂位閉環（LIFF Endpoint = 站根）
 

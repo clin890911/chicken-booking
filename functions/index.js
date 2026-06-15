@@ -29,6 +29,12 @@ import {
   buildMyBookingsList,
 } from './lib/myBookings.js'
 import { buildLineBindingRecord } from './lib/lineBinding.js'
+import {
+  buildAuthorizeUrl,
+  parseFriendFlag,
+  buildBindResultUrl,
+  LINE_LOGIN_STATE_TTL_MS,
+} from './lib/lineLogin.js'
 
 initializeApp()
 
@@ -71,6 +77,9 @@ async function requireStaff(req) {
 }
 const LINE_CHANNEL_ACCESS_TOKEN = defineSecret('LINE_CHANNEL_ACCESS_TOKEN')
 const LINE_CHANNEL_SECRET = defineSecret('LINE_CHANNEL_SECRET')
+// LINE Login channel 自己的 channel secret（OAuth 換 token 用），與上面 Messaging API
+// 的 LINE_CHANNEL_SECRET（webhook 驗簽）不同，務必分開設定。
+const LINE_LOGIN_CHANNEL_SECRET = defineSecret('LINE_LOGIN_CHANNEL_SECRET')
 
 // 內場通知用 Telegram bot（取代過去前端持有 bot token 的做法，P0-4）。
 // token 與 chat id 皆以 Secret Manager 管理，不進前端 bundle。
@@ -79,6 +88,8 @@ const TELEGRAM_CHAT_ID = defineSecret('TELEGRAM_CHAT_ID')
 
 const LINE_REPLY_URL = 'https://api.line.me/v2/bot/message/reply'
 const LINE_PUSH_URL = 'https://api.line.me/v2/bot/message/push'
+const LINE_TOKEN_URL = 'https://api.line.me/oauth2/v2.1/token'
+const LINE_FRIENDSHIP_URL = 'https://api.line.me/friendship/v1/status'
 const DEFAULT_STORE_ADDRESS = '南投縣鹿谷鄉中正路二段377號'
 const DEFAULT_STORE_MAP_URL = 'https://www.google.com/maps/search/?api=1&query=%E5%8D%97%E6%8A%95%E7%B8%A3%E9%B9%BF%E8%B0%B7%E9%84%89%E4%B8%AD%E6%AD%A3%E8%B7%AF%E4%BA%8C%E6%AE%B5377%E8%99%9F'
 const DEFAULT_STORE_LATITUDE = '23.7523874'
@@ -850,6 +861,164 @@ export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LIN
   }
 })
 
+function lineLoginChannelSecret() {
+  try { return (LINE_LOGIN_CHANNEL_SECRET.value() || '').trim() } catch { return '' }
+}
+
+// 授權碼換 token（id_token + access_token）。AbortController 逾時保護，仿 lineSend/verifyLineIdToken。
+async function exchangeLineLoginCode({ code, redirectUri, channelId, channelSecret }) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS)
+  try {
+    const res = await fetch(LINE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        client_id: channelId,
+        client_secret: channelSecret,
+      }).toString(),
+      signal: controller.signal,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data.id_token) {
+      throw errorWithStatus(`line-token-${res.status}: ${String(data.error_description || data.error || '')}`.slice(0, 200), 502)
+    }
+    return data
+  } catch (err) {
+    if (err.status) throw err
+    throw errorWithStatus(err?.name === 'AbortError' ? 'line-token-timeout' : 'line-token-failed', 502)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 查好友狀態（friendFlag）。失敗/逾時回 null（未知）——綁定照走，未加好友由 follow 事件補發。
+async function fetchLineFriendFlag(accessToken) {
+  if (!accessToken) return null
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS)
+  try {
+    const res = await fetch(LINE_FRIENDSHIP_URL, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    })
+    if (!res.ok) return null
+    const data = await res.json().catch(() => ({}))
+    return typeof data.friendFlag === 'boolean' ? data.friendFlag : null
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// LINE Login 綁定入口：驗證訂位後寫一次性 state，302 導去 LINE 授權頁（取代 LIFF 自動綁定）。
+// 純伺服器重導，不依賴 client SDK，根治「一直載入」。
+export const lineLoginStart = onRequest({ invoker: 'public' }, async (req, res) => {
+  const bookingId = String(req.query.bookingId || '')
+  const token = String(req.query.token || '')
+  try {
+    const settingsSnap = await db.collection('settings').doc('main').get()
+    const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+    const channelId = settings.lineLoginChannelId
+    const callbackUrl = settings.lineLoginCallbackUrl
+    const fail = (err) => {
+      const dest = buildBindResultUrl(settings.publicSiteUrl, { bookingId, token, bound: 0, err })
+      return dest ? res.redirect(302, dest) : res.status(400).send(`line-login-start: ${err}`)
+    }
+    if (!channelId || !callbackUrl) return fail('not-configured')
+
+    // 權威驗證 bookingId + manageToken（失敗→導回錯誤頁，不洩漏細節）
+    let authBooking
+    try {
+      authBooking = await getBookingByToken(bookingId, token)
+    } catch {
+      return fail('invalid-booking')
+    }
+
+    const state = createServerToken()
+    await db.collection('lineLoginStates').doc(state).set({
+      bookingId: authBooking.id,
+      manageToken: authBooking.manageToken,
+      createdAt: FieldValue.serverTimestamp(),
+      expiresAt: new Date(Date.now() + LINE_LOGIN_STATE_TTL_MS).toISOString(),
+    })
+    return res.redirect(302, buildAuthorizeUrl({ channelId, redirectUri: callbackUrl, state }))
+  } catch (err) {
+    console.error('lineLoginStart failed:', err)
+    return res.status(500).send('line-login-start-failed')
+  }
+})
+
+// LINE Login 回呼：換 token → 驗 id_token 取 userId/profile → 取 friendFlag →
+// 沿用 attachLineBindingAndPush 寫綁定並推播確認卡 → 302 導回 SPA 結果頁。
+export const lineLoginCallback = onRequest(
+  { invoker: 'public', secrets: [LINE_CHANNEL_ACCESS_TOKEN, LINE_LOGIN_CHANNEL_SECRET] },
+  async (req, res) => {
+    let settings = normalizeStoreSettings({})
+    const fail = (err, bookingId = '', token = '') => {
+      const dest = buildBindResultUrl(settings.publicSiteUrl, { bookingId, token, bound: 0, err })
+      return dest ? res.redirect(302, dest) : res.status(400).send(`line-login: ${err}`)
+    }
+    try {
+      const settingsSnap = await db.collection('settings').doc('main').get()
+      settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+
+      if (req.query.error) return fail(String(req.query.error_description || req.query.error))
+      const code = String(req.query.code || '')
+      const state = String(req.query.state || '')
+      if (!code || !state) return fail('missing-code')
+
+      // 一次性 state：讀出後立即刪除，過期即拒
+      const stateRef = db.collection('lineLoginStates').doc(state)
+      const stateSnap = await stateRef.get()
+      if (!stateSnap.exists) return fail('expired')
+      const stateData = stateSnap.data() || {}
+      await stateRef.delete().catch(() => {})
+      if (stateData.expiresAt && Date.parse(stateData.expiresAt) <= Date.now()) return fail('expired')
+      const bookingId = stateData.bookingId || ''
+      const manageToken = stateData.manageToken || ''
+
+      const channelId = settings.lineLoginChannelId
+      const channelSecret = lineLoginChannelSecret()
+      const callbackUrl = settings.lineLoginCallbackUrl
+      if (!channelId || !channelSecret || !callbackUrl) return fail('not-configured', bookingId, manageToken)
+
+      const tokenData = await exchangeLineLoginCode({ code, redirectUri: callbackUrl, channelId, channelSecret })
+      const claims = await verifyLineIdToken(tokenData.id_token, channelId)
+      let friendFlag = parseFriendFlag(req.query.friendship_status_changed)
+      if (friendFlag === null) friendFlag = await fetchLineFriendFlag(tokenData.access_token)
+
+      const authBooking = await getBookingByToken(bookingId, manageToken)
+      const existingSnap = await db.collection('lineBookingBindings').doc(authBooking.id).get()
+      const existing = existingSnap.exists ? existingSnap.data() : null
+      const line = {
+        userId: claims.sub,
+        displayName: claims.name || '',
+        pictureUrl: claims.picture || '',
+        ...(friendFlag === null ? {} : { friendFlag }),
+      }
+      const result = await attachLineBindingAndPush({ authBooking, settings, line, existing })
+
+      const dest = buildBindResultUrl(settings.publicSiteUrl, {
+        bookingId: authBooking.id,
+        token: manageToken,
+        bound: 1,
+        needFriend: result.needFriend ? 1 : 0,
+      })
+      return dest
+        ? res.redirect(302, dest)
+        : res.status(200).send('LINE 綁定完成，請回到訂位頁查看。')
+    } catch (err) {
+      console.error('lineLoginCallback failed:', err)
+      return fail(err.message || 'line-login-failed')
+    }
+  },
+)
+
 export const lineWebhook = onRequest({ invoker: 'public', secrets: [LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('method-not-allowed')
   const signature = req.get('x-line-signature') || ''
@@ -1371,15 +1540,19 @@ function normalizeStoreSettings(settings = {}) {
     heroBanners: Array.isArray(settings.heroBanners) ? settings.heroBanners : [],
     lineOfficialUrl: settings.lineOfficialUrl || 'https://lin.ee/8lECi4S',
     lineOfficialName: settings.lineOfficialName || '雞王涮涮鍋 LINE 官方帳號',
-    lineUseLiff: settings.lineUseLiff !== false,
+    // LIFF 自動綁定（舊路徑）預設關閉：改用 LINE Login 網頁授權，LIFF 多段重導易卡載入。
+    lineUseLiff: settings.lineUseLiff === true,
     lineLiffUrl: settings.lineLiffUrl || 'https://liff.line.me/2009996489-f1SCb75q',
     lineLiffId: settings.lineLiffId || '2009996489-f1SCb75q',
     lineBindEndpoint: settings.lineBindEndpoint || 'https://linebind-reaor76eyq-uc.a.run.app',
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
     lineMyBookingsEndpoint: settings.lineMyBookingsEndpoint || 'https://linemybookings-reaor76eyq-uc.a.run.app',
-    // LINE Login channel ID（LIFF 所屬 channel，非 Messaging API channel）：
-    // lineMyBookings 驗 ID token 用；未設定時該端點回 not-configured、前端退回電話查詢。
+    // LINE Login network 綁定（新路徑）入口端點與 OAuth 回呼網址。空字串 = 沿用前端預設 / 尚未設定。
+    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || '').trim(),
+    lineLoginCallbackUrl: String(settings.lineLoginCallbackUrl || '').trim(),
+    // LINE Login channel ID（LIFF / Login 所屬 channel，非 Messaging API channel）：
+    // lineLoginStart/Callback 與 lineMyBookings 驗 ID token 共用；未設定時相關功能停用。
     lineLoginChannelId: String(settings.lineLoginChannelId || '').trim(),
     // 前端正式站網址：後端組 LINE 訊息「管理 / 修改訂位」按鈕連結用；未設定則該按鈕不顯示。
     publicSiteUrl: String(settings.publicSiteUrl || '').trim(),

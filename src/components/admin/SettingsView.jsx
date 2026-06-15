@@ -480,8 +480,31 @@ export default function SettingsView() {
             </Field>
           </FieldGroup>
 
-          {/* C11：LIFF */}
-          <FieldGroup title="LIFF" hint="LIFF 自動綁定；未確認可用前請保持關閉，改走網站中轉頁避免 404。">
+          {/* LINE Login 網頁授權綁定（建議的主要綁定方式，取代易卡載入的 LIFF） */}
+          <FieldGroup title="LINE Login 綁定（建議）" hint="網頁授權綁定：客人點訂位頁 CTA → LINE 授權 → 自動完成綁定並接收訊息。比 LIFF 穩定，不會卡「一直載入」。">
+            <Field hint="LINE Login channel 的 Channel ID（非 Messaging API channel）。位置：LINE Developers → LINE Login channel → Basic settings。LINE Login 綁定與「我的訂位」查詢共用；未填則兩者停用。">
+              <Input
+                label="LINE Login Channel ID"
+                value={form.lineLoginChannelId || ''}
+                onChange={e => setForm(f => ({ ...f, lineLoginChannelId: e.target.value.trim() }))}
+                placeholder="1234567890"
+                title="LINE Login channel 的 Channel ID（綁定 + 我的訂位查詢用）"
+              />
+            </Field>
+            <Field hint="OAuth 回呼網址＝部署後的 lineLoginCallback 函式網址；需一字不差填入 LINE Login channel 的 Callback URL 白名單。另需把 Login channel 連動（Linked OA）到官方帳號，加好友才會生效。">
+              <Input
+                label="LINE Login 回呼網址"
+                type="url"
+                value={form.lineLoginCallbackUrl || ''}
+                onChange={e => setForm(f => ({ ...f, lineLoginCallbackUrl: e.target.value.trim() }))}
+                placeholder="https://linelogincallback-xxxx-uc.a.run.app"
+                title="OAuth 回呼網址（lineLoginCallback 函式 URL）"
+              />
+            </Field>
+          </FieldGroup>
+
+          {/* C11：LIFF（舊版，建議關閉，改用上方 LINE Login 綁定） */}
+          <FieldGroup title="LIFF（舊版）" hint="舊版 LIFF 自動綁定；多段重導易卡「一直載入」，建議保持關閉、改用上方 LINE Login 綁定。">
             <label className="flex items-start gap-3 rounded-xl border border-chicken-brown/10 bg-white px-4 py-3 text-sm font-bold text-chicken-brown">
               <input
                 type="checkbox"
@@ -490,9 +513,9 @@ export default function SettingsView() {
                 className="mt-1"
               />
               <span>
-                使用 LIFF 自動綁定
+                使用 LIFF 自動綁定（不建議）
                 <span className="mt-1 block text-xs font-bold leading-5 text-chicken-brown/55">
-                  未確認 LIFF 正式可用前請保持關閉；關閉時客人會先進網站中轉頁，不會遇到 LINE 404。
+                  建議關閉，改用上方 LINE Login 網頁授權綁定；LIFF 在 LINE 內外瀏覽器易重導卡死。
                 </span>
               </span>
             </label>
@@ -513,15 +536,6 @@ export default function SettingsView() {
                 onChange={e => setForm(f => ({ ...f, lineLiffId: e.target.value.trim() }))}
                 placeholder="xxxxxxxxxx-xxxxxxxx"
                 title="LINE Developers 後台的 LIFF App ID"
-              />
-            </Field>
-            <Field hint="LIFF 所屬「LINE Login channel」的 Channel ID（非 Messaging API channel）。位置：LINE Developers → LINE Login channel → Basic settings。「LINE 我的訂位」查詢頁驗證身分用；未填則查詢頁退回電話查詢。">
-              <Input
-                label="LINE Login Channel ID（選填）"
-                value={form.lineLoginChannelId || ''}
-                onChange={e => setForm(f => ({ ...f, lineLoginChannelId: e.target.value.trim() }))}
-                placeholder="1234567890"
-                title="LINE Login channel 的 Channel ID（我的訂位查詢驗證用）"
               />
             </Field>
           </FieldGroup>

@@ -27,15 +27,20 @@ const DEFAULT = {
   heroBanners: [],
   lineOfficialUrl: 'https://lin.ee/8lECi4S',
   lineOfficialName: '雞王涮涮鍋 LINE 官方帳號',
-  lineUseLiff: true,
+  // LIFF 自動綁定（舊）預設關：改走 LINE Login 網頁授權，避免 LIFF 多段重導卡載入。
+  lineUseLiff: false,
   lineLiffUrl: 'https://liff.line.me/2009996489-f1SCb75q',
   lineLiffId: '2009996489-f1SCb75q',
   lineBindEndpoint: 'https://linebind-reaor76eyq-uc.a.run.app',
   linePushEndpoint: 'https://linepushbooking-reaor76eyq-uc.a.run.app',
   lineManageEndpoint: 'https://linegetbooking-reaor76eyq-uc.a.run.app',
   lineMyBookingsEndpoint: 'https://linemybookings-reaor76eyq-uc.a.run.app',
-  // LINE Login channel ID（LIFF 所屬 channel）：「LINE 我的訂位」驗 ID token 用；
-  // 空字串 = 功能未啟用，查詢頁自動退回電話查詢。★ 白名單成對。
+  // LINE Login 網頁授權綁定（新）：入口端點 + OAuth 回呼網址。空字串 = 前端用預設 / 後端視為未設定。
+  // ★ 與 functions normalizeStoreSettings 白名單成對，兩邊都要有，否則同步時被靜默剝除。
+  lineLoginStartEndpoint: '',
+  lineLoginCallbackUrl: '',
+  // LINE Login channel ID（Login / LIFF 所屬 channel）：LINE Login 綁定與「我的訂位」驗 ID token 共用；
+  // 空字串 = 功能未啟用。★ 白名單成對。
   lineLoginChannelId: '',
   // 前端正式站網址：後端組 LINE 訊息「管理 / 修改訂位」按鈕連結用（空字串 = 按鈕不顯示）。
   // ★ 與 functions 的 normalizeStoreSettings 白名單成對，兩邊都要有，否則同步時被靜默剝除。
@@ -114,6 +119,8 @@ function withDefaults(value = {}) {
     linePushEndpoint: merged.linePushEndpoint || DEFAULT.linePushEndpoint,
     lineManageEndpoint: merged.lineManageEndpoint || DEFAULT.lineManageEndpoint,
     lineMyBookingsEndpoint: merged.lineMyBookingsEndpoint || DEFAULT.lineMyBookingsEndpoint,
+    lineLoginStartEndpoint: String(merged.lineLoginStartEndpoint || '').trim(),
+    lineLoginCallbackUrl: String(merged.lineLoginCallbackUrl || '').trim(),
     lineLoginChannelId: String(merged.lineLoginChannelId || '').trim(),
     publicSiteUrl: String(merged.publicSiteUrl || '').trim(),
     lineNotifyOnAdminChange: merged.lineNotifyOnAdminChange === true,

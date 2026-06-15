@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CheckCircle2, ChevronLeft, Loader2, MessageCircle, ShieldCheck, TriangleAlert } from 'lucide-react'
-import { Button, Card } from '../components/ui'
+import { CheckCircle2, ChevronLeft, Loader2, MessageCircle, TriangleAlert } from 'lucide-react'
+import { Card } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
-import { decodeLinePayload, fetchLineBooking, lineBindEndpoint, lineLiffId, lineLiffUrl, lineOfficialUrl, loadLiffSdk } from '../services/lineService'
+import { decodeLinePayload, fetchLineBooking, lineLoginStartUrl, lineOfficialUrl } from '../services/lineService'
 import { dayLabel } from '../utils/timeSlots'
 
-const LINE_BIND_STATE_KEY = 'chicken_line_bind_params_v1'
-const LINE_BIND_REDIRECT_KEY = 'chicken_line_bind_redirect_v1'
-const LINE_BIND_SUBMITTED_KEY = 'chicken_line_bind_submitted_v1'
-const LINE_BIND_SUBMIT_DEDUPE_MS = 5 * 60 * 1000
+// LINE 綁定結果頁。綁定本體已改由「LINE Login 網頁授權」完成（ConfirmPage CTA → 後端
+// lineLoginStart → LINE 授權 → lineLoginCallback 寫綁定 + 推播 → 302 導回此頁帶 ?bound=1）。
+// 本頁不再跑 LIFF（client SDK 多段重導易卡「一直載入」），只負責：
+//   1. 顯示回呼結果（成功 / 待加好友 / 失敗）
+//   2. 直接到站（或舊 LIFF 連結落地）時，提供「用 LINE 完成綁定」入口按鈕
+
+const ERR_MESSAGES = {
+  expired: '授權連結已過期，請回訂位頁重新點一次「加入並綁定 LINE 通知」。',
+  'not-configured': 'LINE 綁定尚未設定完成，請先加入官方帳號；設定開通後即可自動接收訂位資訊。',
+  'invalid-booking': '找不到此訂位或連結已失效，請使用最新的訂位確認頁。',
+}
 
 export default function LineBindPage() {
   const location = useLocation()
@@ -20,158 +27,56 @@ export default function LineBindPage() {
   const decodedPayload = useMemo(() => decodeLinePayload(bindParams.get('payload') || ''), [bindParams])
   const bookingId = bindParams.get('bookingId') || decodedPayload?.booking?.id || ''
   const token = bindParams.get('token') || decodedPayload?.booking?.token || decodedPayload?.booking?.manageToken || ''
-  const manageUrl = bindParams.get('manageUrl') || decodedPayload?.booking?.manageUrl || ''
+  const bound = bindParams.get('bound') === '1'
+  const needFriend = bindParams.get('needFriend') === '1'
+  const errCode = bindParams.get('err') || ''
   const officialUrl = lineOfficialUrl(settings)
-  const liffId = lineLiffId(settings)
-  const liffUrl = lineLiffUrl(settings)
-  const endpoint = lineBindEndpoint(settings)
-  const shouldUseLiff = (bindParams.get('useLiff') === '1' || settings.lineUseLiff) && !!liffId && !!liffUrl
 
-  const [state, setState] = useState('loading')
-  const [message, setMessage] = useState('正在準備 LINE 訂位通知...')
-  const [profile, setProfile] = useState(null)
   const [remoteBooking, setRemoteBooking] = useState(null)
-  const submittedRef = useRef(new Set())
   const remoteFetchRef = useRef('')
 
-  // 顯示用訂位資料來源（依序）：本機 → 舊版連結的 payload（相容已寄出的連結）→ lineGetBooking 回讀。
-  // 新版連結不再夾帶個資 payload（會進 LINE 伺服器 log 與瀏覽器歷史），跨裝置/LINE 內開啟靠回讀補上。
+  // 顯示用訂位資料來源（依序）：本機 → 舊版連結 payload（相容）→ lineGetBooking 回讀。
   const booking = useMemo(() => {
     const localBooking = bookingId ? bookingService.ensureManageToken(bookingId) : null
     if (localBooking) return localBooking
     return normalizePayloadBooking(decodedPayload?.booking) || remoteBooking
   }, [bookingId, decodedPayload, remoteBooking])
 
+  // 跨裝置 / LINE 內開啟、無本機資料時，回讀訂位摘要供顯示（不影響綁定結果判斷）。
   useEffect(() => {
+    if (booking || !bookingId || !token) return
+    if (remoteFetchRef.current !== '') return
+    remoteFetchRef.current = 'pending'
     let cancelled = false
-    async function run() {
-      let activeSubmitKey = ''
-      if (!booking) {
-        // 回讀狀態機（''→pending→ok/failed）放 ref：StrictMode 下 effect 會連跑兩次，
-        // 第二次必須「等待中返回」而不是誤判成查無資料。
-        if (bookingId && token && remoteFetchRef.current !== 'failed') {
-          if (remoteFetchRef.current === '') {
-            remoteFetchRef.current = 'pending'
-            setMessage('正在讀取訂位資料...')
-            const remote = await fetchLineBooking(settings, bookingId, token)
-            if (remote.ok && remote.booking?.id) {
-              remoteFetchRef.current = 'ok'
-              // 即使本輪 effect 已被 cleanup（cancelled），仍要寫入結果：
-              // 另一輪正以 pending 返回等待，沒人寫 state 流程會卡死。
-              setRemoteBooking(normalizePayloadBooking(remote.booking))
-            } else {
-              remoteFetchRef.current = 'failed'
-              setState('error')
-              setMessage('找不到此訂位資料，請回到訂位成功頁重新按一次 LINE 接收按鈕。')
-            }
-          }
-          return // pending：booking 就緒後 effect 會重跑，繼續綁定流程
-        }
-        setState('error')
-        setMessage('找不到此訂位資料，請回到訂位成功頁重新按一次 LINE 接收按鈕。')
-        return
-      }
-      if (!token || token !== booking.manageToken) {
-        setState('error')
-        setMessage('訂位連結驗證失敗，請使用最新的 LINE 接收連結。')
-        return
-      }
-      if (!liffId) {
-        setState('setup')
-        setMessage('請先加入雞王 LINE 官方帳號，並保留此頁的管理訂位入口。正式 LIFF 自動綁定開通後，官方帳號會自動傳送訂位與定位。')
-        return
-      }
-      if (!endpoint) {
-        setState('setup')
-        setMessage('LINE 後端推播端點尚未設定。請先加入官方帳號，待後端啟用後即可自動接收訊息。')
-        return
-      }
-
-      try {
-        persistBindParams(bindParams)
-        if (shouldUseLiff && !isLikelyLiffCallback(location.search, location.hash) && !hasRecentlyRedirected(booking.id)) {
-          // 已在 LINE 內（LIFF/in-app browser 曾 init 成功）就不再重導 deep link——
-          // 避免被踢到外部瀏覽器的往返迴圈，直接走本地 init/login。
-          let alreadyInClient = false
-          try {
-            const liffProbe = await loadLiffSdk()
-            alreadyInClient = typeof liffProbe.isInClient === 'function' && liffProbe.isInClient()
-          } catch { alreadyInClient = false }
-          if (!alreadyInClient) {
-            rememberLiffRedirect(booking.id)
-            setState('loading')
-            setMessage('正在開啟 LINE 授權，完成後官方帳號會傳送訂位資訊。')
-            window.location.href = buildLiffUrl(liffUrl, bindParams)
-            return
-          }
-        }
-        const liff = await loadLiffSdk()
-        await liff.init({ liffId })
-        if (!liff.isLoggedIn()) {
-          liff.login({ redirectUri: window.location.href })
-          return
-        }
-        const nextProfile = await liff.getProfile()
-        if (cancelled) return
-        setProfile(nextProfile)
-        // 好友狀態檢查：未加好友的 push 必定被 LINE 拒絕。先知道、先引導，
-        // 後端也會據此跳過首封推播（加好友後由 follow 事件自動補發）。
-        let friendFlag = null
-        try {
-          const friendship = await liff.getFriendship?.()
-          if (typeof friendship?.friendFlag === 'boolean') friendFlag = friendship.friendFlag
-        } catch {
-          friendFlag = null // 查不到（channel 未連動 OA 等）視為未知，照舊流程走
-        }
-        setMessage('正在綁定您的 LINE 訂位通知...')
-        activeSubmitKey = `${booking.id}:${nextProfile.userId}`
-        if (submittedRef.current.has(activeSubmitKey) || hasRecentlySubmittedBind(activeSubmitKey)) {
-          setState('success')
-          setMessage('LINE 訂位通知已完成設定；剛剛已傳送過訂位資訊，因此不重複發送。')
-          return
-        }
-        submittedRef.current.add(activeSubmitKey)
-        rememberSubmittedBind(activeSubmitKey)
-
-        // 後端 lineBind 會權威重讀訂位並以 settings 組店家資訊，這裡只需要 id + token + LINE profile。
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            booking: { id: booking.id, token },
-            line: {
-              userId: nextProfile.userId,
-              displayName: nextProfile.displayName,
-              pictureUrl: nextProfile.pictureUrl,
-              ...(friendFlag === null ? {} : { friendFlag }),
-            },
-          }),
-        })
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok || data.ok === false) throw new Error(data.error || 'LINE 綁定失敗')
-        clearPersistedBindParams()
-        if (data.needFriend || friendFlag === false) {
-          setState('need-friend')
-          setMessage('綁定已完成，但還沒加入官方帳號好友。請點下方按鈕加入好友，加入後會自動補發訂位資訊。')
-          return
-        }
-        setState('success')
-        setMessage(data.skippedPush
-          ? 'LINE 訂位通知已完成設定；剛剛已傳送過訂位資訊，因此不重複發送。'
-          : '已完成 LINE 訂位通知設定，官方帳號會傳送訂位摘要與定位資訊。')
-      } catch (err) {
-        console.warn('LINE bind failed:', err)
-        if (activeSubmitKey) {
-          submittedRef.current.delete(activeSubmitKey)
-          forgetSubmittedBind(activeSubmitKey)
-        }
-        setState('error')
-        setMessage(err.message || 'LINE 綁定失敗，請稍後再試。')
-      }
-    }
-    run()
+    fetchLineBooking(settings, bookingId, token).then((remote) => {
+      if (cancelled) return
+      if (remote.ok && remote.booking?.id) setRemoteBooking(normalizePayloadBooking(remote.booking))
+    })
     return () => { cancelled = true }
-  }, [bindParams, booking, bookingId, endpoint, liffId, liffUrl, location.hash, location.search, settings, shouldUseLiff, token])
+  }, [booking, bookingId, token, settings])
+
+  const startUrl = useMemo(() => {
+    if (!booking?.id) return ''
+    if (token && booking.manageToken && token !== booking.manageToken) return ''
+    try { return lineLoginStartUrl(settings, booking) } catch { return '' }
+  }, [booking, token, settings])
+
+  // 狀態：err > bound（成功 / 待加好友）> ready（入口）> error（缺資料）
+  const state = errCode
+    ? 'error'
+    : bound
+      ? (needFriend ? 'need-friend' : 'success')
+      : (booking ? 'ready' : 'error')
+
+  const message = errCode
+    ? (ERR_MESSAGES[errCode] || 'LINE 綁定未完成，請再試一次。')
+    : bound
+      ? (needFriend
+        ? '綁定已完成，但還沒加入官方帳號好友。請點下方按鈕加入好友，加入後會自動補發訂位資訊。'
+        : '已完成 LINE 訂位通知設定，官方帳號會傳送訂位摘要與定位資訊。')
+      : (booking
+        ? '點下方按鈕，用 LINE 授權即可接收訂位卡片、店家定位與修改入口；同一步驟也會加入官方帳號好友。'
+        : '找不到此訂位資料，請回到訂位成功頁重新按一次「加入並綁定 LINE 通知」。')
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#06C755]/10 via-chicken-cream to-white pb-12">
@@ -214,19 +119,17 @@ export default function LineBindPage() {
               <StatusIcon state={state} />
               <h2 className="mt-4 text-lg font-black text-chicken-brown">{statusTitle(state)}</h2>
               <p className="mt-2 text-sm leading-6 text-chicken-brown/60">{message}</p>
-              {profile?.displayName && (
-                <p className="mt-2 text-xs font-bold text-chicken-brown/45">LINE：{profile.displayName}</p>
-              )}
 
               <div className="mt-5 grid gap-2">
-                {officialUrl && (
-                  <a href={officialUrl} target="_blank" rel="noreferrer" className="btn-primary text-center !bg-[#06C755]">
-                    加入 LINE 官方帳號
+                {/* 入口 / 重試：直接導向 LINE Login 授權（同分頁，完成後自動跳回本頁 ?bound=1） */}
+                {(state === 'ready' || (state === 'error' && startUrl)) && startUrl && (
+                  <a href={startUrl} className="btn-primary text-center !bg-[#06C755] text-base">
+                    用 LINE 完成綁定
                   </a>
                 )}
-                {shouldUseLiff && (
-                  <a href={buildLiffUrl(liffUrl, bindParams)} className="btn-primary text-center">
-                    在 LINE 完成訂位綁定
+                {officialUrl && (state === 'need-friend' || state === 'ready' || state === 'success') && (
+                  <a href={officialUrl} target="_blank" rel="noreferrer" className={`btn-primary text-center !bg-[#06C755] ${state === 'need-friend' ? '' : 'opacity-90'}`}>
+                    加入 LINE 官方帳號
                   </a>
                 )}
                 {booking && (
@@ -239,7 +142,7 @@ export default function LineBindPage() {
           </Card>
 
           <div className="mt-4 rounded-2xl border border-chicken-brown/10 bg-white/75 p-4 text-xs font-bold leading-5 text-chicken-brown/55">
-            若沒有自動收到 LINE 訂位摘要，請先加入官方帳號並保留此頁的管理訂位入口；LIFF 自動綁定確認可用後，官方帳號會自動發送訂位摘要、店家定位與修改訂位連結。
+            完成 LINE 授權後，官方帳號會自動發送訂位摘要、店家定位與修改訂位連結；若先綁定才加好友，加好友後會自動補發。
           </div>
         </motion.div>
       </main>
@@ -256,10 +159,6 @@ function collectBindParams(search = '', hash = '') {
     mergeParams(params, hashText)
     const hashQueryIndex = hashText.indexOf('?')
     if (hashQueryIndex >= 0) mergeParams(params, hashText.slice(hashQueryIndex))
-  }
-
-  if (!params.get('bookingId') && !params.get('payload')) {
-    mergeParams(params, readPersistedBindParams())
   }
 
   return params
@@ -283,92 +182,6 @@ function safeDecode(value) {
   }
 }
 
-function persistBindParams(params) {
-  if (!params.get('bookingId') && !params.get('payload')) return
-  try {
-    sessionStorage.setItem(LINE_BIND_STATE_KEY, params.toString())
-  } catch {}
-}
-
-function readPersistedBindParams() {
-  try {
-    return sessionStorage.getItem(LINE_BIND_STATE_KEY) || ''
-  } catch {
-    return ''
-  }
-}
-
-function clearPersistedBindParams() {
-  try {
-    sessionStorage.removeItem(LINE_BIND_STATE_KEY)
-    sessionStorage.removeItem(LINE_BIND_REDIRECT_KEY)
-  } catch {}
-}
-
-function isLikelyLiffCallback(search = '', hash = '') {
-  const text = `${search || ''}${hash || ''}`
-  return text.includes('liff.state') || text.includes('access_token') || text.includes('id_token') || text.includes('friendship_status_changed')
-}
-
-function hasRecentlyRedirected(bookingId) {
-  try {
-    const raw = sessionStorage.getItem(LINE_BIND_REDIRECT_KEY)
-    if (!raw) return false
-    const data = JSON.parse(raw)
-    return data.bookingId === bookingId && Date.now() - Number(data.at || 0) < 90 * 1000
-  } catch {
-    return false
-  }
-}
-
-function rememberLiffRedirect(bookingId) {
-  try {
-    sessionStorage.setItem(LINE_BIND_REDIRECT_KEY, JSON.stringify({ bookingId, at: Date.now() }))
-  } catch {}
-}
-
-function hasRecentlySubmittedBind(key) {
-  try {
-    const data = JSON.parse(sessionStorage.getItem(LINE_BIND_SUBMITTED_KEY) || '{}')
-    const submittedAt = Number(data[key] || 0)
-    return submittedAt > 0 && Date.now() - submittedAt < LINE_BIND_SUBMIT_DEDUPE_MS
-  } catch {
-    return false
-  }
-}
-
-function rememberSubmittedBind(key) {
-  try {
-    const data = JSON.parse(sessionStorage.getItem(LINE_BIND_SUBMITTED_KEY) || '{}')
-    const now = Date.now()
-    const next = Object.fromEntries(
-      Object.entries(data).filter(([, value]) => now - Number(value || 0) < LINE_BIND_SUBMIT_DEDUPE_MS)
-    )
-    next[key] = now
-    sessionStorage.setItem(LINE_BIND_SUBMITTED_KEY, JSON.stringify(next))
-  } catch {}
-}
-
-function forgetSubmittedBind(key) {
-  try {
-    const data = JSON.parse(sessionStorage.getItem(LINE_BIND_SUBMITTED_KEY) || '{}')
-    delete data[key]
-    sessionStorage.setItem(LINE_BIND_SUBMITTED_KEY, JSON.stringify(data))
-  } catch {}
-}
-
-// Path-style deep link：liff.line.me/{id}/line/bind?{params}。
-// LIFF Endpoint=站根後，LINE 會把 path+query 編成 liff.state 帶到站根，
-// 由 main.jsx 的 resolveLiffStatePath shim 直接落地本頁（見 src/utils/liffState.js）。
-function buildLiffUrl(base, params) {
-  const url = new URL(base)
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}/line/bind`
-  params.forEach((value, key) => {
-    if (!url.searchParams.get(key)) url.searchParams.set(key, value)
-  })
-  return url.toString()
-}
-
 function normalizePayloadBooking(booking) {
   if (!booking?.id) return null
   return {
@@ -387,15 +200,15 @@ function normalizePayloadBooking(booking) {
 function StatusIcon({ state }) {
   if (state === 'success') return <CheckCircle2 className="mx-auto text-chicken-green" size={46} />
   if (state === 'error') return <TriangleAlert className="mx-auto text-chicken-red" size={46} />
-  if (state === 'setup') return <ShieldCheck className="mx-auto text-chicken-yellow" size={46} />
   if (state === 'need-friend') return <MessageCircle className="mx-auto text-[#06C755]" size={46} />
+  if (state === 'ready') return <MessageCircle className="mx-auto text-[#06C755]" size={46} />
   return <Loader2 className="mx-auto animate-spin text-[#06C755]" size={46} />
 }
 
 function statusTitle(state) {
   if (state === 'success') return 'LINE 訂位通知已啟用'
   if (state === 'error') return 'LINE 綁定未完成'
-  if (state === 'setup') return 'LINE 自動通知準備中'
   if (state === 'need-friend') return '最後一步：加入官方帳號好友'
+  if (state === 'ready') return '用 LINE 接收訂位通知'
   return '正在連接 LINE'
 }

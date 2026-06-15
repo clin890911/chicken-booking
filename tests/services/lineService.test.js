@@ -95,3 +95,25 @@ describe('lineMyBookingsEndpoint / fetchLineMyBookings', () => {
     expect(result).toEqual({ ok: false, error: 'not-configured' })
   })
 })
+
+describe('lineLoginStartUrl / lineLoginStartEndpoint（LINE Login 網頁授權綁定入口）', () => {
+  it('優先用 settings 端點，未設定回預設', async () => {
+    const { lineLoginStartEndpoint } = await import('../../src/services/lineService')
+    expect(lineLoginStartEndpoint({ lineLoginStartEndpoint: 'https://custom.example.com' })).toBe('https://custom.example.com')
+    expect(lineLoginStartEndpoint({})).toBe('https://lineloginstart-reaor76eyq-uc.a.run.app')
+  })
+
+  it('組出只帶 bookingId / token 的入口連結，不夾個資', async () => {
+    const { lineLoginStartUrl } = await import('../../src/services/lineService')
+    const url = new URL(lineLoginStartUrl({}, BOOKING))
+    expect(url.searchParams.get('bookingId')).toBe(BOOKING.id)
+    expect(url.searchParams.get('token')).toBe(BOOKING.manageToken)
+    expect(decodeURIComponent(url.toString())).not.toContain(BOOKING.name)
+    expect(decodeURIComponent(url.toString())).not.toContain(BOOKING.phone)
+  })
+
+  it('無 booking 回空字串', async () => {
+    const { lineLoginStartUrl } = await import('../../src/services/lineService')
+    expect(lineLoginStartUrl({}, null)).toBe('')
+  })
+})
