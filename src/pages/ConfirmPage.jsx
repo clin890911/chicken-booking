@@ -6,7 +6,7 @@ import { dayLabel } from '../utils/timeSlots'
 import { copyText } from '../utils/clipboard'
 import { Card, Button, Badge } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
-import { lineBindUrl, lineOfficialUrl } from '../services/lineService'
+import { lineLoginStartUrl, lineOfficialUrl } from '../services/lineService'
 import { guestGetBooking } from '../services/cloudDataService'
 
 export default function ConfirmPage() {
@@ -66,8 +66,8 @@ export default function ConfirmPage() {
   const lineFriendUrl = lineOfficialUrl(settings)
   // 這兩個 URL 在 render 階段計算；任何例外（如異常日期）都不該讓整頁白屏，故 try/catch 後退成空字串。
   const lineReceiveUrl = useMemo(() => {
-    try { return b ? lineBindUrl(settings, b, manageUrl) : '' } catch { return '' }
-  }, [b, manageUrl, settings])
+    try { return b ? lineLoginStartUrl(settings, b) : '' } catch { return '' }
+  }, [b, settings])
   const calendarUrl = useMemo(() => {
     try { return b ? googleCalendarUrl(b, settings) : '' } catch { return '' }
   }, [b, settings])
@@ -254,11 +254,11 @@ export default function ConfirmPage() {
               </>
             ) : lineReceiveUrl ? (
               <>
-                <a href={lineReceiveUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755] text-base">
+                <a href={lineReceiveUrl} className="btn-primary w-full text-center !bg-[#06C755] text-base">
                   加入並綁定 LINE 通知
                 </a>
                 <p className="text-center text-[11px] font-bold leading-4 text-chicken-brown/50">
-                  會開啟 LINE 完成授權並加入官方帳號好友；先綁定才加好友也會自動補發訂位資訊。
+                  會開啟 LINE 完成授權並加入官方帳號好友；完成後自動傳送訂位資訊。先綁定才加好友也會自動補發。
                 </p>
               </>
             ) : lineFriendUrl ? (

@@ -1,6 +1,7 @@
 const DEFAULT_LIFF_URL = 'https://liff.line.me/2009996489-f1SCb75q'
 const DEFAULT_LIFF_ID = '2009996489-f1SCb75q'
 const DEFAULT_BIND_ENDPOINT = 'https://linebind-reaor76eyq-uc.a.run.app'
+const DEFAULT_LOGIN_START_ENDPOINT = 'https://lineloginstart-reaor76eyq-uc.a.run.app'
 const DEFAULT_PUSH_ENDPOINT = 'https://linepushbooking-reaor76eyq-uc.a.run.app'
 const DEFAULT_MANAGE_ENDPOINT = 'https://linegetbooking-reaor76eyq-uc.a.run.app'
 const DEFAULT_MYBOOKINGS_ENDPOINT = 'https://linemybookings-reaor76eyq-uc.a.run.app'
@@ -23,6 +24,22 @@ export function lineBindUrl(settings = {}, booking, manageUrl) {
 
 export function lineLiffUrl(settings = {}) {
   return settings.lineLiffUrl || import.meta.env.VITE_LINE_LIFF_URL || DEFAULT_LIFF_URL
+}
+
+export function lineLoginStartEndpoint(settings = {}) {
+  return settings.lineLoginStartEndpoint || import.meta.env.VITE_LINE_LOGIN_START_ENDPOINT || DEFAULT_LOGIN_START_ENDPOINT
+}
+
+// LINE Login 網頁授權綁定入口：純連結，瀏覽器整頁導向後端 lineLoginStart → LINE 授權 → 自動跳回。
+// 取代舊 LIFF 自動綁定（client SDK 多段重導易卡在「一直載入」）。只帶 bookingId + token，不夾個資。
+export function lineLoginStartUrl(settings = {}, booking) {
+  if (!booking?.id) return ''
+  const endpoint = lineLoginStartEndpoint(settings)
+  if (!endpoint) return ''
+  const url = new URL(endpoint)
+  url.searchParams.set('bookingId', booking.id)
+  url.searchParams.set('token', booking.manageToken || '')
+  return url.toString()
 }
 
 export function lineOfficialUrl(settings = {}) {

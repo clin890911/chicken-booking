@@ -1,11 +1,13 @@
 import { test, expect } from '@playwright/test'
 
-// LINE 綁定頁主線：以 window.liff stub 模擬 LIFF 環境（不打真 LINE），
-// 攔截 lineGetBooking / lineBind 端點回假資料。
+// LINE 綁定結果頁（LINE Login 網頁授權版）。
+// 綁定本體已改由後端 lineLoginStart → LINE 授權 → lineLoginCallback 完成（純伺服器重導，
+// 取代易卡「一直載入」的 LIFF）。本頁只負責顯示結果與提供入口，訂位摘要以 lineGetBooking 回讀。
 // 防回歸重點：
-// 1) 新版連結不帶 payload，顯示資料須由 lineGetBooking 回讀（跨裝置/LINE 內開啟情境）
-// 2) 未加好友（getFriendship friendFlag=false）→ 顯示「加入好友」引導，不顯示成功
-// 3) 送往 lineBind 的 body 不得夾帶姓名/電話（後端權威重讀，只需 id + token + LINE profile）
+// 1) ?bound=1 → 顯示「已啟用」
+// 2) ?bound=1&needFriend=1 → 顯示「加入好友」引導與補發說明
+// 3) 落地（無 bound）→ 顯示「用 LINE 完成綁定」入口，連到 lineLoginStart 端點（只帶 id+token）
+// 4) ?err=expired → 顯示過期錯誤，不再無限載入
 
 const BOOKING = {
   id: 'E2E-LINE-1', name: '林測試', phone: '0987654321', guests: 2,
@@ -13,24 +15,9 @@ const BOOKING = {
   notes: {},
 }
 
-// liff.state 參數讓頁面把這次開啟視為 LIFF callback，跳過向 liff.line.me 的重導、直接走綁定流程
-const BIND_URL = `/line/bind?bookingId=${BOOKING.id}&token=${BOOKING.manageToken}&liff.state=cb`
+const BASE = `/line/bind?bookingId=${BOOKING.id}&token=${BOOKING.manageToken}`
 
-function stubLiff(page, friendFlag) {
-  return page.addInitScript(flag => {
-    window.liff = {
-      init: async () => {},
-      isLoggedIn: () => true,
-      getProfile: async () => ({ userId: 'U-e2e-1', displayName: 'E2E 測試帳號', pictureUrl: '' }),
-      getFriendship: async () => ({ friendFlag: flag }),
-    }
-  }, friendFlag)
-}
-
-let lineBindBody = null
-
-// 跨網域 mock 必備：fulfill 不會自動帶 CORS 標頭，少了 ACAO 瀏覽器會擋下回應；
-// POST + JSON 還會先發 preflight OPTIONS，也要回 2xx + 允許標頭。
+// 跨網域 mock 必備：fulfill 不會自動帶 CORS 標頭；GET 也補上避免被瀏覽器擋。
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
   'access-control-allow-headers': 'content-type',
@@ -49,45 +36,40 @@ function fulfillJson(route, payload) {
 }
 
 test.beforeEach(async ({ page }) => {
-  lineBindBody = null
-  // 注意：regex 必須鎖定端點網域開頭——寬鬆的 /linebind/i 會誤攔 Vite 的
-  // /src/pages/LineBindPage.jsx 模組請求，把 JSON 餵給模組載入器導致整頁空白。
+  // 注意：regex 鎖定端點網域開頭，避免誤攔 Vite 的 /src/.../LineBindPage.jsx 模組請求。
   await page.route(/^https:\/\/linegetbooking/i, route =>
     fulfillJson(route, { ok: true, booking: BOOKING, store: {}, line: {} }))
-  await page.route(/^https:\/\/linebind/i, route => {
-    if (route.request().method() === 'POST') {
-      lineBindBody = route.request().postDataJSON()
-      const needFriend = lineBindBody?.line?.friendFlag === false
-      return fulfillJson(route, { ok: true, ...(needFriend ? { needFriend: true } : {}) })
-    }
-    return fulfillJson(route, { ok: true })
-  })
 })
 
-test('未加好友：完成綁定但顯示「加入好友」引導與補發說明', async ({ page }) => {
-  await stubLiff(page, false)
-  await page.goto(BIND_URL)
+test('綁定成功（bound=1）：顯示已啟用 + 訂位摘要', async ({ page }) => {
+  await page.goto(`${BASE}&bound=1`)
+  await expect(page.getByRole('heading', { name: 'LINE 訂位通知已啟用' })).toBeVisible()
+  // 顯示資料來自 lineGetBooking 回讀（無本機資料、無 payload）
+  await expect(page.getByText(BOOKING.id)).toBeVisible()
+})
 
+test('待加好友（bound=1&needFriend=1）：顯示加好友引導與補發說明', async ({ page }) => {
+  await page.goto(`${BASE}&bound=1&needFriend=1`)
   await expect(page.getByRole('heading', { name: '最後一步：加入官方帳號好友' })).toBeVisible()
   await expect(page.getByText(/加入後會自動補發訂位資訊/)).toBeVisible()
   await expect(page.getByRole('link', { name: '加入 LINE 官方帳號' })).toBeVisible()
-  // 顯示資料來自 lineGetBooking 回讀（無本機資料、無 payload）
-  await expect(page.getByText(BOOKING.id)).toBeVisible()
-  // LIFF Endpoint=站根後 deep link 必須是 path-style（/line/bind 在 path 上、liff.state 路由落地）
-  await expect(page.getByRole('link', { name: '在 LINE 完成訂位綁定' }))
-    .toHaveAttribute('href', /liff\.line\.me\/[^/?]+\/line\/bind/)
 })
 
-test('已是好友：綁定成功，body 不含姓名/電話（隱私回歸）', async ({ page }) => {
-  await stubLiff(page, true)
-  await page.goto(BIND_URL)
+test('落地入口（無 bound）：顯示「用 LINE 完成綁定」連到 lineLoginStart（只帶 id+token）', async ({ page }) => {
+  await page.goto(BASE)
+  await expect(page.getByRole('heading', { name: '用 LINE 接收訂位通知' })).toBeVisible()
+  const link = page.getByRole('link', { name: '用 LINE 完成綁定' })
+  await expect(link).toHaveAttribute('href', /lineloginstart/)
+  const href = await link.getAttribute('href')
+  expect(href).toContain(`bookingId=${BOOKING.id}`)
+  expect(href).toContain(`token=${BOOKING.manageToken}`)
+  // 入口連結不夾個資
+  expect(href).not.toContain(BOOKING.name)
+  expect(href).not.toContain(BOOKING.phone)
+})
 
-  await expect(page.getByRole('heading', { name: 'LINE 訂位通知已啟用' })).toBeVisible()
-  expect(lineBindBody).toBeTruthy()
-  expect(lineBindBody.booking).toEqual({ id: BOOKING.id, token: BOOKING.manageToken })
-  expect(lineBindBody.line.userId).toBe('U-e2e-1')
-  expect(lineBindBody.line.friendFlag).toBe(true)
-  const raw = JSON.stringify(lineBindBody)
-  expect(raw).not.toContain(BOOKING.name)
-  expect(raw).not.toContain(BOOKING.phone)
+test('授權失敗（err=expired）：顯示過期提示，不再無限載入', async ({ page }) => {
+  await page.goto(`${BASE}&bound=0&err=expired`)
+  await expect(page.getByRole('heading', { name: 'LINE 綁定未完成' })).toBeVisible()
+  await expect(page.getByText(/已過期/)).toBeVisible()
 })
