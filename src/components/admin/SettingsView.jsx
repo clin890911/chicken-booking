@@ -130,16 +130,6 @@ export default function SettingsView() {
   const handleSearch = () => {
     setSearchResult(searchNoshow(searchPhone.trim()))
   }
-  const handleResetAll = async () => {
-    const ok = await confirm(
-      `將清除所有訂位、候位、桌位狀態與顧客資料，桌位佈局還原為預設。\n此動作無法復原。`,
-      { title: '重設所有資料', danger: true, confirmLabel: '⚠️ 確認重設' }
-    )
-    if (!ok) return
-    ;['chicken_bookings_v1', 'chicken_tables_v3', 'chicken_tables_v2', 'chicken_waitlist_v1', 'chicken_customers_v1', 'chicken_noshow_v1']
-      .forEach(k => localStorage.removeItem(k))
-    window.location.reload()
-  }
   // C11：驗證設定（stub）— 檢查啟用 LIFF 時必填欄位是否非空
   const handleValidateLine = () => {
     const missing = []
@@ -768,18 +758,6 @@ export default function SettingsView() {
         </div>
         <Button onClick={async () => { if (await confirm('確定登出？', { title: '登出', confirmLabel: '登出' })) signOut() }} variant="secondary" className="w-full">登出</Button>
       </SettingsSection>
-
-      {can('settings.update') && (
-        <SettingsSection title="危險操作" description="會清除資料，僅店長需要時使用。" danger>
-          <p className="text-xs text-chicken-brown/60 mb-3">清除所有訂位、桌位狀態、候位、顧客資料（不可復原）</p>
-          <button
-            onClick={handleResetAll}
-            className="btn-destructive w-full"
-          >
-            🚫 重設所有資料
-          </button>
-        </SettingsSection>
-      )}
 
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
         雞王涮涮鍋訂位系統 v0.4 · Firestore 同步模式
