@@ -17,3 +17,11 @@ vite.config.js.timestamp-*.mjs
 
 # Local Claude/IDE config
 .claude/
+
+# Firebase service account 金鑰（絕不 commit）
+serviceAccountKey.json
+*-firebase-adminsdk-*.json
+*serviceAccount*.json
+
+# Firestore 備份（一次性、含正式資料）
+backups/
