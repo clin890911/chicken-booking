@@ -560,6 +560,20 @@ export default function GroupEditorStage({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-black text-indigo-700">🚗 司領桌</span>
                     <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">司機+領隊</span>
+                    {(() => {
+                      const sea = seatingForSlot(settings, escortBatch.timeSlot)
+                      return (
+                        <>
+                          {sea && (
+                            <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>
+                          )}
+                          <label className="flex items-center gap-1 text-xs text-chicken-brown/60">抵達
+                            <ArrivalTimeSelect seating={sea} slots={slots} value={escortBatch.timeSlot}
+                              onChange={v => patchBatch(escortBatch.id, { timeSlot: v })} className="w-28 !py-1" />
+                          </label>
+                        </>
+                      )
+                    })()}
                     <label className="flex items-center gap-1 text-xs text-chicken-brown/60">人數
                       <Input className="w-16 !py-1" type="number" inputMode="numeric" min={0} value={escortBatch.guests}
                         onChange={e => patchBatch(escortBatch.id, { guests: Number(e.target.value) || 0 })} />
