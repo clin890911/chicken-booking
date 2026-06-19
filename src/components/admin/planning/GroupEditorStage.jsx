@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef } from 'react'
+import { useBooking } from '../../../contexts/BookingContext'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { Button, Input, Select, Textarea } from '../../ui'
 import SeatGauge from '../../ui/SeatGauge'
@@ -62,6 +63,7 @@ export default function GroupEditorStage({
 }) {
   const toast = useToast()
   const confirm = useConfirm()
+  const { fixtures, zones } = useBooking()
 
   const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(initialGroup)))
   const [step, setStep] = useState(1)
@@ -645,6 +647,8 @@ export default function GroupEditorStage({
                 selectedTables={selectedTables}
                 blockedTables={blockedTables}
                 mapDate={date}
+                fixtures={fixtures}
+                zones={zones}
                 onSelectTable={toggleTable}
               />
             </div>
@@ -703,7 +707,7 @@ export default function GroupEditorStage({
       </div>
 
       {sheetOpen && (
-        <GroupSheet group={draft} tables={tables} store={settings} onClose={() => setSheetOpen(false)} />
+        <GroupSheet group={draft} tables={tables} store={settings} fixtureSource={fixtures} onClose={() => setSheetOpen(false)} />
       )}
     </div>
   )

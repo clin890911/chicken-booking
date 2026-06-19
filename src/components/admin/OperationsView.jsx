@@ -23,7 +23,7 @@ import { todayStr } from '../../utils/timeSlots'
 // 候位入座由右側欄（OpsRail > WaitlistPanel）頁內觸發；指派桌仍可由「訂位」分頁跨頁觸發（pendingAssign）
 export default function OperationsView({ pendingAssign, onAssignDone }) {
   const {
-    tables, bookings, waitlist, settings, groupReservations,
+    tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
     assignBookingToTable, assignBookingTablesMulti, seatWaitlist, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
     findSuitableTables, suggestTable, suggestTableCombo,
   } = useBooking()
@@ -501,6 +501,8 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
                 justAssignedTable={justAssigned}
                 groupHoldTables={groupHoldTables}
                 preassignTables={preassignTables}
+                fixtures={fixtures}
+                zones={zones}
               />
               </div>
             </>

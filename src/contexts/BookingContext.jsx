@@ -283,6 +283,22 @@ export function BookingProvider({ children }) {
   const addTable = (data) => { const t = tableService.addTable(data); refresh(); syncCloudSoon(); return t }
   const removeTable = (number) => { const r = tableService.removeTable(number); refresh(); syncCloudSoon(); return r }
   const resetTables = () => { tableService.reset(); refresh(); syncCloudSoon() }
+  // 桌位佈局一次存檔：桌位走守門（佔用/團 hold 不准停用刪除），設施/分區/底圖寫進 settings.floorPlan。
+  const saveFloorPlan = ({ tables: list, fixtures, zones, backgroundImages } = {}) => {
+    if (Array.isArray(list)) {
+      const r = seatingService.bulkSaveTablesGuarded(list)
+      if (!r?.ok) return r
+    }
+    const fp = { ...(settings.floorPlan || {}) }
+    if (fixtures !== undefined) fp.fixtures = fixtures
+    if (zones !== undefined) fp.zones = zones
+    if (backgroundImages !== undefined) fp.backgroundImages = backgroundImages
+    const s = settingsService.saveSettings({ floorPlan: fp })
+    setSettings(s)
+    refresh()
+    syncCloudSoon()
+    return { ok: true }
+  }
 
   // ============ 整合動作（含通知）============
   const assignBookingToTable = (bookingId, tableNumber) => {
@@ -515,7 +531,12 @@ export function BookingProvider({ children }) {
     refresh, pullCloud, migrateLocalToCloud,
     addBooking, updateBooking, cycleStatus, setStatus,
     toggleTable, setTableOutage, clearTableOutage, setTableStatus, blockTable, unblockTable, updateTablePosition,
-    bulkSaveTables, addTable, removeTable, resetTables,
+    bulkSaveTables, addTable, removeTable, resetTables, saveFloorPlan,
+    // 桌位佈局便捷存取（FloorMap 消費端傳入 fixtures/zones 用）
+    floorPlan: settings.floorPlan,
+    fixtures: settings.floorPlan?.fixtures,
+    zones: settings.floorPlan?.zones || [],
+    backgroundImages: settings.floorPlan?.backgroundImages,
     assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     addWaitlist, callWaitlist, seatWaitlist, leaveWaitlist,

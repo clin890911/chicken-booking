@@ -98,6 +98,18 @@ describe('read() / 初始種子', () => {
     expect(t.mergedWith).toBeNull()
     expect(t.blockReason).toBeNull()
     expect(t.updatedAt).toBeNull()
+    // 佈局升級新欄位：缺則補預設（旋轉 0、無分區）
+    expect(t.rotation).toBe(0)
+    expect(t.zoneId).toBeNull()
+  })
+
+  it('佈局欄位：既有 rotation/zoneId 不會被預設覆蓋', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([
+      { number: 'X1', capacity: 4, floor: '1F', rotation: 90, zoneId: 'z-window' },
+    ]))
+    const [t] = tableService.listAll()
+    expect(t.rotation).toBe(90)
+    expect(t.zoneId).toBe('z-window')
   })
 
   it('已存在資料的既有欄位不會被預設值覆蓋', () => {

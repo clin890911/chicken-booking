@@ -18,8 +18,9 @@ const TABLE_4P_H = 75
 const TABLE_6P_W = 90   // 六人桌橫式：寬＞高，且比四人桌寬
 const TABLE_6P_H = 75
 
-// 依人數回傳桌位寬高 — 單一來源。預設佈局、編輯器改容量、新增桌位都用這個，
-// 確保「4 人改 6 人」時尺寸一致（六人桌變寬不變長），不會各自寫死而走鐘。
+// 依人數回傳桌位寬高 — 僅供「新增桌位」與「重設預設佈局」帶入初始尺寸。
+// ★ 既有桌位不再由容量回推尺寸：店家可在編輯器自由縮放（w/h 各自持久化），
+//   改容量只改 capacity、不動 w/h；要套回標準尺寸由編輯器「套用標準尺寸」按需呼叫。
 export function tableDims(capacity) {
   return Number(capacity) === 6
     ? { w: TABLE_6P_W, h: TABLE_6P_H }
@@ -64,29 +65,44 @@ const FLOOR_2F = [
   mk('253', 4, '2F', 120, 707), mk('257', 4, '2F', 240, 707), mk('260', 6, '2F', 332, 707), mk('263', 4, '2F', 470, 707), mk('267', 4, '2F', 562, 707),
 ]
 
-// 非桌位設施（純標示，不可點選）。type: 'label' | 'rect' | 'stairs'；vtext=直書
+// 非桌位設施（純標示，不可點選）。type: 'label' | 'rect' | 'stairs'；vtext=直書。
+// ★ 每項帶穩定 id（編輯器以 id 為 key，拖移/刪除不會錯位）。此為「預設設施」，
+//   實際以 settings.floorPlan.fixtures 為準（後台可編輯），未設定時 fallback 回這裡。
 export const FIXTURES = {
   '1F': [
-    { type: 'label', x: 300, y: 235, text: '醬料台' },
-    { type: 'label', x: 380, y: 150, text: '出菜口' },
-    { type: 'label', x: 560, y: 150, text: '結帳口' },
-    { type: 'rect', x: 735, y: 300, w: 24, h: 230, text: '冷藏自選冰箱', vtext: true },
-    { type: 'stairs', x: 735, y: 560, w: 60, h: 90, text: '上樓 ↑' },
-    { type: 'rect', x: 120, y: 610, w: 80, h: 60, text: '領位台' },
-    { type: 'label', x: 120, y: 735, text: '玻璃門入口' },
+    { id: 'f1-sauce', type: 'label', x: 300, y: 235, w: 0, h: 0, text: '醬料台', vtext: false },
+    { id: 'f1-serve', type: 'label', x: 380, y: 150, w: 0, h: 0, text: '出菜口', vtext: false },
+    { id: 'f1-cashier', type: 'label', x: 560, y: 150, w: 0, h: 0, text: '結帳口', vtext: false },
+    { id: 'f1-fridge', type: 'rect', x: 735, y: 300, w: 24, h: 230, text: '冷藏自選冰箱', vtext: true },
+    { id: 'f1-stairs', type: 'stairs', x: 735, y: 560, w: 60, h: 90, text: '上樓 ↑', vtext: false },
+    { id: 'f1-host', type: 'rect', x: 120, y: 610, w: 80, h: 60, text: '領位台', vtext: false },
+    { id: 'f1-door', type: 'label', x: 120, y: 735, w: 0, h: 0, text: '玻璃門入口', vtext: false },
   ],
   '2F': [
-    { type: 'rect', x: 560, y: 40, w: 150, h: 26, text: '冷藏自選冰箱' },
-    { type: 'rect', x: 780, y: 40, w: 160, h: 50, text: '洗手間' },
-    { type: 'rect', x: 88, y: 120, w: 24, h: 150, text: '結帳口／出菜口', vtext: true },
-    { type: 'stairs', x: 430, y: 55, w: 60, h: 80, text: '下樓 ↓' },
-    { type: 'label', x: 430, y: 470, text: '醬料台' },
+    { id: 'f2-fridge', type: 'rect', x: 560, y: 40, w: 150, h: 26, text: '冷藏自選冰箱', vtext: false },
+    { id: 'f2-wc', type: 'rect', x: 780, y: 40, w: 160, h: 50, text: '洗手間', vtext: false },
+    { id: 'f2-serve', type: 'rect', x: 88, y: 120, w: 24, h: 150, text: '結帳口／出菜口', vtext: true },
+    { id: 'f2-stairs', type: 'stairs', x: 430, y: 55, w: 60, h: 80, text: '下樓 ↓', vtext: false },
+    { id: 'f2-sauce', type: 'label', x: 430, y: 470, w: 0, h: 0, text: '醬料台', vtext: false },
   ],
 }
+
+// 桌位分區（zone）色盤：編輯器新增分區時取色。分區定義存 settings.floorPlan.zones，
+// 桌位以 zoneId 引用；運營地圖只在角落畫小圓點（不蓋 status 填色），編輯器內可整桌填色。
+export const ZONE_PALETTE = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e',
+  '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899',
+]
+export const DEFAULT_ZONES = []
+// 各樓層底圖（描繪用半透明參考圖）：{ url(data URL), opacity, x, y, w, h } | null。
+export const DEFAULT_BACKGROUND_IMAGES = { '1F': null, '2F': null }
 
 // 合併 + 預設運營狀態欄位
 export const INITIAL_TABLES = [...FLOOR_1F, ...FLOOR_2F].map(t => ({
   ...t,
+  // 旋轉角度（度）與所屬分區 id；★ 同 outage：必須顯式帶值，merge-upsert 刪不掉缺席鍵。
+  rotation: 0,
+  zoneId: null,
   isActive: true,
   // 維修停用窗 { from, to, reason }；★ 必須顯式帶 null：Firestore merge-upsert
   // 無法刪除「缺席」欄位，少了這個鍵，重設佈局後雲端殘留的 outage 會在下次拉取時復活。

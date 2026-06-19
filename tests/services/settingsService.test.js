@@ -1,11 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { getSettings, saveSettings } from '../../src/services/settingsService'
+import { FIXTURES } from '../../src/data/tables'
 
 // 與原始碼一致的儲存鍵與預設值（用來驗證合併/回退行為）
 const STORAGE_KEY = 'chicken_settings_v1'
 
 const DEFAULT = {
   openTime: '11:00',
+  // 桌位佈局：normalizeFloorPlan 對預設 fixtures 的輸出與 FIXTURES 深層相等
+  floorPlan: {
+    fixtures: FIXTURES,
+    zones: [],
+    backgroundImages: { '1F': null, '2F': null },
+  },
   closeTime: '19:00',
   slotInterval: 30,
   maxDaysAhead: 30,
@@ -339,6 +346,50 @@ describe('settingsService', () => {
     it('行為記錄：NaN 數字輸入回退預設（Number(NaN) falsy）', () => {
       const result = saveSettings({ diningDurationMin: NaN })
       expect(result.diningDurationMin).toBe(DEFAULT.diningDurationMin)
+    })
+  })
+
+  // ---- 桌位佈局 floorPlan 正規化 ----
+  describe('floorPlan 正規化（設施 / 分區 / 底圖）', () => {
+    it('無資料時 floorPlan 為預設（fixtures = FIXTURES、zones 空、底圖 null）', () => {
+      const s = getSettings()
+      expect(s.floorPlan.fixtures).toEqual(FIXTURES)
+      expect(s.floorPlan.zones).toEqual([])
+      expect(s.floorPlan.backgroundImages).toEqual({ '1F': null, '2F': null })
+    })
+
+    it('清洗：非法 fixture 類型被剔除、欄位型別正規化、補 vtext 預設', () => {
+      const result = saveSettings({ floorPlan: {
+        fixtures: { '1F': [
+          { id: 'a', type: 'rect', x: '10', y: '20', w: '5', h: '6', text: 7 },  // 字串座標 → 數字、text → 字串
+          { id: 'b', type: 'evil', x: 0, y: 0 },                                  // 非法類型 → 剔除
+        ] },
+        zones: [{ id: 'z1', name: '靠窗', color: '#ff0000' }, { name: '無 id' }],  // 無 id → 剔除
+      } })
+      expect(result.floorPlan.fixtures['1F']).toEqual([
+        { id: 'a', type: 'rect', x: 10, y: 20, w: 5, h: 6, text: '7', vtext: false },
+      ])
+      expect(result.floorPlan.zones).toEqual([{ id: 'z1', name: '靠窗', color: '#ff0000' }])
+    })
+
+    it('底圖：合法 data URL 收下並夾不透明度；非 data URL 設為 null', () => {
+      const result = saveSettings({ floorPlan: {
+        backgroundImages: {
+          '1F': { url: 'data:image/png;base64,AAAA', opacity: 5, x: 0, y: 0, w: 100, h: 80 },
+          '2F': { url: 'https://evil.example/x.png' },
+        },
+      } })
+      expect(result.floorPlan.backgroundImages['1F']).toEqual({ url: 'data:image/png;base64,AAAA', opacity: 1, x: 0, y: 0, w: 100, h: 80 })
+      expect(result.floorPlan.backgroundImages['2F']).toBeNull()
+    })
+
+    it('回歸防護：getSettings 不共享 DEFAULT.floorPlan 參考，mutate 不污染後續', () => {
+      const a = getSettings()
+      a.floorPlan.zones.push({ id: 'x', name: 'x', color: '#000' })
+      a.floorPlan.fixtures['1F'].push({ id: 'y', type: 'label', x: 0, y: 0, w: 0, h: 0, text: '', vtext: false })
+      const b = getSettings()
+      expect(b.floorPlan.zones).toEqual([])
+      expect(b.floorPlan.fixtures).toEqual(FIXTURES)
     })
   })
 })

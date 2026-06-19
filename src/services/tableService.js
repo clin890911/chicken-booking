@@ -23,6 +23,8 @@ function read() {
     const parsed = JSON.parse(raw)
     // 防呆：若舊資料缺欄位，補上預設值
     return parsed.map(t => ({
+      rotation: 0,           // 旋轉角度（度）；舊雲端/本機資料缺此鍵時補 0
+      zoneId: null,          // 所屬分區 id；缺則無分區
       isActive: true,
       outage: null,          // 維修停用窗 { from, to, reason }；null = 無
       status: 'vacant',
@@ -262,6 +264,8 @@ export function addTable({ capacity = 4, floor = '1F', x = 200, y = 200 }) {
     floor,
     x, y,
     ...tableDims(capacity),
+    rotation: 0,
+    zoneId: null,
     isActive: true,
     outage: null,
     status: 'vacant',

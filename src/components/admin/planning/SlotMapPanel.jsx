@@ -15,7 +15,7 @@ import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 // focusRequest（{ tableNumbers, seatingId, agencyName, batchLabel }）：時間軸點團 → 自動切場次/樓層
 // 並在那些桌畫白圈脈動，幫外場一眼定位「這團坐哪」。
 export default function SlotMapPanel({ date, assignRequest = null, onAssignHandled, focusRequest = null, onFocusHandled }) {
-  const { settings, bookings, groupReservations, tables, preassignBookingTable, preassignBookingTables, clearBookingPreassign } = useBooking()
+  const { settings, bookings, groupReservations, tables, fixtures, zones, preassignBookingTable, preassignBookingTables, clearBookingPreassign } = useBooking()
   const toast = useToast()
 
   const seatings = Array.isArray(settings?.seatings) ? settings.seatings : []
@@ -285,6 +285,8 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
               scopedHighlightTables={highlightTables}
               scopedFocusTables={assignMulti ? assignSelected : (focus?.tables || [])}
               mapDate={date}
+              fixtures={fixtures}
+              zones={zones}
             />
           </div>
           <div className="text-center text-[11px] text-chicken-brown/45 mt-2">

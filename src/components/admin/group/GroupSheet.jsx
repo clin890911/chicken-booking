@@ -35,7 +35,7 @@ function floorBBox(groupTables) {
   return { x, y, w, h }
 }
 
-export default function GroupSheet({ group, tables = [], store = {}, onClose }) {
+export default function GroupSheet({ group, tables = [], store = {}, fixtureSource = null, onClose }) {
   const svgRef = useRef(null)
   const [logo, setLogo] = useState(null)
 
@@ -135,7 +135,7 @@ export default function GroupSheet({ group, tables = [], store = {}, onClose }) 
     const mine = floorTables.filter(t => groupNums.has(t.number))
     const bb = floorBBox(mine)
     const innerX = x + 14, innerY = y + 40, innerW = w - 28, innerH = h - 54
-    const fixtures = FIXTURES?.[floor] || []
+    const fixtures = (fixtureSource && fixtureSource[floor]) || FIXTURES?.[floor] || []
     return (
       <g key={floor}>
         <rect x={x} y={y} width={w} height={h} rx={16} fill="#ffffff" stroke={C.line} filter="url(#cardShadow)" />

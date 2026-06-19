@@ -7,6 +7,13 @@
 // 需要動作的桌（用餐中/待清/超時/團保）才用實心色跳出。色相語義：
 //   綠=可入座（淡）/ 藍=已預訂（淡）/ 橙=用餐 / 黃=待清（與橙以飽和度區隔）/ 紅=超時 / 靛=團保 / 灰=不可用
 // 每格 fill 各自帶 text 色，淡底用深字、實心用白字（對比 ≥4.5:1）。
+//
+// 旋轉與分區（2026-06 桌位佈局升級）：
+//   - 桌可帶 rotation（度）：外層 <g> 套 rotate(rot 中心)，桌號/人數文字再反向 rotate(-rot 中心)
+//     抵銷，永遠水平易讀（文字維持在桌中心、桌框繞中心轉）。
+//   - zoneColor（由 FloorMap 依 zoneId 解析）：只在桌左上角畫小圓點，★ 絕不取代 status 填色，
+//     確保「桌況圖色彩語義不可回退」。整桌填分區色只發生在 LayoutEditor 內。
+//   - 字級啟發式改用 min(w,h)：自由縮放後 h 不再恆為 75。
 import { diffMin, stageOf } from '../../../utils/diningStage'
 
 const STATUS_COLOR = {
@@ -49,24 +56,42 @@ export default function TableShape({
   preassignLabel = null,       // 今日預配桌：vacant 桌面改顯示「📌 HH:MM 預配」（預配不動桌況，僅視覺提示）
   outNote = '',                // 維修停用（地圖日期落在維修窗內）：與永久停用同樣置灰，顯示 🛠 標籤
   outClickable = false,        // 僅現場即時圖開啟：點維修桌可開抽屜「結束維修」；規劃/統一視圖維持不可點
+  zoneColor = null,            // 分區色（依 zoneId 解析）：只在左上角畫小圓點，不蓋 status 填色
   onClick,
 }) {
   const { x, y, w, h, capacity, status, isActive, number } = table
+
+  // 旋轉：外層 <g> 繞桌中心轉 rot 度；文字群組再反轉抵銷，保持水平。
+  const cx = x + w / 2
+  const cy = y + h / 2
+  const rot = Number(table.rotation) || 0
+  const gTransform = rot ? `rotate(${rot} ${cx} ${cy})` : undefined
+  const textTransform = rot ? `rotate(${-rot} ${cx} ${cy})` : undefined
+  // 字級依較短邊判定（自由縮放後 h 不再恆為 75）
+  const small = Math.min(w, h) <= 80
+
+  // 分區角點（左上）：避開右上的「團」疊框標記與焦點環。
+  const zoneDot = zoneColor ? (
+    <circle cx={x + 9} cy={y + 9} r={4.5} fill={zoneColor} stroke="#ffffff" strokeWidth={1.2} pointerEvents="none" />
+  ) : null
 
   // 永久停用或維修中：置灰虛線、不參與任何模式的狀態渲染。
   // 預設不可點（規劃圈桌等流程的安全防線）；只有現場即時圖傳 outClickable 讓店員點開結束維修。
   if (!isActive || outNote) {
     const clickable = isActive && outNote && outClickable
     return (
-      <g style={{ opacity: 0.35, cursor: clickable ? 'pointer' : 'default' }} onClick={clickable ? onClick : undefined}>
+      <g style={{ opacity: 0.35, cursor: clickable ? 'pointer' : 'default' }} onClick={clickable ? onClick : undefined} transform={gTransform}>
         <rect x={x} y={y} width={w} height={h} rx={6}
               fill="#e5e0d8" stroke="#3a2e26" strokeWidth={1} strokeDasharray="3 3"/>
-        <text x={x + w / 2} y={y + h / 2 - (outNote ? 4 : -4)} fontSize={16} fontWeight={800} fill="#8a7e72" textAnchor="middle" pointerEvents="none">{number}</text>
-        {outNote && (
-          <text x={x + w / 2} y={y + h / 2 + 12} fontSize={9} fontWeight={700} fill="#b45309" textAnchor="middle" pointerEvents="none">
-            🛠 {outNote.length > 7 ? '維修中' : outNote}
-          </text>
-        )}
+        {zoneDot}
+        <g transform={textTransform}>
+          <text x={cx} y={cy - (outNote ? 4 : -4)} fontSize={16} fontWeight={800} fill="#8a7e72" textAnchor="middle" pointerEvents="none">{number}</text>
+          {outNote && (
+            <text x={cx} y={cy + 12} fontSize={9} fontWeight={700} fill="#b45309" textAnchor="middle" pointerEvents="none">
+              🛠 {outNote.length > 7 ? '維修中' : outNote}
+            </text>
+          )}
+        </g>
       </g>
     )
   }
@@ -82,22 +107,25 @@ export default function TableShape({
     const stroke = isSelected ? '#4f46e5' : P.stroke
     const strokeWidth = isSelected ? 3 : 1.5
     return (
-      <g onClick={onClick} style={{ cursor: planState === 'blocked' ? 'not-allowed' : 'pointer' }}>
+      <g onClick={onClick} style={{ cursor: planState === 'blocked' ? 'not-allowed' : 'pointer' }} transform={gTransform}>
         <rect x={x} y={y} width={w} height={h} rx={8}
               fill={P.fill} stroke={stroke} strokeWidth={strokeWidth}
               strokeDasharray={planState === 'blocked' ? '4 3' : null} />
-        <text x={x + w / 2} y={y + (h <= 80 ? 25 : 28)}
-              fontSize={h <= 80 ? 20 : 22} fontWeight={900} fill={P.text} textAnchor="middle" pointerEvents="none">
-          {number}
-        </text>
-        <text x={x + w / 2} y={y + (h <= 80 ? 44 : 48)}
-              fontSize={h <= 80 ? 13 : 14} fontWeight={700} fill={P.text} opacity={0.95} textAnchor="middle" pointerEvents="none">
-          {capacity} 人
-        </text>
-        <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fontWeight={700} fill={P.text} opacity={0.9} textAnchor="middle" pointerEvents="none">
-          {planState === 'selected' ? '✓ 已選' : P.label}
-        </text>
+        {zoneDot}
+        <g transform={textTransform}>
+          <text x={cx} y={y + (small ? 25 : 28)}
+                fontSize={small ? 20 : 22} fontWeight={900} fill={P.text} textAnchor="middle" pointerEvents="none">
+            {number}
+          </text>
+          <text x={cx} y={y + (small ? 44 : 48)}
+                fontSize={small ? 13 : 14} fontWeight={700} fill={P.text} opacity={0.95} textAnchor="middle" pointerEvents="none">
+            {capacity} 人
+          </text>
+          <text x={cx} y={y + h - 8}
+                fontSize={9} fontWeight={700} fill={P.text} opacity={0.9} textAnchor="middle" pointerEvents="none">
+            {planState === 'selected' ? '✓ 已選' : P.label}
+          </text>
+        </g>
       </g>
     )
   }
@@ -113,7 +141,7 @@ export default function TableShape({
     const stroke = isSelected ? '#e60012' : occHighlight ? '#9eb63a' : O.stroke
     const strokeWidth = isSelected ? 3 : occHighlight ? 3 : 1.5
     return (
-      <g onClick={onClick} style={{ cursor: 'pointer', opacity: occDimmed ? 0.5 : 1 }} className={occHighlight ? 'animate-pulse' : ''}>
+      <g onClick={onClick} style={{ cursor: 'pointer', opacity: occDimmed ? 0.5 : 1 }} className={occHighlight ? 'animate-pulse' : ''} transform={gTransform}>
         {/* 時間軸點團跳地圖：白圈脈動標示這團坐哪（深靛外暈撐在淺底/靛底都讀得出，白環在其上吸睛） */}
         {focusRing && (
           <>
@@ -126,13 +154,16 @@ export default function TableShape({
         <rect x={x} y={y} width={w} height={h} rx={8}
               fill={O.fill} stroke={stroke} strokeWidth={strokeWidth}
               strokeDasharray={occHighlight ? '4 2' : null} />
-        <text x={x + w / 2} y={y + (h <= 80 ? 24 : 26)} fontSize={h <= 80 ? 19 : 21} fontWeight={900} fill={O.text} textAnchor="middle" pointerEvents="none">{number}</text>
-        <text x={x + w / 2} y={y + (h <= 80 ? 40 : 41)} fontSize={h <= 80 ? 12 : 13} fontWeight={700} fill={O.text} opacity={0.95} textAnchor="middle" pointerEvents="none">{capacity}人</text>
-        {occLabel && (
-          <text x={x + w / 2} y={y + h - 8} fontSize={8.5} fontWeight={700} fill={O.text} textAnchor="middle" pointerEvents="none">
-            {occLabel.length > 5 ? occLabel.slice(0, 5) : occLabel}
-          </text>
-        )}
+        {zoneDot}
+        <g transform={textTransform}>
+          <text x={cx} y={y + (small ? 24 : 26)} fontSize={small ? 19 : 21} fontWeight={900} fill={O.text} textAnchor="middle" pointerEvents="none">{number}</text>
+          <text x={cx} y={y + (small ? 40 : 41)} fontSize={small ? 12 : 13} fontWeight={700} fill={O.text} opacity={0.95} textAnchor="middle" pointerEvents="none">{capacity}人</text>
+          {occLabel && (
+            <text x={cx} y={y + h - 8} fontSize={8.5} fontWeight={700} fill={O.text} textAnchor="middle" pointerEvents="none">
+              {occLabel.length > 5 ? occLabel.slice(0, 5) : occLabel}
+            </text>
+          )}
+        </g>
       </g>
     )
   }
@@ -168,7 +199,7 @@ export default function TableShape({
   const opacity = isDimmed ? 0.35 : 1
 
   return (
-    <g onClick={onClick} style={{ cursor: 'pointer', opacity }} className={className}>
+    <g onClick={onClick} style={{ cursor: 'pointer', opacity }} className={className} transform={gTransform}>
       {/* 即將結束：橘色光暈（還有時間，提醒留意） */}
       {stage === 'late' && (
         <rect x={x - 3} y={y - 3} width={w + 6} height={h + 6} rx={10}
@@ -191,44 +222,47 @@ export default function TableShape({
 
       <rect x={x} y={y} width={w} height={h} rx={8}
             fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={strokeDash} />
+      {zoneDot}
 
-      {/* 桌號 */}
-      <text x={x + w / 2} y={y + (h <= 80 ? 25 : 28)}
-            fontSize={h <= 80 ? 20 : 22} fontWeight={900} fill={textColor} textAnchor="middle" pointerEvents="none">
-        {number}
-      </text>
-      {/* 容量 */}
-      <text x={x + w / 2} y={y + (h <= 80 ? 44 : 48)}
-            fontSize={h <= 80 ? 13 : 14} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
-        {capacity} 人
-      </text>
+      <g transform={textTransform}>
+        {/* 桌號 */}
+        <text x={cx} y={y + (small ? 25 : 28)}
+              fontSize={small ? 20 : 22} fontWeight={900} fill={textColor} textAnchor="middle" pointerEvents="none">
+          {number}
+        </text>
+        {/* 容量 */}
+        <text x={cx} y={y + (small ? 44 : 48)}
+              fontSize={small ? 13 : 14} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
+          {capacity} 人
+        </text>
 
-      {/* 時間/時長 */}
-      {status === 'reserved' && booking && (
-        <text x={x + w / 2} y={y + h - 8}
-              fontSize={10} fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
-          📋 {booking.timeSlot || ''}
-        </text>
-      )}
-      {status === 'dining' && table.seatedAt && (
-        <text x={x + w / 2} y={y + h - 8}
-              fontSize={stage === 'overtime' || stage === 'buffer-overtime' ? 11 : 10}
-              fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
-          {(stage === 'overtime' || stage === 'buffer-overtime') && '⚠ '}{minutes} 分
-        </text>
-      )}
-      {status === 'cleaning' && (
-        <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
-          待清桌
-        </text>
-      )}
-      {status === 'vacant' && (
-        <text x={x + w / 2} y={y + h - 8}
-              fontSize={9} fontWeight={groupHoldLabel || preassignLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
-          {groupHoldLabel || preassignLabel || '✓ 可入座'}
-        </text>
-      )}
+        {/* 時間/時長 */}
+        {status === 'reserved' && booking && (
+          <text x={cx} y={y + h - 8}
+                fontSize={10} fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
+            📋 {booking.timeSlot || ''}
+          </text>
+        )}
+        {status === 'dining' && table.seatedAt && (
+          <text x={cx} y={y + h - 8}
+                fontSize={stage === 'overtime' || stage === 'buffer-overtime' ? 11 : 10}
+                fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
+            {(stage === 'overtime' || stage === 'buffer-overtime') && '⚠ '}{minutes} 分
+          </text>
+        )}
+        {status === 'cleaning' && (
+          <text x={cx} y={y + h - 8}
+                fontSize={9} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
+            待清桌
+          </text>
+        )}
+        {status === 'vacant' && (
+          <text x={cx} y={y + h - 8}
+                fontSize={9} fontWeight={groupHoldLabel || preassignLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
+            {groupHoldLabel || preassignLabel || '✓ 可入座'}
+          </text>
+        )}
+      </g>
     </g>
   )
 }
