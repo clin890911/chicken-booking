@@ -4,15 +4,15 @@ import { FLOOR_VIEWBOX, FIXTURES } from '../../../data/tables'
 import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr } from '../../../utils/timeSlots'
 
-// 渲染樓層設施（醬料台/出菜口/結帳口/冰箱/樓梯/洗手間…）— 純標示、不可點選
-function FixtureLayer({ floor }) {
-  const items = FIXTURES?.[floor] || []
+// 渲染樓層設施（醬料台/出菜口/結帳口/冰箱/樓梯/洗手間…）— 純標示、不可點選。
+// items 由 FloorMap 解析（settings.floorPlan.fixtures 優先，fallback 預設 FIXTURES）。
+function FixtureLayer({ items = [] }) {
   return (
     <g pointerEvents="none">
       {items.map((f, i) => {
         if (f.type === 'label') {
           return (
-            <text key={i} x={f.x} y={f.y} fontSize={15} fontWeight={700} fill="#6b5b4d">
+            <text key={f.id || i} x={f.x} y={f.y} fontSize={15} fontWeight={700} fill="#6b5b4d">
               {f.text}
             </text>
           )
@@ -21,7 +21,7 @@ function FixtureLayer({ floor }) {
         const cy = f.y + f.h / 2
         const isStairs = f.type === 'stairs'
         return (
-          <g key={i}>
+          <g key={f.id || i}>
             <rect
               x={f.x} y={f.y} width={f.w} height={f.h} rx={4}
               fill={isStairs ? '#f1ede8' : '#ece7e1'}
@@ -67,6 +67,8 @@ export default function FloorMap({
   scopedHighlightTables = [], // 統一佔用視圖：預先配桌模式中、可選的空桌（高亮）
   scopedFocusTables = [],   // 統一佔用視圖：時間軸點團 → 白圈脈動標示該團座位
   mapDate = '',             // 地圖對應日期（規劃/統一視圖傳入；今日即時圖不傳 = 今天）：維修窗判定用
+  fixtures = null,          // 設施來源（{ '1F':[], '2F':[] }）；未傳則 fallback 預設 FIXTURES
+  zones = [],               // 分區定義 [{id,name,color}]：解析 zoneId→色，桌角畫小圓點
 }) {
   const [, setTick] = useState(0)
   // 每 5 秒重繪，讓桌位用餐計時即時跳動
@@ -93,6 +95,15 @@ export default function FloorMap({
     return m
   }, [bookings])
 
+  // 設施：settings.floorPlan.fixtures 優先，未設定 fallback 程式內預設 FIXTURES。
+  const fixtureItems = (fixtures && fixtures[floor]) || FIXTURES?.[floor] || []
+  // 分區色解析：zoneId → color（無分區回 null）
+  const zoneColorOf = useMemo(() => {
+    const m = {}
+    ;(zones || []).forEach(z => { if (z?.id) m[z.id] = z.color })
+    return (zoneId) => (zoneId && m[zoneId]) || null
+  }, [zones])
+
   return (
     <svg
       viewBox={`0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}`}
@@ -105,7 +116,7 @@ export default function FloorMap({
       </text>
 
       {/* 設施標示（桌位底下） */}
-      <FixtureLayer floor={floor} />
+      <FixtureLayer items={fixtureItems} />
 
       {floorTables.map(t => {
         // 統一佔用視圖（日期+場次）：散客暖色 / 團客冷色 / 空桌淺色；不吃今日即時狀態。
@@ -127,6 +138,7 @@ export default function FloorMap({
               occDimmed={scopedClosed}
               focusRing={scopedFocusTables.includes(t.number)}
               outNote={outNoteFor(t)}
+              zoneColor={zoneColorOf(t.zoneId)}
               onClick={() => onSelectTable(t.number)}
             />
           )
@@ -146,6 +158,7 @@ export default function FloorMap({
               isSelected={selectedTableNumber === t.number}
               planState={planState}
               outNote={outNoteFor(t)}
+              zoneColor={zoneColorOf(t.zoneId)}
               onClick={() => onSelectTable(t.number)}
             />
           )
@@ -185,6 +198,7 @@ export default function FloorMap({
             preassignLabel={preassignLabel}
             outNote={isOccupied(t) ? '' : outNoteFor(t)}
             outClickable={!assignMode}
+            zoneColor={zoneColorOf(t.zoneId)}
             onClick={() => onSelectTable(t.number)}
           />
         )
@@ -195,8 +209,10 @@ export default function FloorMap({
       {!planningMode && floorTables.map(t => {
         const hold = groupHoldTables[t.number]
         if (!hold || t.status === 'vacant') return null
+        const rot = Number(t.rotation) || 0
+        const holdTransform = rot ? `rotate(${rot} ${t.x + t.w / 2} ${t.y + t.h / 2})` : undefined
         return (
-          <g key={`hold-${t.number}`} pointerEvents="none">
+          <g key={`hold-${t.number}`} pointerEvents="none" transform={holdTransform}>
             <rect x={t.x - 3} y={t.y - 3} width={t.w + 6} height={t.h + 6} rx={11}
                   fill="none" stroke="#6366f1" strokeWidth={2.5} strokeDasharray="5 3" opacity={0.9} />
             <text x={t.x + t.w - 7} y={t.y + 15} fontSize={11} fontWeight={800} fill="#4338ca" textAnchor="end" pointerEvents="none">團</text>

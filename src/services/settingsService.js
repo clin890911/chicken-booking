@@ -1,7 +1,16 @@
+import { FIXTURES, DEFAULT_ZONES, DEFAULT_BACKGROUND_IMAGES } from '../data/tables'
+
 const STORAGE_KEY = 'chicken_settings_v1'
 
 const DEFAULT = {
   openTime: '11:00',
+  // 桌位佈局（設施 / 分區 / 底圖）。★ 與 functions normalizeFloorPlanServer 白名單成對，
+  // 未設定時 fallback 程式內預設 FIXTURES。
+  floorPlan: {
+    fixtures: FIXTURES,
+    zones: DEFAULT_ZONES,
+    backgroundImages: DEFAULT_BACKGROUND_IMAGES,
+  },
   closeTime: '19:00',
   slotInterval: 30,
   maxDaysAhead: 30,
@@ -86,10 +95,45 @@ function normalizeClosures(c = {}) {
   return out
 }
 
+// 桌位佈局深正規化（深拷貝避免與 DEFAULT 共用參考；與 functions normalizeFloorPlanServer 同口徑）。
+const FP_FLOORS = ['1F', '2F']
+const FP_FIXTURE_TYPES = ['label', 'rect', 'stairs']
+function normalizeFloorPlan(fp) {
+  const out = { fixtures: { '1F': [], '2F': [] }, zones: [], backgroundImages: { '1F': null, '2F': null } }
+  const src = (fp && typeof fp === 'object') ? fp : {}
+  for (const floor of FP_FLOORS) {
+    const items = src.fixtures?.[floor]
+    out.fixtures[floor] = Array.isArray(items)
+      ? items.filter(f => f && FP_FIXTURE_TYPES.includes(f.type)).map(f => ({
+          id: String(f.id || ''),
+          type: String(f.type),
+          x: Number(f.x) || 0,
+          y: Number(f.y) || 0,
+          w: Number(f.w) || 0,
+          h: Number(f.h) || 0,
+          text: String(f.text || ''),
+          vtext: f.vtext === true,
+        }))
+      // 未設定該樓層 → fallback 預設設施（深拷貝）
+      : (FIXTURES[floor] || []).map(f => ({ ...f }))
+  }
+  out.zones = Array.isArray(src.zones)
+    ? src.zones.filter(z => z?.id).map(z => ({ id: String(z.id), name: String(z.name || ''), color: String(z.color || '#cccccc') }))
+    : []
+  for (const floor of FP_FLOORS) {
+    const bg = src.backgroundImages?.[floor]
+    out.backgroundImages[floor] = (bg && typeof bg === 'object' && typeof bg.url === 'string' && bg.url.startsWith('data:image/'))
+      ? { url: bg.url, opacity: Math.min(1, Math.max(0.05, Number(bg.opacity) || 0.4)), x: Number(bg.x) || 0, y: Number(bg.y) || 0, w: Number(bg.w) || 0, h: Number(bg.h) || 0 }
+      : null
+  }
+  return out
+}
+
 function withDefaults(value = {}) {
   const merged = { ...DEFAULT, ...value }
   return {
     ...merged,
+    floorPlan: normalizeFloorPlan(merged.floorPlan),
     // heroBanners 複製一份新陣列，避免回傳值與 DEFAULT.heroBanners 共用同一參考、
     // 被呼叫端 mutate 後污染後續 getSettings()。
     heroBanners: Array.isArray(merged.heroBanners) ? merged.heroBanners.slice() : [],

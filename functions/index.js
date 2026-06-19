@@ -1520,9 +1520,62 @@ function normalizeClosuresServer(c) {
   return out
 }
 
+// 桌位佈局設定（設施 / 分區 / 底圖）白名單清洗。與前端 settingsService.floorPlan 成對。
+// 背景圖比照 heroBanners 存 base64 data URL；每樓層單張上限 ~500KB，避免兩樓層 + heroBanners
+// 撐爆 Firestore 單文件 1MB。超限直接丟棄該圖（不阻擋其他設定寫入）。
+const FLOORPLAN_FLOORS = ['1F', '2F']
+const FIXTURE_TYPES = ['label', 'rect', 'stairs']
+const BG_MAX_URL_LEN = 500000
+
+function normalizeFloorPlanServer(fp) {
+  const out = { fixtures: { '1F': [], '2F': [] }, zones: [], backgroundImages: { '1F': null, '2F': null } }
+  if (!fp || typeof fp !== 'object') return out
+  if (fp.fixtures && typeof fp.fixtures === 'object') {
+    for (const floor of FLOORPLAN_FLOORS) {
+      const items = fp.fixtures[floor]
+      if (!Array.isArray(items)) continue
+      out.fixtures[floor] = items
+        .filter(f => f && FIXTURE_TYPES.includes(f.type))
+        .map(f => ({
+          id: String(f.id || ''),
+          type: String(f.type),
+          x: Number(f.x) || 0,
+          y: Number(f.y) || 0,
+          w: Number(f.w) || 0,
+          h: Number(f.h) || 0,
+          text: String(f.text || ''),
+          vtext: f.vtext === true,
+        }))
+    }
+  }
+  if (Array.isArray(fp.zones)) {
+    out.zones = fp.zones
+      .filter(z => z && z.id)
+      .map(z => ({ id: String(z.id), name: String(z.name || ''), color: String(z.color || '#cccccc') }))
+  }
+  if (fp.backgroundImages && typeof fp.backgroundImages === 'object') {
+    for (const floor of FLOORPLAN_FLOORS) {
+      const bg = fp.backgroundImages[floor]
+      if (bg && typeof bg === 'object' && typeof bg.url === 'string'
+          && bg.url.startsWith('data:image/') && bg.url.length <= BG_MAX_URL_LEN) {
+        out.backgroundImages[floor] = {
+          url: bg.url,
+          opacity: Math.min(1, Math.max(0.05, Number(bg.opacity) || 0.4)),
+          x: Number(bg.x) || 0,
+          y: Number(bg.y) || 0,
+          w: Number(bg.w) || 0,
+          h: Number(bg.h) || 0,
+        }
+      }
+    }
+  }
+  return out
+}
+
 function normalizeStoreSettings(settings = {}) {
   return {
     openTime: settings.openTime || '11:00',
+    floorPlan: normalizeFloorPlanServer(settings.floorPlan),
     seatings: normalizeSeatingsServer(settings.seatings),
     closures: normalizeClosuresServer(settings.closures),
     closeTime: settings.closeTime || '19:00',

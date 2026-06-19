@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useBooking } from '../../../contexts/BookingContext'
 import { Button } from '../../ui'
 import FloorMap from '../floormap/FloorMap'
 import GroupSheet from '../group/GroupSheet'
@@ -24,6 +25,7 @@ const QUICK_NEEDS = [
 // 領位與備餐視角的彙整 + 回傳單輸出；要改內容才進編輯精靈（onEdit）。
 export default function GroupDetailStage({ group, tables, settings, onBack, onEdit }) {
   const [sheetOpen, setSheetOpen] = useState(false)
+  const { fixtures, zones } = useBooking()
 
   const st = STATUS_LABEL[group.status] || STATUS_LABEL.planned
   const counts = group.counts || {}
@@ -184,6 +186,8 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
               selectedTables={heldNumbers}
               blockedTables={[]}
               mapDate={group?.date}
+              fixtures={fixtures}
+              zones={zones}
               onSelectTable={() => {}}
             />
           </div>
@@ -192,7 +196,7 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
       )}
 
       {sheetOpen && (
-        <GroupSheet group={group} tables={tables} store={settings} onClose={() => setSheetOpen(false)} />
+        <GroupSheet group={group} tables={tables} store={settings} fixtureSource={fixtures} onClose={() => setSheetOpen(false)} />
       )}
     </div>
   )
