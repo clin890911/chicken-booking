@@ -9,7 +9,12 @@
 //   - chat_id 存在 LocalStorage，由使用者透過 Settings 頁面設定或自動偵測
 //
 // API: https://core.telegram.org/bots/api
-const TOKEN = import.meta.env.VITE_TELEGRAM_BOT_TOKEN || ''
+//
+// 安全：正式環境（prod build）一律不在前端持有 bot token——內場通知改由後端 Cloud Functions
+// （Secret Manager 的 TELEGRAM_BOT_TOKEN）權威送出。此處僅在 dev 讀取 token，供本機測試
+// chat 偵測 / 測試訊息；prod build 中 TOKEN 恆為空字串，hasToken() 即 false，下方所有
+// 直打 Telegram API 的路徑自動 no-op（即使有人誤把 VITE_TELEGRAM_BOT_TOKEN 設進正式環境也不外洩）。
+const TOKEN = import.meta.env.DEV ? (import.meta.env.VITE_TELEGRAM_BOT_TOKEN || '') : ''
 const CHAT_ID_KEY = 'chicken_telegram_chatid'
 const ENABLED_KEY = 'chicken_telegram_enabled'
 

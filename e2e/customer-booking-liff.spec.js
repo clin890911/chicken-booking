@@ -31,6 +31,11 @@ function stubLiff(page, { friendFlag = true, initFails = false } = {}) {
 
 test.beforeEach(async ({ page }) => {
   createBody = null
+  // LIFF 身分偵測受 settings.lineUseLiff 把關（預設關 → 走 LINE Login）。本測試驗的是
+  // 「LIFF 內」路徑，故先把店家設定的 lineUseLiff 開起來，lineLiffId 才會回傳 id、啟用 LIFF。
+  await page.addInitScript(() => {
+    localStorage.setItem('chicken_settings_v1', JSON.stringify({ lineUseLiff: true }))
+  })
   await page.route('**/guest*', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-blocked' }) }))
   await page.route('**/guestGetAvailability', route =>

@@ -43,16 +43,16 @@ export default function LineBindPage() {
   }, [bookingId, decodedPayload, remoteBooking])
 
   // 跨裝置 / LINE 內開啟、無本機資料時，回讀訂位摘要供顯示（不影響綁定結果判斷）。
+  // StrictMode 守門只用 remoteFetchRef（跑一次）；★ 不可再用 cancelled 旗標擋 setState——
+  // dev StrictMode「mount→cleanup→再 mount」會讓 run#1 的 fetch 結果被 cancelled 丟棄、
+  // run#2 又被 ref 擋住 → remoteBooking 永遠設不進去、摘要永遠不顯示（本檔註解早已警告此坑）。
   useEffect(() => {
     if (booking || !bookingId || !token) return
     if (remoteFetchRef.current !== '') return
     remoteFetchRef.current = 'pending'
-    let cancelled = false
     fetchLineBooking(settings, bookingId, token).then((remote) => {
-      if (cancelled) return
       if (remote.ok && remote.booking?.id) setRemoteBooking(normalizePayloadBooking(remote.booking))
     })
-    return () => { cancelled = true }
   }, [booking, bookingId, token, settings])
 
   const startUrl = useMemo(() => {
