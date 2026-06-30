@@ -12,6 +12,7 @@ import {
   dayLabelServer,
   buildManageUrl,
   classifyAdminBookingChange,
+  classifyAdminBookingBackupEvent,
 } from './lib/notify.js'
 import {
   normalizeOnlineGuardSettings,
@@ -149,7 +150,7 @@ export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
   }
 })
 
-export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     await requireStaff(req)
@@ -180,12 +181,20 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
     // 開關開啟時才在 commit「前」讀舊值（merge-upsert 不讀舊值，diff 需要 before 快照），
     // commit「成功後」才分類入列——先寫成功才通知，避免通知了卻沒寫進去。
     const notifySettings = await readSettingsForAdminNotify(dataset.settings)
-    const beforeBookings = notifySettings.lineNotifyOnAdminChange === true
-      ? await snapshotBookingsBefore(dataset.bookings)
+    // commit「前」讀舊值才能做 diff（merge-upsert 不讀舊值）。LINE 或 Telegram 任一開啟才付這筆讀取成本。
+    const wantBefore = notifySettings.lineNotifyOnAdminChange === true || notifySettings.telegramNotifyOnAdminChange === true
+    const beforeBookings = wantBefore
+      ? await snapshotBookingsByIds((dataset.bookings || []).map(b => b?.id))
+      : new Map()
+    // 硬刪除的訂位只出現在 deletedIds，commit 後就查不到；先抓刪除前完整舊值，Telegram 才能附完整 JSON 供還原。
+    const deletedBookingIds = (dataset.deletedIds || {}).bookings || []
+    const deletedBefore = (notifySettings.telegramNotifyOnAdminChange === true && deletedBookingIds.length)
+      ? await snapshotBookingsByIds(deletedBookingIds)
       : new Map()
     // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
     await commitInChunks(ops)
     await notifyAdminBookingChanges(beforeBookings, dataset.bookings, notifySettings)
+    await notifyAdminBookingTelegram(beforeBookings, deletedBefore, dataset.bookings, deletedBookingIds, notifySettings)
     return res.json({ ok: true })
   } catch (err) {
     console.error('adminPushData failed:', err)
@@ -266,12 +275,13 @@ export const adminManageStaff = onRequest({ cors: PUBLIC_CORS, invoker: 'public'
   }
 })
 
-// 讀取本次推送涉及訂位的「commit 前」狀態（每批 ≤300 筆 getAll）。失敗回空 Map（通知靜默跳過，不影響同步）。
-async function snapshotBookingsBefore(bookings) {
+// 讀取指定訂位 id 的「commit 前」狀態（每批 ≤300 筆 getAll）。失敗回空 Map（通知靜默跳過，不影響同步）。
+// 同時供 upsert（diff before/after）與硬刪除（抓刪除前完整舊值）兩條通知路徑使用。
+async function snapshotBookingsByIds(rawIds) {
   const map = new Map()
   try {
-    const ids = (Array.isArray(bookings) ? bookings : [])
-      .map(b => String(b?.id || '').trim())
+    const ids = (Array.isArray(rawIds) ? rawIds : [])
+      .map(id => String(id || '').trim())
       .filter(Boolean)
     if (!ids.length) return map
     for (let i = 0; i < ids.length; i += 300) {
@@ -280,7 +290,7 @@ async function snapshotBookingsBefore(bookings) {
       snaps.forEach(snap => { if (snap.exists) map.set(snap.id, snap.data()) })
     }
   } catch (err) {
-    console.error('snapshotBookingsBefore failed:', err?.message)
+    console.error('snapshotBookingsByIds failed:', err?.message)
   }
   return map
 }
@@ -321,6 +331,77 @@ async function notifyAdminBookingChanges(beforeMap, bookings, settings) {
     }
   } catch (err) {
     console.error('notifyAdminBookingChanges failed:', err?.message)
+  }
+}
+
+// 店員端訂位變更 → 內場 Telegram 備份通知（feature flag telegramNotifyOnAdminChange，預設開）。
+// 目的＝資料還原：每則附完整 JSON（tgBookingMessage 內嵌），系統若出問題可從 Telegram 撈回。
+// 只發重要變更：新增 / 改期時段人數 / 取消 / 硬刪除；內務操作（指派桌、入座、結帳、noshow、備註）不發。
+// 差異同步只送變動文件、且以 commit 前 before 比對，多裝置重送同一變更時 before==after → 自然略過。
+// 走 enqueueAndTrySend（outbox：先寫一筆→立即試送→失敗由 retryNotifications 補送）。錯誤只記 log，不影響同步。
+async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, deletedBookingIds, settings) {
+  try {
+    if (settings.telegramNotifyOnAdminChange !== true) return
+    // 新增 / 修改 / 取消（仍以 upsert 形式送出）
+    if (Array.isArray(bookings)) {
+      for (const incoming of bookings) {
+        const id = String(incoming?.id || '').trim()
+        if (!id) continue
+        const before = beforeMap.get(id)
+        const event = classifyAdminBookingBackupEvent(before, incoming)
+        if (!event) continue
+        // 內容以 commit 後權威文件為準（merge-upsert 後可能含 client 沒帶齊的欄位）
+        const freshSnap = await db.collection(COLLECTIONS.bookings).doc(id).get()
+        if (!freshSnap.exists) continue
+        const booking = { id: freshSnap.id, ...freshSnap.data() }
+        if (event === 'created') {
+          await enqueueAndTrySend({
+            channel: 'telegram', event: 'admin_created', bookingId: id,
+            payload: { text: tgBookingMessage('🆕 <b>店員新增訂位</b>', booking, { event: 'admin_created', booking }) },
+          })
+        } else if (event === 'updated') {
+          const changedKeys = ['date', 'timeSlot', 'guests', 'name', 'phone', 'notes', 'assignedTableId', 'status']
+            .filter(k => JSON.stringify(before?.[k]) !== JSON.stringify(booking[k]))
+          await enqueueAndTrySend({
+            channel: 'telegram', event: 'admin_updated', bookingId: id,
+            payload: {
+              text: tgBookingMessage(
+                `✏️ <b>店員修改訂位</b> · ${id}`,
+                booking,
+                { event: 'admin_updated', booking, changedKeys },
+                changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
+              ),
+            },
+          })
+        } else if (event === 'cancelled') {
+          const reason = booking.cancellationReason?.reason
+          await enqueueAndTrySend({
+            channel: 'telegram', event: 'admin_cancelled', bookingId: id,
+            payload: {
+              text: tgBookingMessage(
+                '❌ <b>店員取消訂位</b>',
+                booking,
+                { event: 'admin_cancelled', booking },
+                reason ? `取消原因：${escapeTg(reason)}` : '',
+              ),
+            },
+          })
+        }
+      }
+    }
+    // 硬刪除：用刪除前快照，JSON 即還原資料
+    for (const rawId of (Array.isArray(deletedBookingIds) ? deletedBookingIds : [])) {
+      const id = String(rawId || '').trim()
+      if (!id) continue
+      const booking = deletedBefore.get(id)
+      if (!booking) continue // 查無刪除前舊值（可能早已不存在）→ 無資料可備份，略過
+      await enqueueAndTrySend({
+        channel: 'telegram', event: 'admin_deleted', bookingId: id,
+        payload: { text: tgBookingMessage('🗑️ <b>店員刪除訂位</b>', { id, ...booking }, { event: 'admin_deleted', booking: { id, ...booking } }) },
+      })
+    }
+  } catch (err) {
+    console.error('notifyAdminBookingTelegram failed:', err?.message)
   }
 }
 
@@ -1611,6 +1692,8 @@ function normalizeStoreSettings(settings = {}) {
     publicSiteUrl: String(settings.publicSiteUrl || '').trim(),
     // 店員後台改期/取消時自動 LINE 通知客人（預設關，店內驗證後再開）。
     lineNotifyOnAdminChange: settings.lineNotifyOnAdminChange === true,
+    // 店員端訂位變更的內場 Telegram 備份通知，預設開（資料還原用途）；要關才明確設 false。
+    telegramNotifyOnAdminChange: settings.telegramNotifyOnAdminChange !== false,
     storeName: settings.storeName || '雞王涮涮鍋',
     storePhone: settings.storePhone || DEFAULT_STORE_PHONE,
     storeAddress: settings.storeAddress || DEFAULT_STORE_ADDRESS,
@@ -2091,6 +2174,38 @@ async function tgSend(text) {
   }
 }
 
+// 上傳檔案到 Telegram（sendDocument，multipart/form-data）。每日全量快照用：
+// 避開 sendMessage 4096 字上限，且 JSON 檔可直接下載還原。逾時放寬（檔案較大）。
+async function tgSendDocument(filename, content, caption = '') {
+  let token = ''
+  let chatId = ''
+  try { token = (TELEGRAM_BOT_TOKEN.value() || '').trim() } catch { token = '' }
+  try { chatId = (TELEGRAM_CHAT_ID.value() || '').trim() } catch { chatId = '' }
+  if (!token || !chatId) return { ok: false, error: 'telegram-not-configured' }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30_000)
+  try {
+    const form = new FormData()
+    form.append('chat_id', chatId)
+    if (caption) {
+      form.append('caption', caption.slice(0, 1024))
+      form.append('parse_mode', 'HTML')
+    }
+    form.append('document', new Blob([content], { type: 'application/json' }), filename)
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    })
+    if (!res.ok) return { ok: false, error: `telegram-doc-${res.status}: ${(await res.text()).slice(0, 300)}` }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err?.name === 'AbortError' ? 'telegram-doc-timeout' : (err?.message || 'telegram-doc-error') }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 // 送 LINE push（AbortController 逾時保護），回 { ok, error, retryable?, httpStatus? }。
 // retryable === false（4xx 非 429：封鎖/非好友/壞請求）時重試也不會好，由 sendOutboxDoc 立即 dead-letter。
 // line-not-configured 維持可重試：呼叫端點可能沒綁 secret，但 retryNotifications 排程有，補送會成功。
@@ -2258,5 +2373,37 @@ export const notificationHeartbeat = onSchedule(
     ]
     const result = await tgSend(lines.join('\n'))
     if (!result.ok) console.error('NOTIFICATION_HEARTBEAT_FAILED', result.error)
+  },
+)
+
+// 每日 04:30（台北，打烊後）全量快照：把所有同步集合 + settings 打包成一份 JSON 檔上傳 Telegram。
+// 逐筆變更通知是「事件流」，這支是「完整還原點」——系統若出問題可直接下載某天的檔案還原全貌。
+export const dailyBackup = onSchedule(
+  {
+    schedule: '30 4 * * *',
+    timeZone: 'Asia/Taipei',
+    secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID],
+  },
+  async () => {
+    try {
+      const names = Object.keys(SYNC_COLLECTION_IDKEYS)
+      const [lists, settingsSnap] = await Promise.all([
+        Promise.all(names.map(n => listCollection(n))),
+        db.collection('settings').doc('main').get(),
+      ])
+      const snapshot = { generatedAt: new Date().toISOString() }
+      const counts = []
+      names.forEach((n, i) => {
+        snapshot[n] = lists[i]
+        counts.push(`${n}: ${lists[i].length}`)
+      })
+      snapshot.settings = settingsSnap.exists ? settingsSnap.data() : {}
+      const dateStr = new Date().toISOString().slice(0, 10)
+      const caption = `💾 <b>每日全量備份</b> · ${dateStr}\n${escapeTg(counts.join(' · '))}`
+      const result = await tgSendDocument(`backup-${dateStr}.json`, JSON.stringify(snapshot, null, 0), caption)
+      if (!result.ok) console.error('DAILY_BACKUP_FAILED', result.error)
+    } catch (err) {
+      console.error('dailyBackup failed:', err?.message)
+    }
   },
 )
