@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '../ui'
+import EditBookingModal from './EditBookingModal'
 import { getNoshowCount } from '../../services/bookingService'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
@@ -63,6 +64,7 @@ export default function BookingCard({ booking, onAssign, onClick }) {
 
   // B12：手機上低頻操作收進「⋯ 更多」展開選單
   const [showMore, setShowMore] = useState(false)
+  const [editing, setEditing] = useState(false)
 
   // 日期三態 guard：未來日不可「客人到了/標No-show」、過去日只可補登（離席/No-show/取消）
   const dayKind = bookingDayKind(booking.date, todayStr())
@@ -285,6 +287,10 @@ export default function BookingCard({ booking, onAssign, onClick }) {
             {(booking.status === 'confirmed' || booking.status === 'pending') && (
               <>
                 <button
+                  onClick={(e) => { e.stopPropagation(); setEditing(true) }}
+                  className="inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/20 text-chicken-brown rounded-lg font-bold hover:border-chicken-brown/40"
+                >✏️ 編輯</button>
+                <button
                   onClick={(e) => { e.stopPropagation(); setShowMore(s => !s) }}
                   className="sm:hidden text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown/70 rounded-lg font-bold hover:border-chicken-brown/30"
                   aria-expanded={showMore}
@@ -332,6 +338,8 @@ export default function BookingCard({ booking, onAssign, onClick }) {
           )}
         </div>
       </div>
+
+      {editing && <EditBookingModal booking={booking} onClose={() => setEditing(false)} />}
     </div>
   )
 }

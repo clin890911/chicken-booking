@@ -696,6 +696,82 @@ describe('updateBookingByGuest', () => {
   })
 })
 
+describe('updateByStaff（員工後台編輯）', () => {
+  const TABLES_KEY = 'chicken_tables_v3'
+  function seedStaff(overrides = {}) {
+    seedBookings([{
+      id: 'B1', name: '小明', phone: '0912345678', guests: 4,
+      date: '2026-06-20', timeSlot: '18:00',
+      notes: { pet: false, child: false, mobility: false, text: '' },
+      status: 'confirmed', assignedTableId: '101', extraTableIds: [],
+      lastGuestEditAt: null, guestEditCount: 0, guestEditHistory: [],
+      ...overrides,
+    }])
+  }
+  function seedHeldTable(number, bookingId) {
+    localStorage.setItem(TABLES_KEY, JSON.stringify([
+      { number, status: 'reserved', currentBookingId: bookingId, seatedAt: null, capacity: 4 },
+    ]))
+  }
+  function rawTables() { return JSON.parse(localStorage.getItem(TABLES_KEY) || '[]') }
+
+  it('找不到訂位 → null', () => {
+    expect(bookingService.updateByStaff('NOPE', { name: 'x' })).toBeNull()
+  })
+
+  it('只改 name（非結構性）→ 保留桌位、不釋放原桌', () => {
+    seedStaff(); seedHeldTable('101', 'B1')
+    const r = bookingService.updateByStaff('B1', { name: '阿明' })
+    expect(r.name).toBe('阿明')
+    expect(r.assignedTableId).toBe('101')
+    expect(rawTables()[0].currentBookingId).toBe('B1')
+  })
+
+  it('改 guests（結構性）→ 解除 assignedTableId 並釋放原桌', () => {
+    seedStaff(); seedHeldTable('101', 'B1')
+    const r = bookingService.updateByStaff('B1', { guests: 6 })
+    expect(r.guests).toBe(6)
+    expect(r.assignedTableId).toBeNull()
+    const t = rawTables()[0]
+    expect(t.currentBookingId).toBeNull()
+    expect(t.status).toBe('vacant')
+  })
+
+  it('改 date / timeSlot（結構性）→ 解除桌位', () => {
+    seedStaff()
+    expect(bookingService.updateByStaff('B1', { date: '2026-06-21' }).assignedTableId).toBeNull()
+    seedStaff()
+    expect(bookingService.updateByStaff('B1', { timeSlot: '19:00' }).assignedTableId).toBeNull()
+  })
+
+  it('結構性欄位但值未變 → 不解除桌位', () => {
+    seedStaff()
+    expect(bookingService.updateByStaff('B1', { guests: 4 }).assignedTableId).toBe('101')
+  })
+
+  it('不寫 lastGuestEditAt/guestEditHistory（避免誤觸「客人自行修改」標記）', () => {
+    seedStaff()
+    const r = bookingService.updateByStaff('B1', { guests: 6, name: '阿明' })
+    expect(r.lastGuestEditAt).toBeNull()
+    expect(r.guestEditHistory).toEqual([])
+    expect(r.guestEditCount).toBe(0)
+  })
+
+  it('結構性改動會一併釋放併桌的 extraTableIds', () => {
+    seedStaff({ assignedTableId: '101', extraTableIds: ['102'] })
+    localStorage.setItem(TABLES_KEY, JSON.stringify([
+      { number: '101', status: 'reserved', currentBookingId: 'B1' },
+      { number: '102', status: 'reserved', currentBookingId: 'B1' },
+    ]))
+    const r = bookingService.updateByStaff('B1', { guests: 8 })
+    expect(r.assignedTableId).toBeNull()
+    expect(r.extraTableIds).toEqual([])
+    const tables = rawTables()
+    expect(tables.find(t => t.number === '101').currentBookingId).toBeNull()
+    expect(tables.find(t => t.number === '102').currentBookingId).toBeNull()
+  })
+})
+
 describe('cancelBookingByGuest', () => {
   beforeEach(() => {
     vi.useFakeTimers()

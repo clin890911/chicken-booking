@@ -163,6 +163,27 @@ export function update(id, patch) {
   return list[idx]
 }
 
+// === 員工後台編輯訂位 ===
+// 與客人自助改（updateBookingByGuest）不同：不需 token、不限可編輯時段（店員可隨時改）。
+// 但同樣在「結構性變更」(日期/時段/人數) 時解除並釋放原桌，避免留下指向舊綁定的孤兒 reserved 桌。
+// ★ 不寫 lastGuestEditAt/guestEditHistory（那是客人專用欄位，寫了會誤觸卡片「客人自行修改」標記）。
+export function updateByStaff(id, patch) {
+  const booking = getById(id)
+  if (!booking) return null
+  const structuralKeys = ['date', 'timeSlot', 'guests']
+  const shouldUnassign = structuralKeys.some(k => patch[k] !== undefined && String(patch[k]) !== String(booking[k]))
+  const cleanPatch = { ...patch }
+  let releasedTables = []
+  if (shouldUnassign && booking.assignedTableId) {
+    cleanPatch.assignedTableId = null
+    cleanPatch.extraTableIds = []
+    releasedTables = [booking.assignedTableId, ...(Array.isArray(booking.extraTableIds) ? booking.extraTableIds : [])]
+  }
+  const updated = update(id, cleanPatch)
+  releasedTables.forEach(t => releaseTableIfHeldBy(t, id))
+  return updated
+}
+
 export function upsertFromRemote(data) {
   if (!data?.id) return null
   const list = read()
