@@ -248,8 +248,9 @@ export function BookingProvider({ children }) {
     safeNotify(() => tg.notifyBookingCreated(b))
     return b
   }
+  // 員工後台編輯訂位：結構性變更（日期/時段/人數）會自動解除並釋放原桌，避免孤兒 reserved 桌。
   const updateBooking = (id, patch) => {
-    const b = bookingService.update(id, patch)
+    const b = bookingService.updateByStaff(id, patch)
     refresh()
     syncCloudSoon()
     safeNotify(() => tg.notifyBookingUpdated(b, patch))
