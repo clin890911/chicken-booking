@@ -23,6 +23,9 @@ import {
   normalizeStaffEmail,
   resolveStaffRole,
   validateStaffUpsert,
+  canWriteCollection,
+  canDeleteCollection,
+  canWriteSettings,
 } from './lib/staffAccess.js'
 import { isTableUsableOnDate } from './lib/tableUsable.js'
 import {
@@ -125,8 +128,9 @@ const SYNC_COLLECTION_IDKEYS = {
 
 export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  let staff
   try {
-    await requireStaff(req)
+    staff = await requireStaff(req)
   } catch (err) {
     return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
   }
@@ -143,6 +147,8 @@ export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
     if (out.tables) out.tables.sort((a, b) => String(a.number || '').localeCompare(String(b.number || '')))
     if (out.waitlist) out.waitlist.sort((a, b) => String(a.takenAt || '').localeCompare(String(b.takenAt || '')))
     out.settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+    // 廚房（kitchen）無 customer.read：不下發顧客 PII 到廚房裝置（其餘集合渲染所需維持回傳）。
+    if (staff.role === 'kitchen') out.customers = []
     return res.json(out)
   } catch (err) {
     console.error('adminPullData failed:', err)
@@ -152,13 +158,29 @@ export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
 
 export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  let staff
   try {
-    await requireStaff(req)
+    staff = await requireStaff(req)
   } catch (err) {
     return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
   }
   try {
     const { dataset = {} } = req.body || {}
+    // 後端 RBAC：依角色把關每個集合的「寫入/刪除」與「改設定」。合法前端只送該角色可改的
+    // 髒集合，故正常操作不受影響；此檢查擋的是繞過 UI 直接打 API 的越權（如 kitchen 改設定/刪訂位）。
+    const role = staff.role
+    const denied = []
+    for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
+      if (Array.isArray(dataset[name]) && dataset[name].length && !canWriteCollection(role, name)) denied.push(`寫入 ${name}`)
+    }
+    const deletedIdsCheck = dataset.deletedIds || {}
+    for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
+      if (Array.isArray(deletedIdsCheck[name]) && deletedIdsCheck[name].length && !canDeleteCollection(role, name)) denied.push(`刪除 ${name}`)
+    }
+    if (dataset.settings && !canWriteSettings(role)) denied.push('變更設定')
+    if (denied.length) {
+      return res.status(403).json({ ok: false, error: `角色「${role}」無權：${denied.join('、')}` })
+    }
     // 泛型遍歷所有同步集合做 merge-upsert（接受「部分資料集」，未帶的集合略過）。
     const ops = []
     for (const [name, idKey] of Object.entries(SYNC_COLLECTION_IDKEYS)) {
@@ -410,10 +432,15 @@ async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, de
 // 前端建/改團、變更圈桌時呼叫；衝突回 409 並附明細。
 export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  let staff
   try {
-    await requireStaff(req)
+    staff = await requireStaff(req)
   } catch (err) {
     return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
+  }
+  // 圈桌＝寫入團體預排，需 group.update（manager / host）；floor、kitchen 越權。
+  if (!canWriteCollection(staff.role, 'groupReservations')) {
+    return res.status(403).json({ ok: false, error: `角色「${staff.role}」無權圈桌（團體預排）` })
   }
   try {
     const { group } = req.body || {}
