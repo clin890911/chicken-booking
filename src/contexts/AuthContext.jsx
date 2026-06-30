@@ -48,7 +48,7 @@ const PERMISSIONS = {
     'booking.read', 'booking.create', 'booking.update', 'booking.delete', 'booking.assign',
     'table.read', 'table.update', 'table.block', 'table.merge', 'table.config',
     'waitlist.read', 'waitlist.create', 'waitlist.update', 'waitlist.delete',
-    'customer.read', 'customer.update', 'customer.blacklist',
+    'customer.read', 'customer.update', 'customer.delete', 'customer.blacklist',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
     'settings.read', 'settings.update',
     'staff.manage',
