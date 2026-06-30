@@ -52,6 +52,11 @@ let lastBody = null
 
 test.beforeEach(async ({ page }) => {
   lastBody = null
+  // 「我的訂位」用 LIFF idToken 查詢，受 settings.lineUseLiff 把關（預設關 → 直接 fallback）。
+  // 先開 lineUseLiff，lineLiffId 才會回傳 id、流程才會走到 window.liff stub 與端點查詢。
+  await page.addInitScript(() => {
+    localStorage.setItem('chicken_settings_v1', JSON.stringify({ lineUseLiff: true }))
+  })
   await stubLiff(page)
 })
 

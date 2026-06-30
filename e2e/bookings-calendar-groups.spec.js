@@ -29,11 +29,16 @@ test('日曆月格同時顯示散客與旅行社團體人數', async ({ page }) 
   await expect(page).toHaveURL(/\/admin/)
   await page.getByRole('button', { name: /日曆/ }).click()
 
-  // 確保停在 2026 年 6 月（種子月份；預設今日所在月即 6 月，仍保險翻頁）
-  for (let i = 0; i < 12; i++) {
+  // 導到種子月份 2026 年 6 月。★ 須雙向翻頁：種子是固定日期，當系統日期已過 2026/6（例如
+  // 7 月以後），6 月變成「過去月」，只往後（›）翻永遠到不了 → 依目前顯示月與目標月比較方向。
+  const TARGET = 2026 * 12 + 6
+  for (let i = 0; i < 24; i++) {
     const t = await page.getByRole('heading', { name: /\d+年 \d+月/ }).textContent()
-    if (/2026年 6月/.test(t)) break
-    await page.getByRole('button', { name: '›' }).first().click()
+    const m = t.match(/(\d+)年\s*(\d+)月/)
+    if (!m) break
+    const cur = Number(m[1]) * 12 + Number(m[2])
+    if (cur === TARGET) break
+    await page.getByRole('button', { name: cur > TARGET ? '‹' : '›' }).first().click()
   }
   await expect(page.getByRole('heading', { name: /2026年 6月/ })).toBeVisible()
 
