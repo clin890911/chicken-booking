@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import DatePicker from '../booking/DatePicker'
+import MonthCalendar from '../booking/MonthCalendar'
 import TimeSlotPicker from '../booking/TimeSlotPicker'
 import { Card, Input, Textarea, Button } from '../ui'
 import { useToast } from '../ui/Toast'
@@ -263,15 +263,15 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
                   !isQuickDate
                     ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'
                     : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-                📅 其他日期
+                📅 選月曆
                 <span className="block text-[10px] font-bold opacity-70">
-                  {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合 ▴' : '展開 ▾'}
+                  {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合 ▴' : '可排數月後 ▾'}
                 </span>
               </button>
             </div>
             {showCalendar && (
               <div className="mt-2 animate-soft-enter">
-                <DatePicker compact value={date} onChange={(d) => { setDate(d); setShowCalendar(false) }} maxDaysAhead={settings.maxDaysAhead} />
+                <MonthCalendar value={date} onChange={(d) => { setDate(d); setShowCalendar(false) }} />
               </div>
             )}
           </div>
@@ -324,35 +324,38 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
         />
       </Card>
 
-      {/* === 底部黏性操作列：缺漏 checklist + 大按鈕（避開手機 BottomNav） === */}
-      <div className="sticky bottom-24 lg:bottom-4 z-20">
-        <Card className="shadow-lg border-2 border-chicken-brown/10">
-          <label className="flex items-center gap-2 mb-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoAssign}
-              onChange={e => setAutoAssign(e.target.checked)}
-              className="w-5 h-5"
-            />
-            <span className="text-sm font-bold text-chicken-brown">建立後立刻自動指派最佳桌（限今天；可手動修改）</span>
-          </label>
+      {/* === 底部黏性操作列：精簡單列、半透明避免遮擋上方選日期/時段；
+             自動指派僅今天才有意義 → 只在今天顯示，未來日（多為團體）直接收起 === */}
+      <div className="sticky bottom-20 lg:bottom-3 z-20 pt-2">
+        <div className="rounded-2xl border border-chicken-brown/10 bg-white/95 p-2.5 shadow-lg backdrop-blur">
+          {date === todayStr() && (
+            <label className="mb-2 flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoAssign}
+                onChange={e => setAutoAssign(e.target.checked)}
+                className="h-4 w-4"
+              />
+              <span className="text-xs font-bold text-chicken-brown/80">建立後立刻自動指派最佳桌（可手動修改）</span>
+            </label>
+          )}
           {missing.length > 0 && (
-            <div className="mb-2 flex items-center gap-1.5 flex-wrap text-xs">
-              <span className="font-bold text-chicken-brown/55">還差：</span>
+            <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="font-bold text-chicken-brown/55">還差</span>
               {missing.map(m => (
                 <button key={m.key} type="button" onClick={() => scrollToField(m)}
-                  className="px-2.5 py-1 rounded-full bg-chicken-red/10 text-chicken-red font-black hover:bg-chicken-red/20">
-                  ⚠ {m.label}
+                  className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-black text-chicken-red hover:bg-chicken-red/20">
+                  {m.label}
                 </button>
               ))}
             </div>
           )}
-          <Button onClick={handleSubmit} disabled={!valid || busy} className="w-full text-base min-h-[44px]">
+          <Button onClick={handleSubmit} disabled={!valid || busy} className="w-full min-h-[44px]">
             {busy ? '建立中...'
               : valid ? `✅ 確認新增 · ${dayLabel(date)} ${timeSlot} · ${guests} 位`
               : `還差：${missing.map(m => m.label).join('、')}`}
           </Button>
-        </Card>
+        </div>
       </div>
     </div>
   )
