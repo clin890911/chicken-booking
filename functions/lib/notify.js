@@ -62,17 +62,18 @@ export function classifyAdminBookingChange(before, after) {
 }
 
 // 店員端變更分類（Telegram 備份用）：目的是「萬一系統壞掉能從 Telegram 撈回資料」，
-// 故比 classifyAdminBookingChange 多認「新增」，但同樣只發重要變更——
-// 內務操作（指派桌位、入座 arrived、結帳 completed、no-show、改備註）一律 null 不發。
+// 故比 classifyAdminBookingChange 多認「新增」，且改期/時段/人數不分狀態都留底——
+// 內務操作（指派桌位、入座 arrived、結帳 completed、no-show、改備註）仍一律 null 不發。
 // - 無 before（後端查無此訂位）但有 after → 'created'（店員新建；客人線上建單走 guestCreateBooking 不經這裡）
 // - 任何狀態 → cancelled → 'cancelled'
-// - 維持 confirmed 且改期/改時段/改人數 → 'updated'
+// - 改期/改時段/改人數，只要訂位「不是已取消」（confirmed / arrived / completed 皆可）→ 'updated'
+//   （比 classifyAdminBookingChange 放寬：已入座/已結帳客人臨時改人數也是重要異動，要備份）
 // 硬刪除（dataset.deletedIds）不在此函式判斷，由呼叫端以刪除前快照另發 'deleted'。
 export function classifyAdminBookingBackupEvent(before, after) {
   if (!after) return null
   if (!before) return 'created'
   if (before.status !== 'cancelled' && after.status === 'cancelled') return 'cancelled'
-  if (before.status === 'confirmed' && after.status === 'confirmed') {
+  if (after.status !== 'cancelled') {
     const structuralChanged = ['date', 'timeSlot', 'guests']
       .some(key => String(after[key] ?? '') !== String(before[key] ?? ''))
     if (structuralChanged) return 'updated'
