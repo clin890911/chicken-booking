@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
 import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
-import { useToast } from '../ui/Toast'
+import { useToast, useConfirm } from '../ui/Toast'
 import { todayStr } from '../../utils/timeSlots'
 import {
   filterBookings, filterGroups, buildBookingsCSV, buildGroupsCSV,
   BOOKING_SOURCE_LABELS, BOOKING_STATUS_LABELS, GROUP_STATUS_LABELS,
+  BOOKING_CSV_HEADERS, GROUP_CSV_HEADERS, PII_HEADERS,
 } from '../../utils/exportData'
 
 // 匯出中心：自選資料類型（散客/團體）、日期區間、來源、場次、狀態、旅行社/導遊後下載 CSV。
@@ -53,6 +54,7 @@ const PRESETS = [
 export default function ExportCenter() {
   const { bookings, groupReservations, agencies, guides, settings } = useBooking()
   const toast = useToast()
+  const confirm = useConfirm()
   const [type, setType] = useState('bookings')
   const [range, setRange] = useState(() => presetRange('month'))
   const [source, setSource] = useState('all')
@@ -94,16 +96,26 @@ export default function ExportCenter() {
     [filteredGroups]
   )
 
-  const handleExport = () => {
+  // 將輸出的欄位（依資料類型）；含個資者於預覽中標示。
+  const fields = type === 'bookings' ? BOOKING_CSV_HEADERS : GROUP_CSV_HEADERS
+
+  const handleExport = async () => {
+    const list = type === 'bookings' ? filteredBookings : filteredGroups
+    const label = type === 'bookings' ? '散客訂位' : '團體預排'
+    if (!list.length) { toast.error(`目前條件沒有可匯出的${label}`); return }
+    // 匯出前確認 + 個資下載提示（CSV 含姓名／電話等個人資料）
+    const ok = await confirm(
+      `即將下載 ${list.length} 筆${label}，內容包含姓名、電話等個人資料。\n請妥善保管、勿外流或上傳至不安全的服務。確定匯出？`,
+      { title: '匯出個資提醒', confirmLabel: '確定匯出' }
+    )
+    if (!ok) return
     const rangeTag = range.dateFrom || range.dateTo
       ? `${range.dateFrom || '起'}_${range.dateTo || '迄'}`
       : '全部期間'
     if (type === 'bookings') {
-      if (!filteredBookings.length) { toast.error('目前條件沒有可匯出的散客訂位'); return }
       downloadCSV(`散客訂位_${rangeTag}.csv`, buildBookingsCSV(filteredBookings, settings))
       toast.success(`已匯出 ${filteredBookings.length} 筆散客訂位`)
     } else {
-      if (!filteredGroups.length) { toast.error('目前條件沒有可匯出的團體預排'); return }
       downloadCSV(`團體預排_${rangeTag}.csv`, buildGroupsCSV(filteredGroups, settings))
       toast.success(`已匯出 ${filteredGroups.length} 張團單`)
     }
@@ -168,6 +180,24 @@ export default function ExportCenter() {
           </>
         )}
       </div>
+
+      {/* 欄位預覽：下載前先知道會輸出哪些欄位，含個資者以紅點標示 */}
+      <details className="rounded-xl border border-chicken-brown/10 bg-white">
+        <summary className="cursor-pointer list-none px-4 py-2.5 text-sm font-bold text-chicken-brown/70">
+          欄位預覽（{fields.length} 欄）<span className="ml-1 text-xs font-normal text-chicken-brown/45">點擊展開</span>
+        </summary>
+        <div className="flex flex-wrap gap-1.5 px-4 pb-3">
+          {fields.map(h => {
+            const pii = PII_HEADERS.includes(h)
+            return (
+              <span key={h} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${pii ? 'bg-chicken-red/10 text-chicken-red' : 'bg-chicken-brown/8 text-chicken-brown/70'}`}>
+                {pii && <span aria-hidden>●</span>}{h}
+              </span>
+            )
+          })}
+        </div>
+        <p className="px-4 pb-3 text-xs text-chicken-brown/50"><span className="text-chicken-red">●</span> = 個人資料（姓名 / 電話）</p>
+      </details>
 
       {/* 預覽 + 匯出 */}
       <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-sm text-chicken-brown/70">

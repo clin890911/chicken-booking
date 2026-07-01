@@ -103,9 +103,19 @@ function seatingNameById(settings, id) {
   return s ? s.name : ''
 }
 
+// CSV 欄位標題（供匯出中心「欄位預覽」重用，避免與下方 build 函式重複維護）。
+export const BOOKING_CSV_HEADERS = ['訂位編號', '日期', '時段', '場次', '姓名', '電話', '人數', '來源', '狀態', '指派桌', '寵物', '兒童', '行動不便', '備註', '建立時間']
+export const GROUP_CSV_HEADERS = [
+  '團單編號', '日期', '梯次', '抵達時段', '場次', '旅行社', '導遊', '導遊電話',
+  '梯次人數', '桌號', '團總人數', '素食', '兒童餐', '行動不便', '輪椅',
+  '過敏備註', '桌邊需求', '遊覽車', '狀態', '團備註',
+]
+// 含個資（姓名/電話）的欄位，匯出前提示用。
+export const PII_HEADERS = ['姓名', '電話', '導遊', '導遊電話']
+
 // 散客 CSV：含場次與中文來源/狀態（欄位為舊版「匯出全部訂位」的超集）。
 export function buildBookingsCSV(bookings, settings) {
-  const headers = ['訂位編號', '日期', '時段', '場次', '姓名', '電話', '人數', '來源', '狀態', '指派桌', '寵物', '兒童', '行動不便', '備註', '建立時間']
+  const headers = BOOKING_CSV_HEADERS
   const rows = bookings.map(b => [
     b.id, b.date, b.timeSlot,
     seatingNameById(settings, seatingIdForSlot(settings, b.timeSlot)),
@@ -121,11 +131,7 @@ export function buildBookingsCSV(bookings, settings) {
 
 // 團體 CSV：一梯次一列。
 export function buildGroupsCSV(groups, settings) {
-  const headers = [
-    '團單編號', '日期', '梯次', '抵達時段', '場次', '旅行社', '導遊', '導遊電話',
-    '梯次人數', '桌號', '團總人數', '素食', '兒童餐', '行動不便', '輪椅',
-    '過敏備註', '桌邊需求', '遊覽車', '狀態', '團備註',
-  ]
+  const headers = GROUP_CSV_HEADERS
   const rows = groupBatchRows(groups, settings).map(({ group: g, batch: bt, seatingId }) => [
     g.id, g.date, bt.label || '', bt.timeSlot || '',
     seatingNameById(settings, seatingId),
