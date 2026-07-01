@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { Reorder, useDragControls } from 'framer-motion'
 import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
@@ -71,7 +72,7 @@ export default function SettingsView({ onOpenCustomer }) {
   const dirtyKeys = useMemo(() => {
     if (!settings) return []
     return Object.keys(form || {}).filter(k => {
-      // heroBanners 有自己的儲存按鈕，這裡用 JSON 比對其餘設定欄位
+      // 物件/陣列型欄位（如 heroBanners、seatings、closures）用 JSON 比對
       const a = form[k]
       const b = settings[k]
       if (typeof a === 'object') return JSON.stringify(a) !== JSON.stringify(b)
@@ -144,6 +145,9 @@ export default function SettingsView({ onOpenCustomer }) {
     try {
       const images = await Promise.all(list.map(file => readBannerFile(file)))
       setForm(f => ({ ...f, heroBanners: [...(f.heroBanners || []), ...images] }))
+      // 壓縮提示：dataURL base64 約比原檔大 1/3，過大會拖慢首頁載入
+      const heavy = images.filter(im => (im.image?.length || 0) > 900_000).length
+      if (heavy) toast.info(`已新增 ${images.length} 張；其中 ${heavy} 張偏大，建議先壓到 500KB 以內加快首頁載入`)
     } catch (err) {
       toast.error(err.message || '圖片讀取失敗')
     }
@@ -151,18 +155,6 @@ export default function SettingsView({ onOpenCustomer }) {
   const removeBanner = async (id) => {
     if (!(await confirm('確定刪除這張首頁廣告？', { title: '刪除廣告', confirmLabel: '刪除' }))) return
     setForm(f => ({ ...f, heroBanners: (f.heroBanners || []).filter(b => b.id !== id) }))
-  }
-  const moveBanner = (id, dir) => {
-    setForm(f => {
-      const next = [...(f.heroBanners || [])]
-      const index = next.findIndex(b => b.id === id)
-      const target = index + dir
-      if (index < 0 || target < 0 || target >= next.length) return f
-      const item = next[index]
-      next[index] = next[target]
-      next[target] = item
-      return { ...f, heroBanners: next }
-    })
   }
   const handleSearch = () => {
     setSearchResult(searchNoshow(searchPhone.trim()))
@@ -447,7 +439,7 @@ export default function SettingsView({ onOpenCustomer }) {
         <div className="space-y-4">
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-chicken-brown/15 bg-white px-4 py-8 text-center transition hover:border-chicken-red/40">
             <span className="text-sm font-black text-chicken-brown">上傳橫式照片</span>
-            <span className="mt-1 text-xs text-chicken-brown/55">建議 16:9 或 2:1，單張小於 2MB，支援多選</span>
+            <span className="mt-1 text-xs text-chicken-brown/55">建議 16:9 或 2:1、單張小於 2MB（越小越快，建議壓到 500KB 內）、支援多選</span>
             <input
               type="file"
               accept="image/*"
@@ -462,40 +454,21 @@ export default function SettingsView({ onOpenCustomer }) {
               尚未新增廣告圖。首頁會先顯示品牌 logo 與預設訂位宣傳。
             </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {(form.heroBanners || []).map((banner, index) => (
-                <div key={banner.id} className="overflow-hidden rounded-xl border border-chicken-brown/10 bg-white">
-                  <div className="aspect-[16/9] bg-chicken-cream">
-                    <img src={banner.image} alt={banner.title || `首頁廣告 ${index + 1}`} className="h-full w-full object-cover" />
-                  </div>
-                  <div className="space-y-2 p-3">
-                    <Input
-                      label="標題"
-                      value={banner.title || ''}
-                      onChange={e => setForm(f => ({
-                        ...f,
-                        heroBanners: (f.heroBanners || []).map(b => b.id === banner.id ? { ...b, title: e.target.value } : b)
-                      }))}
-                      placeholder="例：母親節限定套餐"
-                    />
-                    <Input
-                      label="副標"
-                      value={banner.subtitle || ''}
-                      onChange={e => setForm(f => ({
-                        ...f,
-                        heroBanners: (f.heroBanners || []).map(b => b.id === banner.id ? { ...b, subtitle: e.target.value } : b)
-                      }))}
-                      placeholder="例：限量供應，建議提前訂位"
-                    />
-                    <div className="grid grid-cols-3 gap-2">
-                      <button onClick={() => moveBanner(banner.id, -1)} className="btn-secondary !px-2 !py-2 text-xs" disabled={index === 0}>上移</button>
-                      <button onClick={() => moveBanner(banner.id, 1)} className="btn-secondary !px-2 !py-2 text-xs" disabled={index === (form.heroBanners || []).length - 1}>下移</button>
-                      <button onClick={() => removeBanner(banner.id)} className="btn-danger !px-2 !py-2 text-xs">刪除</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <>
+              <p className="text-xs font-bold text-chicken-brown/50">拖曳右上角握把可調整輪播順序；圖上文字即客人首頁看到的樣子（前台預覽）。</p>
+              <Reorder.Group axis="y" values={form.heroBanners || []} onReorder={next => setForm(f => ({ ...f, heroBanners: next }))} className="space-y-3">
+                {(form.heroBanners || []).map((banner, index) => (
+                  <HeroBannerItem
+                    key={banner.id}
+                    banner={banner}
+                    index={index}
+                    total={(form.heroBanners || []).length}
+                    setForm={setForm}
+                    removeBanner={removeBanner}
+                  />
+                ))}
+              </Reorder.Group>
+            </>
           )}
         </div>
       </SettingsSection>
@@ -885,6 +858,50 @@ function readBannerFile(file) {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+// 首頁廣告單張卡片：Reorder.Item（右上握把拖曳排序）+ 圖上疊標題副標（前台預覽）+ 非 16:9 提示。
+function HeroBannerItem({ banner, index, total, setForm, removeBanner }) {
+  const controls = useDragControls()
+  const [ratioWarn, setRatioWarn] = useState(false)
+  const patch = (p) => setForm(f => ({ ...f, heroBanners: (f.heroBanners || []).map(b => b.id === banner.id ? { ...b, ...p } : b) }))
+  return (
+    <Reorder.Item value={banner} dragListener={false} dragControls={controls} className="overflow-hidden rounded-xl border border-chicken-brown/10 bg-white">
+      <div className="relative aspect-[16/9] bg-chicken-cream">
+        <img
+          src={banner.image}
+          alt={banner.title || `首頁廣告 ${index + 1}`}
+          className="h-full w-full object-cover"
+          onLoad={e => setRatioWarn(Math.abs((e.target.naturalWidth / e.target.naturalHeight) - 16 / 9) > 0.3)}
+        />
+        {/* 前台預覽：標題/副標疊在圖上（近似客人首頁 hero 呈現） */}
+        {(banner.title || banner.subtitle) && (
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3">
+            {banner.title && <div className="text-sm font-black text-white drop-shadow">{banner.title}</div>}
+            {banner.subtitle && <div className="text-xs text-white/90 drop-shadow">{banner.subtitle}</div>}
+          </div>
+        )}
+        {ratioWarn && (
+          <span className="absolute left-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[11px] font-bold text-white">⚠ 非 16:9，首頁可能被裁切</span>
+        )}
+        <button
+          type="button"
+          onPointerDown={e => controls.start(e)}
+          className="absolute right-2 top-2 cursor-grab touch-none rounded bg-black/40 px-2 py-1 text-xs font-bold text-white active:cursor-grabbing"
+          title="拖曳排序"
+          aria-label="拖曳排序"
+        >⠿</button>
+      </div>
+      <div className="space-y-2 p-3">
+        <Input label="標題" value={banner.title || ''} onChange={e => patch({ title: e.target.value })} placeholder="例：母親節限定套餐" />
+        <Input label="副標" value={banner.subtitle || ''} onChange={e => patch({ subtitle: e.target.value })} placeholder="例：限量供應，建議提前訂位" />
+        <div className="flex items-center justify-between text-xs text-chicken-brown/50">
+          <span>第 {index + 1} / {total} 張</span>
+          <button type="button" onClick={() => removeBanner(banner.id)} className="btn-danger !px-3 !py-1.5 text-xs">刪除</button>
+        </div>
+      </div>
+    </Reorder.Item>
+  )
 }
 
 // 場次（seating）編輯器：增刪場次、改名稱/起訖時間。寫回 form.seatings。
