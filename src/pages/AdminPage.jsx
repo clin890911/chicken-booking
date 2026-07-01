@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Header from '../components/layout/Header'
 import SidebarNav from '../components/layout/SidebarNav'
 import BottomNav from '../components/layout/BottomNav'
@@ -20,8 +21,20 @@ const TABS = [
   { key: 'settings',  label: '設定',  icon: '⚙️', subtitle: '營業時段 · 桌位 · 帳號' },
 ]
 
+const VALID_TABS = TABS.map(t => t.key)
+
 export default function AdminPage() {
-  const [tab, setTab] = useState('bookings')
+  // URL 作為分頁的單一真實來源：重整/上一頁/下一頁/書籤皆能還原（?tab=settings&section=...）。
+  // tab 為衍生值（非另存 state），故無雙向同步 useEffect、無迴圈。
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawTab = searchParams.get('tab')
+  const tab = VALID_TABS.includes(rawTab) ? rawTab : 'bookings'
+  const setTab = (next) => setSearchParams(prev => {
+    const p = new URLSearchParams(prev)
+    p.set('tab', next)
+    if (next !== 'settings') p.delete('section') // 離開設定頁時清掉殘留的 section 參數
+    return p
+  }) // push（非 replace）→ 瀏覽器上一頁/下一頁可用
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式
   // （候位入座已是現場頁內互動，無需跨頁機制）
   const [pendingAssign, setPendingAssign] = useState(null)
