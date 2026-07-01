@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, createContext, useContext } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
@@ -30,6 +31,19 @@ const FIELD_LABELS = {
   slotInterval: '時段間隔',
 }
 
+// 二級分類導覽：把 16 個設定區塊按工作情境分成 5 類。sections 內為各區塊的 sectionKey，
+// 只作「屬於哪一類」的成員判定；實際顯示順序仍由 JSX（DOM）順序決定。
+const SETTINGS_CATEGORIES = [
+  { key: 'ops-rules', label: '營運規則',   icon: '🕒', sections: ['hours', 'seatings', 'closures'] },
+  { key: 'online',    label: '線上訂位',   icon: '🌐', sections: ['online-guard', 'hero', 'contact'] },
+  { key: 'floor',     label: '現場與桌位', icon: '🪑', sections: ['automation', 'layout', 'table-enable'] },
+  { key: 'line',      label: '通知與 LINE', icon: '💚', sections: ['line', 'telegram'] },
+  { key: 'data',      label: '資料與權限', icon: '🔐', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
+]
+const DEFAULT_CATEGORY = 'ops-rules'
+// 由父層提供「目前分類包含的 sectionKey 清單」；SettingsSection 據此自我隱藏（不屬當前分類則 return null）。
+const CategoryContext = createContext([])
+
 export default function SettingsView() {
   const { settings, bookings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
   const { user, signOut, can } = useAuth()
@@ -40,6 +54,18 @@ export default function SettingsView() {
   const [searchResult, setSearchResult] = useState(null)
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
   const [cloudBusy, setCloudBusy] = useState(false)
+
+  // 目前分類同步到 URL（?tab=settings&section=xxx）：重整/上一頁/書籤皆能還原、可分享定位。
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawSection = searchParams.get('section')
+  const activeKey = SETTINGS_CATEGORIES.some(c => c.key === rawSection) ? rawSection : DEFAULT_CATEGORY
+  const activeCat = SETTINGS_CATEGORIES.find(c => c.key === activeKey) || SETTINGS_CATEGORIES[0]
+  const setActiveKey = (k) => setSearchParams(prev => {
+    const p = new URLSearchParams(prev)
+    p.set('tab', 'settings') // 確保停留在設定分頁（分類鈕從設定頁內按）
+    p.set('section', k)
+    return p
+  })
 
   // B14：追蹤未儲存變更（比對目前表單 vs 已存 settings）
   const dirtyKeys = useMemo(() => {
@@ -158,8 +184,45 @@ export default function SettingsView() {
   }
 
   return (
-    <div className="space-y-4">
-      {/* B14：未儲存變更 sticky 提示 + 統一儲存 CTA */}
+    <CategoryContext.Provider value={activeCat.sections}>
+      <div className="flex gap-4">
+      {/* 桌機：左側二級分類側欄 */}
+      <nav className="hidden lg:flex w-44 shrink-0 flex-col gap-1" aria-label="設定分類">
+        {SETTINGS_CATEGORIES.map(c => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setActiveKey(c.key)}
+            aria-current={activeKey === c.key ? 'page' : undefined}
+            className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition ${
+              activeKey === c.key ? 'bg-chicken-red text-white shadow-sm' : 'text-chicken-brown/70 hover:bg-chicken-brown/5'
+            }`}
+          >
+            <span aria-hidden>{c.icon}</span><span>{c.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* 內容欄 */}
+      <div className="min-w-0 flex-1 space-y-4">
+      {/* 手機：頂部橫向分類 pills */}
+      <div className="lg:hidden -mx-1 flex gap-2 overflow-x-auto pb-1" aria-label="設定分類">
+        {SETTINGS_CATEGORIES.map(c => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setActiveKey(c.key)}
+            aria-current={activeKey === c.key ? 'page' : undefined}
+            className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-full px-4 text-sm font-bold transition ${
+              activeKey === c.key ? 'bg-chicken-red text-white' : 'bg-chicken-brown/5 text-chicken-brown/70'
+            }`}
+          >
+            <span aria-hidden>{c.icon}</span> {c.label}
+          </button>
+        ))}
+      </div>
+
+      {/* B14：未儲存變更 sticky 提示 + 統一儲存 CTA（全域，跨分類反映所有未存變更） */}
       {isDirty && (
         <div className="sticky top-0 z-30 -mx-1 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
           <div className="text-sm font-bold text-amber-800">
@@ -187,7 +250,7 @@ export default function SettingsView() {
         </div>
       )}
 
-      <SettingsSection title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" defaultOpen>
+      <SettingsSection sectionKey="hours" title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" defaultOpen>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Input label="開始時間" type="time" value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))} />
@@ -267,14 +330,14 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" defaultOpen>
+      <SettingsSection sectionKey="seatings" title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" defaultOpen>
         <SeatingsEditor form={form} setForm={setForm} />
         <div className="flex gap-2 items-center mt-3">
           <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存場次</Button>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="線上訂位防線" description="只限制線上客人端；店員後台、現場與團體預排完全不受影響。">
+      <SettingsSection sectionKey="online-guard" title="線上訂位防線" description="只限制線上客人端；店員後台、現場與團體預排完全不受影響。">
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
@@ -327,7 +390,7 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。">
+      <SettingsSection sectionKey="automation" title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。">
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
@@ -377,14 +440,14 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。">
+      <SettingsSection sectionKey="closures" title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。">
         <ClosuresEditor form={form} setForm={setForm} bookings={bookings} />
         <div className="flex gap-2 items-center mt-3">
           <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存關閉設定</Button>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="首頁廣告輪播" description="新增橫式照片，會顯示在客人首頁第一屏。" defaultOpen>
+      <SettingsSection sectionKey="hero" title="首頁廣告輪播" description="新增橫式照片，會顯示在客人首頁第一屏。" defaultOpen>
         <div className="space-y-4">
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-chicken-brown/15 bg-white px-4 py-8 text-center transition hover:border-chicken-red/40">
             <span className="text-sm font-black text-chicken-brown">上傳橫式照片</span>
@@ -445,7 +508,7 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="LINE 官方帳號" description="設定客人訂位成功後看到的 LINE 加好友入口與保存提醒。">
+      <SettingsSection sectionKey="line" title="LINE 官方帳號" description="設定客人訂位成功後看到的 LINE 加好友入口與保存提醒。">
         <div className="space-y-4">
           {/* C11：基本 */}
           <FieldGroup title="基本" hint="客人訂位完成後看到的 LINE 加好友入口。">
@@ -621,7 +684,7 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="客人聯絡入口" description="設定確認頁與訂位管理中心的一鍵撥電話、導航資訊。">
+      <SettingsSection sectionKey="contact" title="客人聯絡入口" description="設定確認頁與訂位管理中心的一鍵撥電話、導航資訊。">
         <div className="space-y-3">
           <Input
             label="店名"
@@ -669,11 +732,11 @@ export default function SettingsView() {
       </SettingsSection>
 
       {/* Telegram 通知 + 備份 */}
-      <SettingsSection title="通知與備份" description="Telegram 事件推送與備份狀態。">
+      <SettingsSection sectionKey="telegram" title="通知與備份" description="Telegram 事件推送與備份狀態。">
         <TelegramSettings embedded />
       </SettingsSection>
 
-      <SettingsSection title="Firestore 資料同步" description="正式跨裝置資料來源；可手動上傳本機資料或重新拉取雲端資料。" defaultOpen>
+      <SettingsSection sectionKey="firestore" title="Firestore 資料同步" description="正式跨裝置資料來源；可手動上傳本機資料或重新拉取雲端資料。" defaultOpen>
         <div className="space-y-3">
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             狀態：<span className="font-black text-chicken-brown">{cloudStatus?.state || 'idle'}</span>
@@ -696,7 +759,7 @@ export default function SettingsView() {
 
       {/* 桌位佈局編輯（拖拉位置、新增/刪除桌、改容量）*/}
       {can('table.config') && (
-        <SettingsSection title="桌位佈局" description="拖拉桌位、調整容量與樓層。">
+        <SettingsSection sectionKey="layout" title="桌位佈局" description="拖拉桌位、調整容量與樓層。">
           <p className="text-xs text-chicken-brown/60 mb-3">
             打開全螢幕編輯器：拖拉移動桌位、調整容量與樓層、新增或刪除桌位。
             修改完按「儲存變更」才會生效。
@@ -709,13 +772,13 @@ export default function SettingsView() {
 
       {/* 桌位啟用/停用 — 簡單方格切換 */}
       {can('table.config') && (
-        <SettingsSection title="桌位啟用" description="停用桌位不會出現在現場營運頁，也不計入可訂位人數。">
+        <SettingsSection sectionKey="table-enable" title="桌位啟用" description="停用桌位不會出現在現場營運頁，也不計入可訂位人數。">
           <p className="text-xs text-chicken-brown/60 mb-3">點擊桌號可切換啟用 / 停用。停用的桌位不會出現在現場營運頁，也不計入可訂位人數。</p>
           <TableGrid />
         </SettingsSection>
       )}
 
-      <SettingsSection title="No-show 查詢" description="用電話快速查詢過往未到紀錄。">
+      <SettingsSection sectionKey="noshow" title="No-show 查詢" description="用電話快速查詢過往未到紀錄。">
         <div className="flex gap-2">
           <Input placeholder="輸入電話號碼" value={searchPhone} onChange={e => setSearchPhone(e.target.value)} inputMode="numeric" />
           <Button onClick={handleSearch} variant="secondary" className="whitespace-nowrap">查詢</Button>
@@ -741,17 +804,17 @@ export default function SettingsView() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
+      <SettingsSection sectionKey="export" title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
         <ExportCenter />
       </SettingsSection>
 
       {can('staff.manage') && (
-        <SettingsSection title="管理員帳號" description="新增同仁的 Google 帳號即可登入後台；毋須重新部署。">
+        <SettingsSection sectionKey="staff" title="管理員帳號" description="新增同仁的 Google 帳號即可登入後台；毋須重新部署。">
           <StaffAdminSection />
         </SettingsSection>
       )}
 
-      <SettingsSection title="帳號" description="目前登入者與角色資訊。">
+      <SettingsSection sectionKey="account" title="帳號" description="目前登入者與角色資訊。">
         <div className="text-sm text-chicken-brown/70 mb-3">
           <div>已登入：<span className="font-mono font-bold text-chicken-brown">{user?.email}</span></div>
           <div className="text-xs text-chicken-brown/60 mt-1">角色：<span className="font-bold">{user?.roleLabel || '—'}</span></div>
@@ -762,9 +825,12 @@ export default function SettingsView() {
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
         雞王涮涮鍋訂位系統 v0.4 · Firestore 同步模式
       </p>
+      </div>{/* 內容欄 */}
+      </div>{/* flex gap-4 */}
 
+      {/* 桌位佈局編輯器 modal：掛在分類條件外，切換分類/開關皆不受影響 */}
       <LayoutEditor open={showLayoutEditor} onClose={() => setShowLayoutEditor(false)} />
-    </div>
+    </CategoryContext.Provider>
   )
 }
 
@@ -956,7 +1022,10 @@ function DefaultBadge({ current, fallback, unit = '' }) {
   )
 }
 
-function SettingsSection({ title, description, children, defaultOpen = false, danger = false }) {
+function SettingsSection({ title, description, children, defaultOpen = false, danger = false, sectionKey }) {
+  // 依目前分類自我隱藏：不屬當前分類則不渲染（隱藏時 unmount，但 form 在父層 → 編輯不遺失）。
+  const activeSections = useContext(CategoryContext)
+  if (sectionKey && !activeSections.includes(sectionKey)) return null
   return (
     <details className={`card group ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`} open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
