@@ -13,6 +13,7 @@ import {
   buildManageUrl,
   classifyAdminBookingChange,
   classifyAdminBookingBackupEvent,
+  diffAdminBooking,
 } from './lib/notify.js'
 import {
   normalizeOnlineGuardSettings,
@@ -382,16 +383,19 @@ async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, de
             payload: { text: tgBookingMessage('🆕 <b>店員新增訂位</b>', booking, { event: 'admin_created', booking }) },
           })
         } else if (event === 'updated') {
-          const changedKeys = ['date', 'timeSlot', 'guests', 'name', 'phone', 'notes', 'assignedTableId', 'status']
-            .filter(k => JSON.stringify(before?.[k]) !== JSON.stringify(booking[k]))
+          const changes = diffAdminBooking(before, booking)
+          const changedKeys = changes.map(c => c.key)
+          const changeLines = changes
+            .map(c => `• ${escapeTg(c.label)}：${escapeTg(c.from) || '（空）'} → <b>${escapeTg(c.to) || '（空）'}</b>`)
+            .join('\n')
           await enqueueAndTrySend({
             channel: 'telegram', event: 'admin_updated', bookingId: id,
             payload: {
               text: tgBookingMessage(
                 `✏️ <b>店員修改訂位</b> · ${id}`,
                 booking,
-                { event: 'admin_updated', booking, changedKeys },
-                changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
+                { event: 'admin_updated', booking, changedKeys, changes },
+                changeLines ? `變動：\n${changeLines}` : '',
               ),
             },
           })
