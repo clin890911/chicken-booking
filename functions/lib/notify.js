@@ -69,6 +69,33 @@ export function classifyAdminBookingChange(before, after) {
 // - 改期/改時段/改人數，只要訂位「不是已取消」（confirmed / arrived / completed 皆可）→ 'updated'
 //   （比 classifyAdminBookingChange 放寬：已入座/已結帳客人臨時改人數也是重要異動，要備份）
 // 硬刪除（dataset.deletedIds）不在此函式判斷，由呼叫端以刪除前快照另發 'deleted'。
+// 店員修改訂位時，產生「什麼欄位 從X 變成 Y」的對照清單（純資料，escaping 由送出端處理）。
+// 回傳 [{ key, label, from, to }, ...]；只比對客人/營運在意的欄位，volatile 欄位（updatedAt 等）不列。
+const ADMIN_BOOKING_FIELD_LABELS = {
+  date: '日期', timeSlot: '時段', guests: '人數', name: '姓名',
+  phone: '電話', notes: '備註', assignedTableId: '桌位', status: '狀態',
+}
+const ADMIN_BOOKING_STATUS_LABELS = {
+  confirmed: '已確認', arrived: '已入座', completed: '已結帳', cancelled: '已取消', noshow: '未到',
+}
+function adminBookingFieldDisplay(key, val) {
+  if (key === 'notes') return (val && typeof val === 'object') ? String(val.text || '') : String(val ?? '')
+  if (key === 'status') return ADMIN_BOOKING_STATUS_LABELS[val] || String(val ?? '')
+  if (key === 'assignedTableId') return (val == null || val === '') ? '（無）' : String(val)
+  return String(val ?? '')
+}
+export function diffAdminBooking(before, after) {
+  const changes = []
+  for (const key of Object.keys(ADMIN_BOOKING_FIELD_LABELS)) {
+    // 以「顯示值」為準比對：guests 4 vs '4'、備註只改了非文字旗標等，顯示相同就不列為變更。
+    const from = adminBookingFieldDisplay(key, before?.[key])
+    const to = adminBookingFieldDisplay(key, after?.[key])
+    if (from === to) continue
+    changes.push({ key, label: ADMIN_BOOKING_FIELD_LABELS[key], from, to })
+  }
+  return changes
+}
+
 export function classifyAdminBookingBackupEvent(before, after) {
   if (!after) return null
   if (!before) return 'created'
