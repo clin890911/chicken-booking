@@ -43,6 +43,8 @@ export default function AdminPage() {
   const [pendingPlanAssign, setPendingPlanAssign] = useState(null)
   // pendingGroupOpen：訂位頁團體卡點擊 → 規劃頁該團單詳情
   const [pendingGroupOpen, setPendingGroupOpen] = useState(null)
+  // pendingRosterPhone：設定→No-show 查詢點「顧客檔」→ 名冊頁顧客子籤並 seed 該電話
+  const [pendingRosterPhone, setPendingRosterPhone] = useState(null)
   const { user, usingFirebase } = useAuth()
   const { bookings, waitlist } = useBooking()
   const toast = useToast()
@@ -115,6 +117,12 @@ export default function AdminPage() {
     setTab('planning')
   }
 
+  // 設定→No-show 查詢點「顧客檔」→ 名冊頁帶入該電話
+  const handleOpenCustomer = (phone) => {
+    setPendingRosterPhone(phone)
+    setTab('roster')
+  }
+
   return (
     <div className="h-[100dvh] overflow-hidden bg-chicken-cream flex">
       {/* 桌面版側邊導航 */}
@@ -181,8 +189,13 @@ export default function AdminPage() {
               {tab === 'bookings' && (
                 <BookingsView onAssignTable={handleAssignTable} onOpenGroup={handleOpenGroup} />
               )}
-              {tab === 'roster' && <RosterView />}
-              {tab === 'settings' && <SettingsView />}
+              {tab === 'roster' && (
+                <RosterView
+                  pendingPhone={pendingRosterPhone}
+                  onPendingConsumed={() => setPendingRosterPhone(null)}
+                />
+              )}
+              {tab === 'settings' && <SettingsView onOpenCustomer={handleOpenCustomer} />}
           </div>
         </main>
 

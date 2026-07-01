@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Card, Input, Modal, Textarea, Select, EmptyState } from '../../ui'
 import { useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
@@ -27,9 +27,14 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
-export default function CustomersView() {
+export default function CustomersView({ initialQuery }) {
   const { customers, bookings, updateCustomer, setCustomerBlacklist, setCustomerVip } = useBooking()
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(initialQuery || '')
+
+  // 從他頁（如設定→No-show 查詢）帶入電話時，seed 搜尋框以聚焦該顧客。
+  useEffect(() => {
+    if (initialQuery) setQuery(initialQuery)
+  }, [initialQuery])
   const [filter, setFilter] = useState('all')      // all | repeat | vip | blacklist | archived
   const [editing, setEditing] = useState(null)
   const [editForm, setEditForm] = useState({ notes: '', allergies: '', vipTier: 'none' })

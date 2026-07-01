@@ -44,7 +44,7 @@ const DEFAULT_CATEGORY = 'ops-rules'
 // 由父層提供「目前分類包含的 sectionKey 清單」；SettingsSection 據此自我隱藏（不屬當前分類則 return null）。
 const CategoryContext = createContext([])
 
-export default function SettingsView() {
+export default function SettingsView({ onOpenCustomer }) {
   const { settings, bookings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
   const { user, signOut, can, usingFirebase } = useAuth()
   const toast = useToast()
@@ -815,9 +815,20 @@ export default function SettingsView() {
               <div className="space-y-2">
                 {searchResult.map(r => (
                   <div key={r.phone} className="bg-chicken-red/5 border border-chicken-red/20 rounded-xl p-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="font-mono font-bold text-chicken-brown">{r.phone}</span>
-                      <span className="badge bg-chicken-red text-white">⚠️ {r.count} 次</span>
+                      <div className="flex items-center gap-2">
+                        <span className="badge bg-chicken-red text-white">⚠️ {r.count} 次</span>
+                        {onOpenCustomer && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenCustomer(r.phone)}
+                            className="rounded-lg border border-chicken-brown/20 bg-white px-2.5 py-1 text-xs font-bold text-chicken-brown hover:bg-chicken-brown/5"
+                          >
+                            顧客檔 →
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="text-xs text-chicken-brown/60 mt-1">{r.dates.map(d => d.date).join(', ')}</div>
                   </div>
