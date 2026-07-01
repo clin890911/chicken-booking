@@ -3,16 +3,17 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../ui/Toast'
 import { Modal, Input, Textarea, Button, EmptyState } from '../../ui'
+import AgencyDetailModal from './AgencyDetailModal'
 
 // 旅行社 / 導遊名冊 + 即時彙算歷史 + 貢獻排名（依業績）
-export default function AgencyDirectoryView() {
+export default function AgencyDirectoryView({ onGoPlanning }) {
   const { agencies, guides, groupReservations, addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide } = useBooking()
   const { can } = useAuth()
   const toast = useToast()
   const editable = can('agency.manage')
 
   const [query, setQuery] = useState('')
-  const [expanded, setExpanded] = useState(null)
+  const [detail, setDetail] = useState(null) // { agency, rank }
   const [agencyModal, setAgencyModal] = useState(null) // { mode:'add'|'edit', data }
   const [guideModal, setGuideModal] = useState(null)    // { agencyId, data }
 
@@ -77,7 +78,6 @@ export default function AgencyDirectoryView() {
       ) : (
         visibleAgencies.map((a, idx) => {
           const s = statsByAgency[a.id] || { visits: 0, totalGuests: 0, totalSpend: 0, lastVisit: '', history: [] }
-          const isOpen = expanded === a.id
           return (
             <div key={a.id} className="bg-white rounded-xl border border-chicken-brown/10 p-4">
               <div className="flex items-start justify-between gap-2 flex-wrap">
@@ -124,22 +124,9 @@ export default function AgencyDirectoryView() {
                 </div>
               </div>
 
-              <button onClick={() => setExpanded(isOpen ? null : a.id)} className="mt-3 text-xs text-chicken-brown/60 underline">
-                {isOpen ? '收合歷史' : `查看來訪歷史（${s.history.length}）`}
+              <button onClick={() => setDetail({ agency: a, rank: idx })} className="mt-3 text-xs text-chicken-red font-bold underline">
+                查看詳情與來訪記錄（{s.history.length}）
               </button>
-              {isOpen && (
-                <div className="mt-2 space-y-1">
-                  {s.history.map(h => (
-                    <div key={h.id} className="text-xs text-chicken-brown/70 flex gap-2 flex-wrap">
-                      <span className="font-bold tabular-nums">{h.date}</span>
-                      <span>{(h.batches || []).map(b => b.timeSlot).join('/')}</span>
-                      <span>{h.counts?.total || 0} 人</span>
-                      <span>導遊 {h.guideName || '—'}</span>
-                      {h.spend > 0 && <span className="text-chicken-green font-bold">${Number(h.spend).toLocaleString()}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )
         })
@@ -179,6 +166,18 @@ export default function AgencyDirectoryView() {
           </div>
         )}
       </Modal>
+
+      {detail && (
+        <AgencyDetailModal
+          agency={detail.agency}
+          rank={detail.rank}
+          stats={statsByAgency[detail.agency.id]}
+          guides={guidesByAgency(detail.agency.id)}
+          onClose={() => setDetail(null)}
+          onGoPlanning={() => { setDetail(null); onGoPlanning?.() }}
+          onEdit={editable ? (a) => { setDetail(null); setAgencyModal({ mode: 'edit', data: { ...a } }) } : undefined}
+        />
+      )}
     </div>
   )
 }

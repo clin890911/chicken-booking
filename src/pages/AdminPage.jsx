@@ -30,6 +30,8 @@ export default function AdminPage() {
   const [pendingPlanAssign, setPendingPlanAssign] = useState(null)
   // pendingGroupOpen：訂位頁團體卡點擊 → 規劃頁該團單詳情
   const [pendingGroupOpen, setPendingGroupOpen] = useState(null)
+  // addPrefill：名冊「新增訂位」帶入的預填（電話/姓名），導到訂位頁新增子分頁
+  const [addPrefill, setAddPrefill] = useState(null)
   const { user, usingFirebase } = useAuth()
   const { bookings, waitlist } = useBooking()
   const toast = useToast()
@@ -102,10 +104,18 @@ export default function AdminPage() {
     setTab('planning')
   }
 
+  // 名冊 →「新增訂位」：帶入顧客電話/姓名，切到訂位頁（BookingsView 收到 openAdd 跳「新增」子分頁）
+  const openAddBooking = (c) => {
+    setAddPrefill({ phone: c?.phone || '', name: c?.name || '', source: 'phone', seq: Date.now() })
+    setTab('bookings')
+  }
+  // 導覽切頁：離開訂位頁時清掉預填，避免下次再進訂位頁又自動跳到「新增」
+  const navTo = (t) => { if (t !== 'bookings') setAddPrefill(null); setTab(t) }
+
   return (
     <div className="h-[100dvh] overflow-hidden bg-chicken-cream flex">
       {/* 桌面版側邊導航 */}
-      <SidebarNav tabs={TABS} active={tab} onChange={setTab} badges={badges} />
+      <SidebarNav tabs={TABS} active={tab} onChange={navTo} badges={badges} />
 
       {/* 主區 */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
@@ -166,15 +176,15 @@ export default function AdminPage() {
                 />
               )}
               {tab === 'bookings' && (
-                <BookingsView onAssignTable={handleAssignTable} onOpenGroup={handleOpenGroup} />
+                <BookingsView onAssignTable={handleAssignTable} onOpenGroup={handleOpenGroup} openAdd={addPrefill} />
               )}
-              {tab === 'roster' && <RosterView />}
+              {tab === 'roster' && <RosterView onAddBooking={openAddBooking} onGoPlanning={() => setTab('planning')} />}
               {tab === 'settings' && <SettingsView />}
           </div>
         </main>
 
         {/* 手機版底部導航 */}
-        <BottomNav tabs={TABS} active={tab} onChange={setTab} badges={badges} />
+        <BottomNav tabs={TABS} active={tab} onChange={navTo} badges={badges} />
       </div>
     </div>
   )

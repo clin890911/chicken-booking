@@ -9,7 +9,7 @@ const SUB = [
 
 // 名冊：顧客檔（VIP/黑名單）＋ 旅行社/導遊（含歷史團體與業績排名）。
 // 兩個子視圖都自取 context，容器只負責子籤切換。
-export default function RosterView() {
+export default function RosterView({ onAddBooking, onGoPlanning }) {
   const [sub, setSub] = useState('customers')
   return (
     <div className="space-y-3">
@@ -28,8 +28,8 @@ export default function RosterView() {
           </button>
         ))}
       </div>
-      {sub === 'customers' && <CustomersView />}
-      {sub === 'agencies' && <AgencyDirectoryView />}
+      {sub === 'customers' && <CustomersView onAddBooking={onAddBooking} />}
+      {sub === 'agencies' && <AgencyDirectoryView onGoPlanning={onGoPlanning} />}
     </div>
   )
 }

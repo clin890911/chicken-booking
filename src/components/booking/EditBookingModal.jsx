@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Modal, Input, Button, Textarea } from '../ui'
+import GuestCountField from '../admin/GuestCountField'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import TimeSlotPicker from './TimeSlotPicker'
@@ -17,8 +18,6 @@ const NOTE_OPTIONS = [
   { key: 'child',    label: '👶 兒童' },
   { key: 'mobility', label: '♿ 行動不便' },
 ]
-const QUICK_GUESTS = [1, 2, 3, 4, 5, 6, 7, 8]
-
 // 員工後台編輯既有訂位：姓名／電話／人數／日期／時段／來源／備註。
 // 採「按需掛載」（父層 {editing && <EditBookingModal/>}）→ 每次開啟都以當前 booking 初始化。
 // 結構性變更（日期/時段/人數）由 context.updateBooking → bookingService.updateByStaff
@@ -102,24 +101,8 @@ export default function EditBookingModal({ booking, onClose }) {
         <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />
         <Input label="電話" type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder="0912345678" />
 
-        {/* 人數 */}
-        <div>
-          <label className="label">人數</label>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {QUICK_GUESTS.map(n => (
-              <button key={n} type="button" onClick={() => setGuests(n)}
-                className={`h-11 w-11 rounded-xl border-2 text-sm font-black tabular-nums transition-all ${
-                  guests === n ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
-                {n}
-              </button>
-            ))}
-            <select value={guests > 8 ? guests : ''} onChange={e => e.target.value && setGuests(Number(e.target.value))}
-              className="input !w-24 !py-2.5 font-bold">
-              <option value="">9+</option>
-              {Array.from({ length: 22 }, (_, i) => i + 9).map(n => <option key={n} value={n}>{n} 位</option>)}
-            </select>
-          </div>
-        </div>
+        {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
+        <GuestCountField value={guests} onChange={setGuests} />
 
         {/* 日期：快選 chips + 月曆 */}
         <div>

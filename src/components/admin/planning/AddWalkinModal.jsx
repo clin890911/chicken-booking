@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Modal, Input } from '../../ui'
+import GuestCountField from '../GuestCountField'
 import { useToast } from '../../ui/Toast'
 import TimeSlotPicker from '../../booking/TimeSlotPicker'
 import { useBooking } from '../../../contexts/BookingContext'
@@ -10,15 +11,12 @@ import { dayLabel } from '../../../utils/timeSlots'
 
 // 規劃頁「快速新增散客」：與「新增團單」並列，留在規劃頁、日期鎖定當日。
 // 建立 confirmed 散客 booking（與訂位分頁同 addBooking 口徑），存檔後立即出現在右側當日散客名單。
-const QUICK_GUESTS = [1, 2, 3, 4, 5, 6, 7, 8]
-
 export default function AddWalkinModal({ open, onClose, date, onCreated }) {
   const { settings, tables, bookings, groupReservations, addBooking } = useBooking()
   const { user } = useAuth()
   const toast = useToast()
 
   const [guests, setGuests] = useState(2)
-  const [moreGuests, setMoreGuests] = useState(false)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [timeSlot, setTimeSlot] = useState('')
@@ -45,7 +43,7 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
   useEffect(() => { setTimeSlot('') }, [date])
 
   const reset = () => {
-    setGuests(2); setMoreGuests(false); setName(''); setPhone(''); setTimeSlot(''); setNotes('')
+    setGuests(2); setName(''); setPhone(''); setTimeSlot(''); setNotes('')
     setAttempted(false)
   }
   const handleClose = () => { reset(); onClose?.() }
@@ -86,29 +84,8 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
       </>
     }>
       <div className="space-y-4">
-        {/* 人數 */}
-        <div>
-          <label className="label">人數</label>
-          <div className="flex gap-1.5 flex-wrap items-center">
-            {QUICK_GUESTS.map(n => (
-              <button key={n} type="button" onClick={() => { setGuests(n); setMoreGuests(false) }}
-                className={`w-11 h-11 rounded-xl border-2 text-base font-black tabular-nums transition-all ${
-                  guests === n && !moreGuests
-                    ? 'border-chicken-red bg-chicken-red text-white'
-                    : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
-                {n}
-              </button>
-            ))}
-            {moreGuests || guests > 8 ? (
-              <select value={guests} onChange={e => setGuests(Number(e.target.value))} className="input w-24 !py-2.5 font-bold">
-                {Array.from({ length: 22 }, (_, i) => i + 9).map(n => <option key={n} value={n}>{n} 位</option>)}
-              </select>
-            ) : (
-              <button type="button" onClick={() => { setMoreGuests(true); setGuests(9) }}
-                className="px-3 h-11 rounded-xl border-2 border-chicken-brown/15 bg-white text-sm font-bold text-chicken-brown/70">9+ ▾</button>
-            )}
-          </div>
-        </div>
+        {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
+        <GuestCountField value={guests} onChange={setGuests} />
 
         {/* 聯絡 */}
         <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐"

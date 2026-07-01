@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import TodayView from './TodayView'
 import CalendarView from './CalendarView'
 import AddBookingView from './AddBookingView'
@@ -14,8 +14,13 @@ const SUB_TABS = [
 // 訂位總頁：合併 今日 / 日曆 / 新增 為 sub-tabs
 // 「指派桌」按鈕呼叫 onAssignTable（今天→現場、未來日→規劃排位地圖，由 AdminPage 分流）；
 // 團體卡點擊呼叫 onOpenGroup → 規劃頁團單詳情
-export default function BookingsView({ onAssignTable, onOpenGroup, onCreated }) {
-  const [sub, setSub] = useState('today')
+export default function BookingsView({ onAssignTable, onOpenGroup, onCreated, openAdd }) {
+  const [sub, setSub] = useState(openAdd ? 'add' : 'today')
+  // 名冊帶入預填時跳到「新增」子分頁（seq 變更才觸發，避免重複跳）
+  const lastSeq = useRef(openAdd?.seq)
+  useEffect(() => {
+    if (openAdd && openAdd.seq !== lastSeq.current) { lastSeq.current = openAdd.seq; setSub('add') }
+  }, [openAdd])
 
   return (
     <div className="space-y-3">
@@ -41,7 +46,7 @@ export default function BookingsView({ onAssignTable, onOpenGroup, onCreated }) 
           {sub === 'today' && <TodayView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} />}
           {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} />}
           {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} />}
-          {sub === 'add' && <AddBookingView onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} />}
+          {sub === 'add' && <AddBookingView initial={openAdd} onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} />}
       </div>
     </div>
   )
