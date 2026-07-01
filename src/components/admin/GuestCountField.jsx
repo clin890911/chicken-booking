@@ -5,6 +5,13 @@ import { useState, useEffect } from 'react'
 // accent：chips 選中色，'red'（訂位/編輯/規劃）或 'amber'（現場帶位）。
 const QUICK = [1, 2, 3, 4, 5, 6, 7, 8]
 
+// 夾住自訂人數：非數字或 < 1 回 null（不更新）；否則取整並套上限（防手誤多按 0）。
+export function clampGuests(n, max = 200) {
+  const v = Number(n)
+  if (!Number.isFinite(v) || v < 1) return null
+  return Math.min(max, Math.floor(v))
+}
+
 export default function GuestCountField({ value, onChange, max = 200, accent = 'red', label = '人數', hint }) {
   // more：是否展開自訂輸入框。value>8 一律展開；點 chip 收回。
   const [more, setMore] = useState(value > 8)
@@ -21,8 +28,8 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
 
   const commit = (s) => {
     setRaw(s)
-    const n = Number(s)
-    if (Number.isFinite(n) && n >= 1) onChange(Math.min(max, Math.floor(n)))
+    const v = clampGuests(s, max)
+    if (v != null) onChange(v)
   }
 
   return (

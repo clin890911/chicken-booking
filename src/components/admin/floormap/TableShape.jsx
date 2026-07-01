@@ -16,21 +16,25 @@
 //   - 字級啟發式改用 min(w,h)：自由縮放後 h 不再恆為 75。
 import { diffMin, stageOf } from '../../../utils/diningStage'
 
+// 配色層級「可坐醒目 vs 佔用降噪」（2026-07 依店家反饋反轉 PR#52）：
+//   可入座＝實心綠跳出（領檯第一眼要找的就是空桌）；用餐中/預訂/團保＝低彩度降噪；
+//   需處理狀態（待清＝琥珀、超時＝紅，見 DINING_STAGE_FILL）仍保留醒目色。
 const STATUS_COLOR = {
-  vacant:   { fill: '#ffffff', stroke: '#16a34a', text: '#15803d' },   // 可入座：淡色降噪（白底綠框綠字），不搶視覺
-  reserved: { fill: '#e6f1fb', stroke: '#2f86d6', text: '#0c447c' },   // 已預訂：淡藍，尚不能入座
-  dining:   { fill: '#f97316', stroke: '#c2410c', text: '#ffffff' },   // 用餐中：飽和橘實心
-  cleaning: { fill: '#fde68a', stroke: '#d97706', text: '#92400e' },   // 待清桌：淡黃，與用餐中橘以飽和度一眼區隔
-  blocked:  { fill: '#9ca3af', stroke: '#6b7280', text: '#ffffff' },   // 停用
+  vacant:   { fill: '#86efac', stroke: '#15803d', text: '#14532d' },   // 可入座：實心綠、最醒目
+  reserved: { fill: '#eef2f7', stroke: '#9db4cd', text: '#3f5876' },   // 已預訂：低彩度灰藍降噪
+  dining:   { fill: '#eef0f2', stroke: '#cbd5e1', text: '#475569' },   // 用餐中：中性灰降噪（附已用餐分鐘）
+  cleaning: { fill: '#fde68a', stroke: '#d97706', text: '#92400e' },   // 待清桌：琥珀（需翻桌）
+  blocked:  { fill: '#e5e7eb', stroke: '#9ca3af', text: '#6b7280' },   // 停用：淡灰
 }
 
-// 團體保留（vacant 但今日被團 hold）：實心靛色，絕不與可入座綠混淆——忙碌時不會誤帶散客上保留桌
-const GROUP_HOLD = { fill: '#6366f1', stroke: '#4338ca', text: '#ffffff' }
+// 團體保留（vacant 但今日被團 hold）：低彩度靛（有「團保」字樣即可辨識，不搶過可坐綠）
+const GROUP_HOLD = { fill: '#e0e7ff', stroke: '#818cf8', text: '#3730a3' }
 
 // dining 階段顏色：normal/late 為橘系（仍在用餐，警示但非超時），超時才轉紅
+// normal/late 維持中性灰降噪（用光暈提示接近時限）；overtime 才轉紅跳出（需處理）。
 const DINING_STAGE_FILL = {
-  normal:   '#f97316',  // 0 ~ (用餐時間-30)：橘
-  late:     '#ea580c',  // 接近時限（還有時間）：深橘提醒，不用紅避免假性超時
+  normal:   '#eef0f2',  // 用餐中：中性灰
+  late:     '#eef0f2',  // 接近時限：仍中性灰，改用橘色光暈提示（見下方 late 光暈）
   overtime: '#dc2626',  // 已達用餐時間：紅
   'buffer-overtime': '#b91c1c',  // 超過清桌緩衝：深紅
 }
@@ -176,10 +180,12 @@ export default function TableShape({
   const isGroupHold = status === 'vacant' && !!groupHoldLabel
   const palette = isGroupHold ? GROUP_HOLD : (STATUS_COLOR[status] || STATUS_COLOR.vacant)
   let fill = palette.fill
+  let textColor = palette.text   // 淡底用深字、實心用白字
   if (status === 'dining' && stage) {
     fill = DINING_STAGE_FILL[stage]
+    // normal/late 淺灰底→深字；overtime/buffer 紅底→白字
+    textColor = (stage === 'overtime' || stage === 'buffer-overtime') ? '#ffffff' : palette.text
   }
-  const textColor = palette.text   // 淡底用深字、實心用白字
 
   // 邊框：選中 / 高亮優先；超時也用紅邊。base 2px 讓淡底狀態的色框讀得出語義
   let stroke = palette.stroke

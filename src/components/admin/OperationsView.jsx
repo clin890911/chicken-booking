@@ -6,8 +6,8 @@ import ModeBanner from './ops/ModeBanner'
 import OpsRail from './ops/OpsRail'
 import OpsHintBar from './ops/OpsHintBar'
 import OpsLogModal from './ops/OpsLogModal'
-import WalkInSeatModal from './ops/WalkInSeatModal'
 import TableScheduleView from './ops/TableScheduleView'
+import TableSummaryView from './ops/TableSummaryView'
 import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
@@ -33,13 +33,12 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const [floor, setFloor] = useState('1F')
   const [view, setView] = useState('map') // map=SVG 桌況圖 ｜ schedule=當日排程（每桌 turns）
   const [selectedTable, setSelectedTable] = useState(null)
-  const [railTab, setRailTab] = useState('upcoming') // 右側欄籤；ESC/關閉抽屜不重設
+  const [railTab, setRailTab] = useState('walkin') // 左側操作欄籤（預設帶位）；ESC/關閉抽屜不重設
   const [mode, setMode] = useState(null)
   const [justAssigned, setJustAssigned] = useState(null) // 剛指派的桌號（綠光）
   const [pendingConfirm, setPendingConfirm] = useState(null) // 指派/候位/換桌：待確認的桌號（二步確認）
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
   const [showOpsLog, setShowOpsLog] = useState(false) // 系統自動處理紀錄（自動清檯留痕）
-  const [showWalkIn, setShowWalkIn] = useState(false) // 立即帶位表單
 
   // 今日團體 hold：今日（未取消/未完成）團體的桌位，若尚未實際入座（非 dining）則於圖上標示 🚌。
   // value = { agencyName, holds: [{ group, batch }] }（未入座梯次，依時段排序）：
@@ -76,6 +75,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
 
   // 帶位/指派等模式一律在 SVG 桌況圖操作；排程視圖為總覽用途，模式進行中強制切回地圖。
   const showSchedule = !mode && view === 'schedule'
+  const showSummary = !mode && view === 'summary'
 
   // 進入指派桌模式（含自動建議）。無單桌容納（大組）→ 改走多桌指派（併桌）。
   const startAssign = (booking) => {
@@ -130,7 +130,6 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
       setMode({ type: 'walkin', guestData: { ...guestData, guests }, suitable, suggestion: suggestion?.number })
       setSelectedTable(null)
       setPendingConfirm(null)
-      setShowWalkIn(false)
       if (suggestion) setFloor(suggestion.floor)
       return true
     }
@@ -150,7 +149,6 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     })
     setSelectedTable(null)
     setPendingConfirm(null)
-    setShowWalkIn(false)
     const firstTable = tables.find(t => t.number === combo.tableNumbers[0])
     if (firstTable) setFloor(firstTable.floor)
     return true
@@ -416,7 +414,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
         {!mode && (
           <div className="flex gap-1 rounded-xl bg-chicken-cream p-1 border-2 border-chicken-brown/10">
-            {[['map', '桌況'], ['schedule', '排程']].map(([k, label]) => (
+            {[['map', '地圖'], ['summary', '摘要'], ['schedule', '排程']].map(([k, label]) => (
               <button
                 key={k}
                 onClick={() => setView(k)}
@@ -431,7 +429,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
         <div className="flex-1" />
         {!mode && (
           <button
-            onClick={() => setShowWalkIn(true)}
+            onClick={() => { setSelectedTable(null); setRailTab('walkin') }}
             className="px-4 py-2 rounded-xl text-sm font-black bg-amber-500 text-white shadow hover:bg-amber-600 transition-all"
           >🪑 立即帶位</button>
         )}
@@ -457,9 +455,43 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
       />
       </div>
 
-      {/* 主區：地圖 + 側邊（剩餘高度全填，2 欄從 md=直向 iPad 起；捲動只在右側欄內） */}
-      <div className="flex-1 min-h-0 mt-3 grid grid-cols-1 md:grid-cols-[1fr_300px] lg:grid-cols-[1fr_360px] gap-3">
-        {/* 地圖區（桌況 SVG 圖）／排程視圖（每桌當日 turns）。高度填滿剩餘空間，SVG 自動縮放 */}
+      {/* 主區：左＝操作/帶位欄（常駐、內部捲動）｜右＝桌況（地圖/摘要/排程，填滿）。
+          一面式機制不變：外層 flex-1 min-h-0；左欄自身 overflow-y-auto；右欄 flex-1 min-h-0、SVG 自動縮放 */}
+      <div className="flex-1 min-h-0 mt-3 grid grid-cols-1 md:grid-cols-[340px_1fr] lg:grid-cols-[380px_1fr] gap-3">
+        {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/脈動/候位/團體） */}
+        <div className="h-full min-h-0 overflow-y-auto space-y-3">
+          {selectedTableObj ? (
+            <TableDrawer
+              table={selectedTableObj}
+              booking={selectedBooking}
+              preassign={selectedTablePreassign}
+              groupHold={groupHoldTables[selectedTable] || null}
+              onClose={() => setSelectedTable(null)}
+              onStartMove={() => startMove(selectedBooking)}
+              onReseatBatch={startGroupReseat}
+              mode={{ assigning: mode?.type === 'assign' }}
+            />
+          ) : (
+            <OpsRail
+              activeTab={railTab}
+              onTabChange={setRailTab}
+              onStartWalkin={startWalkin}
+              onClickBooking={(b) => {
+                if (b.assignedTableId) setSelectedTable(b.assignedTableId)
+              }}
+              onAssignTable={startAssign}
+              onSeatWaitlist={startSeatWaitlist}
+              onReseatBatch={startGroupReseat}
+              onFocusTable={(n) => {
+                const t = tables.find(x => x.number === n)
+                if (t) setFloor(t.floor)
+                setSelectedTable(n)
+              }}
+            />
+          )}
+        </div>
+
+        {/* 右欄：桌況（地圖 SVG／摘要／排程）。高度填滿剩餘空間，SVG 自動縮放 */}
         <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 h-full min-h-[260px] overflow-hidden flex flex-col">
           {showSchedule ? (
             // 排程視圖＝縱向堆疊卡片，會長 → 內部捲動避免裁切
@@ -471,15 +503,25 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
                 onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
               />
             </div>
+          ) : showSummary ? (
+            // 摘要視圖＝可坐存量 + 依狀態分組（不估時間）
+            <div className="flex-1 min-h-0">
+              <TableSummaryView
+                tables={tables.filter(t => t.floor === floor)}
+                groupHoldTables={groupHoldTables}
+                settings={settings}
+                onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
+              />
+            </div>
           ) : (
             <>
               <div className="mb-2 flex-shrink-0 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white border-2 border-green-600" />可入座</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-sky-100 border border-sky-500" />已預訂</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-orange-500" />用餐中</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-green-300 border-2 border-green-700" />可入座</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-100 border border-slate-400" />已預訂</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-gray-200 border border-gray-400" />用餐中</span>
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-amber-200 border border-amber-600" />待清桌</span>
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-red-600" />超時</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-500" />團體保留</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-100 border border-indigo-400" />團體保留</span>
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white ring-2 ring-chicken-red ring-inset" />選中</span>
               </div>
               <div className="flex-1 min-h-0">
@@ -508,38 +550,6 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
             </>
           )}
         </div>
-
-        {/* 右側：模式相關 / 詳情 / 候位（高度填滿、內部捲動，不撐高整頁） */}
-        <div className="h-full min-h-0 overflow-y-auto space-y-3">
-          {selectedTableObj ? (
-            <TableDrawer
-              table={selectedTableObj}
-              booking={selectedBooking}
-              preassign={selectedTablePreassign}
-              groupHold={groupHoldTables[selectedTable] || null}
-              onClose={() => setSelectedTable(null)}
-              onStartMove={() => startMove(selectedBooking)}
-              onReseatBatch={startGroupReseat}
-              mode={{ assigning: mode?.type === 'assign' }}
-            />
-          ) : (
-            <OpsRail
-              activeTab={railTab}
-              onTabChange={setRailTab}
-              onClickBooking={(b) => {
-                if (b.assignedTableId) setSelectedTable(b.assignedTableId)
-              }}
-              onAssignTable={startAssign}
-              onSeatWaitlist={startSeatWaitlist}
-              onReseatBatch={startGroupReseat}
-              onFocusTable={(n) => {
-                const t = tables.find(x => x.number === n)
-                if (t) setFloor(t.floor)
-                setSelectedTable(n)
-              }}
-            />
-          )}
-        </div>
       </div>
 
       <div className="flex-shrink-0 hidden sm:block text-center text-[11px] text-chicken-brown/45 mt-2">
@@ -551,9 +561,6 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
 
       {/* 系統自動處理紀錄（自動清檯留痕） */}
       <OpsLogModal open={showOpsLog} onClose={() => setShowOpsLog(false)} />
-
-      {/* 立即帶位：客人優先表單 → startWalkin 進選桌模式 */}
-      <WalkInSeatModal open={showWalkIn} onClose={() => setShowWalkIn(false)} onStart={startWalkin} />
     </div>
   )
 }

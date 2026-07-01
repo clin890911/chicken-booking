@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Modal } from '../../ui'
 import { useBooking } from '../../../contexts/BookingContext'
-import { normalize } from '../../../services/customerService'
+import { customerBookings } from '../../../utils/customerHistory'
 import { getNoshowCount } from '../../../services/bookingService'
 import { STATUS_MAP, SOURCE_MAP } from '../../booking/BookingCard'
 
@@ -20,13 +20,7 @@ export default function CustomerDetailModal({ customer, onClose, onAddBooking, o
   const { bookings } = useBooking()
   const c = customer
 
-  const history = useMemo(() => {
-    if (!c) return []
-    const key = normalize(c.phone)
-    return bookings
-      .filter(b => normalize(b.phone) === key)
-      .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timeSlot || '').localeCompare(a.timeSlot || ''))
-  }, [bookings, c])
+  const history = useMemo(() => (c ? customerBookings(bookings, c.phone) : []), [bookings, c])
 
   if (!c) return null
   const noshow = getNoshowCount(c.phone)
