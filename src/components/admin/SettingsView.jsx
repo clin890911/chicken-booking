@@ -605,7 +605,7 @@ export default function SettingsView() {
           </FieldGroup>
 
           {/* C11：後端端點 */}
-          <FieldGroup title="後端端點" hint="Cloud Functions / 後端服務網址；API Token 一律放後端，不可放前端。">
+          <FieldGroup collapsible title="後端端點（進階）" hint="Cloud Functions / 後端服務網址；API Token 一律放後端，不可放前端。">
             <Field hint="處理 LINE 綁定的後端網址。">
               <Input
                 label="LINE 綁定後端端點（選填）"
@@ -657,6 +657,37 @@ export default function SettingsView() {
               />
             </Field>
           </FieldGroup>
+
+          {/* 安裝檢查表：逐項顯示必填/建議欄位是否已填，快速定位缺漏 */}
+          <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+            <h3 className="mb-2 text-sm font-black text-chicken-brown">安裝檢查表</h3>
+            <ul className="space-y-1.5">
+              {[
+                { label: '官方帳號加入連結', ok: !!form.lineOfficialUrl?.trim(), required: true },
+                { label: 'LINE Login Channel ID', ok: !!form.lineLoginChannelId?.trim(), hint: '綁定 + 我的訂位查詢' },
+                { label: 'LINE Login 回呼網址', ok: !!form.lineLoginCallbackUrl?.trim(), hint: '需填入 channel Callback 白名單' },
+                ...(form.lineUseLiff ? [
+                  { label: 'LIFF 綁定連結', ok: !!form.lineLiffUrl?.trim(), required: true },
+                  { label: 'LIFF ID', ok: !!form.lineLiffId?.trim(), required: true },
+                ] : []),
+                { label: '訂位網站網址', ok: !!form.publicSiteUrl?.trim(), hint: '通知卡「管理訂位」按鈕用' },
+              ].map(item => (
+                <li key={item.label} className="flex items-start gap-2 text-sm">
+                  <span aria-hidden className={item.ok ? 'text-chicken-green' : item.required ? 'text-chicken-red' : 'text-chicken-brown/35'}>
+                    {item.ok ? '✓' : item.required ? '✕' : '○'}
+                  </span>
+                  <span className={item.ok ? 'text-chicken-brown/70' : 'font-bold text-chicken-brown'}>
+                    {item.label}
+                    {item.required && !item.ok && <span className="ml-1 text-xs text-chicken-red">必填</span>}
+                    {item.hint && <span className="ml-1 text-xs font-normal text-chicken-brown/45">· {item.hint}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs leading-5 text-chicken-brown/45">
+              API Token / Secret 一律放後端（Cloud Functions），不在此設定；「測試發送」請於 LINE 內以官方帳號實測。
+            </p>
+          </div>
 
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             目前預設會先開啟網站中轉頁，避免未公開或設定錯誤的 LIFF 造成 404。若已確認 LIFF Channel、Endpoint URL、Scope 與官方帳號連動都正常，再勾選「使用 LIFF 自動綁定」。
@@ -979,8 +1010,20 @@ function ClosuresEditor({ form, setForm, bookings }) {
   )
 }
 
-// C11：LINE 端點分組區塊（基本 / LIFF / 後端端點）
-function FieldGroup({ title, hint, children }) {
+// C11：LINE 端點分組區塊（基本 / LIFF / 後端端點）。collapsible → 進階群組預設收合。
+function FieldGroup({ title, hint, children, collapsible = false }) {
+  if (collapsible) {
+    return (
+      <details className="group rounded-xl border border-chicken-brown/10 bg-white p-3">
+        <summary className="flex cursor-pointer list-none items-baseline gap-2">
+          <h3 className="text-sm font-black text-chicken-brown">{title}</h3>
+          {hint && <span className="text-xs leading-5 text-chicken-brown/50">{hint}</span>}
+          <span className="ml-auto text-xs font-black text-chicken-brown/40 group-open:rotate-180">⌄</span>
+        </summary>
+        <div className="mt-2 space-y-3">{children}</div>
+      </details>
+    )
+  }
   return (
     <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
       <div className="mb-2 flex items-baseline gap-2">
