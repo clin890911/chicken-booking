@@ -102,7 +102,7 @@ export default function LookupBookingPage() {
             )}
 
             {error && <ErrorText>{error}</ErrorText>}
-            <Button disabled={busy} className="w-full">
+            <Button type="submit" disabled={busy} className="w-full">
               <Search size={18} />
               {busy ? '查詢中...' : '查詢訂位'}
             </Button>
