@@ -106,11 +106,6 @@ export default function SettingsView() {
     return () => window.removeEventListener('beforeunload', handler)
   }, [isDirty])
 
-  const persist = (patch) => {
-    updateSettings(patch)
-    toast.success('✅ 已儲存')
-  }
-
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
   const handleSave = async () => {
     if (capacityDirty && affectedBookingCount > 0) {
@@ -121,7 +116,11 @@ export default function SettingsView() {
       )
       if (!ok) return
     }
-    persist(form)
+    // 存後把 form 重置為正規化後的 settings：清除因 withDefaults 正規化造成的 phantom-dirty，
+    // 讓 sticky banner 正確消失、beforeunload 守衛解除。
+    const saved = updateSettings(form)
+    setForm(saved)
+    toast.success('✅ 已儲存')
   }
   const handleBannerFiles = async (files) => {
     const list = Array.from(files || [])
@@ -132,10 +131,6 @@ export default function SettingsView() {
     } catch (err) {
       toast.error(err.message || '圖片讀取失敗')
     }
-  }
-  const saveBanners = () => {
-    updateSettings({ heroBanners: form.heroBanners || [] })
-    toast.success('✅ 首頁廣告已儲存')
   }
   const removeBanner = async (id) => {
     if (!(await confirm('確定刪除這張首頁廣告？', { title: '刪除廣告', confirmLabel: '刪除' }))) return
@@ -324,17 +319,11 @@ export default function SettingsView() {
               </span>
             </div>
           )}
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存設定</Button>
-          </div>
         </div>
       </SettingsSection>
 
       <SettingsSection sectionKey="seatings" title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" defaultOpen>
         <SeatingsEditor form={form} setForm={setForm} />
-        <div className="flex gap-2 items-center mt-3">
-          <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存場次</Button>
-        </div>
       </SettingsSection>
 
       <SettingsSection sectionKey="online-guard" title="線上訂位防線" description="只限制線上客人端；店員後台、現場與團體預排完全不受影響。">
@@ -384,9 +373,6 @@ export default function SettingsView() {
               到截止時間後，該場次（餐期）所有抵達時段都不再開放線上訂位與線上改期；電話與現場不受影響。
             </div>
           </div>
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存防線設定</Button>
-          </div>
         </div>
       </SettingsSection>
 
@@ -434,17 +420,11 @@ export default function SettingsView() {
               checked={form.autoNoshowOnRollover === true}
               onChange={e => setForm(f => ({ ...f, autoNoshowOnRollover: e.target.checked }))} />
           </label>
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存自動化設定</Button>
-          </div>
         </div>
       </SettingsSection>
 
       <SettingsSection sectionKey="closures" title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。">
         <ClosuresEditor form={form} setForm={setForm} bookings={bookings} />
-        <div className="flex gap-2 items-center mt-3">
-          <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存關閉設定</Button>
-        </div>
       </SettingsSection>
 
       <SettingsSection sectionKey="hero" title="首頁廣告輪播" description="新增橫式照片，會顯示在客人首頁第一屏。" defaultOpen>
@@ -501,10 +481,6 @@ export default function SettingsView() {
               ))}
             </div>
           )}
-
-          <div className="flex items-center gap-2">
-            <Button onClick={saveBanners} className="flex-1 min-h-[44px]">儲存首頁廣告</Button>
-          </div>
         </div>
       </SettingsSection>
 
@@ -671,7 +647,6 @@ export default function SettingsView() {
             LINE API Token 仍必須放在後端或 Cloud Functions，不能放前端。
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存 LINE 設定</Button>
             <button onClick={handleValidateLine} className="btn-secondary min-h-[44px] whitespace-nowrap">
               驗證設定
             </button>
@@ -724,9 +699,6 @@ export default function SettingsView() {
               onChange={e => setForm(f => ({ ...f, storeLongitude: e.target.value.trim() }))}
               placeholder="120.xxxxxx"
             />
-          </div>
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存聯絡入口</Button>
           </div>
         </div>
       </SettingsSection>
