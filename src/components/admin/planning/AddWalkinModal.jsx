@@ -101,7 +101,7 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
             ))}
             {moreGuests || guests > 8 ? (
               <select value={guests} onChange={e => setGuests(Number(e.target.value))} className="input w-24 !py-2.5 font-bold">
-                {Array.from({ length: 12 }, (_, i) => i + 9).map(n => <option key={n} value={n}>{n} 位</option>)}
+                {Array.from({ length: 22 }, (_, i) => i + 9).map(n => <option key={n} value={n}>{n} 位</option>)}
               </select>
             ) : (
               <button type="button" onClick={() => { setMoreGuests(true); setGuests(9) }}

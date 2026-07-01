@@ -116,7 +116,7 @@ export default function EditBookingModal({ booking, onClose }) {
             <select value={guests > 8 ? guests : ''} onChange={e => e.target.value && setGuests(Number(e.target.value))}
               className="input !w-24 !py-2.5 font-bold">
               <option value="">9+</option>
-              {Array.from({ length: 12 }, (_, i) => i + 9).map(n => <option key={n} value={n}>{n} 位</option>)}
+              {Array.from({ length: 22 }, (_, i) => i + 9).map(n => <option key={n} value={n}>{n} 位</option>)}
             </select>
           </div>
         </div>

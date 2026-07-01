@@ -229,7 +229,7 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
                   onChange={e => setGuests(Number(e.target.value))}
                   className="input w-28 !py-2.5 font-bold"
                 >
-                  {Array.from({ length: 12 }, (_, i) => i + 9).map(n => (
+                  {Array.from({ length: 22 }, (_, i) => i + 9).map(n => (
                     <option key={n} value={n}>{n} 位</option>
                   ))}
                 </select>
