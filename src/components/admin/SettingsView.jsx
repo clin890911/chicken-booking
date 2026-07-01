@@ -46,7 +46,7 @@ const CategoryContext = createContext([])
 
 export default function SettingsView() {
   const { settings, bookings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
-  const { user, signOut, can } = useAuth()
+  const { user, signOut, can, usingFirebase } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
   const [form, setForm] = useState(settings)
@@ -94,6 +94,22 @@ export default function SettingsView() {
       return 0
     }
   }, [form.openTime, form.closeTime, form.slotInterval])
+
+  // 折疊標題摘要 / 狀態徽章：不用展開即可一眼看現況
+  const seatingsCount = (form.seatings || []).length
+  const hoursSummary = `${form.openTime || '—'}–${form.closeTime || '—'} · ${form.slotInterval || 30} 分一格 · ${slotCount} 時段`
+  const guardOn = form.onlineAutoCloseEnabled === true
+  const guardPercent = Number(form.onlineAutoClosePercent) || 80
+  const guardCutoff = Number(form.onlineSessionCutoffMin) || 0
+  const guardSummary = guardOn
+    ? `達 ${guardPercent}% 自動關閉${guardCutoff ? ` · 場次前 ${guardCutoff} 分停訂` : ''}`
+    : '未啟用線上滿座自動關閉'
+  const autoReleaseOn = form.autoReleaseEnabled !== false
+  const autoReleaseHr = (Number(form.autoReleaseAfterMin) || 300) / 60
+  const rolloverOn = form.dayRolloverEnabled !== false
+  const automationSummary = autoReleaseOn
+    ? `逾時 ${autoReleaseHr} 小時自動釋桌${rolloverOn ? ' · 換日掃除' : ''}`
+    : `未啟用自動釋桌${rolloverOn ? ' · 換日掃除' : ''}`
 
   // B14：離開前提醒尚有未儲存變更
   useEffect(() => {
@@ -245,7 +261,7 @@ export default function SettingsView() {
         </div>
       )}
 
-      <SettingsSection sectionKey="hours" title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" defaultOpen>
+      <SettingsSection sectionKey="hours" title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" summary={hoursSummary} defaultOpen>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Input label="開始時間" type="time" value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))} />
@@ -322,11 +338,11 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection sectionKey="seatings" title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" defaultOpen>
+      <SettingsSection sectionKey="seatings" title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" summary={`${seatingsCount} 場次`} defaultOpen>
         <SeatingsEditor form={form} setForm={setForm} />
       </SettingsSection>
 
-      <SettingsSection sectionKey="online-guard" title="線上訂位防線" description="只限制線上客人端；店員後台、現場與團體預排完全不受影響。">
+      <SettingsSection sectionKey="online-guard" title="線上訂位防線" description="只限制線上客人端；店員後台、現場與團體預排完全不受影響。" badge={guardOn ? '啟用' : '未啟用'} summary={guardSummary}>
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
@@ -376,7 +392,7 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection sectionKey="automation" title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。">
+      <SettingsSection sectionKey="automation" title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。" badge={autoReleaseOn ? '啟用' : '未啟用'} summary={automationSummary}>
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
@@ -708,18 +724,23 @@ export default function SettingsView() {
         <TelegramSettings embedded />
       </SettingsSection>
 
-      <SettingsSection sectionKey="firestore" title="Firestore 資料同步" description="正式跨裝置資料來源；可手動上傳本機資料或重新拉取雲端資料。" defaultOpen>
+      <SettingsSection sectionKey="firestore" title="Firestore 資料同步" description="正式跨裝置資料來源；可手動上傳本機資料或重新拉取雲端資料。" badge={usingFirebase ? undefined : '本機模式'} defaultOpen>
         <div className="space-y-3">
+          {!usingFirebase && (
+            <div className="rounded-xl border border-chicken-brown/15 bg-chicken-brown/5 px-4 py-3 text-xs font-bold leading-5 text-chicken-brown/60">
+              目前未設定 Firebase（本機開發模式），雲端同步僅正式環境可用。設定 VITE_FIREBASE_* 並重新部署後才能上傳／拉取。
+            </div>
+          )}
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             狀態：<span className="font-black text-chicken-brown">{cloudStatus?.state || 'idle'}</span>
             {cloudStatus?.lastSyncAt && <span> · 最近同步 {new Date(cloudStatus.lastSyncAt).toLocaleString('zh-TW')}</span>}
             {cloudStatus?.error && <div className="mt-1 font-bold text-chicken-red">錯誤：{cloudStatus.error}</div>}
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Button disabled={cloudBusy} onClick={() => handleCloudSync('push')} className="w-full min-h-[44px]">
+            <Button disabled={cloudBusy || !usingFirebase} onClick={() => handleCloudSync('push')} className="w-full min-h-[44px]">
               {cloudBusy ? '同步中...' : '上傳本機資料到 Firestore'}
             </Button>
-            <button disabled={cloudBusy} onClick={() => handleCloudSync('pull')} className="btn-secondary min-h-[44px]">
+            <button disabled={cloudBusy || !usingFirebase} onClick={() => handleCloudSync('pull')} className="btn-secondary min-h-[44px] disabled:opacity-40">
               從 Firestore 重新整理
             </button>
           </div>
@@ -994,16 +1015,21 @@ function DefaultBadge({ current, fallback, unit = '' }) {
   )
 }
 
-function SettingsSection({ title, description, children, defaultOpen = false, danger = false, sectionKey }) {
+function SettingsSection({ title, description, children, defaultOpen = false, danger = false, sectionKey, summary, badge }) {
   // 依目前分類自我隱藏：不屬當前分類則不渲染（隱藏時 unmount，但 form 在父層 → 編輯不遺失）。
   const activeSections = useContext(CategoryContext)
   if (sectionKey && !activeSections.includes(sectionKey)) return null
   return (
     <details className={`card group ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`} open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-        <div>
-          <h2 className={`font-black ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className={`font-black ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
+            {badge && <span className="badge bg-chicken-brown/10 text-chicken-brown/70">{badge}</span>}
+          </div>
           {description && <p className="mt-0.5 text-xs text-chicken-brown/55">{description}</p>}
+          {/* 收合時顯示現況摘要，展開後隱藏（避免與內容重複） */}
+          {summary && <p className="mt-1 text-xs font-bold text-chicken-brown/70 group-open:hidden">{summary}</p>}
         </div>
         <span className="rounded-full bg-chicken-brown/5 px-2 py-1 text-xs font-black text-chicken-brown/45 group-open:rotate-180">⌄</span>
       </summary>
