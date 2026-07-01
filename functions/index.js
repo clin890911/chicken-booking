@@ -28,6 +28,11 @@ import {
   canDeleteCollection,
   canWriteSettings,
 } from './lib/staffAccess.js'
+import {
+  projectForRead,
+  stripServerOwnedCustomerFields,
+  buildBookingUpsertData,
+} from './lib/dataProjection.js'
 import { isTableUsableOnDate } from './lib/tableUsable.js'
 import {
   slotEpochMs,
@@ -148,6 +153,11 @@ export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' },
     if (out.tables) out.tables.sort((a, b) => String(a.number || '').localeCompare(String(b.number || '')))
     if (out.waitlist) out.waitlist.sort((a, b) => String(a.takenAt || '').localeCompare(String(b.takenAt || '')))
     out.settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
+    // 欄位級讀取投影：manageToken 對所有角色剝除；kitchen 另剝 bookings/waitlist 的 PII 與 group 領隊電話。
+    // 純記憶體 map（已抓回的文件），零額外讀取。
+    for (const name of ['bookings', 'waitlist', 'groupReservations']) {
+      if (Array.isArray(out[name])) out[name] = out[name].map(d => projectForRead(name, d, staff.role))
+    }
     // 廚房（kitchen）無 customer.read：不下發顧客 PII 到廚房裝置（其餘集合渲染所需維持回傳）。
     if (staff.role === 'kitchen') out.customers = []
     return res.json(out)
@@ -182,10 +192,34 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     if (denied.length) {
       return res.status(403).json({ ok: false, error: `角色「${role}」無權：${denied.join('、')}` })
     }
+    // commit「前」讀舊值：同時供 (a) 寫入路徑判 new-vs-existing + 保 server-owned 欄位、(b) 下方通知 diff。
+    // ⚠️ 安全關鍵：id 集合非空但快照讀取失敗時，snapshotBookingsByIds（strict）會丟出 → 由外層 catch 回 500，
+    //   絕不落到「全判新單 → 重鑄 manageToken → 輪替（毀掉）所有既有客人管理連結」的災難分支。
+    const pushedBookingIds = (dataset.bookings || []).map(b => b?.id)
+    const beforeBookings = await snapshotBookingsByIds(pushedBookingIds, { strict: true })
     // 泛型遍歷所有同步集合做 merge-upsert（接受「部分資料集」，未帶的集合略過）。
     const ops = []
     for (const [name, idKey] of Object.entries(SYNC_COLLECTION_IDKEYS)) {
-      ops.push(...upsertOps(name, dataset[name] || [], idKey))
+      if (name === COLLECTIONS.bookings) {
+        // bookings 走欄位級白名單：server-owned 欄位（manageToken/history/… ）永不取自客戶端，
+        // 新單伺服器鑄 token、既有單靠 merge 省略保留既存值。擋掉繞過 UI 直接注入敏感欄位的越權（修 item 2）。
+        for (const item of (dataset.bookings || [])) {
+          const id = String(item?.id || '').trim()
+          if (!id) continue
+          ops.push({
+            ref: db.collection(COLLECTIONS.bookings).doc(id),
+            data: buildBookingUpsertData(item, beforeBookings.get(id), {
+              now: () => new Date().toISOString(),
+              mintToken: createServerToken,
+            }),
+          })
+        }
+      } else if (name === COLLECTIONS.customers) {
+        // customers：phoneDigits 一律伺服器推導（既有 upsertOps 已覆寫；此處再剝一層防禦）。
+        ops.push(...upsertOps(name, (dataset[name] || []).map(stripServerOwnedCustomerFields), idKey))
+      } else {
+        ops.push(...upsertOps(name, dataset[name] || [], idKey))
+      }
     }
     // 差異同步的刪除路徑：前端把「本機已刪」的文件 id 放在 dataset.deletedIds，
     // 後端逐集合刪除，避免硬刪除的文件在下一輪拉取時復活（修 F-A）。
@@ -204,11 +238,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     // 開關開啟時才在 commit「前」讀舊值（merge-upsert 不讀舊值，diff 需要 before 快照），
     // commit「成功後」才分類入列——先寫成功才通知，避免通知了卻沒寫進去。
     const notifySettings = await readSettingsForAdminNotify(dataset.settings)
-    // commit「前」讀舊值才能做 diff（merge-upsert 不讀舊值）。LINE 或 Telegram 任一開啟才付這筆讀取成本。
-    const wantBefore = notifySettings.lineNotifyOnAdminChange === true || notifySettings.telegramNotifyOnAdminChange === true
-    const beforeBookings = wantBefore
-      ? await snapshotBookingsByIds((dataset.bookings || []).map(b => b?.id))
-      : new Map()
+    // beforeBookings 已於上方 commit 前無條件讀取（strict），此處直接重用做通知 diff，不再重讀。
     // 硬刪除的訂位只出現在 deletedIds，commit 後就查不到；先抓刪除前完整舊值，Telegram 才能附完整 JSON 供還原。
     const deletedBookingIds = (dataset.deletedIds || {}).bookings || []
     const deletedBefore = (notifySettings.telegramNotifyOnAdminChange === true && deletedBookingIds.length)
@@ -298,9 +328,12 @@ export const adminManageStaff = onRequest({ cors: PUBLIC_CORS, invoker: 'public'
   }
 })
 
-// 讀取指定訂位 id 的「commit 前」狀態（每批 ≤300 筆 getAll）。失敗回空 Map（通知靜默跳過，不影響同步）。
-// 同時供 upsert（diff before/after）與硬刪除（抓刪除前完整舊值）兩條通知路徑使用。
-async function snapshotBookingsByIds(rawIds) {
+// 讀取指定訂位 id 的「commit 前」狀態（每批 ≤300 筆 getAll）。
+// 同時供 upsert（判 new-vs-existing + 保 server-owned 欄位、diff before/after）與硬刪除（抓刪除前完整舊值）使用。
+// strict=false（通知路徑）：失敗回目前 Map、靜默跳過，不影響同步。
+// strict=true（adminPushData 寫入路徑）：非空 id 讀取失敗必須丟出 → 由呼叫端回 500，
+//   絕不讓寫入路徑誤判「全為新單」而重鑄 token、輪替（毀掉）既有客人的 manageToken。
+async function snapshotBookingsByIds(rawIds, { strict = false } = {}) {
   const map = new Map()
   try {
     const ids = (Array.isArray(rawIds) ? rawIds : [])
@@ -314,6 +347,7 @@ async function snapshotBookingsByIds(rawIds) {
     }
   } catch (err) {
     console.error('snapshotBookingsByIds failed:', err?.message)
+    if (strict) throw errorWithStatus('read-before-write-failed', 500)
   }
   return map
 }
@@ -532,7 +566,11 @@ export const guestLookupBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     if (mode === 'code') {
       const bookingId = String(input.bookingId || '').trim()
       const phoneInput = digits(input.phone || input.phoneTail || '')
-      if (!bookingId || phoneInput.length < 3) return res.status(400).json({ ok: false, error: '請輸入訂位編號與電話末碼' })
+      // 末碼提升到 4 碼（原 3 碼過弱）：搭配訂位編號才回傳 manageToken。
+      if (!bookingId || phoneInput.length < 4) return res.status(400).json({ ok: false, error: '請輸入訂位編號與電話末 4 碼' })
+      // 讀取「前」先加維度節流，避免讀取放大：per-booking（跨 IP 全域，擋換 IP 暴力）+ per-phone。
+      await enforceRateLimit(req, 'guestLookupBookingPerBooking', `booking:${bookingId}`)
+      await enforceRateLimit(req, 'guestLookupBookingPerPhone', `phone:${phoneInput}`)
       const snap = await db.collection(COLLECTIONS.bookings).doc(bookingId).get()
       if (snap.exists) {
         const booking = { id: snap.id, ...snap.data() }
@@ -542,6 +580,8 @@ export const guestLookupBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       const surname = String(input.surname || '').trim()
       const phone = digits(input.phone || '')
       if (!surname || phone.length < 7) return res.status(400).json({ ok: false, error: '請輸入訂位姓氏與完整電話' })
+      // 讀取「前」先加 per-phone 節流（identity 用完整電話，擋對已知號碼猜姓氏批量擷取）。
+      await enforceRateLimit(req, 'guestLookupBookingPerPhone', `phone:${phone}`)
       const snap = await db.collection(COLLECTIONS.bookings).where('phoneDigits', '==', phone).get()
       matches = snap.docs
         .map(doc => ({ id: doc.id, ...doc.data() }))
@@ -550,6 +590,7 @@ export const guestLookupBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
 
     const items = matches
       .sort(sortBookings)
+      .slice(0, 10) // identity 模式單次曝光上限（正常客人不會有 >10 筆有效訂位）
       .map(safeBookingSummary)
 
     return res.json({ ok: true, items })
@@ -1775,7 +1816,8 @@ function phoneMatches(phone, input) {
   const actual = digits(phone)
   const value = digits(input)
   if (value.length >= 7) return actual === value
-  if (![3, 4].includes(value.length)) return false
+  // 只接受末 4 碼（原本連 3 碼也放行過弱，暴力空間僅 1000）。
+  if (value.length !== 4) return false
   return actual.endsWith(value)
 }
 
@@ -1794,7 +1836,9 @@ function errorWithStatus(message, status) {
 // manageToken；(2) 灌爆 guestCreateBooking 造成費用型 DoS。以 Firestore 交易做每-IP
 // 滑動視窗計數緩解。App Check（reCAPTCHA v3）是更強的後續防線，需在 Console/前端配置。
 const RATE_LIMITS = {
-  guestLookupBooking: { limit: 30, windowMs: 10 * 60 * 1000 },
+  guestLookupBooking: { limit: 30, windowMs: 10 * 60 * 1000 },              // per-IP（第一道）
+  guestLookupBookingPerBooking: { limit: 5, windowMs: 10 * 60 * 1000 },     // 每訂位（跨 IP 全域，擋換 IP 暴力同一訂位末碼）
+  guestLookupBookingPerPhone: { limit: 10, windowMs: 10 * 60 * 1000 },      // 每電話（擋對已知號碼猜姓氏/末碼）
   guestCreateBooking: { limit: 20, windowMs: 10 * 60 * 1000 },
   lineMyBookings: { limit: 30, windowMs: 10 * 60 * 1000 },      // per-IP（驗證前先擋）
   lineMyBookingsUser: { limit: 20, windowMs: 10 * 60 * 1000 },  // per-LINE-userId（驗證後）
