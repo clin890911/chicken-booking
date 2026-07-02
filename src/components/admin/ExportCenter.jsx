@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
+import { useAuth } from '../../contexts/AuthContext'
 import { useToast, useConfirm } from '../ui/Toast'
 import { todayStr } from '../../utils/timeSlots'
+import { adminExportLog } from '../../services/cloudDataService'
 import {
   filterBookings, filterGroups, buildBookingsCSV, buildGroupsCSV,
   BOOKING_SOURCE_LABELS, BOOKING_STATUS_LABELS, GROUP_STATUS_LABELS,
@@ -53,8 +55,11 @@ const PRESETS = [
 
 export default function ExportCenter() {
   const { bookings, groupReservations, agencies, guides, settings } = useBooking()
+  const { usingFirebase } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
+  const [logs, setLogs] = useState(null) // 最近匯出紀錄（懶載入）
+  const [logBusy, setLogBusy] = useState(false)
   const [type, setType] = useState('bookings')
   const [range, setRange] = useState(() => presetRange('month'))
   const [source, setSource] = useState('all')
@@ -118,6 +123,28 @@ export default function ExportCenter() {
     } else {
       downloadCSV(`團體預排_${rangeTag}.csv`, buildGroupsCSV(filteredGroups, settings))
       toast.success(`已匯出 ${filteredGroups.length} 張團單`)
+    }
+    // 稽核留痕：fire-and-forget，後端未部署或失敗都不影響已完成的下載。
+    if (usingFirebase) {
+      const filters = type === 'bookings'
+        ? `來源=${source} 狀態=${bStatus} 場次=${seatingId}`
+        : `狀態=${gStatus} 旅行社=${agencyId} 導遊=${guideId} 場次=${seatingId}`
+      adminExportLog({ action: 'record', type, count: list.length, dateFrom: range.dateFrom, dateTo: range.dateTo, filters })
+        .then(() => { if (logs !== null) setLogs(null) }) // 已展開過的紀錄失效，下次展開重抓
+        .catch(() => {})
+    }
+  }
+
+  const loadLogs = async () => {
+    setLogBusy(true)
+    try {
+      const res = await adminExportLog({ action: 'list' })
+      setLogs(res.logs || [])
+    } catch (err) {
+      toast.error(err.message || '讀取匯出紀錄失敗')
+      setLogs([])
+    } finally {
+      setLogBusy(false)
     }
   }
 
@@ -210,6 +237,33 @@ export default function ExportCenter() {
       <p className="text-xs leading-5 text-chicken-brown/55">
         CSV 為 UTF-8（含 BOM），Excel 直接開啟不會亂碼。團體匯出一梯次一列，欄含旅行社/導遊/素食/兒童餐/輪椅等備餐資訊。
       </p>
+
+      {/* 最近匯出紀錄（稽核）：僅正式環境；展開時懶載入 */}
+      {usingFirebase && (
+        <details className="rounded-xl border border-chicken-brown/10 bg-white" onToggle={e => { if (e.target.open && logs === null && !logBusy) loadLogs() }}>
+          <summary className="cursor-pointer list-none px-4 py-2.5 text-sm font-bold text-chicken-brown/70">
+            最近匯出紀錄<span className="ml-1 text-xs font-normal text-chicken-brown/45">點擊展開（最近 50 筆）</span>
+          </summary>
+          <div className="px-4 pb-3">
+            {logBusy && logs === null ? (
+              <p className="text-sm text-chicken-brown/50">載入中…</p>
+            ) : !logs || logs.length === 0 ? (
+              <p className="text-sm text-chicken-brown/50">尚無匯出紀錄</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {logs.map(l => (
+                  <li key={l.id} className="flex flex-wrap justify-between gap-x-2 border-t border-chicken-brown/5 pt-1.5 text-xs">
+                    <span className="font-bold text-chicken-brown">
+                      {l.at ? new Date(l.at).toLocaleString('zh-TW') : '—'} · {l.type === 'groups' ? '團體' : '散客'} {l.count} 筆
+                    </span>
+                    <span className="font-mono text-chicken-brown/55">{l.actor}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
+      )}
     </div>
   )
 }

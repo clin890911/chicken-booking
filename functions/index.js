@@ -38,6 +38,7 @@ import {
   slotEpochMs,
   buildMyBookingsList,
 } from './lib/myBookings.js'
+import { sanitizeExportLog } from './lib/exportLog.js'
 import { buildLineBindingRecord } from './lib/lineBinding.js'
 import {
   buildAuthorizeUrl,
@@ -261,6 +262,13 @@ export const staffWhoAmI = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, a
   if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
     const staff = await requireStaff(req)
+    // 記錄動態管理員（admins 集合）最後登入時間，供後台「管理員帳號」顯示。
+    // 非阻塞、best-effort：失敗不影響身分驗證回應。env 白名單管理員無對應文件故略過。
+    if (staff.source === 'db') {
+      db.collection('admins').doc(staff.email)
+        .set({ lastLoginAt: new Date().toISOString() }, { merge: true })
+        .catch(err => console.error('lastLoginAt update failed:', err))
+    }
     return res.json({ ok: true, email: staff.email, role: staff.role, source: staff.source })
   } catch (err) {
     return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
@@ -325,6 +333,38 @@ export const adminManageStaff = onRequest({ cors: PUBLIC_CORS, invoker: 'public'
   } catch (err) {
     console.error('adminManageStaff failed:', err)
     return res.status(500).json({ ok: false, error: err.message || 'manage-staff-failed' })
+  }
+})
+
+// 匯出稽核紀錄：record（下載 CSV 後留痕）/ list（後台檢視最近 50 筆）。
+// actor 與 at 由伺服器決定（不取自客戶端）；exportLogs 為獨立集合，不進 adminPull/Push 同步管線。
+export const adminExportLog = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  let staff
+  try {
+    staff = await requireStaff(req)
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
+  }
+  try {
+    const { action } = req.body || {}
+
+    if (action === 'record') {
+      const entry = sanitizeExportLog(req.body, staff.email)
+      await db.collection('exportLogs').add(entry)
+      return res.json({ ok: true })
+    }
+
+    if (action === 'list') {
+      const snap = await db.collection('exportLogs').orderBy('at', 'desc').limit(50).get()
+      const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      return res.json({ ok: true, logs })
+    }
+
+    return res.status(400).json({ ok: false, error: 'unknown-action' })
+  } catch (err) {
+    console.error('adminExportLog failed:', err)
+    return res.status(500).json({ ok: false, error: err.message || 'export-log-failed' })
   }
 })
 

@@ -348,6 +348,17 @@ export async function adminManageStaff(payload) {
   })
 }
 
+// 匯出稽核紀錄（任何員工可 record 自己的匯出 / list 最近 50 筆）。
+// payload: { action: 'record'|'list', type, count, dateFrom, dateTo, filters }
+// actor 與 at 由後端決定。record 由 ExportCenter fire-and-forget 呼叫（未部署則靜默失敗、不影響下載）。
+export async function adminExportLog(payload) {
+  return requestJson(endpoint('adminExportLog'), {
+    method: 'POST',
+    headers: await authHeader(),
+    body: JSON.stringify(payload || {}),
+  })
+}
+
 export async function guestGetAvailability(date) {
   return requestJson(endpoint('guestGetAvailability'), {
     method: 'POST',
