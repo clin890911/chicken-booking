@@ -134,6 +134,10 @@ export default function StaffAdminSection() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-mono text-sm font-bold text-chicken-brown">{admin.email}</div>
                   {admin.name && <div className="text-xs text-chicken-brown/55">{admin.name}</div>}
+                  {/* 最後登入時間：後端 staffWhoAmI 寫入 lastLoginAt 後即顯示（未提供則不顯示） */}
+                  {admin.lastLoginAt && (
+                    <div className="text-xs text-chicken-brown/45">最後登入：{new Date(admin.lastLoginAt).toLocaleString('zh-TW')}</div>
+                  )}
                 </div>
                 <Select
                   className="!w-auto"

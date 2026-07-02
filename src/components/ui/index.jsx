@@ -1,29 +1,36 @@
+import { useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
-export function Button({ variant = 'primary', className = '', children, ...rest }) {
+// 預設 type="button"：避免包進 <form> 時被當成隱式 submit 誤觸送出；呼叫端仍可傳 type="submit" 覆寫。
+export function Button({ variant = 'primary', type = 'button', className = '', children, ...rest }) {
   const cls = variant === 'secondary' ? 'btn-secondary' : variant === 'yellow' ? 'btn-yellow' : 'btn-primary'
-  return <button className={`${cls} ${className}`} {...rest}>{children}</button>
+  return <button type={type} className={`${cls} ${className}`} {...rest}>{children}</button>
 }
 
 export function Card({ className = '', children, ...rest }) {
   return <div className={`card ${className}`} {...rest}>{children}</div>
 }
 
-export function Input({ label, error, className = '', ...rest }) {
+// label 用 htmlFor 綁到 input（id 未傳則以 useId 自動產生）：改善鍵盤/螢幕閱讀器與 getByLabel 測試。
+export function Input({ label, error, id, className = '', ...rest }) {
+  const auto = useId()
+  const inputId = id || auto
   return (
     <div>
-      {label && <label className="label">{label}</label>}
-      <input className={`input ${error ? 'border-chicken-red ring-2 ring-chicken-red/30' : ''} ${className}`} {...rest} />
+      {label && <label htmlFor={inputId} className="label">{label}</label>}
+      <input id={inputId} className={`input ${error ? 'border-chicken-red ring-2 ring-chicken-red/30' : ''} ${className}`} {...rest} />
       {error && <p className="text-xs text-chicken-red mt-1">{error}</p>}
     </div>
   )
 }
 
-export function Select({ label, options = [], className = '', ...rest }) {
+export function Select({ label, options = [], id, className = '', ...rest }) {
+  const auto = useId()
+  const selectId = id || auto
   return (
     <div>
-      {label && <label className="label">{label}</label>}
-      <select className={`input ${className}`} {...rest}>
+      {label && <label htmlFor={selectId} className="label">{label}</label>}
+      <select id={selectId} className={`input ${className}`} {...rest}>
         {options.map(o => (
           typeof o === 'object'
             ? <option key={o.value} value={o.value}>{o.label}</option>
@@ -34,11 +41,13 @@ export function Select({ label, options = [], className = '', ...rest }) {
   )
 }
 
-export function Textarea({ label, className = '', ...rest }) {
+export function Textarea({ label, id, className = '', ...rest }) {
+  const auto = useId()
+  const textareaId = id || auto
   return (
     <div>
-      {label && <label className="label">{label}</label>}
-      <textarea className={`input min-h-[80px] resize-none ${className}`} {...rest} />
+      {label && <label htmlFor={textareaId} className="label">{label}</label>}
+      <textarea id={textareaId} className={`input min-h-[80px] resize-none ${className}`} {...rest} />
     </div>
   )
 }

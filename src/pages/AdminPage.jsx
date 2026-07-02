@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import Header from '../components/layout/Header'
 import SidebarNav from '../components/layout/SidebarNav'
 import BottomNav from '../components/layout/BottomNav'
@@ -20,8 +21,20 @@ const TABS = [
   { key: 'settings',  label: '設定',  icon: '⚙️', subtitle: '營業時段 · 桌位 · 帳號' },
 ]
 
+const VALID_TABS = TABS.map(t => t.key)
+
 export default function AdminPage() {
-  const [tab, setTab] = useState('bookings')
+  // URL 作為分頁的單一真實來源：重整/上一頁/下一頁/書籤皆能還原（?tab=settings&section=...）。
+  // tab 為衍生值（非另存 state），故無雙向同步 useEffect、無迴圈。
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawTab = searchParams.get('tab')
+  const tab = VALID_TABS.includes(rawTab) ? rawTab : 'bookings'
+  const setTab = (next) => setSearchParams(prev => {
+    const p = new URLSearchParams(prev)
+    p.set('tab', next)
+    if (next !== 'settings') p.delete('section') // 離開設定頁時清掉殘留的 section 參數
+    return p
+  }) // push（非 replace）→ 瀏覽器上一頁/下一頁可用
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式
   // （候位入座已是現場頁內互動，無需跨頁機制）
   const [pendingAssign, setPendingAssign] = useState(null)
@@ -30,6 +43,8 @@ export default function AdminPage() {
   const [pendingPlanAssign, setPendingPlanAssign] = useState(null)
   // pendingGroupOpen：訂位頁團體卡點擊 → 規劃頁該團單詳情
   const [pendingGroupOpen, setPendingGroupOpen] = useState(null)
+  // pendingRosterPhone：設定→No-show 查詢點「顧客檔」→ 名冊頁顧客子籤並 seed 該電話
+  const [pendingRosterPhone, setPendingRosterPhone] = useState(null)
   // addPrefill：名冊「新增訂位」帶入的預填（電話/姓名），導到訂位頁新增子分頁
   const [addPrefill, setAddPrefill] = useState(null)
   const { user, usingFirebase } = useAuth()
@@ -104,6 +119,11 @@ export default function AdminPage() {
     setTab('planning')
   }
 
+  // 設定→No-show 查詢點「顧客檔」→ 名冊頁帶入該電話
+  const handleOpenCustomer = (phone) => {
+    setPendingRosterPhone(phone)
+    navTo('roster')
+  }
   // 名冊 →「新增訂位」：帶入顧客電話/姓名，切到訂位頁（BookingsView 收到 openAdd 跳「新增」子分頁）
   const openAddBooking = (c) => {
     setAddPrefill({ phone: c?.phone || '', name: c?.name || '', source: 'phone', seq: Date.now() })
@@ -178,8 +198,15 @@ export default function AdminPage() {
               {tab === 'bookings' && (
                 <BookingsView onAssignTable={handleAssignTable} onOpenGroup={handleOpenGroup} openAdd={addPrefill} />
               )}
-              {tab === 'roster' && <RosterView onAddBooking={openAddBooking} onGoPlanning={() => setTab('planning')} />}
-              {tab === 'settings' && <SettingsView />}
+              {tab === 'roster' && (
+                <RosterView
+                  pendingPhone={pendingRosterPhone}
+                  onPendingConsumed={() => setPendingRosterPhone(null)}
+                  onAddBooking={openAddBooking}
+                  onGoPlanning={() => setTab('planning')}
+                />
+              )}
+              {tab === 'settings' && <SettingsView onOpenCustomer={handleOpenCustomer} />}
           </div>
         </main>
 

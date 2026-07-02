@@ -1,4 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, createContext, useContext } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Reorder, useDragControls } from 'framer-motion'
 import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
@@ -30,9 +32,22 @@ const FIELD_LABELS = {
   slotInterval: '時段間隔',
 }
 
-export default function SettingsView() {
+// 二級分類導覽：把 16 個設定區塊按工作情境分成 5 類。sections 內為各區塊的 sectionKey，
+// 只作「屬於哪一類」的成員判定；實際顯示順序仍由 JSX（DOM）順序決定。
+const SETTINGS_CATEGORIES = [
+  { key: 'ops-rules', label: '營運規則',   icon: '🕒', sections: ['hours', 'seatings', 'closures'] },
+  { key: 'online',    label: '線上訂位',   icon: '🌐', sections: ['online-guard', 'hero', 'contact'] },
+  { key: 'floor',     label: '現場與桌位', icon: '🪑', sections: ['automation', 'layout', 'table-enable'] },
+  { key: 'line',      label: '通知與 LINE', icon: '💚', sections: ['line', 'telegram'] },
+  { key: 'data',      label: '資料與權限', icon: '🔐', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
+]
+const DEFAULT_CATEGORY = 'ops-rules'
+// 由父層提供「目前分類包含的 sectionKey 清單」；SettingsSection 據此自我隱藏（不屬當前分類則 return null）。
+const CategoryContext = createContext([])
+
+export default function SettingsView({ onOpenCustomer }) {
   const { settings, bookings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
-  const { user, signOut, can } = useAuth()
+  const { user, signOut, can, usingFirebase } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
   const [form, setForm] = useState(settings)
@@ -41,11 +56,23 @@ export default function SettingsView() {
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
   const [cloudBusy, setCloudBusy] = useState(false)
 
+  // 目前分類同步到 URL（?tab=settings&section=xxx）：重整/上一頁/書籤皆能還原、可分享定位。
+  const [searchParams, setSearchParams] = useSearchParams()
+  const rawSection = searchParams.get('section')
+  const activeKey = SETTINGS_CATEGORIES.some(c => c.key === rawSection) ? rawSection : DEFAULT_CATEGORY
+  const activeCat = SETTINGS_CATEGORIES.find(c => c.key === activeKey) || SETTINGS_CATEGORIES[0]
+  const setActiveKey = (k) => setSearchParams(prev => {
+    const p = new URLSearchParams(prev)
+    p.set('tab', 'settings') // 確保停留在設定分頁（分類鈕從設定頁內按）
+    p.set('section', k)
+    return p
+  })
+
   // B14：追蹤未儲存變更（比對目前表單 vs 已存 settings）
   const dirtyKeys = useMemo(() => {
     if (!settings) return []
     return Object.keys(form || {}).filter(k => {
-      // heroBanners 有自己的儲存按鈕，這裡用 JSON 比對其餘設定欄位
+      // 物件/陣列型欄位（如 heroBanners、seatings、closures）用 JSON 比對
       const a = form[k]
       const b = settings[k]
       if (typeof a === 'object') return JSON.stringify(a) !== JSON.stringify(b)
@@ -69,6 +96,22 @@ export default function SettingsView() {
     }
   }, [form.openTime, form.closeTime, form.slotInterval])
 
+  // 折疊標題摘要 / 狀態徽章：不用展開即可一眼看現況
+  const seatingsCount = (form.seatings || []).length
+  const hoursSummary = `${form.openTime || '—'}–${form.closeTime || '—'} · ${form.slotInterval || 30} 分一格 · ${slotCount} 時段`
+  const guardOn = form.onlineAutoCloseEnabled === true
+  const guardPercent = Number(form.onlineAutoClosePercent) || 80
+  const guardCutoff = Number(form.onlineSessionCutoffMin) || 0
+  const guardSummary = guardOn
+    ? `達 ${guardPercent}% 自動關閉${guardCutoff ? ` · 場次前 ${guardCutoff} 分停訂` : ''}`
+    : '未啟用線上滿座自動關閉'
+  const autoReleaseOn = form.autoReleaseEnabled !== false
+  const autoReleaseHr = (Number(form.autoReleaseAfterMin) || 300) / 60
+  const rolloverOn = form.dayRolloverEnabled !== false
+  const automationSummary = autoReleaseOn
+    ? `逾時 ${autoReleaseHr} 小時自動釋桌${rolloverOn ? ' · 換日掃除' : ''}`
+    : `未啟用自動釋桌${rolloverOn ? ' · 換日掃除' : ''}`
+
   // B14：離開前提醒尚有未儲存變更
   useEffect(() => {
     if (!isDirty) return
@@ -80,11 +123,6 @@ export default function SettingsView() {
     return () => window.removeEventListener('beforeunload', handler)
   }, [isDirty])
 
-  const persist = (patch) => {
-    updateSettings(patch)
-    toast.success('✅ 已儲存')
-  }
-
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
   const handleSave = async () => {
     if (capacityDirty && affectedBookingCount > 0) {
@@ -95,7 +133,11 @@ export default function SettingsView() {
       )
       if (!ok) return
     }
-    persist(form)
+    // 存後把 form 重置為正規化後的 settings：清除因 withDefaults 正規化造成的 phantom-dirty，
+    // 讓 sticky banner 正確消失、beforeunload 守衛解除。
+    const saved = updateSettings(form)
+    setForm(saved)
+    toast.success('✅ 已儲存')
   }
   const handleBannerFiles = async (files) => {
     const list = Array.from(files || [])
@@ -103,29 +145,16 @@ export default function SettingsView() {
     try {
       const images = await Promise.all(list.map(file => readBannerFile(file)))
       setForm(f => ({ ...f, heroBanners: [...(f.heroBanners || []), ...images] }))
+      // 壓縮提示：dataURL base64 約比原檔大 1/3，過大會拖慢首頁載入
+      const heavy = images.filter(im => (im.image?.length || 0) > 900_000).length
+      if (heavy) toast.info(`已新增 ${images.length} 張；其中 ${heavy} 張偏大，建議先壓到 500KB 以內加快首頁載入`)
     } catch (err) {
       toast.error(err.message || '圖片讀取失敗')
     }
   }
-  const saveBanners = () => {
-    updateSettings({ heroBanners: form.heroBanners || [] })
-    toast.success('✅ 首頁廣告已儲存')
-  }
   const removeBanner = async (id) => {
     if (!(await confirm('確定刪除這張首頁廣告？', { title: '刪除廣告', confirmLabel: '刪除' }))) return
     setForm(f => ({ ...f, heroBanners: (f.heroBanners || []).filter(b => b.id !== id) }))
-  }
-  const moveBanner = (id, dir) => {
-    setForm(f => {
-      const next = [...(f.heroBanners || [])]
-      const index = next.findIndex(b => b.id === id)
-      const target = index + dir
-      if (index < 0 || target < 0 || target >= next.length) return f
-      const item = next[index]
-      next[index] = next[target]
-      next[target] = item
-      return { ...f, heroBanners: next }
-    })
   }
   const handleSearch = () => {
     setSearchResult(searchNoshow(searchPhone.trim()))
@@ -158,8 +187,45 @@ export default function SettingsView() {
   }
 
   return (
-    <div className="space-y-4">
-      {/* B14：未儲存變更 sticky 提示 + 統一儲存 CTA */}
+    <CategoryContext.Provider value={activeCat.sections}>
+      <div className="flex gap-4">
+      {/* 桌機：左側二級分類側欄 */}
+      <nav className="hidden lg:flex w-44 shrink-0 flex-col gap-1" aria-label="設定分類">
+        {SETTINGS_CATEGORIES.map(c => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setActiveKey(c.key)}
+            aria-current={activeKey === c.key ? 'page' : undefined}
+            className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition ${
+              activeKey === c.key ? 'bg-chicken-red text-white shadow-sm' : 'text-chicken-brown/70 hover:bg-chicken-brown/5'
+            }`}
+          >
+            <span aria-hidden>{c.icon}</span><span>{c.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* 內容欄 */}
+      <div className="min-w-0 flex-1 space-y-4">
+      {/* 手機：頂部橫向分類 pills */}
+      <div className="lg:hidden -mx-1 flex gap-2 overflow-x-auto pb-1" aria-label="設定分類">
+        {SETTINGS_CATEGORIES.map(c => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => setActiveKey(c.key)}
+            aria-current={activeKey === c.key ? 'page' : undefined}
+            className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-full px-4 text-sm font-bold transition ${
+              activeKey === c.key ? 'bg-chicken-red text-white' : 'bg-chicken-brown/5 text-chicken-brown/70'
+            }`}
+          >
+            <span aria-hidden>{c.icon}</span> {c.label}
+          </button>
+        ))}
+      </div>
+
+      {/* B14：未儲存變更 sticky 提示 + 統一儲存 CTA（全域，跨分類反映所有未存變更） */}
       {isDirty && (
         <div className="sticky top-0 z-30 -mx-1 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
           <div className="text-sm font-bold text-amber-800">
@@ -187,7 +253,7 @@ export default function SettingsView() {
         </div>
       )}
 
-      <SettingsSection title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" defaultOpen>
+      <SettingsSection sectionKey="hours" title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" summary={hoursSummary} defaultOpen>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Input label="開始時間" type="time" value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))} />
@@ -261,20 +327,14 @@ export default function SettingsView() {
               </span>
             </div>
           )}
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存設定</Button>
-          </div>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" defaultOpen>
+      <SettingsSection sectionKey="seatings" title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" summary={`${seatingsCount} 場次`} defaultOpen>
         <SeatingsEditor form={form} setForm={setForm} />
-        <div className="flex gap-2 items-center mt-3">
-          <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存場次</Button>
-        </div>
       </SettingsSection>
 
-      <SettingsSection title="線上訂位防線" description="只限制線上客人端；店員後台、現場與團體預排完全不受影響。">
+      <SettingsSection sectionKey="online-guard" title="線上訂位防線" description="只限制線上客人端；店員後台、現場與團體預排完全不受影響。" badge={guardOn ? '啟用' : '未啟用'} summary={guardSummary}>
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
@@ -321,13 +381,10 @@ export default function SettingsView() {
               到截止時間後，該場次（餐期）所有抵達時段都不再開放線上訂位與線上改期；電話與現場不受影響。
             </div>
           </div>
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存防線設定</Button>
-          </div>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。">
+      <SettingsSection sectionKey="automation" title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。" badge={autoReleaseOn ? '啟用' : '未啟用'} summary={automationSummary}>
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
@@ -371,24 +428,18 @@ export default function SettingsView() {
               checked={form.autoNoshowOnRollover === true}
               onChange={e => setForm(f => ({ ...f, autoNoshowOnRollover: e.target.checked }))} />
           </label>
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存自動化設定</Button>
-          </div>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。">
+      <SettingsSection sectionKey="closures" title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。">
         <ClosuresEditor form={form} setForm={setForm} bookings={bookings} />
-        <div className="flex gap-2 items-center mt-3">
-          <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存關閉設定</Button>
-        </div>
       </SettingsSection>
 
-      <SettingsSection title="首頁廣告輪播" description="新增橫式照片，會顯示在客人首頁第一屏。" defaultOpen>
+      <SettingsSection sectionKey="hero" title="首頁廣告輪播" description="新增橫式照片，會顯示在客人首頁第一屏。" defaultOpen>
         <div className="space-y-4">
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-chicken-brown/15 bg-white px-4 py-8 text-center transition hover:border-chicken-red/40">
             <span className="text-sm font-black text-chicken-brown">上傳橫式照片</span>
-            <span className="mt-1 text-xs text-chicken-brown/55">建議 16:9 或 2:1，單張小於 2MB，支援多選</span>
+            <span className="mt-1 text-xs text-chicken-brown/55">建議 16:9 或 2:1、單張小於 2MB（越小越快，建議壓到 500KB 內）、支援多選</span>
             <input
               type="file"
               accept="image/*"
@@ -403,49 +454,26 @@ export default function SettingsView() {
               尚未新增廣告圖。首頁會先顯示品牌 logo 與預設訂位宣傳。
             </div>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {(form.heroBanners || []).map((banner, index) => (
-                <div key={banner.id} className="overflow-hidden rounded-xl border border-chicken-brown/10 bg-white">
-                  <div className="aspect-[16/9] bg-chicken-cream">
-                    <img src={banner.image} alt={banner.title || `首頁廣告 ${index + 1}`} className="h-full w-full object-cover" />
-                  </div>
-                  <div className="space-y-2 p-3">
-                    <Input
-                      label="標題"
-                      value={banner.title || ''}
-                      onChange={e => setForm(f => ({
-                        ...f,
-                        heroBanners: (f.heroBanners || []).map(b => b.id === banner.id ? { ...b, title: e.target.value } : b)
-                      }))}
-                      placeholder="例：母親節限定套餐"
-                    />
-                    <Input
-                      label="副標"
-                      value={banner.subtitle || ''}
-                      onChange={e => setForm(f => ({
-                        ...f,
-                        heroBanners: (f.heroBanners || []).map(b => b.id === banner.id ? { ...b, subtitle: e.target.value } : b)
-                      }))}
-                      placeholder="例：限量供應，建議提前訂位"
-                    />
-                    <div className="grid grid-cols-3 gap-2">
-                      <button onClick={() => moveBanner(banner.id, -1)} className="btn-secondary !px-2 !py-2 text-xs" disabled={index === 0}>上移</button>
-                      <button onClick={() => moveBanner(banner.id, 1)} className="btn-secondary !px-2 !py-2 text-xs" disabled={index === (form.heroBanners || []).length - 1}>下移</button>
-                      <button onClick={() => removeBanner(banner.id)} className="btn-danger !px-2 !py-2 text-xs">刪除</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <>
+              <p className="text-xs font-bold text-chicken-brown/50">拖曳右上角握把可調整輪播順序；圖上文字即客人首頁看到的樣子（前台預覽）。</p>
+              <Reorder.Group axis="y" values={form.heroBanners || []} onReorder={next => setForm(f => ({ ...f, heroBanners: next }))} className="space-y-3">
+                {(form.heroBanners || []).map((banner, index) => (
+                  <HeroBannerItem
+                    key={banner.id}
+                    banner={banner}
+                    index={index}
+                    total={(form.heroBanners || []).length}
+                    setForm={setForm}
+                    removeBanner={removeBanner}
+                  />
+                ))}
+              </Reorder.Group>
+            </>
           )}
-
-          <div className="flex items-center gap-2">
-            <Button onClick={saveBanners} className="flex-1 min-h-[44px]">儲存首頁廣告</Button>
-          </div>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="LINE 官方帳號" description="設定客人訂位成功後看到的 LINE 加好友入口與保存提醒。">
+      <SettingsSection sectionKey="line" title="LINE 官方帳號" description="設定客人訂位成功後看到的 LINE 加好友入口與保存提醒。">
         <div className="space-y-4">
           {/* C11：基本 */}
           <FieldGroup title="基本" hint="客人訂位完成後看到的 LINE 加好友入口。">
@@ -550,7 +578,7 @@ export default function SettingsView() {
           </FieldGroup>
 
           {/* C11：後端端點 */}
-          <FieldGroup title="後端端點" hint="Cloud Functions / 後端服務網址；API Token 一律放後端，不可放前端。">
+          <FieldGroup collapsible title="後端端點（進階）" hint="Cloud Functions / 後端服務網址；API Token 一律放後端，不可放前端。">
             <Field hint="處理 LINE 綁定的後端網址。">
               <Input
                 label="LINE 綁定後端端點（選填）"
@@ -603,12 +631,42 @@ export default function SettingsView() {
             </Field>
           </FieldGroup>
 
+          {/* 安裝檢查表：逐項顯示必填/建議欄位是否已填，快速定位缺漏 */}
+          <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+            <h3 className="mb-2 text-sm font-black text-chicken-brown">安裝檢查表</h3>
+            <ul className="space-y-1.5">
+              {[
+                { label: '官方帳號加入連結', ok: !!form.lineOfficialUrl?.trim(), required: true },
+                { label: 'LINE Login Channel ID', ok: !!form.lineLoginChannelId?.trim(), hint: '綁定 + 我的訂位查詢' },
+                { label: 'LINE Login 回呼網址', ok: !!form.lineLoginCallbackUrl?.trim(), hint: '需填入 channel Callback 白名單' },
+                ...(form.lineUseLiff ? [
+                  { label: 'LIFF 綁定連結', ok: !!form.lineLiffUrl?.trim(), required: true },
+                  { label: 'LIFF ID', ok: !!form.lineLiffId?.trim(), required: true },
+                ] : []),
+                { label: '訂位網站網址', ok: !!form.publicSiteUrl?.trim(), hint: '通知卡「管理訂位」按鈕用' },
+              ].map(item => (
+                <li key={item.label} className="flex items-start gap-2 text-sm">
+                  <span aria-hidden className={item.ok ? 'text-chicken-green' : item.required ? 'text-chicken-red' : 'text-chicken-brown/35'}>
+                    {item.ok ? '✓' : item.required ? '✕' : '○'}
+                  </span>
+                  <span className={item.ok ? 'text-chicken-brown/70' : 'font-bold text-chicken-brown'}>
+                    {item.label}
+                    {item.required && !item.ok && <span className="ml-1 text-xs text-chicken-red">必填</span>}
+                    {item.hint && <span className="ml-1 text-xs font-normal text-chicken-brown/45">· {item.hint}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs leading-5 text-chicken-brown/45">
+              API Token / Secret 一律放後端（Cloud Functions），不在此設定；「測試發送」請於 LINE 內以官方帳號實測。
+            </p>
+          </div>
+
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             目前預設會先開啟網站中轉頁，避免未公開或設定錯誤的 LIFF 造成 404。若已確認 LIFF Channel、Endpoint URL、Scope 與官方帳號連動都正常，再勾選「使用 LIFF 自動綁定」。
             LINE API Token 仍必須放在後端或 Cloud Functions，不能放前端。
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存 LINE 設定</Button>
             <button onClick={handleValidateLine} className="btn-secondary min-h-[44px] whitespace-nowrap">
               驗證設定
             </button>
@@ -621,7 +679,7 @@ export default function SettingsView() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="客人聯絡入口" description="設定確認頁與訂位管理中心的一鍵撥電話、導航資訊。">
+      <SettingsSection sectionKey="contact" title="客人聯絡入口" description="設定確認頁與訂位管理中心的一鍵撥電話、導航資訊。">
         <div className="space-y-3">
           <Input
             label="店名"
@@ -662,29 +720,31 @@ export default function SettingsView() {
               placeholder="120.xxxxxx"
             />
           </div>
-          <div className="flex gap-2 items-center">
-            <Button onClick={handleSave} className="flex-1 min-h-[44px]">儲存聯絡入口</Button>
-          </div>
         </div>
       </SettingsSection>
 
       {/* Telegram 通知 + 備份 */}
-      <SettingsSection title="通知與備份" description="Telegram 事件推送與備份狀態。">
+      <SettingsSection sectionKey="telegram" title="通知與備份" description="Telegram 事件推送與備份狀態。">
         <TelegramSettings embedded />
       </SettingsSection>
 
-      <SettingsSection title="Firestore 資料同步" description="正式跨裝置資料來源；可手動上傳本機資料或重新拉取雲端資料。" defaultOpen>
+      <SettingsSection sectionKey="firestore" title="Firestore 資料同步" description="正式跨裝置資料來源；可手動上傳本機資料或重新拉取雲端資料。" badge={usingFirebase ? undefined : '本機模式'} defaultOpen>
         <div className="space-y-3">
+          {!usingFirebase && (
+            <div className="rounded-xl border border-chicken-brown/15 bg-chicken-brown/5 px-4 py-3 text-xs font-bold leading-5 text-chicken-brown/60">
+              目前未設定 Firebase（本機開發模式），雲端同步僅正式環境可用。設定 VITE_FIREBASE_* 並重新部署後才能上傳／拉取。
+            </div>
+          )}
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             狀態：<span className="font-black text-chicken-brown">{cloudStatus?.state || 'idle'}</span>
             {cloudStatus?.lastSyncAt && <span> · 最近同步 {new Date(cloudStatus.lastSyncAt).toLocaleString('zh-TW')}</span>}
             {cloudStatus?.error && <div className="mt-1 font-bold text-chicken-red">錯誤：{cloudStatus.error}</div>}
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Button disabled={cloudBusy} onClick={() => handleCloudSync('push')} className="w-full min-h-[44px]">
+            <Button disabled={cloudBusy || !usingFirebase} onClick={() => handleCloudSync('push')} className="w-full min-h-[44px]">
               {cloudBusy ? '同步中...' : '上傳本機資料到 Firestore'}
             </Button>
-            <button disabled={cloudBusy} onClick={() => handleCloudSync('pull')} className="btn-secondary min-h-[44px]">
+            <button disabled={cloudBusy || !usingFirebase} onClick={() => handleCloudSync('pull')} className="btn-secondary min-h-[44px] disabled:opacity-40">
               從 Firestore 重新整理
             </button>
           </div>
@@ -696,7 +756,7 @@ export default function SettingsView() {
 
       {/* 桌位佈局編輯（拖拉位置、新增/刪除桌、改容量）*/}
       {can('table.config') && (
-        <SettingsSection title="桌位佈局" description="拖拉桌位、調整容量與樓層。">
+        <SettingsSection sectionKey="layout" title="桌位佈局" description="拖拉桌位、調整容量與樓層。">
           <p className="text-xs text-chicken-brown/60 mb-3">
             打開全螢幕編輯器：拖拉移動桌位、調整容量與樓層、新增或刪除桌位。
             修改完按「儲存變更」才會生效。
@@ -709,13 +769,13 @@ export default function SettingsView() {
 
       {/* 桌位啟用/停用 — 簡單方格切換 */}
       {can('table.config') && (
-        <SettingsSection title="桌位啟用" description="停用桌位不會出現在現場營運頁，也不計入可訂位人數。">
+        <SettingsSection sectionKey="table-enable" title="桌位啟用" description="停用桌位不會出現在現場營運頁，也不計入可訂位人數。">
           <p className="text-xs text-chicken-brown/60 mb-3">點擊桌號可切換啟用 / 停用。停用的桌位不會出現在現場營運頁，也不計入可訂位人數。</p>
           <TableGrid />
         </SettingsSection>
       )}
 
-      <SettingsSection title="No-show 查詢" description="用電話快速查詢過往未到紀錄。">
+      <SettingsSection sectionKey="noshow" title="No-show 查詢" description="用電話快速查詢過往未到紀錄。">
         <div className="flex gap-2">
           <Input placeholder="輸入電話號碼" value={searchPhone} onChange={e => setSearchPhone(e.target.value)} inputMode="numeric" />
           <Button onClick={handleSearch} variant="secondary" className="whitespace-nowrap">查詢</Button>
@@ -728,9 +788,20 @@ export default function SettingsView() {
               <div className="space-y-2">
                 {searchResult.map(r => (
                   <div key={r.phone} className="bg-chicken-red/5 border border-chicken-red/20 rounded-xl p-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="font-mono font-bold text-chicken-brown">{r.phone}</span>
-                      <span className="badge bg-chicken-red text-white">⚠️ {r.count} 次</span>
+                      <div className="flex items-center gap-2">
+                        <span className="badge bg-chicken-red text-white">⚠️ {r.count} 次</span>
+                        {onOpenCustomer && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenCustomer(r.phone)}
+                            className="rounded-lg border border-chicken-brown/20 bg-white px-2.5 py-1 text-xs font-bold text-chicken-brown hover:bg-chicken-brown/5"
+                          >
+                            顧客檔 →
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="text-xs text-chicken-brown/60 mt-1">{r.dates.map(d => d.date).join(', ')}</div>
                   </div>
@@ -741,17 +812,17 @@ export default function SettingsView() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
+      <SettingsSection sectionKey="export" title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
         <ExportCenter />
       </SettingsSection>
 
       {can('staff.manage') && (
-        <SettingsSection title="管理員帳號" description="新增同仁的 Google 帳號即可登入後台；毋須重新部署。">
+        <SettingsSection sectionKey="staff" title="管理員帳號" description="新增同仁的 Google 帳號即可登入後台；毋須重新部署。">
           <StaffAdminSection />
         </SettingsSection>
       )}
 
-      <SettingsSection title="帳號" description="目前登入者與角色資訊。">
+      <SettingsSection sectionKey="account" title="帳號" description="目前登入者與角色資訊。">
         <div className="text-sm text-chicken-brown/70 mb-3">
           <div>已登入：<span className="font-mono font-bold text-chicken-brown">{user?.email}</span></div>
           <div className="text-xs text-chicken-brown/60 mt-1">角色：<span className="font-bold">{user?.roleLabel || '—'}</span></div>
@@ -762,9 +833,12 @@ export default function SettingsView() {
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
         雞王涮涮鍋訂位系統 v0.4 · Firestore 同步模式
       </p>
+      </div>{/* 內容欄 */}
+      </div>{/* flex gap-4 */}
 
+      {/* 桌位佈局編輯器 modal：掛在分類條件外，切換分類/開關皆不受影響 */}
       <LayoutEditor open={showLayoutEditor} onClose={() => setShowLayoutEditor(false)} />
-    </div>
+    </CategoryContext.Provider>
   )
 }
 
@@ -784,6 +858,50 @@ function readBannerFile(file) {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+// 首頁廣告單張卡片：Reorder.Item（右上握把拖曳排序）+ 圖上疊標題副標（前台預覽）+ 非 16:9 提示。
+function HeroBannerItem({ banner, index, total, setForm, removeBanner }) {
+  const controls = useDragControls()
+  const [ratioWarn, setRatioWarn] = useState(false)
+  const patch = (p) => setForm(f => ({ ...f, heroBanners: (f.heroBanners || []).map(b => b.id === banner.id ? { ...b, ...p } : b) }))
+  return (
+    <Reorder.Item value={banner} dragListener={false} dragControls={controls} className="overflow-hidden rounded-xl border border-chicken-brown/10 bg-white">
+      <div className="relative aspect-[16/9] bg-chicken-cream">
+        <img
+          src={banner.image}
+          alt={banner.title || `首頁廣告 ${index + 1}`}
+          className="h-full w-full object-cover"
+          onLoad={e => setRatioWarn(Math.abs((e.target.naturalWidth / e.target.naturalHeight) - 16 / 9) > 0.3)}
+        />
+        {/* 前台預覽：標題/副標疊在圖上（近似客人首頁 hero 呈現） */}
+        {(banner.title || banner.subtitle) && (
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3">
+            {banner.title && <div className="text-sm font-black text-white drop-shadow">{banner.title}</div>}
+            {banner.subtitle && <div className="text-xs text-white/90 drop-shadow">{banner.subtitle}</div>}
+          </div>
+        )}
+        {ratioWarn && (
+          <span className="absolute left-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[11px] font-bold text-white">⚠ 非 16:9，首頁可能被裁切</span>
+        )}
+        <button
+          type="button"
+          onPointerDown={e => controls.start(e)}
+          className="absolute right-2 top-2 cursor-grab touch-none rounded bg-black/40 px-2 py-1 text-xs font-bold text-white active:cursor-grabbing"
+          title="拖曳排序"
+          aria-label="拖曳排序"
+        >⠿</button>
+      </div>
+      <div className="space-y-2 p-3">
+        <Input label="標題" value={banner.title || ''} onChange={e => patch({ title: e.target.value })} placeholder="例：母親節限定套餐" />
+        <Input label="副標" value={banner.subtitle || ''} onChange={e => patch({ subtitle: e.target.value })} placeholder="例：限量供應，建議提前訂位" />
+        <div className="flex items-center justify-between text-xs text-chicken-brown/50">
+          <span>第 {index + 1} / {total} 張</span>
+          <button type="button" onClick={() => removeBanner(banner.id)} className="btn-danger !px-3 !py-1.5 text-xs">刪除</button>
+        </div>
+      </div>
+    </Reorder.Item>
+  )
 }
 
 // 場次（seating）編輯器：增刪場次、改名稱/起訖時間。寫回 form.seatings。
@@ -820,6 +938,7 @@ function SeatingsEditor({ form, setForm }) {
 // 關閉時段編輯器：選日期 → 整天公休 / 關閉整場次 / 關閉個別時段。寫回 form.closures。
 function ClosuresEditor({ form, setForm, bookings }) {
   const [date, setDate] = useState(todayStr())
+  const [monthAnchor, setMonthAnchor] = useState(() => todayStr().slice(0, 7)) // 'YYYY-MM'
   const closures = form.closures || { closedDates: [], closedSlots: {}, closedSeatings: {} }
   const seatings = Array.isArray(form.seatings) ? form.seatings : []
   const dayClosed = (closures.closedDates || []).includes(date)
@@ -844,12 +963,81 @@ function ClosuresEditor({ form, setForm, bookings }) {
   const orphanSlots = generateTimeSlots(form.openTime, form.closeTime, form.slotInterval)
     .filter(t => !seatingForSlot(form, t))
 
+  // === 月曆視覺 ===
+  const today = todayStr()
+  const closedDatesSet = new Set(closures.closedDates || [])
+  const dayStatus = (ds) => {
+    if (closedDatesSet.has(ds)) return 'full'
+    if ((closures.closedSeatings?.[ds]?.length) || (closures.closedSlots?.[ds]?.length)) return 'partial'
+    return null
+  }
+  const [yy, mm] = monthAnchor.split('-').map(Number)
+  const daysInMonth = new Date(yy, mm, 0).getDate()
+  const startDow = new Date(yy, mm - 1, 1).getDay()
+  const cells = []
+  for (let i = 0; i < startDow; i++) cells.push(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(`${yy}-${String(mm).padStart(2, '0')}-${String(d).padStart(2, '0')}`)
+  const shiftMonth = (delta) => {
+    const nm = new Date(yy, mm - 1 + delta, 1)
+    setMonthAnchor(`${nm.getFullYear()}-${String(nm.getMonth() + 1).padStart(2, '0')}`)
+  }
+
+  // 常用規則複製：把此日的關閉設定（整天/場次/時段）疊加到下週同一天（附加、不清除目標既有關閉）。
+  const copyToNextWeek = () => {
+    const nd = new Date(`${date}T00:00:00`); nd.setDate(nd.getDate() + 7)
+    const target = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}-${String(nd.getDate()).padStart(2, '0')}`
+    const closedDates = dayClosed ? [...new Set([...(closures.closedDates || []), target])] : (closures.closedDates || [])
+    const cs = { ...(closures.closedSeatings || {}) }; if (closedSeatingIds.length) cs[target] = [...new Set([...(cs[target] || []), ...closedSeatingIds])]
+    const csl = { ...(closures.closedSlots || {}) }; if (closedSlotList.length) csl[target] = [...new Set([...(csl[target] || []), ...closedSlotList])]
+    setClosures({ ...closures, closedDates, closedSeatings: cs, closedSlots: csl })
+    setMonthAnchor(target.slice(0, 7))
+    setDate(target)
+  }
+
   return (
     <div className="space-y-3">
+      {/* 月曆視覺：一眼看出哪些日子已關閉，點日期即選取 */}
+      <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <button type="button" onClick={() => shiftMonth(-1)} className="rounded-lg px-3 py-1 text-lg font-bold text-chicken-brown/60 hover:bg-chicken-brown/5">‹</button>
+          <span className="text-sm font-black text-chicken-brown">{yy} 年 {mm} 月</span>
+          <button type="button" onClick={() => shiftMonth(1)} className="rounded-lg px-3 py-1 text-lg font-bold text-chicken-brown/60 hover:bg-chicken-brown/5">›</button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-chicken-brown/40">
+          {['日', '一', '二', '三', '四', '五', '六'].map(w => <div key={w}>{w}</div>)}
+        </div>
+        <div className="mt-1 grid grid-cols-7 gap-1">
+          {cells.map((ds, i) => {
+            if (!ds) return <div key={`e${i}`} />
+            const st = dayStatus(ds)
+            const past = ds < today
+            return (
+              <button
+                key={ds}
+                type="button"
+                disabled={past}
+                onClick={() => setDate(ds)}
+                className={`relative aspect-square rounded-lg text-xs font-bold transition disabled:opacity-40 ${
+                  date === ds ? 'ring-2 ring-chicken-red ' : ''
+                }${st === 'full' ? 'bg-chicken-red/15 text-chicken-red' : st === 'partial' ? 'bg-amber-100 text-amber-700' : 'text-chicken-brown hover:bg-chicken-brown/5'}`}
+              >
+                {Number(ds.slice(8))}
+                {ds === today && <span className="absolute inset-x-0 bottom-1 mx-auto h-1 w-1 rounded-full bg-chicken-brown/60" />}
+              </button>
+            )
+          })}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-chicken-brown/50">
+          <span><span className="mr-1 inline-block h-2 w-2 rounded bg-chicken-red/40 align-middle" />整天公休</span>
+          <span><span className="mr-1 inline-block h-2 w-2 rounded bg-amber-300 align-middle" />部分關閉</span>
+          <span><span className="mr-1 inline-block h-1 w-1 rounded-full bg-chicken-brown/60 align-middle" />今天</span>
+        </div>
+      </div>
+
       <div className="flex items-end gap-2 flex-wrap">
         <div>
           <span className="label !mb-1 block">選擇日期</span>
-          <input type="date" value={date} min={todayStr()} onChange={e => setDate(e.target.value)}
+          <input type="date" value={date} min={todayStr()} onChange={e => { setDate(e.target.value); setMonthAnchor(e.target.value.slice(0, 7)) }}
             className="rounded-xl border-2 border-chicken-brown/15 px-3 py-2 text-sm font-bold text-chicken-brown" />
         </div>
         <label className="flex items-center gap-2 min-h-[44px] rounded-xl border-2 px-3 font-bold text-sm cursor-pointer"
@@ -857,12 +1045,28 @@ function ClosuresEditor({ form, setForm, bookings }) {
           <input type="checkbox" checked={dayClosed} onChange={toggleDay} />
           🚫 整天公休
         </label>
+        {(dayClosed || closedSeatingIds.length > 0 || closedSlotList.length > 0) && (
+          <button type="button" onClick={copyToNextWeek} className="btn-secondary min-h-[44px] whitespace-nowrap text-sm">
+            複製到下週同一天
+          </button>
+        )}
       </div>
 
       {affected.length > 0 && (
-        <div className="rounded-xl border border-chicken-red/20 bg-chicken-red/5 px-3 py-2 text-xs leading-5 text-chicken-brown/70">
-          ⚠️ 此日期已有 <span className="font-black text-chicken-red">{affected.length}</span> 筆已確認訂位。關閉只會停止「新訂位」，<b>不會自動取消既有訂位</b>，必要時請另行通知客人。
-        </div>
+        <details className="rounded-xl border border-chicken-red/20 bg-chicken-red/5 px-3 py-2 text-xs leading-5 text-chicken-brown/70">
+          <summary className="cursor-pointer list-none font-bold">
+            ⚠️ 此日期已有 <span className="text-chicken-red">{affected.length}</span> 筆已確認訂位（點擊展開名單）
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {affected.map(b => (
+              <li key={b.id} className="flex flex-wrap justify-between gap-x-2 border-t border-chicken-red/10 pt-1">
+                <span className="font-bold text-chicken-brown">{b.timeSlot} · {b.name}</span>
+                <span className="font-mono text-chicken-brown/60">{b.phone} · {b.guests} 位</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 font-bold text-chicken-brown/60">下一步：關閉只停「新訂位」、<b>不會自動取消</b>上列既有訂位；請逐一以電話 / LINE 通知客人改期或取消。</p>
+        </details>
       )}
 
       {dayClosed ? (
@@ -920,8 +1124,20 @@ function ClosuresEditor({ form, setForm, bookings }) {
   )
 }
 
-// C11：LINE 端點分組區塊（基本 / LIFF / 後端端點）
-function FieldGroup({ title, hint, children }) {
+// C11：LINE 端點分組區塊（基本 / LIFF / 後端端點）。collapsible → 進階群組預設收合。
+function FieldGroup({ title, hint, children, collapsible = false }) {
+  if (collapsible) {
+    return (
+      <details className="group rounded-xl border border-chicken-brown/10 bg-white p-3">
+        <summary className="flex cursor-pointer list-none items-baseline gap-2">
+          <h3 className="text-sm font-black text-chicken-brown">{title}</h3>
+          {hint && <span className="text-xs leading-5 text-chicken-brown/50">{hint}</span>}
+          <span className="ml-auto text-xs font-black text-chicken-brown/40 group-open:rotate-180">⌄</span>
+        </summary>
+        <div className="mt-2 space-y-3">{children}</div>
+      </details>
+    )
+  }
   return (
     <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
       <div className="mb-2 flex items-baseline gap-2">
@@ -956,13 +1172,21 @@ function DefaultBadge({ current, fallback, unit = '' }) {
   )
 }
 
-function SettingsSection({ title, description, children, defaultOpen = false, danger = false }) {
+function SettingsSection({ title, description, children, defaultOpen = false, danger = false, sectionKey, summary, badge }) {
+  // 依目前分類自我隱藏：不屬當前分類則不渲染（隱藏時 unmount，但 form 在父層 → 編輯不遺失）。
+  const activeSections = useContext(CategoryContext)
+  if (sectionKey && !activeSections.includes(sectionKey)) return null
   return (
     <details className={`card group ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`} open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-        <div>
-          <h2 className={`font-black ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className={`font-black ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
+            {badge && <span className="badge bg-chicken-brown/10 text-chicken-brown/70">{badge}</span>}
+          </div>
           {description && <p className="mt-0.5 text-xs text-chicken-brown/55">{description}</p>}
+          {/* 收合時顯示現況摘要，展開後隱藏（避免與內容重複） */}
+          {summary && <p className="mt-1 text-xs font-bold text-chicken-brown/70 group-open:hidden">{summary}</p>}
         </div>
         <span className="rounded-full bg-chicken-brown/5 px-2 py-1 text-xs font-black text-chicken-brown/45 group-open:rotate-180">⌄</span>
       </summary>
