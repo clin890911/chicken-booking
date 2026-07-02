@@ -33,8 +33,8 @@ describe('TableShape 渲染', () => {
     const html = wrapSvg(<TableShape table={baseTable()} zoneColor="#ff0000" onClick={() => {}} />)
     expect(html).toContain('<circle')
     expect(html).toContain('#ff0000')
-    // status=vacant 仍是白底（語義不回退）
-    expect(html).toContain('fill="#ffffff"')
+    // status=vacant 現為醒目綠底（2026-07 配色反轉：可坐醒目、佔用降噪），分區色仍只在角點不取代填色
+    expect(html).toContain('fill="#86efac"')
   })
 
   it('自由尺寸（高瘦桌）不丟例外，仍渲染桌號', () => {

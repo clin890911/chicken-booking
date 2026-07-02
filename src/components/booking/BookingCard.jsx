@@ -9,7 +9,7 @@ import { bookingDayKind, todayStr } from '../../utils/timeSlots'
 
 // 狀態色採品牌語義：待確認=琥珀(需處理) / 待到=綠(已就緒) / 用餐中=橙(進行中)
 // 文字皆採深色確保可讀（不用低對比的純品牌色當文字）
-const STATUS_MAP = {
+export const STATUS_MAP = {
   pending:   { label: '待確認', color: 'bg-amber-100 text-amber-800' },
   confirmed: { label: '待到',  color: 'bg-emerald-50 text-emerald-700' },
   arrived:   { label: '用餐中', color: 'bg-orange-100 text-orange-700' },
@@ -18,7 +18,7 @@ const STATUS_MAP = {
   cancelled: { label: '已取消', color: 'bg-chicken-brown/5 text-chicken-brown/40' },
 }
 
-const SOURCE_MAP = {
+export const SOURCE_MAP = {
   online: '🌐 線上',
   phone:  '📞 電話',
   walkin: '🚶 現場',

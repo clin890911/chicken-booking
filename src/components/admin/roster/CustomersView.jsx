@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Card, Input, Modal, Textarea, Select, EmptyState } from '../../ui'
+import CustomerDetailModal from './CustomerDetailModal'
 import { useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 import { getNoshowCount, noshowRisk } from '../../../services/bookingService'
@@ -27,9 +28,10 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
-export default function CustomersView({ initialQuery }) {
+export default function CustomersView({ initialQuery, onAddBooking }) {
   const { customers, bookings, updateCustomer, setCustomerBlacklist, setCustomerVip } = useBooking()
   const [query, setQuery] = useState(initialQuery || '')
+  const [detail, setDetail] = useState(null)
 
   // 從他頁（如設定→No-show 查詢）帶入電話時，seed 搜尋框以聚焦該顧客。
   useEffect(() => {
@@ -163,9 +165,10 @@ export default function CustomersView({ initialQuery }) {
             return (
               <Card key={c.phone} className={`${c.blacklisted ? 'border-chicken-red/40 !border-2' : ''} ${c.archived ? 'opacity-70' : ''}`}>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setDetail(c)} role="button" tabIndex={0} title="查看來訪記錄">
                     <div className="flex items-baseline gap-2 flex-wrap">
                       <span className="text-base font-bold">{c.name || '未填姓名'}</span>
+                      <span className="text-chicken-brown/30 text-xs">▸ 記錄</span>
                       <span className="text-sm text-chicken-brown/60">📱 {c.phone}</span>
                       {c.archived && (
                         <span className="text-[10px] font-bold bg-chicken-brown/10 text-chicken-brown/60 px-2 py-0.5 rounded-full">已歸檔</span>
@@ -306,6 +309,14 @@ export default function CustomersView({ initialQuery }) {
           placeholder="例：多次 no-show、惡意騷擾、損壞設備"
         />
       </Modal>
+
+      {/* 顧客詳情 + 來訪記錄 */}
+      <CustomerDetailModal
+        customer={detail}
+        onClose={() => setDetail(null)}
+        onAddBooking={(c) => { setDetail(null); onAddBooking?.(c) }}
+        onEdit={(c) => { setDetail(null); openEdit(c) }}
+      />
     </div>
   )
 }

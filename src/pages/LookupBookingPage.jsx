@@ -28,6 +28,11 @@ export default function LookupBookingPage() {
 
   const submit = async (e) => {
     e.preventDefault()
+    // 前端先擋（與後端同口徑）：code 模式需訂位編號 + 電話末 4 碼，避免無謂的往返與 400。
+    if (mode === 'code' && (!bookingId.trim() || phoneTail.trim().length < 4)) {
+      setError('請輸入訂位編號與電話末 4 碼')
+      return
+    }
     setBusy(true)
     setError('')
     setSearched(false)
@@ -67,7 +72,7 @@ export default function LookupBookingPage() {
             <div className="text-xs font-bold opacity-85">雞王涮涮鍋</div>
             <h1 className="mt-1 text-2xl font-black">找回我的訂位</h1>
             <p className="mt-2 text-sm font-bold leading-6 opacity-85">
-              可用訂位姓氏與電話，或訂位編號與電話末碼查詢。查到後仍需電話驗證才能修改。
+              可用訂位姓氏與電話，或訂位編號與電話末 4 碼查詢。查到後仍需電話驗證才能修改。
             </p>
           </div>
 
@@ -97,7 +102,7 @@ export default function LookupBookingPage() {
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 <Input label="訂位編號" value={bookingId} onChange={e => setBookingId(e.target.value)} placeholder="例：Bmov..." />
-                <Input label="電話末 3 或 4 碼" inputMode="numeric" maxLength={4} value={phoneTail} onChange={e => setPhoneTail(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="例：678" />
+                <Input label="電話末 4 碼" inputMode="numeric" maxLength={4} value={phoneTail} onChange={e => setPhoneTail(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="例：5678" />
               </div>
             )}
 

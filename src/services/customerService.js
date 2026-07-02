@@ -16,7 +16,7 @@ function write(map) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
 }
 
-function normalize(phone) {
+export function normalize(phone) {
   // 以「只留數字」當主鍵，與 utils/validation.isValidTwPhone 一致；
   // 確保同一電話不論輸入時帶空白/連字號/括號/點號都對應同一顧客檔（正確去重）。
   return String(phone || '').replace(/\D/g, '')

@@ -10,7 +10,7 @@ const SUB = [
 // 名冊：顧客檔（VIP/黑名單）＋ 旅行社/導遊（含歷史團體與業績排名）。
 // 兩個子視圖都自取 context，容器只負責子籤切換。
 // pendingPhone：他頁（設定→No-show）帶入電話 → 切到顧客子籤並 seed 搜尋，消費後回呼清除。
-export default function RosterView({ pendingPhone, onPendingConsumed }) {
+export default function RosterView({ pendingPhone, onPendingConsumed, onAddBooking, onGoPlanning }) {
   const [sub, setSub] = useState('customers')
   const [seedQuery, setSeedQuery] = useState('')
 
@@ -39,8 +39,8 @@ export default function RosterView({ pendingPhone, onPendingConsumed }) {
           </button>
         ))}
       </div>
-      {sub === 'customers' && <CustomersView initialQuery={seedQuery} />}
-      {sub === 'agencies' && <AgencyDirectoryView />}
+      {sub === 'customers' && <CustomersView initialQuery={seedQuery} onAddBooking={onAddBooking} />}
+      {sub === 'agencies' && <AgencyDirectoryView onGoPlanning={onGoPlanning} />}
     </div>
   )
 }

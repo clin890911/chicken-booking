@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import MonthCalendar from '../booking/MonthCalendar'
 import TimeSlotPicker from '../booking/TimeSlotPicker'
 import { Card, Input, Textarea, Button } from '../ui'
+import GuestCountField from './GuestCountField'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
@@ -28,18 +29,15 @@ const NOTE_OPTIONS = [
   { key: 'mobility', label: '♿ 行動不便' },
 ]
 
-const QUICK_GUESTS = [1, 2, 3, 4, 5, 6, 7, 8]
-
-export default function AddBookingView({ onCreated, onAssignTable }) {
+export default function AddBookingView({ onCreated, onAssignTable, initial }) {
   const { bookings, tables, groupReservations, settings, addBooking, suggestTable } = useBooking()
   const { user } = useAuth()
   const toast = useToast()
 
-  const [phone, setPhone] = useState('')
-  const [source, setSource] = useState('phone')
-  const [name, setName] = useState('')
+  const [phone, setPhone] = useState(initial?.phone || '')
+  const [source, setSource] = useState(initial?.source || 'phone')
+  const [name, setName] = useState(initial?.name || '')
   const [guests, setGuests] = useState(2)
-  const [moreGuests, setMoreGuests] = useState(false)
   const [date, setDate] = useState(todayStr())
   const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState('')
@@ -78,6 +76,15 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
 
   // 換日重設時段
   useEffect(() => { setTimeSlot('') }, [date])
+
+  // 從名冊「新增訂位」帶入預填：initial.seq 變更時重帶（AddBookingView 已掛載時也生效）。
+  useEffect(() => {
+    if (!initial) return
+    setPhone(initial.phone || '')
+    setName(initial.name || '')
+    if (initial.source) setSource(initial.source)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial?.seq])
 
   // 缺漏清單：底部黏性列即時顯示「還差哪幾欄」，點 pill 捲到該欄
   const missing = useMemo(() => [
@@ -129,7 +136,7 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
           { label: date === todayStr() ? '指派桌' : '預配桌位', onClick: () => onAssignTable?.(b) })
       }
       // 重設（保留 source）
-      setPhone(''); setName(''); setGuests(2); setMoreGuests(false); setTimeSlot('')
+      setPhone(''); setName(''); setGuests(2); setTimeSlot('')
       setNotes({ pet: false, child: false, mobility: false, text: '' })
       setAutoAssign(true); setAttempted(false); setShowCalendar(false)
       onCreated?.(b)
@@ -210,37 +217,13 @@ export default function AddBookingView({ onCreated, onAssignTable }) {
       <Card>
         <h2 className="font-bold text-chicken-brown mb-3">🍲 用餐資訊</h2>
         <div className="space-y-4">
-          {/* 人數：1–8 快選 + 更多 */}
+          {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
           <div ref={guestsRef}>
-            <label className="label">人數</label>
-            <div className="flex gap-1.5 flex-wrap items-center">
-              {QUICK_GUESTS.map(n => (
-                <button key={n} type="button" onClick={() => { setGuests(n); setMoreGuests(false) }}
-                  className={`w-11 h-11 rounded-xl border-2 text-sm font-black tabular-nums transition-all ${
-                    guests === n && !moreGuests
-                      ? 'border-chicken-red bg-chicken-red text-white'
-                      : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
-                  {n}
-                </button>
-              ))}
-              {moreGuests || guests > 8 ? (
-                <select
-                  value={guests}
-                  onChange={e => setGuests(Number(e.target.value))}
-                  className="input w-28 !py-2.5 font-bold"
-                >
-                  {Array.from({ length: 22 }, (_, i) => i + 9).map(n => (
-                    <option key={n} value={n}>{n} 位</option>
-                  ))}
-                </select>
-              ) : (
-                <button type="button" onClick={() => { setMoreGuests(true); setGuests(9) }}
-                  className="px-3 h-11 rounded-xl border-2 border-chicken-brown/15 bg-white text-sm font-bold text-chicken-brown/70">
-                  9+ ▾
-                </button>
-              )}
-            </div>
-            <p className="text-xs text-chicken-brown/55 mt-1">已選：{guests} 位{guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}</p>
+            <GuestCountField
+              value={guests}
+              onChange={setGuests}
+              hint={`已選：${guests} 位${guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}`}
+            />
           </div>
 
           {/* 日期：今天/明天/後天 chips + 其他日期（展開緊湊月曆） */}
