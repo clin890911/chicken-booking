@@ -57,7 +57,7 @@ test('桌被佔 → 中文錯誤 + 改派模式 → 點替代桌整梯入座', a
   await expect(page.getByText(/已入座 101/)).toBeVisible()
 
   // 團體梯次入座 → 失敗（101 用餐中，中文）→ 自動進入改派模式
-  await page.getByRole('button', { name: /今日團體/ }).click()
+  await page.getByRole('button', { name: /^團體/ }).click()
   await page.getByRole('button', { name: /梯次入座/ }).first().click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
   await expect(page.getByText(/101（用餐中）被佔用/)).toBeVisible()
@@ -71,7 +71,7 @@ test('桌被佔 → 中文錯誤 + 改派模式 → 點替代桌整梯入座', a
 
   // 成功後抽屜聚焦新桌 → ESC 關閉抽屜回側欄，團卡顯示新桌號、可離席
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: /今日團體/ }).click()
+  await page.getByRole('button', { name: /^團體/ }).click()
   await expect(page.getByRole('button', { name: '103', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: /梯次離席/ })).toBeVisible()
 })
@@ -80,7 +80,7 @@ test('整團完成 → 卡片移入「已完成」摺疊區、不可再入座、
   await login(page)
 
   // 入座 → 整團完成
-  await page.getByRole('button', { name: /今日團體/ }).click()
+  await page.getByRole('button', { name: /^團體/ }).click()
   await page.getByRole('button', { name: /梯次入座/ }).first().click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
   await expect(page.getByText(/第一梯 已入座/)).toBeVisible()
@@ -102,6 +102,6 @@ test('整團完成 → 卡片移入「已完成」摺疊區、不可再入座、
   await expect(page.locator('button[title="回傳單"]')).toBeVisible()
 
   // 今日團體 badge 歸零（籤仍在）
-  const groupTab = page.getByRole('button', { name: /今日團體/ })
+  const groupTab = page.getByRole('button', { name: /^團體/ })
   await expect(groupTab).toBeVisible()
 })

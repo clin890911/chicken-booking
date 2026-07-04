@@ -40,6 +40,7 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
           <button
             key={n}
             type="button"
+            aria-label={`${n} 位`}
             onClick={() => { setMore(false); onChange(n) }}
             className={`w-11 h-11 rounded-xl border-2 text-base font-black tabular-nums transition-all ${
               value === n && !showInput ? chipActive : chipIdle}`}

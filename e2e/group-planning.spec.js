@@ -190,7 +190,7 @@ test('規劃：當日總覽「新增散客」快速表單 → 落地當日散客
   await expect(page.getByText(/新增散客 ·/)).toBeVisible()
   const dialog = page.locator('.fixed.inset-0.z-50')
   await page.getByPlaceholder('王小姐').fill('規劃散客')
-  await dialog.getByRole('button', { name: '4', exact: true }).click()
+  await dialog.getByRole('button', { name: '4 位', exact: true }).click()
   await dialog.getByRole('button', { name: /11:30/ }).first().click()
   await page.getByRole('button', { name: /確認新增/ }).click()
 

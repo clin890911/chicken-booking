@@ -646,6 +646,7 @@ export const guestLookupBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
 export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
   if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
+    await enforceRateLimit(req, 'guestGetAvailability')
     const input = req.method === 'GET' ? req.query : req.body || {}
     const date = normalizeDateInput(input.date)
     const settingsSnap = await db.collection('settings').doc('main').get()
@@ -681,8 +682,9 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
 
     return res.json({ ok: true, date, slots, settings: publicStoreSettings(settings) })
   } catch (err) {
-    console.error('guestGetAvailability failed:', err)
-    return res.status(500).json({ ok: false, error: err.message || 'availability-failed' })
+    const code = Number(err?.status) || 500
+    if (code >= 500) console.error('guestGetAvailability failed:', err)
+    return res.status(code).json({ ok: false, error: err.message || 'availability-failed' })
   }
 })
 
@@ -1269,7 +1271,7 @@ export const lineGetBooking = onRequest({ cors: true, invoker: 'public' }, async
       })
     }
     const data = snap.data()
-    if (!data?.manageToken || data.manageToken !== token) {
+    if (!data?.manageToken || !safeTokenEqual(data.manageToken, token)) {
       return res.status(403).json({ ok: false, error: 'invalid-token' })
     }
 
@@ -1628,9 +1630,9 @@ function upsertOps(name, items = [], idKey = 'id') {
   items.forEach(item => {
     const id = String(item?.[idKey] || item?.id || '').trim()
     if (!id) return
-    const normalized = name === COLLECTIONS.bookings
-      ? normalizeBookingForFirestore(item)
-      : name === COLLECTIONS.customers
+    // bookings 不走此泛型路徑：adminPushData 對 bookings 特判走 buildBookingUpsertData
+    // 欄位級白名單（server-owned 欄位永不取自客戶端），此處不得再出現信任客戶端 token 的分支。
+    const normalized = name === COLLECTIONS.customers
       ? { ...item, phoneDigits: digits(item.phone), updatedAt: item.updatedAt || new Date().toISOString() }
       : { ...item, updatedAt: item.updatedAt || new Date().toISOString() }
     ops.push({ ref: db.collection(name).doc(id), data: normalized })
@@ -1655,32 +1657,6 @@ async function commitInChunks(ops, chunkSize = 450) {
       else batch.set(op.ref, op.data, { merge: true })
     })
     await batch.commit()
-  }
-}
-
-function normalizeBookingForFirestore(booking = {}) {
-  const id = String(booking.id || '').trim()
-  return {
-    assignedTableId: null,
-    extraTableIds: [],
-    lineUserId: null,
-    manageToken: booking.manageToken || booking.token || createServerToken(),
-    lastGuestEditAt: null,
-    guestEditCount: 0,
-    guestEditHistory: [],
-    cancellationReason: null,
-    status: 'confirmed',
-    source: 'online',
-    notes: {},
-    ...booking,
-    id,
-    guests: Number(booking.guests) || 1,
-    // 大組併桌的額外桌：確保是字串陣列（與前端 bookingService 成對；缺欄位的舊資料 → []）
-    extraTableIds: Array.isArray(booking.extraTableIds) ? booking.extraTableIds.map(String) : [],
-    phoneDigits: digits(booking.phone),
-    manageToken: booking.manageToken || booking.token || createServerToken(),
-    updatedAt: booking.updatedAt || new Date().toISOString(),
-    createdAt: booking.createdAt || new Date().toISOString(),
   }
 }
 
@@ -1880,13 +1856,19 @@ const RATE_LIMITS = {
   guestLookupBookingPerBooking: { limit: 5, windowMs: 10 * 60 * 1000 },     // 每訂位（跨 IP 全域，擋換 IP 暴力同一訂位末碼）
   guestLookupBookingPerPhone: { limit: 10, windowMs: 10 * 60 * 1000 },      // 每電話（擋對已知號碼猜姓氏/末碼）
   guestCreateBooking: { limit: 20, windowMs: 10 * 60 * 1000 },
+  // per-IP：訂位頁「找最近可訂日」單次點擊最多連查 maxDaysAhead（可到 60）天，
+  // 且行動網路 CGNAT 多人共用 IP——上限放很寬（平均 1 req/s）只擋無腦灌爆，精細防線待 App Check。
+  guestGetAvailability: { limit: 600, windowMs: 10 * 60 * 1000 },
   lineMyBookings: { limit: 30, windowMs: 10 * 60 * 1000 },      // per-IP（驗證前先擋）
   lineMyBookingsUser: { limit: 20, windowMs: 10 * 60 * 1000 },  // per-LINE-userId（驗證後）
 }
 
 function clientIp(req) {
-  const xff = String(req.get('x-forwarded-for') || '').split(',')[0].trim()
-  return xff || req.ip || 'unknown'
+  // Cloud Functions v2（Cloud Run 直連）由 Google 前端把「真實來源 IP」附加在
+  // X-Forwarded-For 的最後一個；攻擊者自帶的假 XFF 只會排在前面。
+  // 取第一個會被偽造 header 繞過 per-IP 節流，必須取最後一個。
+  const parts = String(req.get('x-forwarded-for') || '').split(',').map(s => s.trim()).filter(Boolean)
+  return parts[parts.length - 1] || req.ip || 'unknown'
 }
 
 // 超限時丟出 429；節流器自身錯誤時「放行」(fail-open)，避免節流機制本身造成服務中斷。
