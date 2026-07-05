@@ -36,12 +36,15 @@ export default function BookingPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState({})
 
-  // LINE-first：客人從 LINE rich menu（LIFF 內）開本頁時靜默取得身分，
-  // 訂位送出即綁定＋立即收到確認卡。外部瀏覽器/未登入 → null，不影響任何流程。
-  const lineIdentity = useLiffIdentity(localSettings)
-
   // 可訂時段與公開店家設定，全部由後端 guestGetAvailability 提供（不含任何顧客個資）。
   const [settings, setSettings] = useState(localSettings)
+
+  // LINE-first：客人從 LINE rich menu（LIFF 內）開本頁時靜默取得身分，
+  // 訂位送出即綁定＋立即收到確認卡。外部瀏覽器/未登入 → null，不影響任何流程。
+  // ★ 必須吃合併了後端公開設定的 settings（非 localSettings）：客人（未登入）拿不到
+  //   Firestore settings，lineUseLiff/lineLiffId 全靠 guestGetAvailability 下發；
+  //   hook 對「settings 晚到」安全——無 liffId 時 return 且不消耗 runRef，之後只跑一次。
+  const lineIdentity = useLiffIdentity(settings)
   const [serverSlots, setServerSlots] = useState([])
   const [slotsLoading, setSlotsLoading] = useState(true)
   const [slotsError, setSlotsError] = useState('')

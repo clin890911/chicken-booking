@@ -6,6 +6,7 @@ import { Card } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import * as bookingService from '../services/bookingService'
 import { decodeLinePayload, fetchLineBooking, lineLoginStartUrl, lineOfficialUrl } from '../services/lineService'
+import { useLineAuthorizeUrl } from '../hooks/useLineAuthorizeUrl'
 import { dayLabel } from '../utils/timeSlots'
 
 // LINE 綁定結果頁。綁定本體已改由「LINE Login 網頁授權」完成（ConfirmPage CTA → 後端
@@ -58,11 +59,16 @@ export default function LineBindPage() {
     })
   }, [booking, bookingId, token, settings])
 
+  // 直達授權預取：token 不符不預取（維持既有守門）、已綁定成功（bound）不預取。
+  // 預取沒回來/失敗 → 退回舊 302 路（lineLoginStart GET），保底不壞。
+  const tokenMismatch = !!(token && booking?.manageToken && token !== booking.manageToken)
+  const authorizeUrl = useLineAuthorizeUrl(lineSettings, tokenMismatch ? null : booking, !bound)
   const startUrl = useMemo(() => {
     if (!booking?.id) return ''
-    if (token && booking.manageToken && token !== booking.manageToken) return ''
+    if (tokenMismatch) return ''
+    if (authorizeUrl) return authorizeUrl
     try { return lineLoginStartUrl(lineSettings, booking) } catch { return '' }
-  }, [booking, token, lineSettings])
+  }, [booking, tokenMismatch, authorizeUrl, lineSettings])
 
   // 狀態：err > bound（成功 / 待加好友）> ready（入口）> error（缺資料）
   const state = errCode

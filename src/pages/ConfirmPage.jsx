@@ -7,6 +7,7 @@ import { copyText } from '../utils/clipboard'
 import { Card, Button, Badge } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import { lineLoginStartUrl, lineOfficialUrl } from '../services/lineService'
+import { useLineAuthorizeUrl } from '../hooks/useLineAuthorizeUrl'
 import { guestGetBooking } from '../services/cloudDataService'
 
 export default function ConfirmPage() {
@@ -79,10 +80,15 @@ export default function ConfirmPage() {
   }, [b])
   const lineOfficialName = lineSettings.lineOfficialName || 'LINE 官方帳號'
   const lineFriendUrl = lineOfficialUrl(lineSettings)
+  // 直達授權預取：CTA href 直指 access.line.me 才能觸發 Universal Link 直跳 LINE app
+  // （經後端 302 中轉會掉到帳密網頁表單）。已綁定/待加好友時不預取。
+  const authorizeUrl = useLineAuthorizeUrl(lineSettings, b, !!b && !b.lineUserId && !b.linePushBlocked)
   // 這兩個 URL 在 render 階段計算；任何例外（如異常日期）都不該讓整頁白屏，故 try/catch 後退成空字串。
+  // 預取沒回來/失敗 → 退回舊 302 路（lineLoginStart GET），保底不壞。
   const lineReceiveUrl = useMemo(() => {
+    if (authorizeUrl) return authorizeUrl
     try { return b ? lineLoginStartUrl(lineSettings, b) : '' } catch { return '' }
-  }, [b, lineSettings])
+  }, [authorizeUrl, b, lineSettings])
   const calendarUrl = useMemo(() => {
     try { return b ? googleCalendarUrl(b, settings) : '' } catch { return '' }
   }, [b, settings])

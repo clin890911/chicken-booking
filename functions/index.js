@@ -1110,17 +1110,28 @@ async function fetchLineFriendFlag(accessToken) {
   }
 }
 
-// LINE Login 綁定入口：驗證訂位後寫一次性 state，302 導去 LINE 授權頁（取代 LIFF 自動綁定）。
-// 純伺服器重導，不依賴 client SDK，根治「一直載入」。
-export const lineLoginStart = onRequest({ invoker: 'public' }, async (req, res) => {
-  const bookingId = String(req.query.bookingId || '')
-  const token = String(req.query.token || '')
+// LINE Login 綁定入口，依 HTTP method 分流：
+// GET ＝驗證訂位後寫一次性 state，302 導去 LINE 授權頁（舊路徑，永久保留：已送出的
+//       連結與前端預取失敗的 fallback 都靠它）。
+// POST＝prepare 模式：同樣驗證與寫 state，但回 JSON { authorizeUrl } 給前端 render 成
+//       <a href> 直達 access.line.me——使用者手勢的 top-level 導航才會觸發 iOS
+//       Universal Link 直跳 LINE app 一鍵授權；經本端點 302 中轉會讓 Universal Link
+//       不觸發、掉到 email/密碼網頁登入表單（LINE 官方文件證實）。
+export const lineLoginStart = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
+  const isPrepare = req.method === 'POST'
+  const bookingId = String((isPrepare ? req.body?.bookingId : req.query.bookingId) || '')
+  const token = String((isPrepare ? req.body?.token : req.query.token) || '')
   try {
+    // 節流：state doc 由未驗證請求寫入，雙層設限（per-IP + per-booking 擋跨 IP 灌爆）。
+    await enforceRateLimit(req, 'lineLoginPrepare')
+    if (bookingId) await enforceRateLimit(req, 'lineLoginPreparePerBooking', `booking:${bookingId}`)
+
     const settingsSnap = await db.collection('settings').doc('main').get()
     const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
     const channelId = settings.lineLoginChannelId
     const callbackUrl = settings.lineLoginCallbackUrl
     const fail = (err) => {
+      if (isPrepare) return res.status(400).json({ ok: false, error: err })
       const dest = buildBindResultUrl(settings.publicSiteUrl, { bookingId, token, bound: 0, err })
       return dest ? res.redirect(302, dest) : res.status(400).send(`line-login-start: ${err}`)
     }
@@ -1135,16 +1146,22 @@ export const lineLoginStart = onRequest({ invoker: 'public' }, async (req, res) 
     }
 
     const state = createServerToken()
+    const expiresAt = new Date(Date.now() + LINE_LOGIN_STATE_TTL_MS).toISOString()
     await db.collection('lineLoginStates').doc(state).set({
       bookingId: authBooking.id,
       manageToken: authBooking.manageToken,
       createdAt: FieldValue.serverTimestamp(),
-      expiresAt: new Date(Date.now() + LINE_LOGIN_STATE_TTL_MS).toISOString(),
+      expiresAt,
     })
-    return res.redirect(302, buildAuthorizeUrl({ channelId, redirectUri: callbackUrl, state }))
+    const authorizeUrl = buildAuthorizeUrl({ channelId, redirectUri: callbackUrl, state })
+    if (isPrepare) return res.json({ ok: true, authorizeUrl, expiresAt })
+    return res.redirect(302, authorizeUrl)
   } catch (err) {
-    console.error('lineLoginStart failed:', err)
-    return res.status(500).send('line-login-start-failed')
+    const code = err.status === 429 ? 429 : 500
+    if (code >= 500) console.error('lineLoginStart failed:', err)
+    return isPrepare
+      ? res.status(code).json({ ok: false, error: code === 429 ? 'rate-limited' : 'line-login-start-failed' })
+      : res.status(code).send(code === 429 ? 'line-login-start: rate-limited' : 'line-login-start-failed')
   }
 })
 
@@ -1861,6 +1878,10 @@ const RATE_LIMITS = {
   guestGetAvailability: { limit: 600, windowMs: 10 * 60 * 1000 },
   lineMyBookings: { limit: 30, windowMs: 10 * 60 * 1000 },      // per-IP（驗證前先擋）
   lineMyBookingsUser: { limit: 20, windowMs: 10 * 60 * 1000 },  // per-LINE-userId（驗證後）
+  // 綁定入口（GET 302 與 POST prepare 共用）：每次呼叫都寫一顆 lineLoginStates doc，
+  // 必須雙層設限；前端預取節奏（掛載一次＋每 8 分鐘刷新）遠低於限額。
+  lineLoginPrepare: { limit: 30, windowMs: 10 * 60 * 1000 },            // per-IP
+  lineLoginPreparePerBooking: { limit: 10, windowMs: 10 * 60 * 1000 },  // 每訂位（跨 IP 全域）
 }
 
 function clientIp(req) {
@@ -2033,6 +2054,10 @@ function publicStoreSettings(settings = {}) {
     lineOfficialUrl: settings.lineOfficialUrl,
     lineOfficialName: settings.lineOfficialName,
     lineLoginStartEndpoint: settings.lineLoginStartEndpoint,
+    // LIFF 靜默自動綁定（訂位即綁定）的客人端開關：客人（未登入）拿不到 Firestore
+    // settings、本機預設永遠是關，必須由公開設定下發才會在客人裝置生效。
+    lineUseLiff: settings.lineUseLiff === true,
+    lineLiffId: settings.lineLiffId,
   }
 }
 
