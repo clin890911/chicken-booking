@@ -22,6 +22,7 @@ export default function ConfirmPage() {
   const [copied, setCopied] = useState(false)
   const [copiedManage, setCopiedManage] = useState(false)
   const [showConfetti, setShowConfetti] = useState(true)
+  const [guestStoreSettings, setGuestStoreSettings] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -31,8 +32,20 @@ export default function ConfirmPage() {
     async function load() {
       setLoading(true)
       const fromState = location.state?.booking
+      const fromStateStore = location.state?.store || location.state?.settings || null
+      if (fromStateStore && !cancelled) setGuestStoreSettings(fromStateStore)
       if (fromState && fromState.id === id) {
         if (!cancelled) { setB(fromState); setLoading(false) }
+        const token = urlToken || fromState.manageToken || ''
+        if (token && !fromStateStore) {
+          guestGetBooking(id, token).then((remote) => {
+            if (cancelled) return
+            if (remote?.store) setGuestStoreSettings(remote.store)
+            if (remote?.ok && remote.booking) {
+              setB(current => current || { ...remote.booking, manageToken: remote.booking.manageToken || token })
+            }
+          }).catch(() => {})
+        }
         return
       }
       // 後台建立的訂位（員工已同步至本機）走 localStorage fallback。
@@ -46,6 +59,7 @@ export default function ConfirmPage() {
         const remote = await guestGetBooking(id, token).catch(() => null)
         if (!cancelled && remote?.ok && remote.booking) {
           setB({ ...remote.booking, manageToken: remote.booking.manageToken || token })
+          if (remote.store) setGuestStoreSettings(remote.store)
           setLoading(false)
           return
         }
@@ -58,16 +72,17 @@ export default function ConfirmPage() {
   }, [id, location.state, urlToken])
 
   const confettiPieces = useMemo(() => generateConfetti(18), [])
+  const lineSettings = useMemo(() => ({ ...settings, ...(guestStoreSettings || {}) }), [settings, guestStoreSettings])
   const manageUrl = useMemo(() => {
     if (!b?.manageToken) return ''
     return `${window.location.origin}/manage/${b.id}?token=${encodeURIComponent(b.manageToken)}`
   }, [b])
-  const lineOfficialName = settings.lineOfficialName || 'LINE 官方帳號'
-  const lineFriendUrl = lineOfficialUrl(settings)
+  const lineOfficialName = lineSettings.lineOfficialName || 'LINE 官方帳號'
+  const lineFriendUrl = lineOfficialUrl(lineSettings)
   // 這兩個 URL 在 render 階段計算；任何例外（如異常日期）都不該讓整頁白屏，故 try/catch 後退成空字串。
   const lineReceiveUrl = useMemo(() => {
-    try { return b ? lineLoginStartUrl(settings, b) : '' } catch { return '' }
-  }, [b, settings])
+    try { return b ? lineLoginStartUrl(lineSettings, b) : '' } catch { return '' }
+  }, [b, lineSettings])
   const calendarUrl = useMemo(() => {
     try { return b ? googleCalendarUrl(b, settings) : '' } catch { return '' }
   }, [b, settings])

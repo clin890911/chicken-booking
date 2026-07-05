@@ -803,7 +803,7 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       }
     }
 
-    return res.json({ ok: true, booking: finalBooking })
+    return res.json({ ok: true, booking: finalBooking, store: publicStoreSettings(settings) })
   } catch (err) {
     const code = err.status || 500
     if (code >= 500) console.error('guestCreateBooking failed:', err)
@@ -2032,6 +2032,7 @@ function publicStoreSettings(settings = {}) {
     storeMapUrl: settings.storeMapUrl,
     lineOfficialUrl: settings.lineOfficialUrl,
     lineOfficialName: settings.lineOfficialName,
+    lineLoginStartEndpoint: settings.lineLoginStartEndpoint,
   }
 }
 

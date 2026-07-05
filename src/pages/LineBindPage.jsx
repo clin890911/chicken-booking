@@ -30,10 +30,12 @@ export default function LineBindPage() {
   const bound = bindParams.get('bound') === '1'
   const needFriend = bindParams.get('needFriend') === '1'
   const errCode = bindParams.get('err') || ''
-  const officialUrl = lineOfficialUrl(settings)
 
   const [remoteBooking, setRemoteBooking] = useState(null)
+  const [remoteStoreSettings, setRemoteStoreSettings] = useState(null)
   const remoteFetchRef = useRef('')
+  const lineSettings = useMemo(() => ({ ...settings, ...(remoteStoreSettings || {}) }), [settings, remoteStoreSettings])
+  const officialUrl = lineOfficialUrl(lineSettings)
 
   // 顯示用訂位資料來源（依序）：本機 → 舊版連結 payload（相容）→ lineGetBooking 回讀。
   const booking = useMemo(() => {
@@ -47,19 +49,20 @@ export default function LineBindPage() {
   // dev StrictMode「mount→cleanup→再 mount」會讓 run#1 的 fetch 結果被 cancelled 丟棄、
   // run#2 又被 ref 擋住 → remoteBooking 永遠設不進去、摘要永遠不顯示（本檔註解早已警告此坑）。
   useEffect(() => {
-    if (booking || !bookingId || !token) return
+    if (!bookingId || !token) return
     if (remoteFetchRef.current !== '') return
     remoteFetchRef.current = 'pending'
     fetchLineBooking(settings, bookingId, token).then((remote) => {
-      if (remote.ok && remote.booking?.id) setRemoteBooking(normalizePayloadBooking(remote.booking))
+      if (!booking && remote.ok && remote.booking?.id) setRemoteBooking(normalizePayloadBooking(remote.booking))
+      if (remote.ok && remote.store) setRemoteStoreSettings(remote.store)
     })
   }, [booking, bookingId, token, settings])
 
   const startUrl = useMemo(() => {
     if (!booking?.id) return ''
     if (token && booking.manageToken && token !== booking.manageToken) return ''
-    try { return lineLoginStartUrl(settings, booking) } catch { return '' }
-  }, [booking, token, settings])
+    try { return lineLoginStartUrl(lineSettings, booking) } catch { return '' }
+  }, [booking, token, lineSettings])
 
   // 狀態：err > bound（成功 / 待加好友）> ready（入口）> error（缺資料）
   const state = errCode

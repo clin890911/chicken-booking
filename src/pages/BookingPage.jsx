@@ -177,7 +177,7 @@ export default function BookingPage() {
       // 同時把 token 放進網址：重新整理或把連結傳到另一支手機時，確認頁可用 id+token 向後端補抓，
       // 不會再因 route state 消失而「找不到此訂位」。
       const tokenQuery = booking.manageToken ? `?token=${encodeURIComponent(booking.manageToken)}` : ''
-      navigate(`/confirm/${booking.id}${tokenQuery}`, { state: { booking } })
+      navigate(`/confirm/${booking.id}${tokenQuery}`, { state: { booking, store: res.store || res.settings || null } })
     } catch (err) {
       // 409：時段剛被訂滿或重複下單 → 退回選時段步驟並重新載入可訂時段
       if (err.status === 409) {

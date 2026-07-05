@@ -11,7 +11,16 @@ const AVAILABILITY = {
     { time: '18:00', remaining: 40 },
     { time: '18:30', remaining: 8 },
   ],
-  settings: { maxDaysAhead: 30, diningDurationMin: 90, cleanupBufferMin: 10, openTime: '11:00', closeTime: '19:00' },
+  settings: {
+    maxDaysAhead: 30,
+    diningDurationMin: 90,
+    cleanupBufferMin: 10,
+    openTime: '11:00',
+    closeTime: '19:00',
+    lineLoginStartEndpoint: 'https://line-login.example/start',
+    lineOfficialUrl: 'https://line.example/friend',
+    lineOfficialName: '測試 LINE 官方帳號',
+  },
 }
 
 test.beforeEach(async ({ page }) => {
@@ -30,7 +39,11 @@ test.beforeEach(async ({ page }) => {
     const payload = route.request().postDataJSON() || {}
     route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ ok: true, booking: { id: 'E2E-CUS-1', manageToken: 'tok-e2e', status: 'confirmed', source: 'online', ...payload } }),
+      body: JSON.stringify({
+        ok: true,
+        booking: { id: 'E2E-CUS-1', manageToken: 'tok-e2e', status: 'confirmed', source: 'online', ...payload },
+        store: AVAILABILITY.settings,
+      }),
     })
   })
   // 安全網：任何其他 function 端點都擋掉，避免誤打正式後端
@@ -56,6 +69,10 @@ test('用戶端：選時段 → 填資料 → 送出 → 進入確認頁', async
   await page.getByRole('button', { name: '完成訂位' }).click()
   await expect(page).toHaveURL(/\/confirm\/E2E-CUS-1/)
   await expect(page.getByText(/建議截圖保存此頁/)).toBeVisible()
+  const lineLink = page.getByRole('link', { name: /加入並綁定 LINE 通知/ })
+  await expect(lineLink).toHaveAttribute('href', /^https:\/\/line-login\.example\/start/)
+  await expect(lineLink).toHaveAttribute('href', /bookingId=E2E-CUS-1/)
+  await expect(lineLink).toHaveAttribute('href', /token=tok-e2e/)
 })
 
 test('用戶端：電話格式錯誤時擋下，無法送出', async ({ page }) => {
