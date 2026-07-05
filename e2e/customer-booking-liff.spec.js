@@ -58,6 +58,9 @@ test.beforeEach(async ({ page }) => {
     })
   })
   await page.route('**/admin*', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false }) }))
+  // 確認頁的直達授權預取（POST lineLoginStart）：本 spec 的 mock 不帶自訂端點，預取會落到
+  // 預設正式端點——必須攔掉（abort＝預取失敗走 fallback，不影響三條測試的斷言）。
+  await page.route(/^https:\/\/lineloginstart/i, route => route.abort())
 })
 
 async function bookThrough(page) {

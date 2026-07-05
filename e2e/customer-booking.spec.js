@@ -28,6 +28,24 @@ test.beforeEach(async ({ page }) => {
   // 確保就算之後頁面多打了新端點，也絕不會送到正式 Cloud Functions。
   await page.route('**/guest*', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-blocked' }) }))
+  // 確認頁的直達授權預取（POST lineLoginStartEndpoint）：mock 成功回 authorize URL，
+  // 讓 CTA href 直指 access.line.me（跨網域 fetch 需補 CORS 與 preflight）。
+  await page.route('https://line-login.example/**', route => {
+    const method = route.request().method()
+    const cors = {
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': 'content-type',
+      'access-control-allow-methods': 'GET,POST,OPTIONS',
+    }
+    if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
+    return route.fulfill({
+      status: 200, contentType: 'application/json', headers: cors,
+      body: JSON.stringify({
+        ok: true,
+        authorizeUrl: 'https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=2009996489&state=e2e-cus-state&scope=profile%20openid&bot_prompt=aggressive',
+      }),
+    })
+  })
   // BookingPage 的 LIFF 靜默偵測會嘗試載入 LINE SDK——攔掉確保離線確定性
   // （載入失敗＝靜默降級，正是非 LIFF 環境的預期行為）。
   await page.route('https://static.line-scdn.net/**', route => route.abort())
@@ -69,6 +87,30 @@ test('用戶端：選時段 → 填資料 → 送出 → 進入確認頁', async
   await page.getByRole('button', { name: '完成訂位' }).click()
   await expect(page).toHaveURL(/\/confirm\/E2E-CUS-1/)
   await expect(page.getByText(/建議截圖保存此頁/)).toBeVisible()
+  // 綁定 CTA：預取成功後 href 直指 access.line.me 授權頁（Universal Link 直跳 LINE app 的前提）
+  const lineLink = page.getByRole('link', { name: /加入並綁定 LINE 通知/ })
+  await expect(lineLink).toHaveAttribute('href', /^https:\/\/access\.line\.me\/oauth2\/v2\.1\/authorize/)
+  await expect(lineLink).toHaveAttribute('href', /state=e2e-cus-state/)
+  // 直達授權連結不夾個資
+  const href = await lineLink.getAttribute('href')
+  expect(href).not.toContain('E2E 測試客')
+  expect(href).not.toContain('0912345678')
+})
+
+test('用戶端：預取失敗 → 確認頁綁定連結退回 lineLoginStart 302 舊路', async ({ page }) => {
+  // 後註冊優先：蓋掉 beforeEach 的預取 mock，模擬 prepare 端點掛掉
+  await page.route('https://line-login.example/**', route => route.abort())
+  // 直接落地確認頁（跨裝置開啟情境）：以 guestGetBooking 回讀訂位與公開設定
+  await page.route('**/guestGetBooking*', route =>
+    route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        booking: { id: 'E2E-CUS-1', manageToken: 'tok-e2e', status: 'confirmed', name: 'E2E 測試客', phone: '0912345678', guests: 2, date: '2099-12-31', timeSlot: '18:00', notes: {} },
+        store: AVAILABILITY.settings,
+      }),
+    }))
+  await page.goto('/confirm/E2E-CUS-1?token=tok-e2e')
   const lineLink = page.getByRole('link', { name: /加入並綁定 LINE 通知/ })
   await expect(lineLink).toHaveAttribute('href', /^https:\/\/line-login\.example\/start/)
   await expect(lineLink).toHaveAttribute('href', /bookingId=E2E-CUS-1/)

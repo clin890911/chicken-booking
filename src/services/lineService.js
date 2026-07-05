@@ -30,6 +30,27 @@ export function lineLoginStartEndpoint(settings = {}) {
   return settings.lineLoginStartEndpoint || import.meta.env.VITE_LINE_LOGIN_START_ENDPOINT || DEFAULT_LOGIN_START_ENDPOINT
 }
 
+// LINE Login 直達授權預取：POST 後端 lineLoginStart（prepare 模式）取得完整 authorize URL，
+// 讓綁定 CTA 的 <a href> 直指 access.line.me——使用者手勢的 top-level 導航才會觸發 iOS
+// Universal Link 直跳 LINE app 一鍵授權；href 指自家後端再 302 中轉會讓 Universal Link
+// 不觸發、掉到 email/密碼網頁登入表單。失敗回 null，呼叫端退回 lineLoginStartUrl 舊 302 路。
+export async function prepareLineLoginUrl(settings = {}, booking) {
+  const endpoint = lineLoginStartEndpoint(settings)
+  if (!endpoint || !booking?.id) return null
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookingId: booking.id, token: booking.manageToken || '' }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.ok === false || !data.authorizeUrl) return null
+    return { authorizeUrl: data.authorizeUrl, expiresAt: data.expiresAt || '' }
+  } catch {
+    return null
+  }
+}
+
 // LINE Login 網頁授權綁定入口：純連結，瀏覽器整頁導向後端 lineLoginStart → LINE 授權 → 自動跳回。
 // 取代舊 LIFF 自動綁定（client SDK 多段重導易卡在「一直載入」）。只帶 bookingId + token，不夾個資。
 export function lineLoginStartUrl(settings = {}, booking) {
