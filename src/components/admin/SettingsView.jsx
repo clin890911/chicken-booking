@@ -46,7 +46,7 @@ const DEFAULT_CATEGORY = 'ops-rules'
 const CategoryContext = createContext([])
 
 export default function SettingsView({ onOpenCustomer }) {
-  const { settings, bookings, updateSettings, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
+  const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
   const { user, signOut, can, usingFirebase } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
@@ -55,6 +55,7 @@ export default function SettingsView({ onOpenCustomer }) {
   const [searchResult, setSearchResult] = useState(null)
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
   const [cloudBusy, setCloudBusy] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   // 目前分類同步到 URL（?tab=settings&section=xxx）：重整/上一頁/書籤皆能還原、可分享定位。
   const [searchParams, setSearchParams] = useSearchParams()
@@ -135,9 +136,33 @@ export default function SettingsView({ onOpenCustomer }) {
     }
     // 存後把 form 重置為正規化後的 settings：清除因 withDefaults 正規化造成的 phantom-dirty，
     // 讓 sticky banner 正確消失、beforeunload 守衛解除。
-    const saved = updateSettings(form)
-    setForm(saved)
-    toast.success('✅ 已儲存')
+    setSaving(true)
+    try {
+      const saved = updateSettings(form)
+      setForm(saved)
+      // 關鍵：以「雲端是否真的寫入成功」為準宣告成功，而非只憑本機 localStorage。
+      // 本機模式（未設 Firebase）沒有雲端可寫，本機存好即算完成。
+      if (!usingFirebase) {
+        toast.success('✅ 已儲存（本機模式）')
+        return
+      }
+      const r = await flushCloudNow()
+      if (r.ok) toast.success('✅ 已儲存並同步雲端')
+      else toast.error(`本機已存，但雲端同步失敗：${r.error}。請按「重試同步」或檢查網路後再試`)
+    } finally {
+      setSaving(false)
+    }
+  }
+  // 雲端同步失敗後的重試：只重推本機未同步的變更（本機資料已存，不會遺失）。
+  const handleRetrySync = async () => {
+    setSaving(true)
+    try {
+      const r = await flushCloudNow()
+      if (r.ok) toast.success('✅ 已同步雲端')
+      else toast.error(`雲端同步仍失敗：${r.error}`)
+    } finally {
+      setSaving(false)
+    }
   }
   const handleBannerFiles = async (files) => {
     const list = Array.from(files || [])
@@ -225,6 +250,36 @@ export default function SettingsView({ onOpenCustomer }) {
         ))}
       </div>
 
+      {/* 雲端同步狀態列：隨時可見地反映「本機變更是否已真的寫入 Firebase」，
+          解決「按了儲存卻看不出到底有沒有存到雲端」。offline 時提供一鍵重試（本機資料不會遺失）。 */}
+      {usingFirebase && (
+        <div className={`mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-2 text-sm font-bold ${
+          cloudStatus?.state === 'offline'
+            ? 'border-red-300 bg-red-50 text-chicken-red'
+            : cloudStatus?.state === 'syncing'
+              ? 'border-blue-200 bg-blue-50 text-blue-700'
+              : cloudStatus?.state === 'synced'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : 'border-chicken-brown/15 bg-chicken-brown/5 text-chicken-brown/50'
+        }`}>
+          <span>
+            {cloudStatus?.state === 'offline' && `⚠️ 雲端未同步：${cloudStatus.error}（本機已存，尚未寫入 Firebase）`}
+            {cloudStatus?.state === 'syncing' && '☁️ 正在同步到雲端…'}
+            {cloudStatus?.state === 'synced' && `✅ 已同步雲端${cloudStatus.lastSyncAt ? ` · ${new Date(cloudStatus.lastSyncAt).toLocaleTimeString('zh-TW')}` : ''}`}
+            {(!cloudStatus?.state || cloudStatus?.state === 'idle') && '尚未同步'}
+          </span>
+          {cloudStatus?.state === 'offline' && (
+            <button
+              onClick={handleRetrySync}
+              disabled={saving}
+              className="min-h-[40px] rounded-xl border border-red-400/60 bg-white px-4 py-1.5 text-sm font-bold text-chicken-red hover:bg-red-50 disabled:opacity-50"
+            >
+              {saving ? '重試中…' : '重試同步'}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* B14：未儲存變更 sticky 提示 + 統一儲存 CTA（全域，跨分類反映所有未存變更） */}
       {isDirty && (
         <div className="sticky top-0 z-30 -mx-1 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
@@ -239,15 +294,17 @@ export default function SettingsView({ onOpenCustomer }) {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setForm(settings)}
-              className="min-h-[44px] rounded-xl border border-amber-400/60 bg-white px-4 py-2 text-sm font-bold text-amber-800 hover:bg-amber-50"
+              disabled={saving}
+              className="min-h-[44px] rounded-xl border border-amber-400/60 bg-white px-4 py-2 text-sm font-bold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
             >
               還原
             </button>
             <button
               onClick={handleSave}
-              className="btn-primary min-h-[44px] px-5 py-2"
+              disabled={saving}
+              className="btn-primary min-h-[44px] px-5 py-2 disabled:opacity-60"
             >
-              儲存全部變更
+              {saving ? '儲存中…' : '儲存全部變更'}
             </button>
           </div>
         </div>

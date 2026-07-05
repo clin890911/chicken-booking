@@ -104,6 +104,23 @@ export function BookingProvider({ children }) {
     }, 250)
   }, [])
 
+  // 立即把本機變更推上雲端並回報「雲端是否真的寫入成功」。供「儲存」等主動操作 await：
+  // 不走 250ms 節流（避免存完馬上關頁而推送從未送出），並以後端真實結果（含 403 等原因）回報，
+  // 讓呼叫端能顯示誠實的成功/失敗，而非只憑本機 localStorage 就宣告成功。
+  const flushCloudNow = useCallback(async () => {
+    if (!isStaffRef.current) return { ok: false, error: 'not-staff' }
+    window.clearTimeout(syncTimerRef.current) // 取消待送的節流推送，改為立即送出
+    setCloudStatus(s => ({ ...s, state: 'syncing' }))
+    try {
+      const r = await cloudData.pushChangedData()
+      setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
+      return { ok: true, skipped: !!r?.skipped }
+    } catch (err) {
+      setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
+      return { ok: false, error: err.message || 'cloud-push-failed' }
+    }
+  }, [])
+
   useEffect(() => { refresh() }, [refresh])
 
   // ── 現場自動清檯（sweep）編排 ──
@@ -546,7 +563,7 @@ export function BookingProvider({ children }) {
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
     createAndReserveGroup, purgeBlankGroups,
     seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
-    updateSettings,
+    updateSettings, flushCloudNow,
   }
 
   return <BookingContext.Provider value={value}>{children}</BookingContext.Provider>
