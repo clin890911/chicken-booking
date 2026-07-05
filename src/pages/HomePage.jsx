@@ -78,12 +78,6 @@ export default function HomePage() {
           className="pb-6 lg:pb-0"
         >
           <HeroCarousel banners={banners} />
-
-          <div className="mt-4 text-center">
-            <Link to="/admin" className="text-xs font-bold text-chicken-brown/45 underline underline-offset-4">
-              同仁登入管理後台
-            </Link>
-          </div>
         </motion.section>
       </main>
     </div>
