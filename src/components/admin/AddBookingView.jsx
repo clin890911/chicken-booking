@@ -95,7 +95,11 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
   ].filter(Boolean), [phone, name, guests, timeSlot])
   const valid = missing.length === 0
 
-  const scrollToField = (m) => m.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  // 點「還差」pill：亮出欄位級紅框並捲到該欄（缺欄時不再顯示提交鈕，紅框改由此觸發）
+  const scrollToField = (m) => {
+    setAttempted(true)
+    m.ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
 
   // 日期快選 chips：今天 / 明天 / 後天 / 其他日期（展開緊湊月曆）
   const quickDates = useMemo(() => {
@@ -307,37 +311,39 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
         />
       </Card>
 
-      {/* === 底部黏性操作列：精簡單列、半透明避免遮擋上方選日期/時段；
+      {/* === 底部黏性操作列：缺欄時收成一列「還差」pills（點捲到該欄），
+             填齊才展開自動指派選項＋確認鈕——避免手機上整塊蓋住日期/時段；
              自動指派僅今天才有意義 → 只在今天顯示，未來日（多為團體）直接收起 === */}
       <div className="sticky bottom-20 lg:bottom-3 z-20 pt-2">
         <div className="rounded-2xl border border-chicken-brown/10 bg-white/95 p-2.5 shadow-lg backdrop-blur">
-          {date === todayStr() && (
-            <label className="mb-2 flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoAssign}
-                onChange={e => setAutoAssign(e.target.checked)}
-                className="h-4 w-4"
-              />
-              <span className="text-xs font-bold text-chicken-brown/80">建立後立刻自動指派最佳桌（可手動修改）</span>
-            </label>
-          )}
-          {missing.length > 0 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+          {valid ? (
+            <>
+              {date === todayStr() && (
+                <label className="mb-2 flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoAssign}
+                    onChange={e => setAutoAssign(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  <span className="text-xs font-bold text-chicken-brown/80">建立後立刻自動指派最佳桌（可手動修改）</span>
+                </label>
+              )}
+              <Button onClick={handleSubmit} disabled={busy} className="w-full min-h-[44px]">
+                {busy ? '建立中...' : `✅ 確認新增 · ${dayLabel(date)} ${timeSlot} · ${guests} 位`}
+              </Button>
+            </>
+          ) : (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <span className="font-bold text-chicken-brown/55">還差</span>
               {missing.map(m => (
                 <button key={m.key} type="button" onClick={() => scrollToField(m)}
-                  className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-black text-chicken-red hover:bg-chicken-red/20">
+                  className="rounded-full bg-chicken-red/10 px-2.5 py-1 font-black text-chicken-red hover:bg-chicken-red/20 min-h-[28px]">
                   {m.label}
                 </button>
               ))}
             </div>
           )}
-          <Button onClick={handleSubmit} disabled={!valid || busy} className="w-full min-h-[44px]">
-            {busy ? '建立中...'
-              : valid ? `✅ 確認新增 · ${dayLabel(date)} ${timeSlot} · ${guests} 位`
-              : `還差：${missing.map(m => m.label).join('、')}`}
-          </Button>
         </div>
       </div>
     </div>
