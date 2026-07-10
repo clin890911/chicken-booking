@@ -23,11 +23,14 @@ const QUICK_NEEDS = [
 
 // 團單詳情（唯讀確認頁）：點團卡 / 儲存後落地於此。
 // 領位與備餐視角的彙整 + 回傳單輸出；要改內容才進編輯精靈（onEdit）。
-export default function GroupDetailStage({ group, tables, settings, onBack, onEdit }) {
+export default function GroupDetailStage({ group, tables, settings, onBack, onEdit, onReschedule }) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const { fixtures, zones } = useBooking()
 
   const st = STATUS_LABEL[group.status] || STATUS_LABEL.planned
+  // 可改期：僅限尚未入座的團（planned/confirmed）。入座後 status→arrived，桌帶 currentRef，
+  // 不得整團搬日；已完成/已取消亦不可改期。
+  const canReschedule = ['planned', 'confirmed'].includes(group.status)
   const counts = group.counts || {}
   const batches = group.batches || []
   const gBatches = guestBatches(group)            // 旅客梯次（排除司領桌）
@@ -56,6 +59,9 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
           <button onClick={onBack} className="text-sm font-bold text-chicken-brown/70 hover:text-chicken-brown">← 返回當日總覽</button>
           <div className="flex gap-1.5">
             <Button variant="secondary" onClick={() => setSheetOpen(true)}>🖨 回傳單</Button>
+            {canReschedule && onReschedule && (
+              <Button variant="secondary" onClick={onReschedule}>📅 改期</Button>
+            )}
             <Button onClick={onEdit}>✏️ 編輯</Button>
           </div>
         </div>

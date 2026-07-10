@@ -60,13 +60,15 @@ export default function GroupEditorStage({
   onBack, onSaved, onDeleted,
   reserveExisting, createGroup, removeGroup,
   addAgency, addGuide,
+  rescheduleFrom = null, initialStep = 1,
 }) {
   const toast = useToast()
   const confirm = useConfirm()
   const { fixtures, zones } = useBooking()
 
   const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(initialGroup)))
-  const [step, setStep] = useState(1)
+  // 改期進入時直接落在「圈選座位」頁（日期已由改期 modal 選定，缺的只有重新圈桌）
+  const [step, setStep] = useState(initialStep)
   const [activeBatchId, setActiveBatchId] = useState(draft.batches?.[0]?.id || null)
   const [floor, setFloor] = useState('1F')
   const [busy, setBusy] = useState(false)
@@ -289,6 +291,9 @@ export default function GroupEditorStage({
       toast.info(`提醒：總人數 ${total} 大於保留席數 ${heldSeats}，將以多梯次輪替（請確認梯次安排）`)
     }
     const patch = {
+      // date 帶入 patch：一般編輯＝原日期（no-op）；改期＝新日期，後端 groupReserveTables
+      // 以 where('date','==', patch.date) 對新日重檢衝突並 merge 搬移同一份團單 doc。
+      date,
       agencyId: draft.agencyId || null, agencyName: draft.agencyName || '',
       guideId: draft.guideId || null, guideName: draft.guideName || '', guidePhone: draft.guidePhone || '',
       batches: batchesToSave, counts: draft.counts,
@@ -353,6 +358,14 @@ export default function GroupEditorStage({
           ))}
         </div>
       </div>
+
+      {/* 改期橫幅：由「📅 改期」進入時顯示原日期→新日期，提示須重新圈桌 */}
+      {rescheduleFrom && rescheduleFrom !== date && (
+        <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 px-4 py-3 text-sm">
+          <div className="font-black text-indigo-700">📅 改期中：{dayLabel(rescheduleFrom)} → {dayLabel(date)}</div>
+          <div className="mt-0.5 text-xs font-bold text-indigo-600/80">原圈桌位已清空，請於下方為新日期重新圈桌後儲存；未儲存前團單仍留在原日期。</div>
+        </div>
+      )}
 
       {/* Page 1：團體資訊（旅行社 + 人數 + 場次） */}
       {step === 1 && (

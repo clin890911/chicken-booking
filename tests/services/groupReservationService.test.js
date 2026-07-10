@@ -223,6 +223,55 @@ describe('cloneGroupForDuplicate（複製團單為新草稿）', () => {
   })
 })
 
+describe('buildRescheduleDraft（團體改期：整團移到新日期）', () => {
+  const source = {
+    id: 'G_SRC', date: '2026-06-09', status: 'confirmed', spend: 5000,
+    agencyId: 'AG1', agencyName: '大發旅行社', guideId: 'GD1', guideName: '李導', guidePhone: '0912',
+    counts: { total: 20, vegetarian: 3, child: 2, mobility: 1, wheelchair: 0 },
+    allergyText: '花生', tableSideNeeds: '剪雞肉', busInfo: '車號 AB-123', notes: '靠窗',
+    batches: [
+      { id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12, note: '', isEscort: false, releasedAt: '2026-06-09T05:00:00Z' },
+      { id: 'be', label: '司領桌', timeSlot: '11:00', tableNumbers: ['107'], guests: 2, note: '', isEscort: true },
+    ],
+  }
+
+  it('保留同一個 id 與旅行社/導遊/人數/特殊需求/梯次結構（label/timeSlot/guests/isEscort/batch id）', () => {
+    const d = group.buildRescheduleDraft(source, '2026-07-20')
+    expect(d.id).toBe('G_SRC')                       // 同一份團單，非複製
+    expect(d.status).toBe('confirmed')               // 狀態原封（不像複製重設 planned）
+    expect(d.spend).toBe(5000)
+    expect(d.agencyId).toBe('AG1')
+    expect(d.guideName).toBe('李導')
+    expect(d.counts).toEqual(source.counts)
+    expect(d.allergyText).toBe('花生')
+    expect(d.batches.map(b => b.id)).toEqual(['b1', 'be'])        // batch id 不重生
+    expect(d.batches.map(b => b.timeSlot)).toEqual(['11:00', '11:00'])
+    expect(d.batches.map(b => b.guests)).toEqual([12, 2])
+    expect(d.batches.map(b => b.isEscort)).toEqual([false, true])
+  })
+
+  it('清空所有 tableNumbers 與 releasedAt', () => {
+    const d = group.buildRescheduleDraft(source, '2026-07-20')
+    expect(d.batches.every(b => b.tableNumbers.length === 0)).toBe(true)
+    expect(d.batches.every(b => b.releasedAt === null)).toBe(true)
+  })
+
+  it('date = 新日期；未給 newDate → 沿用原日期', () => {
+    expect(group.buildRescheduleDraft(source, '2026-07-20').date).toBe('2026-07-20')
+    expect(group.buildRescheduleDraft(source).date).toBe('2026-06-09')
+  })
+
+  it('不變動來源物件（純函式）', () => {
+    const before = JSON.parse(JSON.stringify(source))
+    group.buildRescheduleDraft(source, '2026-07-20')
+    expect(source).toEqual(before)
+  })
+
+  it('null 來源 → null', () => {
+    expect(group.buildRescheduleDraft(null, '2026-07-20')).toBeNull()
+  })
+})
+
 describe('groupReservationService.swapBatchTable（改派桌位：換掉梯內一張桌）', () => {
   it('只動指定梯、字串化桌號', () => {
     const g = group.create({
