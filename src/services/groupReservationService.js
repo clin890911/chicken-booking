@@ -274,6 +274,20 @@ export function cloneGroupForDuplicate(source, { date } = {}) {
   }
 }
 
+// 改期草稿（給團體「📅 改期」）：把整團移到新日期，保留**同一個 id** 與旅行社/導遊/
+// 人數結構/梯次結構（label/timeSlot/guests/isEscort）/特殊需求，但**清空所有 tableNumbers**
+// ——跨日的實體桌意義不同（新日可能被別團圈走或維修中），一律在新日期重新圈桌；同時清 releasedAt
+// （改期＝在新日重新規劃，不帶舊日的清桌痕跡）。純函式：回傳草稿物件（保留 id），由容器當
+// editorGroup（isNew=false）交給編輯器走 reserveExisting → groupReserveTables 原子把關搬移。
+export function buildRescheduleDraft(group, newDate) {
+  if (!group) return null
+  return {
+    ...group,
+    date: newDate || group.date,
+    batches: (group.batches || []).map(b => ({ ...b, tableNumbers: [], releasedAt: null })),
+  }
+}
+
 // 一次性清除既有殘留的空白草稿（無旅行社、0 人、未圈桌）。
 // 草稿優先（記憶體草稿，填好才寫入）改版後不會再產生空白；此函式用於清掉舊版殘留。
 // 回傳清除筆數；本機刪除後由呼叫端 syncCloudSoon 觸發雲端泛型差異刪除。

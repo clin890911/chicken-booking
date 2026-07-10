@@ -10,6 +10,7 @@ import GroupDayPanel from './GroupDayPanel'
 import GroupDaySheet from './GroupDaySheet'
 import GroupDetailStage from './GroupDetailStage'
 import GroupEditorStage from './GroupEditorStage'
+import GroupRescheduleModal from './GroupRescheduleModal'
 import AddWalkinModal from './AddWalkinModal'
 import SlotMapPanel from './SlotMapPanel'
 
@@ -46,6 +47,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   })
   const [editorGroup, setEditorGroup] = useState(null) // 傳給編輯器的初始資料（既有團複本 或 空白範本）
   const [editorIsNew, setEditorIsNew] = useState(false)
+  const [rescheduleFrom, setRescheduleFrom] = useState(null) // 改期進入編輯器時的原日期（顯示橫幅 + 起始頁=圈桌）
+  const [reschedulingGroup, setReschedulingGroup] = useState(null) // 改期 modal 對象（null=關閉）
   const [detailGroupId, setDetailGroupId] = useState(null) // 詳情頁顯示的團單 id（live 查找）
   const [sheetOpen, setSheetOpen] = useState(false)
   const [showAddWalkin, setShowAddWalkin] = useState(false) // 規劃頁快速新增散客
@@ -161,7 +164,26 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
 
   const openEditorFromDetail = () => {
     if (!detailGroup) return
+    setRescheduleFrom(null)
     setEditorGroup(detailGroup)
+    setEditorIsNew(false)
+  }
+
+  // 「📅 改期」第一步：開改期 modal（選新日期）。
+  const openReschedule = () => {
+    if (detailGroup) setReschedulingGroup(detailGroup)
+  }
+  // 改期第二步：選定新日期 → 把整團（清空圈桌、保留同 id）交給編輯器在新日重新圈桌。
+  // 草稿優先：此處不落地，儲存才經 reserveGroupTables 原子搬移。跳到新日、直接進圈桌頁。
+  const confirmReschedule = (newDate) => {
+    const src = reschedulingGroup
+    if (!src || !newDate) return
+    const draft = groupReservationService.buildRescheduleDraft(src, newDate)
+    setReschedulingGroup(null)
+    setDetailGroupId(null)
+    setRescheduleFrom(src.date)
+    jumpToDate(newDate)
+    setEditorGroup(draft)
     setEditorIsNew(false)
   }
 
@@ -202,6 +224,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
       allergyText: '', tableSideNeeds: '', busInfo: '', notes: '', spend: 0,
       status: 'planned',
     })
+    setRescheduleFrom(null)
     setEditorIsNew(true)
   }
 
@@ -212,13 +235,14 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     const target = targetDate || selectedDate
     const draft = groupReservationService.cloneGroupForDuplicate(src, { date: target })
     if (target !== selectedDate) setSelectedDate(target)
+    setRescheduleFrom(null)
     setEditorGroup(draft)
     setEditorIsNew(true)
     toast.info('已複製為新團單草稿，請重新圈桌後儲存')
   }
 
   // 編輯器返回：只清編輯器——從詳情進編輯時自然落回詳情頁；新增草稿（無詳情）回當日總覽。
-  const closeEditor = () => { setEditorGroup(null); setEditorIsNew(false) }
+  const closeEditor = () => { setEditorGroup(null); setEditorIsNew(false); setRescheduleFrom(null) }
   // 儲存後（新增與編輯一致）：進詳情頁，立即可印回傳單傳給導遊。
   const handleSaved = (id) => {
     closeEditor()
@@ -236,7 +260,9 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
         key={editorIsNew ? 'new' : editorGroup.id}
         initialGroup={editorGroup}
         isNew={editorIsNew}
-        date={selectedDate}
+        date={editorGroup.date}
+        rescheduleFrom={rescheduleFrom}
+        initialStep={rescheduleFrom ? 2 : 1}
         slots={slots}
         tables={tables}
         settings={settings}
@@ -259,13 +285,22 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   // 團單詳情頁（唯讀確認 + 回傳單）整頁接管
   if (detailGroup) {
     return (
-      <GroupDetailStage
-        group={detailGroup}
-        tables={tables}
-        settings={settings}
-        onBack={() => setDetailGroupId(null)}
-        onEdit={openEditorFromDetail}
-      />
+      <>
+        <GroupDetailStage
+          group={detailGroup}
+          tables={tables}
+          settings={settings}
+          onBack={() => setDetailGroupId(null)}
+          onEdit={openEditorFromDetail}
+          onReschedule={openReschedule}
+        />
+        <GroupRescheduleModal
+          open={!!reschedulingGroup}
+          group={reschedulingGroup}
+          onClose={() => setReschedulingGroup(null)}
+          onConfirm={confirmReschedule}
+        />
+      </>
     )
   }
 

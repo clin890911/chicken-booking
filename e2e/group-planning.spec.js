@@ -177,6 +177,68 @@ test('規劃：抵達時間軸點團 → 跳排位地圖、白圈標示這團座
   await expect(page.getByText(/🎯/)).toHaveCount(0)
 })
 
+test('規劃：團體改期 → 選新日期 → 編輯器重新圈桌 → 儲存落地', async ({ page }) => {
+  // 種一筆今日 confirmed、已圈桌（101）的團單（總人數 6，單張六人桌容得下）
+  await page.addInitScript(() => {
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_group_reservations_v1', JSON.stringify([{
+      id: 'GE2E_RESCHED', schemaVersion: 2, date: today,
+      agencyName: '大發改期團', guideName: '王導', guidePhone: '0911777888',
+      counts: { total: 6, vegetarian: 0, child: 0, mobility: 0, wheelchair: 0 },
+      allergyText: '', status: 'confirmed',
+      batches: [{ id: 'BRS1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101'], guests: 6, note: '' }],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }]))
+  })
+  await loginAndOpenPlanning(page)
+
+  // 進團單詳情 → 「📅 改期」可見（confirmed 團可改期）
+  await page.getByRole('button', { name: /大發改期團/ }).filter({ hasNotText: '看地圖' }).first().click()
+  await expect(page.getByRole('button', { name: /📅 改期/ })).toBeVisible()
+  await page.getByRole('button', { name: /📅 改期/ }).click()
+
+  // 改期 modal：選 3 天後（月曆格 aria-label = ISO 日期）
+  await expect(page.getByText(/團體改期 ·/)).toBeVisible()
+  const t = new Date(); t.setDate(t.getDate() + 3)
+  const target = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+  await page.getByRole('button', { name: target, exact: true }).click()
+  await page.getByRole('button', { name: /下一步：重新圈桌/ }).click()
+
+  // 編輯器（第 2 頁）：改期橫幅可見、原桌已清空（第一梯顯示「未圈」）
+  await expect(page.getByText(/改期中：/)).toBeVisible()
+  await expect(page.getByText(/桌 未圈/).first()).toBeVisible()
+
+  // 為新日期重新圈桌：點地圖上的 101
+  await page.locator('svg g:has(:text-is("101"))').first().click()
+
+  // 儲存（groupReserveTables 已被 mock 成 ok）→ 成功並落回詳情頁
+  await page.getByRole('button', { name: /儲存團單/ }).click()
+  await expect(page.getByText(/團單已儲存/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /回傳單/ })).toBeVisible()
+})
+
+test('規劃：已到店（arrived）團單不顯示改期按鈕', async ({ page }) => {
+  await page.addInitScript(() => {
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_group_reservations_v1', JSON.stringify([{
+      id: 'GE2E_ARRIVED', schemaVersion: 2, date: today,
+      agencyName: '已到店團', guideName: '陳導', guidePhone: '0911333444',
+      counts: { total: 6, vegetarian: 0, child: 0, mobility: 0, wheelchair: 0 },
+      allergyText: '', status: 'arrived',
+      batches: [{ id: 'BAR1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101'], guests: 6, note: '' }],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }]))
+  })
+  await loginAndOpenPlanning(page)
+
+  await page.getByRole('button', { name: /已到店團/ }).filter({ hasNotText: '看地圖' }).first().click()
+  // 詳情頁開啟（回傳單可見），但無「改期」按鈕
+  await expect(page.getByRole('button', { name: /回傳單/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /📅 改期/ })).toHaveCount(0)
+})
+
 test('規劃：當日總覽「新增散客」快速表單 → 落地當日散客名單', async ({ page }) => {
   // 確保 bookings 乾淨，散客數從 0 起算
   await page.addInitScript(() => localStorage.setItem('chicken_bookings_v1', JSON.stringify([])))
