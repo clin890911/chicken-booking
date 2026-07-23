@@ -96,6 +96,15 @@ export function diffAdminBooking(before, after) {
   return changes
 }
 
+// 每日全量備份檔的收件 chat 解析：備份檔含所有客人姓名電話（PII），不能跟一般文字通知
+// 共用同一個 chat（店員群組）——backup 專用 chat 有值就用它，否則 fallback 回主 chat
+// （相容尚未設定 TELEGRAM_BACKUP_CHAT_ID 的環境，行為與改版前一致）。
+export function resolveBackupChatId(backupRaw, mainRaw) {
+  const backup = String(backupRaw ?? '').trim()
+  if (backup) return backup
+  return String(mainRaw ?? '').trim()
+}
+
 export function classifyAdminBookingBackupEvent(before, after) {
   if (!after) return null
   if (!before) return 'created'
