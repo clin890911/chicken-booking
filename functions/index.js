@@ -14,6 +14,7 @@ import {
   classifyAdminBookingChange,
   classifyAdminBookingBackupEvent,
   diffAdminBooking,
+  resolveBackupChatId,
 } from './lib/notify.js'
 import {
   normalizeOnlineGuardSettings,
@@ -96,6 +97,9 @@ const LINE_LOGIN_CHANNEL_SECRET = defineSecret('LINE_LOGIN_CHANNEL_SECRET')
 // token 與 chat id 皆以 Secret Manager 管理，不進前端 bundle。
 const TELEGRAM_BOT_TOKEN = defineSecret('TELEGRAM_BOT_TOKEN')
 const TELEGRAM_CHAT_ID = defineSecret('TELEGRAM_CHAT_ID')
+// 每日全量備份檔的獨立收件 chat（含所有客人姓名電話 PII，不能跟一般文字通知共用
+// TELEGRAM_CHAT_ID——該值已改指向店員群組）。未設定時 tgSendDocument fallback 回主 chat。
+const TELEGRAM_BACKUP_CHAT_ID = defineSecret('TELEGRAM_BACKUP_CHAT_ID')
 
 const LINE_REPLY_URL = 'https://api.line.me/v2/bot/message/reply'
 const LINE_PUSH_URL = 'https://api.line.me/v2/bot/message/push'
@@ -2299,17 +2303,22 @@ async function tgSend(text) {
 
 // 上傳檔案到 Telegram（sendDocument，multipart/form-data）。每日全量快照用：
 // 避開 sendMessage 4096 字上限，且 JSON 檔可直接下載還原。逾時放寬（檔案較大）。
+// 收件 chat 刻意跟 tgSend 分流：備份檔含所有客人姓名電話（PII），優先送 TELEGRAM_BACKUP_CHAT_ID
+// （店主私人 chat），未設定才 fallback 回 TELEGRAM_CHAT_ID（可能已改指向店員群組）。
 async function tgSendDocument(filename, content, caption = '') {
   let token = ''
   let chatId = ''
+  let backupChatId = ''
   try { token = (TELEGRAM_BOT_TOKEN.value() || '').trim() } catch { token = '' }
   try { chatId = (TELEGRAM_CHAT_ID.value() || '').trim() } catch { chatId = '' }
-  if (!token || !chatId) return { ok: false, error: 'telegram-not-configured' }
+  try { backupChatId = (TELEGRAM_BACKUP_CHAT_ID.value() || '').trim() } catch { backupChatId = '' }
+  const targetChatId = resolveBackupChatId(backupChatId, chatId)
+  if (!token || !targetChatId) return { ok: false, error: 'telegram-not-configured' }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 30_000)
   try {
     const form = new FormData()
-    form.append('chat_id', chatId)
+    form.append('chat_id', targetChatId)
     if (caption) {
       form.append('caption', caption.slice(0, 1024))
       form.append('parse_mode', 'HTML')
@@ -2505,7 +2514,7 @@ export const dailyBackup = onSchedule(
   {
     schedule: '30 4 * * *',
     timeZone: 'Asia/Taipei',
-    secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID],
+    secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_BACKUP_CHAT_ID],
   },
   async () => {
     try {
