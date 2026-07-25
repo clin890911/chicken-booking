@@ -50,7 +50,9 @@ test('桌被佔 → 中文錯誤 + 改派模式 → 點替代桌整梯入座', a
   await login(page)
 
   // 散客先佔走 101（團體保留桌 → 覆蓋確認 → walk-in modal）
-  await page.locator('svg g:has(:text-is("101"))').first().click()
+  // 帶位籤上點空桌＝選進帶位面板（v3），所以改從「團體」籤的桌號按鈕開該桌抽屜
+  await page.getByRole('button', { name: /^團體/ }).click()
+  await page.getByRole('button', { name: '101', exact: true }).click()
   await page.getByRole('button', { name: /散客入座（覆蓋團體預留）/ }).click()
   await page.getByRole('button', { name: '改散客入座', exact: true }).click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()

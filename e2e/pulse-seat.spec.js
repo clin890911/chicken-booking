@@ -39,8 +39,8 @@ test('訂位脈動：遲到且已指派的訂位可直接「客人到了」入�
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
 
-  // 右側欄改版後預設籤為「帶位」，訂位脈動移到「脈動」籤（badge 會使 accessible name 變成「脈動 1」）
-  await page.getByRole('button', { name: /^脈動/ }).click()
+  // 右側欄改版後預設籤為「帶位」，訂位脈動移到「今日訂位」籤（badge 會使 accessible name 變成「今日訂位 1」）
+  await page.getByRole('button', { name: /^今日訂位/ }).click()
 
   // 訂位脈動：過時未到區出現遲到客卡，含「✓ 已指派 113」「✅ 客人到了」「標 No-show」
   await expect(page.getByText('⚠ 過時未到（1 組）— 請聯絡或標記')).toBeVisible()
@@ -75,7 +75,7 @@ test('訂位脈動：入座撞到團體保留桌時跳確認，確認後仍可�
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
-  await page.getByRole('button', { name: /^脈動/ }).click()
+  await page.getByRole('button', { name: /^今日訂位/ }).click()
 
   await expect(page.getByText('遲到客')).toBeVisible()
   await page.getByRole('button', { name: /客人到了/ }).click()
