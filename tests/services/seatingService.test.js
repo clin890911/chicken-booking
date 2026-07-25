@@ -1464,3 +1464,93 @@ describe('bulkSaveTablesGuarded：佈局存檔不覆蓋現場即時狀態', () =
     expect(r.error).toContain('快樂旅行社')
   })
 })
+
+// 佈局存檔的「刪桌守門」：刪掉仍有未來預約/團圈的桌會孤兒化那筆訂位（桌況仍 vacant，前端 UI 抓不到）。
+// list 為刪後完整桌集，本機現存但缺席者＝被刪；命中任一未來參照 → 整批擋。
+describe('bulkSaveTablesGuarded：刪桌守門（不孤兒化未來預約/團圈）', () => {
+  const TODAY = '2026-06-15'
+  const FUTURE = '2026-06-20'
+  const PAST = '2026-06-10'
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(`${TODAY}T12:00:00`))
+    tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('108', 6, '1F')])
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const keep108 = () => [mkTable('108', 6, '1F')]   // 刪 101 的存檔清單（101 缺席）
+
+  const mkFutureBookingOn = (tableNums, over = {}) => {
+    const bk = bookingService.create({
+      name: '王小明', phone: '0912345678', guests: 4,
+      date: FUTURE, timeSlot: '18:00', source: 'online', status: 'confirmed', ...over,
+    })
+    bookingService.assignTables(bk.id, tableNums)
+    return bk
+  }
+
+  const mkGroupOn = (over = {}) => groupService.create({
+    date: FUTURE, agencyName: '快樂旅行社',
+    batches: [{ id: 'BT1', label: '第一梯', timeSlot: '12:00', tableNumbers: ['101'], guests: 4 }],
+    counts: { total: 4 }, status: 'confirmed', ...over,
+  })
+
+  it('刪掉有未來散客預配的桌 → 擋、指名該桌與日期、不刪除', () => {
+    mkFutureBookingOn(['101'])
+    const r = seating.bulkSaveTablesGuarded(keep108())
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('101')
+    expect(r.error).toContain(FUTURE)
+    expect(tableService.getByNumber('101')).toBeTruthy()   // 沒被刪
+  })
+
+  it('刪掉被未來團體圈到的桌 → 擋、指名旅行社', () => {
+    mkGroupOn()
+    const r = seating.bulkSaveTablesGuarded(keep108())
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('快樂旅行社')
+    expect(tableService.getByNumber('101')).toBeTruthy()
+  })
+
+  it('刪掉現場佔用中的桌 → 擋（service 底線）', () => {
+    tableService.bulkWrite([
+      mkTable('101', 4, '1F', { status: 'dining', currentBookingId: 'BK-9' }),
+      mkTable('108', 6, '1F'),
+    ])
+    const r = seating.bulkSaveTablesGuarded(keep108())
+    expect(r.ok).toBe(false)
+    expect(tableService.getByNumber('101')).toBeTruthy()
+  })
+
+  it('併桌額外桌(extraTableIds)參照也擋（listByTable 會漏、bookingTableNumbers 抓得到）', () => {
+    mkFutureBookingOn(['108', '101'])   // 主桌 108、額外桌 101
+    const r = seating.bulkSaveTablesGuarded(keep108())   // 刪 101
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('101')
+  })
+
+  it('無任何未來參照的空桌 → 正常刪除', () => {
+    const r = seating.bulkSaveTablesGuarded(keep108())
+    expect(r.ok).toBe(true)
+    expect(tableService.getByNumber('101')).toBeFalsy()
+    expect(tableService.getByNumber('108')).toBeTruthy()
+  })
+
+  it('過去日期的訂位不擋（date < today）', () => {
+    mkFutureBookingOn(['101'], { date: PAST })
+    expect(seating.bulkSaveTablesGuarded(keep108()).ok).toBe(true)
+    expect(tableService.getByNumber('101')).toBeFalsy()
+  })
+
+  it('已取消的未來訂位不擋', () => {
+    mkFutureBookingOn(['101'], { status: 'cancelled' })
+    expect(seating.bulkSaveTablesGuarded(keep108()).ok).toBe(true)
+    expect(tableService.getByNumber('101')).toBeFalsy()
+  })
+
+  it('已取消的團不擋刪除', () => {
+    mkGroupOn({ status: 'cancelled' })
+    expect(seating.bulkSaveTablesGuarded(keep108()).ok).toBe(true)
+    expect(tableService.getByNumber('101')).toBeFalsy()
+  })
+})
