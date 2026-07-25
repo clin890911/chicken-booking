@@ -93,11 +93,19 @@ describe('canWriteCollection', () => {
     expect(canWriteCollection('floor', 'groupReservations')).toBe(false)
     expect(canWriteCollection('floor', 'agencies')).toBe(false)
   })
-  it('host 可寫 bookings/groupReservations/agencies，但不可寫 tables（host 無 table 寫權）', () => {
+  it('host 可寫 bookings/tables/groupReservations/agencies（領位台需帶位指派桌）', () => {
     expect(canWriteCollection('host', 'bookings')).toBe(true)
     expect(canWriteCollection('host', 'groupReservations')).toBe(true)
     expect(canWriteCollection('host', 'agencies')).toBe(true)
-    expect(canWriteCollection('host', 'tables')).toBe(false)
+    // 帶位/指派/換桌/併桌/團體入座都會寫 tables，host 必須能寫，否則整包 403。
+    expect(canWriteCollection('host', 'tables')).toBe(true)
+  })
+  it('host 能帶位寫桌，但仍不可維修停用/併桌設定/改佈局/刪桌', () => {
+    expect(roleCan('host', 'table.update')).toBe(true)
+    expect(roleCan('host', 'table.block')).toBe(false)
+    expect(roleCan('host', 'table.merge')).toBe(false)
+    expect(roleCan('host', 'table.config')).toBe(false)
+    expect(canDeleteCollection('host', 'tables')).toBe(false)
   })
   it('manager 可寫全部；未知集合保守僅 manager', () => {
     for (const c of ['bookings', 'tables', 'waitlist', 'customers', 'agencies', 'guides', 'groupReservations']) {

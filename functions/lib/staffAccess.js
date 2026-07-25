@@ -41,7 +41,10 @@ export const PERMISSIONS = {
   ]),
   host: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',
-    'table.read',
+    // 帶位/指派/換桌/併桌/團體入座都會寫 tables（COLLECTION_WRITE_PERM.tables），
+    // 領位台就是 host 的主場，故給 table.update；桌位維修停用(table.block)與
+    // 佈局/刪桌(table.config)仍不給。
+    'table.read', 'table.update',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
