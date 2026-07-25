@@ -10,7 +10,7 @@ const STORAGE_KEY = 'chicken_auth_v1'
 // === 角色權限體系 ===
 // manager   店長：全部權限（含設定、員工管理、刪除訂位）
 // floor     外場：操作桌位、訂位、候位（不能改設定）
-// host      訂位專員：訂位 CRUD、候位管理（不能改桌位狀態）
+// host      訂位專員：訂位 CRUD、候位管理、團體/旅行社、現場帶位入座（不能改設定、不能改佈局）
 // kitchen   廚房唯讀：只能看訂位列表（不能寫）
 //
 // 角色映射來源：VITE_ROLE_MAP（JSON 字串），格式：
@@ -62,7 +62,9 @@ const PERMISSIONS = {
   ]),
   host: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',
-    'table.read',
+    // 訂位專員就站在領位台操作「現場」頁（立即帶位／入座／清桌），這些動作都會寫 tables，
+    // 少了 table.update 會在後端 RBAC 被擋 → 每次帶位都跳「雲端同步失敗」。
+    'table.read', 'table.update', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',

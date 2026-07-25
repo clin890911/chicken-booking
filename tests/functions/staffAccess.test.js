@@ -93,11 +93,17 @@ describe('canWriteCollection', () => {
     expect(canWriteCollection('floor', 'groupReservations')).toBe(false)
     expect(canWriteCollection('floor', 'agencies')).toBe(false)
   })
-  it('host 可寫 bookings/groupReservations/agencies，但不可寫 tables（host 無 table 寫權）', () => {
+  it('host 可寫 bookings/groupReservations/agencies；也可寫 tables（訂位專員在領位台帶位入座）', () => {
     expect(canWriteCollection('host', 'bookings')).toBe(true)
     expect(canWriteCollection('host', 'groupReservations')).toBe(true)
     expect(canWriteCollection('host', 'agencies')).toBe(true)
-    expect(canWriteCollection('host', 'tables')).toBe(false)
+    // 少了這條就是現場「帶位完跳雲端同步失敗」的元凶：帶位/入座/清桌都寫 tables。
+    expect(canWriteCollection('host', 'tables')).toBe(true)
+  })
+  it('host 仍不可編輯佈局（table.config，刪桌）與改設定', () => {
+    expect(roleCan('host', 'table.config')).toBe(false)
+    expect(canDeleteCollection('host', 'tables')).toBe(false)
+    expect(canWriteSettings('host')).toBe(false)
   })
   it('manager 可寫全部；未知集合保守僅 manager', () => {
     for (const c of ['bookings', 'tables', 'waitlist', 'customers', 'agencies', 'guides', 'groupReservations']) {

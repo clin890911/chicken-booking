@@ -41,7 +41,9 @@ export const PERMISSIONS = {
   ]),
   host: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',
-    'table.read',
+    // 訂位專員在領位台操作「現場」頁（立即帶位／入座／清桌）→ 需要寫 tables；
+    // 佈局編輯（table.config）與設定仍只有 manager 能做。
+    'table.read', 'table.update', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',

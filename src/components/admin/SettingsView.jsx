@@ -148,7 +148,10 @@ export default function SettingsView({ onOpenCustomer }) {
       }
       const r = await flushCloudNow()
       if (r.ok) toast.success('✅ 已儲存並同步雲端')
-      else toast.error(`本機已存，但雲端同步失敗：${r.error}。請按「重試同步」或檢查網路後再試`)
+      // 權限不足與斷網要分開講：前者按幾次「重試同步」都不會成功，得找店長改角色。
+      else if (r.skippedCollections?.includes('settings')) {
+        toast.error('只有店長能變更店家設定，這次修改不會生效（畫面稍後會還原成雲端設定）')
+      } else toast.error(`本機已存，但雲端同步失敗：${r.error}。請按「重試同步」或檢查網路後再試`)
     } finally {
       setSaving(false)
     }
@@ -159,6 +162,7 @@ export default function SettingsView({ onOpenCustomer }) {
     try {
       const r = await flushCloudNow()
       if (r.ok) toast.success('✅ 已同步雲端')
+      else if (r.skippedCollections?.length) toast.error(`${r.error}，重試也無法上傳。請聯絡店長調整角色`)
       else toast.error(`雲端同步仍失敗：${r.error}`)
     } finally {
       setSaving(false)

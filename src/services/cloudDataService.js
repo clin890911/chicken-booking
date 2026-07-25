@@ -38,6 +38,39 @@ async function authHeader() {
   }
 }
 
+// === 角色寫入權限（與後端 functions/lib/staffAccess.js 的 COLLECTION_WRITE_PERM 成對）===
+// adminPushData 是「整包驗、整包擋」：dataset 只要含一個角色無權寫的集合，整次推送回 403。
+// 若前端照送，後果不只是那個集合沒上雲——同一批的 bookings/waitlist 也一起被退，
+// 而且該集合的本機文件會永遠停在 dirty，導致「每次推送都 403」的死循環（同步永久壞掉）。
+// 因此前端依角色先過濾：只送自己有權寫的集合，後端 403 仍留著擋繞過 UI 的越權。
+const COLLECTION_WRITE_PERM = {
+  bookings: 'booking.update',
+  tables: 'table.update',
+  waitlist: 'waitlist.update',
+  customers: 'customer.update',
+  agencies: 'agency.manage',
+  guides: 'agency.manage',
+  groupReservations: 'group.update',
+  settings: 'settings.update',
+}
+
+// 由 BookingContext 注入 useAuth().can；未注入時（測試/客人端）一律視為可寫，維持舊行為。
+let _permissionChecker = null
+export function setPermissionChecker(fn) {
+  _permissionChecker = typeof fn === 'function' ? fn : null
+}
+
+export function mayWriteCollection(collection) {
+  if (!_permissionChecker) return true
+  const perm = COLLECTION_WRITE_PERM[collection]
+  if (!perm) return true
+  try {
+    return _permissionChecker(perm) !== false
+  } catch {
+    return true
+  }
+}
+
 function readJson(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
@@ -145,6 +178,16 @@ export function applyCloudSnapshot(data = {}) {
     const cloudArr = data[col]
     if (!Array.isArray(cloudArr)) continue
     if (col === 'tables' && cloudArr.length === 0) continue // 不因雲端空白清掉桌位
+    // 本角色無權寫的集合 → 雲端為準，直接覆寫並重置差異基準。
+    // 否則本機那些「永遠推不上去」的變更會一直被判 dirty 而蓋掉雲端最新值，
+    // 畫面就會卡在自己的舊桌況、與其他裝置各說各話（看起來就是「同步壞掉」）。
+    if (!mayWriteCollection(col)) {
+      writeArrayOf(col, cloudArr)
+      lastSynced[col] = Object.fromEntries(
+        Object.entries(indexDocs(col, cloudArr)).map(([id, doc]) => [id, stable(doc)]))
+      pendingDeletes[col].clear()
+      continue
+    }
     const localMap = indexDocs(col, localArrayOf(col))
     const cloudMap = indexDocs(col, cloudArr)
     const merged = { ...cloudMap }
@@ -163,7 +206,8 @@ export function applyCloudSnapshot(data = {}) {
     writeArrayOf(col, Object.values(merged))
   }
   if (data.settings) {
-    const settingsDirty = stable(getSettings()) !== lastSynced.settings
+    // 無權改設定的角色（非店長）不保留本機設定差異，一律採雲端值。
+    const settingsDirty = mayWriteCollection('settings') && stable(getSettings()) !== lastSynced.settings
     if (!settingsDirty) { saveSettings(data.settings); lastSynced.settings = stable(data.settings) }
   }
 }
@@ -208,8 +252,18 @@ export async function pushChangedData() {
   const changed = {}
   const deletedIds = {}
   let hasChange = false
+  const skipped = []
   for (const col of DIFF_COLLECTIONS) {
     const cur = indexDocs(col, ds[col])
+    // 無權寫的集合整個略過：不送、也不記為已同步（下一輪拉取會用雲端值覆寫本機）。
+    // 但若本機真的有未推送的變更，要記進 skipped 回報呼叫端——不能讓 UI 誤報「已同步」。
+    if (!mayWriteCollection(col)) {
+      const hasLocalChange =
+        Object.entries(cur).some(([id, doc]) => lastSynced[col][id] !== stable(doc)) ||
+        Object.keys(lastSynced[col]).some(id => !(id in cur))
+      if (hasLocalChange) skipped.push(col)
+      continue
+    }
     const list = []
     for (const [id, doc] of Object.entries(cur)) {
       if (lastSynced[col][id] !== stable(doc)) list.push(doc)
@@ -223,9 +277,11 @@ export async function pushChangedData() {
       hasChange = true
     }
   }
-  const settingsChanged = stable(ds.settings) !== lastSynced.settings
+  const settingsDirty = stable(ds.settings) !== lastSynced.settings
+  const settingsChanged = settingsDirty && mayWriteCollection('settings')
+  if (settingsDirty && !settingsChanged) skipped.push('settings')
   if (settingsChanged) { changed.settings = ds.settings; hasChange = true }
-  if (!hasChange) return { ok: true, skipped: true }
+  if (!hasChange) return { ok: true, skipped: true, skippedCollections: skipped }
 
   const payload = { ...changed }
   if (Object.keys(deletedIds).length) payload.deletedIds = deletedIds
@@ -239,12 +295,21 @@ export async function pushChangedData() {
     })
   }
   if (settingsChanged) lastSynced.settings = stable(ds.settings)
-  return result
+  return { ...result, skippedCollections: skipped }
+}
+
+// 依角色過濾整份 dataset（一次性遷移用）：無權寫的集合不送，否則整包被後端 403 退回。
+function writableDataset(ds) {
+  const out = {}
+  for (const [key, value] of Object.entries(ds)) {
+    if (mayWriteCollection(key)) out[key] = value
+  }
+  return out
 }
 
 export async function migrateLocalToCloudOnce() {
   if (localStorage.getItem(KEYS.migration) === '1') return { ok: true, skipped: true }
-  const result = await pushCloudData(localDataset())
+  const result = await pushCloudData(writableDataset(localDataset()))
   localStorage.setItem(KEYS.migration, '1')
   return result
 }
@@ -256,6 +321,8 @@ const LAYOUT_FLAG = 'chicken_table_layout_version'
 
 export async function migrateTableLayoutOnce() {
   if (localStorage.getItem(LAYOUT_FLAG) === TABLE_LAYOUT_VERSION) return { ok: true, skipped: true }
+  // 無權寫桌位的角色不做遷移（會被後端擋下，且會把本機桌況洗成初始值）；交給有權限的裝置做。
+  if (!mayWriteCollection('tables')) return { ok: true, skipped: true, reason: 'no-permission' }
   // 先看雲端目前有哪些桌（用來算出要刪除的舊桌號）
   let cloudTables = []
   try {
@@ -288,6 +355,7 @@ const DIMS_FLAG = 'chicken_table_dims_version'
 
 export async function migrateTableDimsOnce() {
   if (localStorage.getItem(DIMS_FLAG) === TABLE_DIMS_VERSION) return { ok: true, skipped: true }
+  if (!mayWriteCollection('tables')) return { ok: true, skipped: true, reason: 'no-permission' }
   const defByNumber = new Map(INITIAL_TABLES.map(t => [t.number, t]))
   const local = readJson(KEYS.tables, [])
   if (!Array.isArray(local) || local.length === 0) {

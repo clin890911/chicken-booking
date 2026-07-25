@@ -427,7 +427,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
         )}
 
         <div className="flex-1" />
-        {!mode && (
+        {/* 帶位會寫桌位狀態；無 table.update 的角色（廚房）不顯示，
+            避免做了一輪操作最後只換來「雲端同步失敗」。 */}
+        {!mode && can('table.update') && (
           <button
             onClick={() => { setSelectedTable(null); setRailTab('walkin') }}
             className="px-4 py-2 rounded-xl text-sm font-black bg-amber-500 text-white shadow hover:bg-amber-600 transition-all"

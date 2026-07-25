@@ -34,8 +34,10 @@ export function BookingProvider({ children }) {
   // 只有登入的員工才會啟動「全量雲端同步」。
   // 客人端（公開頁）一律不碰 admin 同步，避免把所有顧客個資灌進客人的瀏覽器，
   // 也避免未授權的全量讀寫（真正的把關在後端 requireStaff）。
-  const { user, getToken, usingFirebase } = useAuth() || {}
+  const { user, getToken, usingFirebase, can } = useAuth() || {}
   const isStaff = !!user
+  const canRef = useRef(can)
+  canRef.current = can
   const toast = useToast()
   const toastRef = useRef(toast)
   toastRef.current = toast
@@ -60,6 +62,14 @@ export function BookingProvider({ children }) {
     cloudData.setAuthTokenProvider(getToken || null)
     return () => cloudData.setAuthTokenProvider(null)
   }, [getToken])
+
+  // 把角色權限判斷注入 cloudDataService：推送前先過濾掉「本角色無權寫」的集合。
+  // 後端 adminPushData 是整包驗、整包擋——夾帶一個無權集合會讓整批（含訂位）都被 403 退回，
+  // 且該集合永遠 dirty → 之後每次推送都失敗。前端先濾掉，後端 403 仍是防繞過 UI 的底線。
+  useEffect(() => {
+    cloudData.setPermissionChecker(can || null)
+    return () => cloudData.setPermissionChecker(null)
+  }, [can])
 
   const refresh = useCallback(() => {
     setBookings(bookingService.listAll())
@@ -90,7 +100,18 @@ export function BookingProvider({ children }) {
     window.clearTimeout(syncTimerRef.current)
     syncTimerRef.current = window.setTimeout(async () => {
       try {
-        await cloudData.pushChangedData()
+        const r = await cloudData.pushChangedData()
+        const denied = r?.skippedCollections || []
+        if (denied.length) {
+          // 有變更因角色無權而沒上雲：不能宣告 synced，也要讓操作的人知道（節流同 8 秒）。
+          setCloudStatus(s => ({ ...s, state: 'offline', error: 'permission-denied' }))
+          const now = Date.now()
+          if (now - lastPushErrorToastRef.current > 8000) {
+            lastPushErrorToastRef.current = now
+            toastRef.current?.error?.('你的角色無權變更這些資料，剛才的操作不會存到雲端。請聯絡店長調整角色')
+          }
+          return
+        }
         setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
       } catch (err) {
         setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
@@ -98,7 +119,12 @@ export function BookingProvider({ children }) {
         const now = Date.now()
         if (now - lastPushErrorToastRef.current > 8000) {
           lastPushErrorToastRef.current = now
-          toastRef.current?.error?.('雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
+          // 權限問題（403）跟斷網是完全不同的處置：叫店員「檢查網路」只會讓他們一直重試同一個
+          // 永遠不會成功的動作。把後端的真實原因說出來。
+          toastRef.current?.error?.(
+            err?.status === 403
+              ? `無權限同步：${err.message}。請聯絡店長在「設定 → 管理員帳號」調整你的角色`
+              : '雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
         }
       }
     }, 250)
@@ -113,6 +139,12 @@ export function BookingProvider({ children }) {
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     try {
       const r = await cloudData.pushChangedData()
+      // 有本機變更、但因角色無權而沒送出去 → 誠實回報失敗（不是網路問題，重試也不會成功）。
+      const denied = r?.skippedCollections || []
+      if (denied.length) {
+        setCloudStatus(s => ({ ...s, state: 'offline', error: 'permission-denied' }))
+        return { ok: false, error: '你的角色無權變更此項目', skippedCollections: denied }
+      }
       setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
       return { ok: true, skipped: !!r?.skipped }
     } catch (err) {
@@ -138,6 +170,9 @@ export function BookingProvider({ children }) {
 
   const runSweeps = useCallback((opts = {}) => {
     if (!isStaffRef.current) return
+    // 自動清檯會改桌位狀態：無權寫桌位的角色（如廚房）不能跑，否則會產生一堆
+    // 推不上雲端的本機變更，把整條同步管線卡死。交給有權限的裝置處理。
+    if (canRef.current && !canRef.current('table.update')) return
     const nowMs = Date.now()
     const last = Number(localStorage.getItem('chicken_ops_sweep_at') || 0)
     if (!opts.force && nowMs - last < 45000) return // 跨分頁節流
