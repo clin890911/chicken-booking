@@ -1367,3 +1367,100 @@ describe('停用/維修 × 團體圈桌衝突守門（toggleTableGuarded / setTa
     expect(r.ok).toBe(false)
   })
 })
+
+// 佈局存檔（bulkSaveTablesGuarded）：編輯器只擁有佈局欄位，現場即時狀態一律沿用本機當下值。
+// 覆蓋「店主開著編輯器慢慢排 → 期間別台帶了位/設了維修 → 存檔用舊快照」的並行覆寫風險。
+describe('bulkSaveTablesGuarded：佈局存檔不覆蓋現場即時狀態', () => {
+  const TODAY = '2026-06-15'
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(`${TODAY}T12:00:00`))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('本機已入座(dining) → 存入舊快照(vacant)只更新佈局，佔用狀態沿用本機最新值', () => {
+    // 本機當下：101 已被別台帶位
+    tableService.bulkWrite([mkTable('101', 4, '1F', {
+      status: 'dining', currentBookingId: 'BK-1', seatedAt: '2026-06-15T11:30:00', x: 100, y: 100,
+    })])
+    // 編輯器打開時的舊快照：仍是 vacant，但把桌搬了位、轉了向、改了容量
+    const stale = mkTable('101', 6, '1F', {
+      status: 'vacant', currentBookingId: null, seatedAt: null, x: 300, y: 250, rotation: 90,
+    })
+    const r = seating.bulkSaveTablesGuarded([stale])
+    expect(r.ok).toBe(true)
+    const saved = tableService.getByNumber('101')
+    // 佈局欄位採用編輯器的值
+    expect(saved.x).toBe(300)
+    expect(saved.y).toBe(250)
+    expect(saved.rotation).toBe(90)
+    expect(saved.capacity).toBe(6)
+    // 現場即時欄位保留本機最新值，沒被舊快照洗成空桌
+    expect(saved.status).toBe('dining')
+    expect(saved.currentBookingId).toBe('BK-1')
+    expect(saved.seatedAt).toBe('2026-06-15T11:30:00')
+  })
+
+  it('本機設了維修(outage) → 存入 outage=null 的舊快照，維修窗保留', () => {
+    const out = { from: TODAY, to: '2026-06-20', reason: '燈壞' }
+    tableService.bulkWrite([mkTable('101', 4, '1F', { outage: out })])
+    expect(seating.bulkSaveTablesGuarded([mkTable('101', 4, '1F', { outage: null, x: 999 })]).ok).toBe(true)
+    const saved = tableService.getByNumber('101')
+    expect(saved.outage).toEqual(out)
+    expect(saved.x).toBe(999)
+  })
+
+  it('團體梯次占用(currentRef) → 舊快照存檔不清掉 currentRef', () => {
+    const ref = { type: 'group', groupId: 'G1', batchId: 'BT1' }
+    tableService.bulkWrite([mkTable('101', 4, '1F', { status: 'dining', currentRef: ref })])
+    seating.bulkSaveTablesGuarded([mkTable('101', 4, '1F', { status: 'vacant', currentRef: null, y: 400 })])
+    const saved = tableService.getByNumber('101')
+    expect(saved.currentRef).toEqual(ref)
+    expect(saved.status).toBe('dining')
+    expect(saved.y).toBe(400)
+  })
+
+  it('全新桌(本機不存在) → 整張寫入，保留既有桌', () => {
+    tableService.bulkWrite([mkTable('101', 4, '1F')])
+    seating.bulkSaveTablesGuarded([mkTable('101', 4, '1F'), mkTable('301', 6, '3F', { x: 500 })])
+    expect(tableService.getByNumber('101')).toBeTruthy()
+    const created = tableService.getByNumber('301')
+    expect(created.x).toBe(500)
+    expect(created.capacity).toBe(6)
+  })
+
+  it('空桌上的佈局變更（含停用/分區）正常生效', () => {
+    tableService.bulkWrite([mkTable('101', 4, '1F', { status: 'vacant', x: 10, y: 10 })])
+    const r = seating.bulkSaveTablesGuarded([mkTable('101', 4, '1F', {
+      status: 'vacant', x: 88, y: 66, isActive: false, zoneId: 'Z1',
+    })])
+    expect(r.ok).toBe(true)
+    const saved = tableService.getByNumber('101')
+    expect(saved.x).toBe(88)
+    expect(saved.isActive).toBe(false)
+    expect(saved.zoneId).toBe('Z1')
+  })
+
+  it('佔用守門仍有效：把入座中的桌停用 → 整批拒絕、不寫入', () => {
+    tableService.bulkWrite([mkTable('101', 4, '1F', { status: 'dining', currentBookingId: 'BK-1', x: 10 })])
+    const r = seating.bulkSaveTablesGuarded([mkTable('101', 4, '1F', {
+      status: 'dining', currentBookingId: 'BK-1', isActive: false, x: 777,
+    })])
+    expect(r.ok).toBe(false)
+    // 整批拒絕：位置沒被改、桌沒被停用
+    expect(tableService.getByNumber('101').x).toBe(10)
+    expect(tableService.getByNumber('101').isActive).toBe(true)
+  })
+
+  it('團體圈桌守門仍有效：停用被未來團圈到的桌 → 擋', () => {
+    tableService.bulkWrite([mkTable('101', 4, '1F', { status: 'vacant' })])
+    groupService.create({
+      date: '2026-06-20', agencyName: '快樂旅行社',
+      batches: [{ id: 'BT1', label: '第一梯', timeSlot: '12:00', tableNumbers: ['101'], guests: 4 }],
+      counts: { total: 4 }, status: 'confirmed',
+    })
+    const r = seating.bulkSaveTablesGuarded([mkTable('101', 4, '1F', { isActive: false })])
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('快樂旅行社')
+  })
+})
