@@ -7,7 +7,7 @@ import * as customerService from './customerService'
 import * as groupService from './groupReservationService'
 import { statusZh } from '../utils/tableStatus'
 import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
-import { groupTableNumbers } from '../utils/capacity'
+import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES } from '../utils/capacity'
 import { todayStr } from '../utils/timeSlots'
 
 // === 停用/維修守門（service 層底線；UI 防線會被新介面或程式呼叫繞過）===
@@ -361,8 +361,10 @@ function groupHoldConflict(tableNumber, from, to) {
 // blockReason/outage 等現場即時狀態）不屬於編輯器，存檔時一律沿用本機當下值。
 const LAYOUT_FIELDS = ['capacity', 'floor', 'x', 'y', 'w', 'h', 'rotation', 'zoneId', 'isActive']
 
-// 批次寫入（佈局編輯器）前的整合守門：active→inactive 的桌若被今天起的有效團圈到 → 擋。
-// （tableService.bulkWrite 已有佔用守門；這層補上它看不到的團體資料。）
+// 批次寫入（佈局編輯器）前的整合守門。⚠️ list 必須是「完整桌集」（唯一呼叫者 saveFloorPlan 傳
+// 刪後的 localTables 全集）——刪桌偵測靠「本機現存但 list 缺席」，若傳部分清單會誤判成大量刪除。
+// 三道守門：(1) 停用被團圈到的桌；(2) 佔用中的桌不可停用（tableService.bulkWrite 底線）；
+// (3) 刪桌不可孤兒化未來預約/團圈（見下方 delete guard）。
 export function bulkSaveTablesGuarded(list) {
   const byNum = new Map(tableService.listAll().map(t => [t.number, t]))
   for (const t of (list || [])) {
@@ -370,6 +372,29 @@ export function bulkSaveTablesGuarded(list) {
     if (prev && prev.isActive && t.isActive === false) {
       const g = groupHoldConflict(t.number, todayStr(), '')
       if (g) return { ok: false, error: `${t.number} 已被 ${g.date}「${g.agencyName || '團體'}」圈桌，請先調整該團再停用` }
+    }
+  }
+  // 刪桌守門：本機現存但 list 缺席者＝被刪。刪掉仍有「未來預約 / 團體圈了還沒到店」的桌，會讓那筆
+  // 訂位/團單的桌號參照變孤兒（桌況仍 vacant，前端 isOccupied 與 tableService 佔用守門都抓不到）。
+  // 前後端目前都沒有這道參照檢查，這是唯一一道 → 命中即整批擋、指名該桌/該團/該日。
+  const keep = new Set((list || []).map(t => t.number))
+  const deleted = [...byNum.keys()].filter(num => !keep.has(num))
+  if (deleted.length) {
+    const today = todayStr()
+    const activeBookings = bookingService.listAll().filter(b =>
+      !CAPACITY_EXCLUDED_STATUSES.includes(b.status) && b.date >= today)
+    for (const num of deleted) {
+      const prev = byNum.get(num)
+      // (a) 現場仍佔用（保險底線；前端 UI 已擋，但程式/舊快照可能繞過）
+      if (['dining', 'reserved', 'cleaning'].includes(prev.status) || prev.currentBookingId || prev.currentRef) {
+        return { ok: false, error: `${num} 目前有客人/訂位，無法刪除，請先清桌` }
+      }
+      // (b) 今天起有效團體圈到此桌（含未入座的圈桌、司領桌）
+      const g = groupHoldConflict(num, today, '')
+      if (g) return { ok: false, error: `${num} 已被 ${g.date}「${g.agencyName || '團體'}」圈桌，無法刪除，請先調整該團` }
+      // (c) 今天起有效散客訂位參照此桌（含未到店的預配、併桌額外桌）
+      const b = activeBookings.find(bk => bookingTableNumbers(bk).includes(num))
+      if (b) return { ok: false, error: `${num} 已被 ${b.date} 訂位（${b.name || '散客'}）預配，無法刪除，請先改派或取消該訂位` }
     }
   }
   // 存檔只把「佈局欄位」套用到本機當下的桌上；現場即時欄位一律保留本機最新值，不採用編輯器打開時
