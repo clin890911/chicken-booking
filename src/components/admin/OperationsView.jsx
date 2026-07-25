@@ -391,7 +391,9 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     const guests = r.booking?.guests || payload.guests
     const snap = { bookingId: r.booking?.id, tableNumbers: nums, name, guests, at: Date.now() }
     setLastSeated(snap)
-    setLastParty({ guests, notes: payload.notes || '' })   // M6：供下一組一鍵沿用
+    // M6：供下一組一鍵沿用。只存店員手打的 staffNotes——payload.notes 還含著
+    // 由電話帶出的「過敏：xxx」，沿用會把上一位客人的過敏資訊掛到新客人身上。
+    setLastParty({ guests, notes: payload.staffNotes || '' })
     flashAssigned(nums[0])
     setWalkinTableNumbers([])
     // 不 setSelectedTable：留在帶位面板才能直接帶下一組（舊版會被 TableDrawer 蓋掉）

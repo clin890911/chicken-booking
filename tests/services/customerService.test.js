@@ -419,3 +419,36 @@ describe('normalize 電話主鍵：去除所有非數字後去重', () => {
     expect(getByPhone('0912 345 678')).not.toBeNull()
   })
 })
+
+// 迴歸：候位不留名會存成「訪客」、現場帶位不留名會存成「散客」，這些通稱一路傳到 upsert。
+// 若讓它們覆蓋既有顧客檔，回頭客的真名會被洗掉——M5 讓「不填姓名取號」變成主要路徑後
+// 命中率大增，所以通稱一律不可蓋掉已存在的真名。
+describe('upsert：系統通稱不可覆蓋既有真名', () => {
+  it('既有顧客叫「王大明」，之後以「訪客」回填 → 名字要保留王大明', () => {
+    upsert({ phone: '0911222333', name: '王大明', partySize: 2 })
+    expect(getByPhone('0911222333').name).toBe('王大明')
+
+    upsert({ phone: '0911222333', name: '訪客', partySize: 4 })
+    const c = getByPhone('0911222333')
+    expect(c.name).toBe('王大明')      // 名字沒被洗掉
+    expect(c.visits).toBe(2)           // 但來訪次數照常累加
+    expect(c.totalGuests).toBe(6)
+  })
+
+  it('「散客」同樣不可覆蓋既有真名', () => {
+    upsert({ phone: '0955666777', name: '林小美', partySize: 2 })
+    upsert({ phone: '0955666777', name: '散客', partySize: 2 })
+    expect(getByPhone('0955666777').name).toBe('林小美')
+  })
+
+  it('全新顧客只有通稱時，通稱先頂著（總比空白好）', () => {
+    upsert({ phone: '0977888999', name: '訪客', partySize: 3 })
+    expect(getByPhone('0977888999').name).toBe('訪客')
+  })
+
+  it('之後補上真名 → 真名要蓋掉通稱', () => {
+    upsert({ phone: '0966555444', name: '訪客', partySize: 2 })
+    upsert({ phone: '0966555444', name: '陳先生', partySize: 2 })
+    expect(getByPhone('0966555444').name).toBe('陳先生')
+  })
+})

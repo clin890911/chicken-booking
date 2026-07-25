@@ -99,6 +99,10 @@ export default function FastWalkInPanel({
     const noteText = [notes.trim(), allergyNote].filter(Boolean).join('；')
     const ok = onSeat?.({
       name: nm, phone: phone.trim(), guests: g, notes: noteText,
+      // 🔴 staffNotes＝店員手打的那段，**不含**由電話帶出的「過敏：xxx」。
+      // M6「沿用上一組」只能沿用這個；用 noteText 會把上一位客人的過敏資訊
+      // 帶到下一組的訂位上（個資外洩＋出餐安全）。
+      staffNotes: notes.trim(),
       tableNumbers: tables.map(t => t.number),
     })
     if (ok !== false) reset()
