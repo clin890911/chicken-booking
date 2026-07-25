@@ -479,7 +479,7 @@ export default function SettingsView({ onOpenCustomer }) {
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
               <div className="text-sm font-bold text-chicken-brown">換日自動標記未到（No-show）</div>
-              <div className="text-xs text-chicken-red/80 mt-0.5">⚠️ 建議保持關閉：昨日未處理的訂位自動標 No-show 會影響報表口徑（不計入顧客罰則）。當天請改用現場「訂位脈動 → 過時未到」處理。</div>
+              <div className="text-xs text-chicken-red/80 mt-0.5">⚠️ 建議保持關閉：昨日未處理的訂位自動標 No-show 會影響報表口徑（不計入顧客罰則）。當天請改用現場「今日訂位 → 過時未到」處理。</div>
             </div>
             <input type="checkbox" className="w-5 h-5 accent-chicken-red"
               checked={form.autoNoshowOnRollover === true}

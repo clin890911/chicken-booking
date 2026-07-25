@@ -11,7 +11,12 @@ import FastWalkInPanel from './FastWalkInPanel'
 // 現場右側欄：籤切換（即將到達 / 候位 / 今日團體），每籤獨佔全高、badge 顯示待辦數。
 // 今日沒有團體時不渲染「今日團體」籤（一天 0~5 團的稀疏性，無團體日不佔空間）。
 // 選中桌時整欄被 TableDrawer 取代（由 OperationsView 控制），籤狀態保留在外層不重設。
-export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssignTable, onSeatWaitlist, onFocusTable, onReseatBatch, onStartWalkin }) {
+export default function OpsRail({
+  activeTab, onTabChange, onClickBooking, onAssignTable, onSeatWaitlist, onFocusTable, onReseatBatch,
+  // 帶位籤（v3）：桌與人數的真相在 OperationsView，這裡純轉發給 FastWalkInPanel
+  walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
+  walkinWarning, onWalkinSeat,
+}) {
   const { bookings, waitlist, groupReservations } = useBooking()
   const today = todayStr()
 
@@ -38,7 +43,7 @@ export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssi
 
   const tabs = [
     { key: 'walkin', label: '帶位', badge: 0 },
-    { key: 'upcoming', label: '脈動', badge: upcomingCount },
+    { key: 'upcoming', label: '今日訂位', badge: upcomingCount },
     { key: 'waitlist', label: '候位', badge: waitingCount },
     // 全完成的日子籤仍在（badge 0），才能回去印回傳單
     ...(activeGroups.length + completedGroups.length > 0
@@ -47,8 +52,9 @@ export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssi
   const effective = tabs.some(t => t.key === activeTab) ? activeTab : tabs[0].key
 
   return (
-    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden">
-      <div className="flex border-b border-chicken-brown/10">
+    // h-full min-h-0 flex-col：帶位面板要能把「滑動帶位」釘在欄位底部（捲動發生在面板內部）
+    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 flex flex-col">
+      <div className="flex-none flex border-b border-chicken-brown/10">
         {tabs.map(t => (
           <button
             key={t.key}
@@ -68,20 +74,32 @@ export default function OpsRail({ activeTab, onTabChange, onClickBooking, onAssi
           </button>
         ))}
       </div>
-      <div className="p-4">
-        {effective === 'walkin' && (
-          <FastWalkInPanel onStart={onStartWalkin} />
-        )}
-        {effective === 'upcoming' && (
-          <UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} />
-        )}
-        {effective === 'waitlist' && (
-          <WaitlistPanel onSeatWaitlist={onSeatWaitlist} />
-        )}
-        {effective === 'groups' && (
-          <GroupTodayPanel onFocusTable={onFocusTable} onReseatBatch={onReseatBatch} />
-        )}
-      </div>
+      {/* 帶位籤：面板自己管捲動與釘底動作列（直接吃滿剩餘高度）
+          其他籤：維持原本內距與整區捲動 */}
+      {effective === 'walkin' ? (
+        <FastWalkInPanel
+          guests={walkinGuests}
+          onGuestsChange={onWalkinGuestsChange}
+          tables={walkinTables}
+          onRemoveTable={onRemoveWalkinTable}
+          onClearTables={onClearWalkinTables}
+          warning={walkinWarning}
+          onSeat={onWalkinSeat}
+          onOpenTable={onFocusTable}
+        />
+      ) : (
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
+          {effective === 'upcoming' && (
+            <UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} />
+          )}
+          {effective === 'waitlist' && (
+            <WaitlistPanel onSeatWaitlist={onSeatWaitlist} />
+          )}
+          {effective === 'groups' && (
+            <GroupTodayPanel onFocusTable={onFocusTable} onReseatBatch={onReseatBatch} />
+          )}
+        </div>
+      )}
     </div>
   )
 }

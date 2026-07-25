@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test'
 
-// 現場「立即帶位」主線（客人優先快速入座）：
-// 同仁登入 → 現場分頁 → 頂部「🪑 立即帶位」→ 填人數/姓名 → 「選座位」進選桌模式
-// → 讀建議桌 → 點該桌（二步確認）→ 確認帶位 → 入座成功（桌轉用餐中）。
+// 現場「帶位」主線（v3：順序不拘 + 滑動帶位）：
+// 同仁登入 → 現場分頁（左欄預設「帶位」籤）→ 點桌況圖上的空桌（選進面板）+ 選人數
+// → 兩者到齊底部滑桿解鎖 → 滑動帶位 → 入座成功（桌轉用餐中）。
+// 舊版的「選座位帶入 →」按鈕與二步確認已移除，改由滑動手勢承擔防誤觸。
 // 後台本機模式以 localStorage 為後端；攔截 admin* 雲端端點。
 
 test.beforeEach(async ({ page }) => {
@@ -19,35 +20,138 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('現場：立即帶位 填人數/姓名 → 選建議桌（二步確認）→ 入座成功', async ({ page }) => {
+async function loginToOps(page) {
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
-
-  // 進現場分頁（鎖定側邊欄）
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
+}
 
-  // 頂部「立即帶位」→ 開表單
-  await page.getByRole('button', { name: /立即帶位/ }).click()
+// 拿到一個「可入座」的桌號：從帶位面板的建議文字讀（選好人數後會出現「建議 N」）
+async function readSuggestedTable(page) {
+  const hint = page.getByText(/建議\s*\d+/)
+  await expect(hint).toBeVisible()
+  const no = ((await hint.textContent()).match(/建議\s*(\d+)/) || [])[1]
+  expect(no).toBeTruthy()
+  return no
+}
 
-  // 填人數（chip 4）+ 姓名。現場左欄同時有電話大鍵盤（aria-label 為數字），
-  // 人數 chips 以「N 位」為 accessible name 區分，避免與鍵盤數字鍵歧義。
+// 真的滑：對 knob 做 pointer 拖曳（Playwright 的 mouse 會產生真實 pointer 事件）
+async function slideToSeat(page) {
+  const track = page.getByRole('button', { name: '滑動帶位 →' })
+  await expect(track).toBeVisible()
+  const knob = page.locator('[data-slide-knob]')
+  const kb = await knob.boundingBox()
+  const tb = await track.boundingBox()
+  await page.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2)
+  await page.mouse.down()
+  // 拖過去整條軌道（遠超過 60% 門檻）
+  await page.mouse.move(tb.x + tb.width, kb.y + kb.height / 2, { steps: 12 })
+  await page.mouse.up()
+}
+
+test('現場：點桌 → 選人數 → 滑動帶位 → 入座成功', async ({ page }) => {
+  await loginToOps(page)
+
+  // 左欄預設就是「帶位」籤，未選桌時提示點桌況圖
+  await expect(page.getByText(/點右邊桌況圖選一張桌/)).toBeVisible()
+
+  // 先選人數 → 面板給出建議桌
   await page.getByRole('button', { name: '4 位', exact: true }).click()
-  await page.getByPlaceholder('散客').fill('現場張')
+  const tableNo = await readSuggestedTable(page)
 
-  // 「選座位 →」進選桌模式：banner 顯示立即帶位 + 建議桌
-  await page.getByRole('button', { name: /選座位/ }).click()
-  await expect(page.getByText(/立即帶位：現場張 4 位/)).toBeVisible()
-
-  const suggestChip = page.getByText(/💡\s*建議\s*\d+/)
-  await expect(suggestChip).toBeVisible()
-  const tableNo = ((await suggestChip.textContent()).match(/\d+/) || [])[0]
-  expect(tableNo).toBeTruthy()
-
-  // 點建議桌 → 二步確認 → 確認帶位 → 成功
+  // 點該桌 → 選進面板（不是開抽屜、也不是二步確認）
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
-  await expect(page.getByText(new RegExp(`確認帶 現場張 入座桌 ${tableNo}`))).toBeVisible()
-  await page.getByRole('button', { name: /確認帶位/ }).click()
-  await expect(page.getByText(/現場張（4 位）入座.*可帶下一組/)).toBeVisible()
+  await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toBeVisible()
+
+  // 桌與人數到齊 → 滑桿解鎖並可滑動入座
+  await slideToSeat(page)
+  await expect(page.getByText(new RegExp(`入座 ${tableNo}\\s*·\\s*可帶下一組`))).toBeVisible()
+
+  // 入座後面板清空，可以直接帶下一組
+  await expect(page.getByText(/點右邊桌況圖選一張桌/)).toBeVisible()
+})
+
+test('現場：先點桌再選人數（反序）也能帶位，且滑桿未湊齊時鎖住', async ({ page }) => {
+  await loginToOps(page)
+
+  // 還沒選人數/桌 → 滑桿是鎖住的（顯示提示文案而非「滑動帶位」）
+  await expect(page.getByRole('button', { name: '滑動帶位 →' })).toHaveAttribute('aria-disabled', 'true')
+
+  // 先選人數拿建議桌號，再重設人數以測試「先點桌」的順序
+  await page.getByRole('button', { name: '2 位', exact: true }).click()
+  const tableNo = await readSuggestedTable(page)
+
+  // 先點桌
+  await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
+  await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toBeVisible()
+
+  // 再選人數 → 解鎖
+  await page.getByRole('button', { name: '3 位', exact: true }).click()
+  await expect(page.getByRole('button', { name: '滑動帶位 →' })).not.toHaveAttribute('aria-disabled', 'true')
+
+  await slideToSeat(page)
+  await expect(page.getByText(new RegExp(`入座 ${tableNo}\\s*·\\s*可帶下一組`))).toBeVisible()
+})
+
+test('現場：稱謂＋姓氏快選組成姓名，全程不用鍵盤', async ({ page }) => {
+  await loginToOps(page)
+
+  await page.getByRole('button', { name: '2 位', exact: true }).click()
+  const tableNo = await readSuggestedTable(page)
+
+  // 稱謂在上、姓氏在下（領檯看到人先知道先生/小姐，才問貴姓）
+  await page.getByRole('button', { name: '先生', exact: true }).click()
+  await page.getByRole('button', { name: '陳', exact: true }).click()
+
+  await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
+  await slideToSeat(page)
+
+  // 入座成功且姓名記成「陳先生」
+  await expect(page.getByText(/陳先生（2 位）入座/)).toBeVisible()
+})
+
+// 迴歸：iPad 觸控可能在同一個 React batch 內送出兩次 click（touch → 合成 click）。
+// 若加/移是用 render 當下的值判斷，兩次都會判「加入」→ 同一張桌進陣列兩次 → 席數加倍。
+test('現場：連點同一張桌不會重複加入（席數不可加倍）', async ({ page }) => {
+  await loginToOps(page)
+
+  await page.getByRole('button', { name: '2 位', exact: true }).click()
+  const tableNo = await readSuggestedTable(page)
+  const seat = page.locator(`svg g:has(:text-is("${tableNo}"))`).first()
+
+  // 從「未選」狀態快速連點兩下＝加入→移除，回到未選。
+  // 關鍵是任何一刻都不該出現「兩張同號卡」（那代表同一張桌被重複加入、席數加倍）。
+  await seat.dblclick()
+  await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toHaveCount(0)
+  await expect(page.getByText(/點右邊桌況圖選一張桌/)).toBeVisible()
+
+  // 單擊：剛好一張，不多不少
+  await seat.click()
+  await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toHaveCount(1)
+
+  // 再單擊：取消選取
+  await seat.click()
+  await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toHaveCount(0)
+})
+
+test('現場：滑不到門檻不會入座（防誤觸）', async ({ page }) => {
+  await loginToOps(page)
+
+  await page.getByRole('button', { name: '2 位', exact: true }).click()
+  const tableNo = await readSuggestedTable(page)
+  await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
+
+  // 只拖一小段（遠低於 60%）→ 放手應彈回，不入座
+  const knob = page.locator('[data-slide-knob]')
+  const kb = await knob.boundingBox()
+  await page.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(kb.x + kb.width / 2 + 30, kb.y + kb.height / 2, { steps: 5 })
+  await page.mouse.up()
+
+  await expect(page.getByText(/可帶下一組/)).toHaveCount(0)
+  // 桌仍選在面板上，人數也還在，店員可以直接補滑
+  await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toBeVisible()
 })

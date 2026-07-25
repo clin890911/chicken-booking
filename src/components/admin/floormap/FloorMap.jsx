@@ -50,6 +50,7 @@ export default function FloorMap({
   bookings = [],
   settings = {},
   selectedTableNumber,
+  selectedTableNumbers = [], // 現場帶位：已選進帶位面板的桌（可多桌＝併桌），沿用「選中」樣式
   onSelectTable,
   highlightTables = [],   // 指派模式：要 highlight 的桌號陣列
   assignMode = false,
@@ -164,7 +165,7 @@ export default function FloorMap({
           )
         }
         const booking = t.currentBookingId ? bookingMap[t.currentBookingId] : null
-        const isSelected = selectedTableNumber === t.number
+        const isSelected = selectedTableNumber === t.number || selectedTableNumbers.includes(t.number)
         const isHighlight = assignMode && highlightTables.includes(t.number)
         const isAssignSuggestion = assignMode && suggestionTable === t.number
         const isPendingConfirm = assignMode && pendingConfirmTable === t.number
