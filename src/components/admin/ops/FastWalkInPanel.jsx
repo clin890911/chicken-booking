@@ -25,6 +25,7 @@ import HonorificNameField, { composeName } from './HonorificNameField'
 //   onSeat(payload)         — 真正入座，回傳 false 代表失敗（維持欄位，方便改人數或改候位）
 export default function FastWalkInPanel({
   guests, onGuestsChange, tables = [], onRemoveTable, onClearTables, warning, onSeat, onOpenTable,
+  lastParty,
 }) {
   const toast = useToast()
   const { suggestTable, suggestTableCombo } = useBooking()
@@ -162,6 +163,18 @@ export default function FastWalkInPanel({
         />
 
         <GuestCountField value={guests} onChange={onGuestsChange} accent="amber" />
+
+        {/* M6 沿用上一組：連續同型客人（一直來 2 位）省掉重選。
+            只有在「真的會改變什麼」時才出現——人數與註記都已相同就別佔版面、也別讓人白按一下。 */}
+        {lastParty && (g !== lastParty.guests || notes.trim() !== (lastParty.notes || '')) && (
+          <button
+            type="button"
+            onClick={() => { onGuestsChange(lastParty.guests); setNotes(lastParty.notes || '') }}
+            className="w-full min-h-[44px] rounded-xl border-2 border-dashed border-chicken-brown/25 bg-chicken-cream/60 text-sm font-bold text-chicken-brown/70"
+          >
+            ↩︎ 沿用上一組（{lastParty.guests} 位{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
+          </button>
+        )}
 
         {/* 電話收進次級區：大鍵盤佔 210pt，常態用不到就別佔版面 */}
         {showPhone ? (

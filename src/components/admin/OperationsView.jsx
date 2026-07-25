@@ -49,6 +49,10 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const [walkinGuests, setWalkinGuests] = useState(2)
   const [walkinTableNumbers, setWalkinTableNumbers] = useState([])
   const [lastSeated, setLastSeated] = useState(null) // M2b 短復原：{ bookingId, tableNumbers, name, guests, at }
+  // M6 沿用上一組：{ guests, notes }。放在這裡（不放面板內）是因為切籤會把 FastWalkInPanel
+  // 卸載，state 會消失；連續同型客人（一直來 2 位）才是這功能要救的情境。
+  // 刻意不記姓名／電話——那是每組不同的資料，沿用會把上一組的客人資料掛到新客人身上。
+  const [lastParty, setLastParty] = useState(null)
   // 復原時要讀「當下」的訂位狀態（toast 的 onClick 閉包會抓到入座當時的舊值）
   const bookingsRef = useRef(bookings)
   bookingsRef.current = bookings
@@ -387,6 +391,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     const guests = r.booking?.guests || payload.guests
     const snap = { bookingId: r.booking?.id, tableNumbers: nums, name, guests, at: Date.now() }
     setLastSeated(snap)
+    setLastParty({ guests, notes: payload.notes || '' })   // M6：供下一組一鍵沿用
     flashAssigned(nums[0])
     setWalkinTableNumbers([])
     // 不 setSelectedTable：留在帶位面板才能直接帶下一組（舊版會被 TableDrawer 蓋掉）
@@ -568,6 +573,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
               onClearWalkinTables={() => setWalkinTableNumbers([])}
               walkinWarning={walkinWarning}
               onWalkinSeat={handleWalkinSeat}
+              lastParty={lastParty}
               onClickBooking={(b) => {
                 if (b.assignedTableId) setSelectedTable(b.assignedTableId)
               }}

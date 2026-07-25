@@ -155,3 +155,31 @@ test('現場：滑不到門檻不會入座（防誤觸）', async ({ page }) => 
   // 桌仍選在面板上，人數也還在，店員可以直接補滑
   await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toBeVisible()
 })
+
+// M6 沿用上一組：連續同型客人（一直來 4 位）不必每組重選人數。
+// 刻意只沿用人數與註記，不沿用姓名／電話——那是每組不同的資料。
+test('現場：帶完一組後可「沿用上一組」快速帶下一組', async ({ page }) => {
+  await loginToOps(page)
+
+  // 第一組：4 位 + 註記，帶位完成
+  await page.getByRole('button', { name: '4 位', exact: true }).click()
+  const t1 = await readSuggestedTable(page)
+  await page.getByPlaceholder('例：靠窗、慶生、過敏').fill('靠窗')
+  await page.locator(`svg g:has(:text-is("${t1}"))`).first().click()
+  await slideToSeat(page)
+  await expect(page.getByText(new RegExp(`入座 ${t1}\\s*·\\s*可帶下一組`))).toBeVisible()
+
+  // 面板已重置成預設 2 位 → 出現「沿用上一組（4 位 · 靠窗）」
+  const reuse = page.getByRole('button', { name: /沿用上一組/ })
+  await expect(reuse).toBeVisible()
+  await expect(reuse).toContainText('4 位')
+  await expect(reuse).toContainText('靠窗')
+
+  // 按下去 → 人數與註記一起帶回來
+  await reuse.click()
+  await expect(page.getByRole('button', { name: '4 位', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByPlaceholder('例：靠窗、慶生、過敏')).toHaveValue('靠窗')
+
+  // 已經跟上一組一樣了 → 按鈕收起來，不佔版面也不讓人白按
+  await expect(reuse).toHaveCount(0)
+})
