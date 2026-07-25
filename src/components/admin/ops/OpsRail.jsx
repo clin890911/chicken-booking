@@ -15,7 +15,7 @@ export default function OpsRail({
   activeTab, onTabChange, onClickBooking, onAssignTable, onSeatWaitlist, onFocusTable, onReseatBatch,
   // 帶位籤（v3）：桌與人數的真相在 OperationsView，這裡純轉發給 FastWalkInPanel
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
-  walkinWarning, onWalkinSeat,
+  walkinWarning, onWalkinSeat, lastParty,
 }) {
   const { bookings, waitlist, groupReservations } = useBooking()
   const today = todayStr()
@@ -85,6 +85,7 @@ export default function OpsRail({
           onClearTables={onClearWalkinTables}
           warning={walkinWarning}
           onSeat={onWalkinSeat}
+          lastParty={lastParty}
           onOpenTable={onFocusTable}
         />
       ) : (

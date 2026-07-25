@@ -51,6 +51,8 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
             key={n}
             type="button"
             aria-label={`${n} 位`}
+            // 這些是切換鈕，選中狀態原本只用顏色表達 → 補 aria-pressed，讀屏才讀得出來
+            aria-pressed={value === n && !showInput}
             onClick={() => { setMore(false); onChange(n) }}
             className={`w-11 h-11 rounded-xl border-2 text-base font-black tabular-nums transition-all ${
               value === n && !showInput ? chipActive : chipIdle}`}

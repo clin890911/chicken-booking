@@ -155,3 +155,68 @@ test('現場：滑不到門檻不會入座（防誤觸）', async ({ page }) => 
   // 桌仍選在面板上，人數也還在，店員可以直接補滑
   await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toBeVisible()
 })
+
+// M6 沿用上一組：連續同型客人（一直來 4 位）不必每組重選人數。
+// 刻意只沿用人數與註記，不沿用姓名／電話——那是每組不同的資料。
+test('現場：帶完一組後可「沿用上一組」快速帶下一組', async ({ page }) => {
+  await loginToOps(page)
+
+  // 第一組：4 位 + 註記，帶位完成
+  await page.getByRole('button', { name: '4 位', exact: true }).click()
+  const t1 = await readSuggestedTable(page)
+  await page.getByPlaceholder('例：靠窗、慶生、過敏').fill('靠窗')
+  await page.locator(`svg g:has(:text-is("${t1}"))`).first().click()
+  await slideToSeat(page)
+  await expect(page.getByText(new RegExp(`入座 ${t1}\\s*·\\s*可帶下一組`))).toBeVisible()
+
+  // 面板已重置成預設 2 位 → 出現「沿用上一組（4 位 · 靠窗）」
+  const reuse = page.getByRole('button', { name: /沿用上一組/ })
+  await expect(reuse).toBeVisible()
+  await expect(reuse).toContainText('4 位')
+  await expect(reuse).toContainText('靠窗')
+
+  // 按下去 → 人數與註記一起帶回來
+  await reuse.click()
+  await expect(page.getByRole('button', { name: '4 位', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByPlaceholder('例：靠窗、慶生、過敏')).toHaveValue('靠窗')
+
+  // 已經跟上一組一樣了 → 按鈕收起來，不佔版面也不讓人白按
+  await expect(reuse).toHaveCount(0)
+})
+
+// 🔴 迴歸：電話帶出顧客檔時，備註會被合成「店員打的字；過敏：xxx」一起寫進訂位。
+// 「沿用上一組」若沿用這整串，上一位客人的過敏資訊會被掛到下一組客人身上
+// （個資外洩＋出餐安全）。只能沿用店員手打的那段。
+test('現場：「沿用上一組」不可把上一組的過敏註記帶給下一組', async ({ page }) => {
+  // 先種一筆有過敏註記的顧客檔
+  await page.addInitScript(() => {
+    localStorage.setItem('chicken_customers_v1', JSON.stringify({
+      '0912000111': {
+        phone: '0912000111', name: '過敏客', allergies: '花生',
+        visits: 3, totalGuests: 6, vipTier: 'none', createdAt: new Date().toISOString(),
+      },
+    }))
+  })
+  await loginToOps(page)
+
+  // 第一組：輸入該電話帶出顧客檔（過敏：花生）＋店員自己打「靠窗」
+  await page.getByRole('button', { name: '2 位', exact: true }).click()
+  await page.getByRole('button', { name: /電話（帶顧客檔/ }).click()
+  await page.getByPlaceholder('0912345678').fill('0912000111')
+  await expect(page.getByText(/過敏：花生/)).toBeVisible()
+  await page.getByPlaceholder('例：靠窗、慶生、過敏').fill('靠窗')
+
+  const t1 = await readSuggestedTable(page)
+  await page.locator(`svg g:has(:text-is("${t1}"))`).first().click()
+  await slideToSeat(page)
+  await expect(page.getByText(new RegExp(`入座 ${t1}`))).toBeVisible()
+
+  // 沿用按鈕只能帶「靠窗」，絕不能出現「花生」
+  const reuse = page.getByRole('button', { name: /沿用上一組/ })
+  await expect(reuse).toBeVisible()
+  await expect(reuse).toContainText('靠窗')
+  await expect(reuse).not.toContainText('花生')
+
+  await reuse.click()
+  await expect(page.getByPlaceholder('例：靠窗、慶生、過敏')).toHaveValue('靠窗')
+})

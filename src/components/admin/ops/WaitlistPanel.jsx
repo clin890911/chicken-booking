@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react'
-import { Modal, Input, Select } from '../../ui'
+import { Modal, Input } from '../../ui'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
+import GuestCountField from '../GuestCountField'
+import HonorificNameField, { composeName } from './HonorificNameField'
 import WaitlistHistorySheet from './WaitlistHistorySheet'
 
 function diffMin(d) {
@@ -20,6 +22,11 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
   const [showAdd, setShowAdd] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [form, setForm] = useState({ name: '', phone: '', partySize: 2, notes: '' })
+  // 稱謂＋姓氏快選（與現場帶位共用同一套元件）：滿場尖峰時取號不必切注音。
+  // 存進 waitlist 的仍是同一個 name 字串，資料結構不變。
+  const [title, setTitle] = useState(null)
+  const [surname, setSurname] = useState(null)
+  const [customName, setCustomName] = useState('')
 
   const active = waitlist.filter(w => w.status === 'waiting' || w.status === 'called')
 
@@ -41,12 +48,19 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
     return Math.max(5, base)
   }, [active.length, form.partySize])
 
+  const resetForm = () => {
+    setForm({ name: '', phone: '', partySize: 2, notes: '' })
+    setTitle(null); setSurname(null); setCustomName('')
+  }
+
   const handleAdd = () => {
     const size = Number(form.partySize)
     if (!size || size < 1 || size > 12) return toast.warning('人數需介於 1～12 位')
-    const w = addWaitlist({ ...form, partySize: size, estimatedMin: estimatedWaitMin })
+    // 快選組出來的稱呼優先；沒選就沿用手打的 name（兩者都空＝匿名取號，靠號碼叫人）
+    const name = composeName(title, surname, customName.trim()) || form.name.trim()
+    const w = addWaitlist({ ...form, name, partySize: size, estimatedMin: estimatedWaitMin })
     setShowAdd(false)
-    setForm({ name: '', phone: '', partySize: 2, notes: '' })
+    resetForm()
     if (w?.queueNumber) toast.success(`已取號 #${w.queueNumber}，預估等待 ${w.estimatedMin} 分`)
   }
 
@@ -120,25 +134,34 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
       )}
 
       {/* 取號 Modal */}
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title="🚦 候位取號" footer={
+      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title="🚦 候位取號" footer={
         <>
-          <button onClick={() => setShowAdd(false)} className="btn-secondary px-4 py-2">取消</button>
+          <button onClick={() => { setShowAdd(false); resetForm() }} className="btn-secondary px-4 py-2">取消</button>
           <button onClick={handleAdd} className="btn-primary px-4 py-2">取號</button>
         </>
       }>
+        {/* 人數擺第一個：它是唯一必填，滿場尖峰「點人數 → 取號」兩下就走完 */}
         <div className="space-y-3">
-          <Input label="姓名" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="王小姐" />
-          <Input label="電話" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="0912345678" />
-          <Select
-            label="人數（1～12 位）"
+          <GuestCountField
             value={form.partySize}
-            onChange={e => setForm(f => ({ ...f, partySize: Number(e.target.value) }))}
-            options={Array.from({ length: 12 }, (_, i) => ({ value: i + 1, label: `${i + 1} 位` }))}
+            onChange={n => setForm(f => ({ ...f, partySize: n }))}
+            max={12}
+            label="幾位？（1～12 位）"
           />
           <div className="rounded-xl border border-chicken-brown/10 bg-chicken-cream/60 px-3 py-2 text-sm text-chicken-brown/70">
             預估約 <span className="font-bold text-amber-700">{estimatedWaitMin} 分</span>
             <span className="text-xs text-chicken-brown/50">（目前 {active.length} 組候位中）</span>
           </div>
+          <HonorificNameField
+            title={title}
+            surname={surname}
+            onChange={({ title: t, surname: s }) => { setTitle(t); setSurname(s) }}
+            custom={customName}
+            onCustomChange={setCustomName}
+          />
+          <Input label="電話（選填）" type="tel" inputMode="numeric" value={form.phone}
+            onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+            placeholder="0912345678" />
           <Input label="備註（選填）" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="例：靠窗、過敏" />
         </div>
       </Modal>

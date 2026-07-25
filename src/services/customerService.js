@@ -45,6 +45,13 @@ export function search(query) {
   )
 }
 
+// 系統自動填的通稱（不是客人真的叫這個名字）。
+// 候位不留名會存成「訪客」、現場帶位不留名會存成「散客」，這些字串一路傳到 upsert；
+// 若讓它們覆蓋既有顧客檔，回頭客的真名會被洗成「訪客」——M5 把「不填姓名」變成
+// 取號的主要路徑之後，這個覆蓋會頻繁發生。
+const PLACEHOLDER_NAMES = new Set(['訪客', '散客'])
+const isPlaceholderName = (n) => PLACEHOLDER_NAMES.has((n || '').trim())
+
 // upsert：訂位/候位/到店時呼叫
 export function upsert({ phone, name, lineUserId, partySize, source, notes }) {
   const key = normalize(phone)
@@ -55,7 +62,8 @@ export function upsert({ phone, name, lineUserId, partySize, source, notes }) {
   const next = existing
     ? {
       ...existing,
-      name: name || existing.name,
+      // 通稱不覆蓋既有真名（沒有既有名字時才讓通稱先頂著）
+      name: (isPlaceholderName(name) ? existing.name : name) || existing.name || name || '',
       lineUserId: lineUserId || existing.lineUserId,
       visits: (existing.visits || 0) + 1,
       lastVisit: now,
