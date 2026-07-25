@@ -357,6 +357,10 @@ function groupHoldConflict(tableNumber, from, to) {
   ) || null
 }
 
+// 佈局編輯器唯一擁有寫入權的欄位。其餘（status/currentBookingId/currentRef/seatedAt/mergedWith/
+// blockReason/outage 等現場即時狀態）不屬於編輯器，存檔時一律沿用本機當下值。
+const LAYOUT_FIELDS = ['capacity', 'floor', 'x', 'y', 'w', 'h', 'rotation', 'zoneId', 'isActive']
+
 // 批次寫入（佈局編輯器）前的整合守門：active→inactive 的桌若被今天起的有效團圈到 → 擋。
 // （tableService.bulkWrite 已有佔用守門；這層補上它看不到的團體資料。）
 export function bulkSaveTablesGuarded(list) {
@@ -368,7 +372,17 @@ export function bulkSaveTablesGuarded(list) {
       if (g) return { ok: false, error: `${t.number} 已被 ${g.date}「${g.agencyName || '團體'}」圈桌，請先調整該團再停用` }
     }
   }
-  return tableService.bulkWrite(list)
+  // 存檔只把「佈局欄位」套用到本機當下的桌上；現場即時欄位一律保留本機最新值，不採用編輯器打開時
+  // 凍結的舊快照。否則店主開著編輯器慢慢排時，別台剛帶的位、剛設的維修，會被舊快照覆蓋回去
+  // （存檔後差異同步 merge:true 會連帶覆蓋雲端，讓當天的桌看起來變空桌）。
+  const merged = (list || []).map(t => {
+    const prev = byNum.get(t.number)
+    if (!prev) return t   // 全新桌：無本機現值可保留，整張寫入
+    const patch = {}
+    for (const f of LAYOUT_FIELDS) if (f in t) patch[f] = t[f]
+    return { ...prev, ...patch }
+  })
+  return tableService.bulkWrite(merged)
 }
 
 // 永久停用前的整合守門：今天起任何未來有效團圈到此桌 → 擋下並指名該團
