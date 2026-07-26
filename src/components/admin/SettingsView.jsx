@@ -24,6 +24,16 @@ const SETTINGS_DEFAULTS = {
 }
 // 會影響容量／可訂時段的欄位，改動時需提醒既有訂位受影響
 const CAPACITY_FIELDS = ['diningDurationMin', 'cleanupBufferMin', 'openTime', 'closeTime', 'slotInterval']
+// 同步集合的中文名：用在「部分變更未能上雲」的說明，讓店員看得懂是哪一類資料卡住。
+const COLLECTION_LABELS = {
+  bookings: '訂位',
+  tables: '桌位',
+  waitlist: '候位',
+  customers: '顧客',
+  agencies: '旅行社',
+  guides: '導遊',
+  groupReservations: '團體預排',
+}
 const FIELD_LABELS = {
   diningDurationMin: '用餐時間',
   cleanupBufferMin: '清桌緩衝',
@@ -46,7 +56,7 @@ const DEFAULT_CATEGORY = 'ops-rules'
 const CategoryContext = createContext([])
 
 export default function SettingsView({ onOpenCustomer }) {
-  const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud } = useBooking()
+  const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud, discardRejectedChanges } = useBooking()
   const { user, signOut, can, usingFirebase } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
@@ -131,10 +141,10 @@ export default function SettingsView({ onOpenCustomer }) {
 
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
   const handleSave = async () => {
-    // 🔴 非店長不可存設定。這不只是權限問題，更是同步的防線：
-    // 後端 settings 需 settings.update（僅 manager），且採「任一集合越權即整包 403」。
-    // 若讓非店長寫進本機 settings，它會永遠與雲端不一致 → 每次差異推送都夾帶 settings
-    // → 每次都 403 → 該裝置連 bookings/tables 都推不上去、與雲端永久分歧（現場曾整天壞掉）。
+    // 🔴 非店長不可存設定。這不只是權限問題，更是同步的防線：後端 settings 需
+    // settings.update（僅 manager）。非店長寫進本機 settings 後永遠與雲端不一致、
+    // 每次差異推送都夾帶並被拒，畫面會長期顯示雲端根本沒有的設定。
+    // （部分推送上線後不再連坐拖垮其他集合，但這筆本機變更仍然永遠上不了雲。）
     if (!can('settings.update')) {
       toast.error('你的角色沒有變更店家設定的權限，請聯絡店長')
       return
@@ -161,6 +171,7 @@ export default function SettingsView({ onOpenCustomer }) {
       }
       const r = await flushCloudNow()
       if (r.ok) toast.success('✅ 已儲存並同步雲端')
+      else if (r.rejected) toast.error(`本機已存，但雲端拒絕了這筆變更：${r.error}。請改用有權限的帳號，或到下方同步狀態列選擇以雲端為準`)
       else toast.error(`本機已存，但雲端同步失敗：${r.error}。請按「重試同步」或檢查網路後再試`)
     } finally {
       setSaving(false)
@@ -173,6 +184,29 @@ export default function SettingsView({ onOpenCustomer }) {
       const r = await flushCloudNow()
       if (r.ok) toast.success('✅ 已同步雲端')
       else toast.error(`雲端同步仍失敗：${r.error}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+  // 放棄「因權限不足推不上雲」的本機變更，改以雲端為準。這會真的丟資料，故加強確認。
+  // 不自動執行的理由：那些變更是店員真的做過的操作，要不要放棄是店家的決定。
+  const handleDiscardRejected = async () => {
+    const rejected = cloudStatus?.rejected
+    if (!rejected) return
+    const scopes = [
+      ...(rejected.writes || []).map(c => `${COLLECTION_LABELS[c] || c}的變更`),
+      ...(rejected.deletes || []).map(c => `${COLLECTION_LABELS[c] || c}的刪除`),
+      ...(rejected.settings ? ['店家設定的變更'] : []),
+    ]
+    const ok = await confirm(
+      `將放棄這台裝置上以下未能上雲的變更，改以雲端資料為準：\n\n${scopes.map(s => `・${s}`).join('\n')}\n\n這些變更會消失且無法復原。確定嗎？`,
+      { title: '放棄未上雲的變更', danger: true, confirmLabel: '放棄並以雲端為準' }
+    )
+    if (!ok) return
+    setSaving(true)
+    try {
+      await discardRejectedChanges(rejected)
+      toast.success('✅ 已改以雲端資料為準')
     } finally {
       setSaving(false)
     }
@@ -276,14 +310,17 @@ export default function SettingsView({ onOpenCustomer }) {
         <div className={`mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-2 text-sm font-bold ${
           cloudStatus?.state === 'offline'
             ? 'border-red-300 bg-red-50 text-chicken-red'
-            : cloudStatus?.state === 'syncing'
+            : cloudStatus?.state === 'rejected'
+              ? 'border-amber-300 bg-amber-50 text-amber-800'
+              : cloudStatus?.state === 'syncing'
               ? 'border-blue-200 bg-blue-50 text-blue-700'
-              : cloudStatus?.state === 'synced'
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                : 'border-chicken-brown/15 bg-chicken-brown/5 text-chicken-brown/50'
+                : cloudStatus?.state === 'synced'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-chicken-brown/15 bg-chicken-brown/5 text-chicken-brown/50'
         }`}>
           <span>
             {cloudStatus?.state === 'offline' && `⚠️ 雲端未同步：${cloudStatus.error}（本機已存，尚未寫入 Firebase）`}
+            {cloudStatus?.state === 'rejected' && `⚠️ 部分變更未能上雲：${cloudStatus.error}。其餘資料已同步；被擋下的變更目前只存在這台裝置，畫面顯示的內容與雲端不一致。`}
             {cloudStatus?.state === 'syncing' && '☁️ 正在同步到雲端…'}
             {cloudStatus?.state === 'synced' && `✅ 已同步雲端${cloudStatus.lastSyncAt ? ` · ${new Date(cloudStatus.lastSyncAt).toLocaleTimeString('zh-TW')}` : ''}`}
             {(!cloudStatus?.state || cloudStatus?.state === 'idle') && '尚未同步'}
@@ -295,6 +332,15 @@ export default function SettingsView({ onOpenCustomer }) {
               className="min-h-[40px] rounded-xl border border-red-400/60 bg-white px-4 py-1.5 text-sm font-bold text-chicken-red hover:bg-red-50 disabled:opacity-50"
             >
               {saving ? '重試中…' : '重試同步'}
+            </button>
+          )}
+          {cloudStatus?.state === 'rejected' && (
+            <button
+              onClick={handleDiscardRejected}
+              disabled={saving}
+              className="min-h-[40px] rounded-xl border border-amber-400/60 bg-white px-4 py-1.5 text-sm font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+            >
+              放棄這些變更，以雲端為準
             </button>
           )}
         </div>

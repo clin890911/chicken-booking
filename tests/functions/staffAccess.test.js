@@ -8,6 +8,7 @@ import {
   canWriteCollection,
   canDeleteCollection,
   canWriteSettings,
+  classifyDatasetByPermission,
 } from '../../functions/lib/staffAccess.js'
 
 // 管理員帳號管理純邏輯（functions/lib/staffAccess.js）。
@@ -156,5 +157,80 @@ describe('canWriteSettings', () => {
     expect(canWriteSettings('floor')).toBe(false)
     expect(canWriteSettings('host')).toBe(false)
     expect(canWriteSettings('kitchen')).toBe(false)
+  })
+})
+
+// === 部分推送的權限分類 ===
+// 這組守的是「單一集合越權即整包 403」造成的連坐災難：前端把所有髒集合綁成同一個
+// payload，任何一條沒被 UI 擋住的越權寫入，都會讓該裝置全部集合的同步一起失敗。
+describe('classifyDatasetByPermission（部分推送）', () => {
+  const COLS = ['bookings', 'tables', 'waitlist', 'customers', 'agencies', 'guides', 'groupReservations']
+  const call = (dataset, role) => classifyDatasetByPermission(dataset, role, COLS)
+
+  it('全部有權 → 無越權、writable 與輸入等價', () => {
+    const ds = { bookings: [{ id: 'b1' }], tables: [{ number: '101' }] }
+    const r = call(ds, 'floor')
+    expect(r.hasRejection).toBe(false)
+    expect(r.rejected).toEqual({ writes: [], deletes: [], settings: false })
+    expect(r.writable.bookings).toHaveLength(1)
+    expect(r.writable.tables).toHaveLength(1)
+  })
+
+  it('🔴 只剔除越權集合，有權的照留——這是整個重構的重點（不再連坐）', () => {
+    const ds = {
+      bookings: [{ id: 'b1' }],           // floor 有權
+      tables: [{ number: '101' }],        // floor 有權
+      agencies: [{ id: 'a1' }],           // floor 無權（需 agency.manage）
+      settings: { openTime: '11:00' },    // floor 無權（僅 manager）
+    }
+    const r = call(ds, 'floor')
+    expect(r.hasRejection).toBe(true)
+    expect(r.rejected.writes).toEqual(['agencies'])
+    expect(r.rejected.settings).toBe(true)
+    // 有權的部分必須完整保留 —— 舊行為是整包 403、一筆都不寫
+    expect(r.writable.bookings).toHaveLength(1)
+    expect(r.writable.tables).toHaveLength(1)
+    // 越權的部分必須被剔除，不能漏進寫入路徑
+    expect(r.writable.agencies).toBeUndefined()
+    expect(r.writable.settings).toBeUndefined()
+  })
+
+  it('刪除與寫入分開判定：floor 可寫 groupReservations 但不可刪', () => {
+    const ds = {
+      groupReservations: [{ id: 'g1' }],
+      deletedIds: { groupReservations: ['g2'], bookings: ['b9'] },
+    }
+    const r = call(ds, 'floor')
+    expect(r.rejected.writes).toEqual([])          // group.update 有
+    expect(r.rejected.deletes.sort()).toEqual(['bookings', 'groupReservations']) // 兩者的 delete 都沒有
+    expect(r.writable.groupReservations).toHaveLength(1)
+    expect(r.writable.deletedIds).toEqual({})
+  })
+
+  it('manager 全通過；kitchen 幾乎全被拒', () => {
+    const ds = { bookings: [{ id: 'b1' }], tables: [{ number: '101' }], settings: { openTime: '11:00' } }
+    expect(call(ds, 'manager').hasRejection).toBe(false)
+    const k = call(ds, 'kitchen')
+    expect(k.rejected.writes.sort()).toEqual(['bookings', 'tables'])
+    expect(k.rejected.settings).toBe(true)
+    expect(k.writable.bookings).toBeUndefined()
+    expect(k.writable.tables).toBeUndefined()
+  })
+
+  it('不得變動呼叫端傳入的原始 dataset（通知路徑仍需要原始輸入）', () => {
+    const ds = { bookings: [{ id: 'b1' }], agencies: [{ id: 'a1' }], settings: { openTime: '11:00' } }
+    const snapshot = JSON.stringify(ds)
+    call(ds, 'floor')
+    expect(JSON.stringify(ds)).toBe(snapshot)
+  })
+
+  it('空陣列不算越權（避免無資料的集合也被誤判成被拒）', () => {
+    const r = call({ agencies: [], deletedIds: { bookings: [] } }, 'floor')
+    expect(r.hasRejection).toBe(false)
+  })
+
+  it('message 沿用原本的中文格式，供舊 403 路徑與新回報共用', () => {
+    const r = call({ agencies: [{ id: 'a1' }] }, 'floor')
+    expect(r.message).toBe('角色「floor」無權：寫入 agencies')
   })
 })

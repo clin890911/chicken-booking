@@ -111,6 +111,57 @@ export function canWriteSettings(role) {
   return roleCan(role, 'settings.update')
 }
 
+// === 差異推送的權限分類（adminPushData 用）===
+// 背景：adminPushData 原本採「任一集合越權即整包 403」。配合前端把所有髒集合綁成同一個
+// payload 推送，任何一條沒被 UI 擋住的越權寫入，都會讓該裝置**全部**集合的同步一起失敗，
+// 且髒資料永遠留在本機重試、不會自癒（現場曾整天推不上雲）。此函式把 dataset 拆成
+// 「可寫的」與「被拒的」，讓呼叫端能只寫可寫的部分、並如實回報被拒的部分。
+//
+// 回傳：
+//   rejected     { writes: string[], deletes: string[], settings: boolean }
+//   writable     剔除越權部分後的 dataset（原物件不變動）
+//   message      給人看的中文說明（沿用原 403 文案格式）
+//   hasRejection 是否有任何越權
+export function classifyDatasetByPermission(dataset = {}, role, collectionNames = []) {
+  const denied = []
+  const rejected = { writes: [], deletes: [], settings: false }
+  const deletedIds = dataset.deletedIds || {}
+
+  for (const name of collectionNames) {
+    if (Array.isArray(dataset[name]) && dataset[name].length && !canWriteCollection(role, name)) {
+      denied.push(`寫入 ${name}`)
+      rejected.writes.push(name)
+    }
+  }
+  for (const name of collectionNames) {
+    if (Array.isArray(deletedIds[name]) && deletedIds[name].length && !canDeleteCollection(role, name)) {
+      denied.push(`刪除 ${name}`)
+      rejected.deletes.push(name)
+    }
+  }
+  if (dataset.settings && !canWriteSettings(role)) {
+    denied.push('變更設定')
+    rejected.settings = true
+  }
+
+  // 剔除越權部分（淺拷貝，不動原 dataset——呼叫端的通知路徑仍可能需要原始輸入）。
+  const writable = { ...dataset }
+  rejected.writes.forEach(name => { delete writable[name] })
+  if (rejected.deletes.length) {
+    const nextDeletes = { ...deletedIds }
+    rejected.deletes.forEach(name => { delete nextDeletes[name] })
+    writable.deletedIds = nextDeletes
+  }
+  if (rejected.settings) delete writable.settings
+
+  return {
+    rejected,
+    writable,
+    message: denied.length ? `角色「${role}」無權：${denied.join('、')}` : '',
+    hasRejection: denied.length > 0,
+  }
+}
+
 // 新增/更新管理員的輸入驗證 + 清洗。
 export function validateStaffUpsert({ email, role, name } = {}) {
   const cleanEmail = normalizeStaffEmail(email)
