@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { computeOvertimeActions, computeDayRolloverActions } from '../../src/utils/opsSweep'
+import {
+  computeOvertimeActions, computeDayRolloverActions,
+  canRunSweeps, filterSweepActionsByPermission,
+  KNOWN_SWEEP_ACTIONS, SWEEP_ACTION_PERMISSION,
+} from '../../src/utils/opsSweep'
 
 const NOW = new Date(2026, 5, 10, 18, 0, 0, 0).getTime()
 const TODAY = '2026-06-10'
@@ -115,5 +119,94 @@ describe('computeDayRolloverActions（換日掃除）', () => {
       settings: { dayRolloverEnabled: false }, today: TODAY,
     })
     expect(acts).toEqual([])
+  })
+})
+
+// === 掃除的權限政策 ===
+// 這組測試守的是一個「使用者零操作就會壞掉」的災難：掃除是自動跑的，
+// 若讓無寫入權的角色改到本機資料，後端「任一集合越權即整包 403」會讓該裝置
+// 之後的每一次推送全被拒（含帶位、訂位），且不會自癒。
+describe('掃除權限政策', () => {
+  const permitOf = (perms) => (p) => perms.includes(p)
+
+  const FLOOR = ['booking.update', 'table.update', 'group.update']
+  const HOST = ['booking.update', 'table.update', 'group.update']
+  const KITCHEN = ['booking.read', 'table.read'] // 唯讀
+
+  it('kitchen（唯讀）不得執行掃除——否則一開機就毒殺整台裝置的同步', () => {
+    expect(canRunSweeps(permitOf(KITCHEN))).toBe(false)
+  })
+
+  it('floor / host 可以執行掃除', () => {
+    expect(canRunSweeps(permitOf(FLOOR))).toBe(true)
+    expect(canRunSweeps(permitOf(HOST))).toBe(true)
+  })
+
+  it('缺少任一基礎權限就不跑（booking.update 或 table.update 少一個都不行）', () => {
+    expect(canRunSweeps(permitOf(['table.update']))).toBe(false)
+    expect(canRunSweeps(permitOf(['booking.update']))).toBe(false)
+  })
+
+  it('permit 不是函式時放行（無 AuthProvider 的測試/本機模式維持既有行為）', () => {
+    expect(canRunSweeps(undefined)).toBe(true)
+    expect(canRunSweeps(null)).toBe(true)
+  })
+
+  it('complete-group 需要 group.update：無權時濾掉，其餘 action 不受影響', () => {
+    const actions = [
+      { type: 'clear-table', tableNumber: 101 },
+      { type: 'complete-group', groupId: 'g1' },
+      { type: 'complete-booking', bookingId: 'b1' },
+    ]
+    const noGroup = filterSweepActionsByPermission(actions, permitOf(['booking.update', 'table.update']))
+    expect(noGroup.map(a => a.type)).toEqual(['clear-table', 'complete-booking'])
+
+    const withGroup = filterSweepActionsByPermission(actions, permitOf(FLOOR))
+    expect(withGroup).toHaveLength(3)
+  })
+
+  it('permit 不是函式時不過濾任何 action', () => {
+    const actions = [{ type: 'complete-group', groupId: 'g1' }]
+    expect(filterSweepActionsByPermission(actions, undefined)).toEqual(actions)
+  })
+})
+
+// 註冊表完整性：擋「新增了 action 種類卻忘了登記它要寫哪個集合」。
+// 這正是本 repo 已經栽過兩次的坑（host 缺 table.update、floor 缺 group.update）——
+// 自動跑的寫入撞上無權角色，會讓整台裝置的同步全死且不會自癒。
+describe('掃除 action 註冊表完整性', () => {
+  it('兩個 compute 函式吐得出來的 action 種類，必須與 KNOWN_SWEEP_ACTIONS 完全一致', () => {
+    const produced = new Set()
+
+    // 涵蓋 computeOvertimeActions 的三條分支
+    computeOvertimeActions({
+      tables: [
+        mkT('101', { status: 'dining', currentBookingId: 'B1', seatedAt: minAgo(400) }),
+        mkT('105', { status: 'dining', currentRef: { type: 'group', groupId: 'G1', batchId: 'BT1' }, seatedAt: minAgo(400) }),
+        mkT('108', { status: 'dining', seatedAt: minAgo(400) }),
+      ],
+      settings: { autoReleaseEnabled: true, autoReleaseAfterMin: 300 },
+      now: NOW,
+    }).forEach(a => produced.add(a.type))
+
+    // 涵蓋 computeDayRolloverActions 的全部分支（含 autoNoshowOnRollover 開啟）
+    computeDayRolloverActions({
+      tables: [mkT('101', { status: 'dining', currentBookingId: 'B-old', seatedAt: '2026-06-09T19:00:00.000Z' })],
+      bookings: [
+        { id: 'B-old', date: '2026-06-09', status: 'arrived' },
+        { id: 'B-conf', date: '2026-06-09', status: 'confirmed' },
+      ],
+      groupReservations: [{ id: 'G-arr', date: '2026-06-09', status: 'arrived' }],
+      settings: { dayRolloverEnabled: true, autoNoshowOnRollover: true },
+      today: TODAY,
+    }).forEach(a => produced.add(a.type))
+
+    expect([...produced].sort()).toEqual([...KNOWN_SWEEP_ACTIONS].sort())
+  })
+
+  it('SWEEP_ACTION_PERMISSION 的每個 key 都必須是已知的 action 種類（防止殘留過期項目）', () => {
+    Object.keys(SWEEP_ACTION_PERMISSION).forEach(type => {
+      expect(KNOWN_SWEEP_ACTIONS).toContain(type)
+    })
   })
 })

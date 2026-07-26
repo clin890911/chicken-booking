@@ -8,6 +8,47 @@
 //   昨日已到店（arrived）團體自動結案；planned/confirmed 的過期團不動（留給人判斷）。
 //   過期 confirmed 訂位預設不自動標 noshow（會污染顧客罰則與報表口徑），開關另計。
 
+// === 掃除的權限政策（純函式，供 BookingContext.runSweeps 使用）===
+// 掃除是**自動**跑的，使用者毫無所覺。而後端 adminPushData 採「任一集合越權即整包 403」，
+// 所以只要讓一個無權的 action 改到本機資料，該裝置之後的每一次推送都會被整包拒絕，
+// 連帶把帶位、訂位等合法變更一起鎖死，且不會自癒（僅重新整理可解，代價是丟掉未推送的變更）。
+// 政策集中在這裡，新增 sweep action 種類時一併登記它要寫哪個集合的權限。
+
+// 掃除本體會改寫 tables 與 bookings，這是跑掃除的最低門檻。
+export const SWEEP_BASE_PERMISSIONS = ['booking.update', 'table.update']
+
+// 所有掃除 action 的完整清單。新增 action 種類時**必須**登記在這裡，
+// 並在 SWEEP_ACTION_PERMISSION 標明它有沒有寫到 tables/bookings 以外的集合。
+// tests/utils/opsSweep.test.js 會斷言兩個 compute 函式吐得出來的種類與此清單完全一致，
+// 漏登記會直接讓測試變紅——避免註冊表靜默過期、再度出現「自動跑的動作毒殺整台同步」。
+export const KNOWN_SWEEP_ACTIONS = [
+  'finalize-booking',     // bookings + tables
+  'checkout-group-table', // tables
+  'clear-table',          // tables
+  'complete-booking',     // bookings
+  'complete-group',       // tables + groupReservations
+  'mark-noshow-auto',     // bookings（刻意繞過 recordNoshow，不寫 noshow store）
+]
+
+// 個別 action 額外需要的權限（會寫到 tables/bookings 以外的集合）。
+export const SWEEP_ACTION_PERMISSION = {
+  'complete-group': 'group.update', // → groupReservations
+}
+
+// permit 不是函式時（無 AuthProvider 的測試/本機模式）一律放行，維持既有行為。
+export function canRunSweeps(permit) {
+  if (typeof permit !== 'function') return true
+  return SWEEP_BASE_PERMISSIONS.every(p => permit(p))
+}
+
+export function filterSweepActionsByPermission(actions = [], permit) {
+  if (typeof permit !== 'function') return actions
+  return actions.filter(a => {
+    const need = SWEEP_ACTION_PERMISSION[a?.type]
+    return !need || permit(need)
+  })
+}
+
 export function computeOvertimeActions({ tables = [], settings = {}, now = Date.now() }) {
   if (settings.autoReleaseEnabled === false) return []
   const limit = Number(settings.autoReleaseAfterMin) || 300
