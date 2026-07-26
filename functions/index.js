@@ -520,7 +520,9 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
   } catch (err) {
     return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
   }
-  // 圈桌＝寫入團體預排，需 group.update（manager / host）；floor、kitchen 越權。
+  // 圈桌＝寫入團體預排，需 group.update（manager / host / floor）；kitchen 越權。
+  // 註：floor 自 2026-07-26 起有 group.update（外場帶團入座與換日掃除都會寫此集合），
+  // 故 floor 亦可通過此端點；限制「外場不建新團單」是在前端 UI 層把關（見 GroupEditorStage）。
   if (!canWriteCollection(staff.role, 'groupReservations')) {
     return res.status(403).json({ ok: false, error: `角色「${staff.role}」無權圈桌（團體預排）` })
   }

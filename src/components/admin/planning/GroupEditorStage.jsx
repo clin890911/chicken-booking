@@ -1,6 +1,7 @@
 import { useMemo, useState, useRef } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useToast, useConfirm } from '../../ui/Toast'
+import { useAuth } from '../../../contexts/AuthContext'
 import { Button, Input, Select, Textarea } from '../../ui'
 import SeatGauge from '../../ui/SeatGauge'
 import FloorMap from '../floormap/FloorMap'
@@ -63,6 +64,10 @@ export default function GroupEditorStage({
   rescheduleFrom = null, initialStep = 1,
 }) {
   const toast = useToast()
+  // 權限門的用意不只是「不給做」，更是防止越權寫入毒化整台裝置的同步：
+  // 後端「任一集合越權即整包 403」，一旦推送裡混進無權的集合或 deletedIds，
+  // 該裝置整個 session 的所有變更（含帶位、訂位）都會推不上雲。
+  const { can } = useAuth()
   const confirm = useConfirm()
   const { fixtures, zones } = useBooking()
 
@@ -232,6 +237,10 @@ export default function GroupEditorStage({
     patchDraft({ guideId: guideId || null, guideName: g?.name || '', guidePhone: g?.phone || '' })
   }
   const createQuickAgency = () => {
+    // 寫 agencies 需 agency.manage（外場沒有）。名冊頁的同一操作早已用 can() 擋，
+    // 這條 inline 快速新增是漏網的：外場按下去會整包 403，且重整後新增的旅行社會
+    // 被雲端資料覆蓋而無聲消失。
+    if (!can('agency.manage')) return toast.error('你的角色沒有新增旅行社的權限，請聯絡店長')
     if (!quickAgency?.name?.trim()) return toast.error('請填旅行社名稱')
     const a = addAgency(quickAgency)
     patchDraft({ agencyId: a.id, agencyName: a.name, guideId: null, guideName: '', guidePhone: '' })
@@ -239,6 +248,7 @@ export default function GroupEditorStage({
     toast.success('已新增旅行社')
   }
   const createQuickGuide = () => {
+    if (!can('agency.manage')) return toast.error('你的角色沒有新增導遊的權限，請聯絡店長')
     if (!quickGuide?.name?.trim()) return toast.error('請填導遊姓名')
     if (!draft.agencyId) return toast.error('請先選旅行社')
     const g = addGuide({ ...quickGuide, agencyId: draft.agencyId })
@@ -280,6 +290,10 @@ export default function GroupEditorStage({
   // === 儲存 / 刪除 ===
   const save = async () => {
     if (savingRef.current) return
+    // 新建團單需 group.create（外場沒有）。改既有團單只需 group.update，外場可以
+    // （帶團入座本來就會改團狀態）。這道門讓「外場不建新團單」這個不變量真的成立——
+    // 後端集合層權限分不出 create/update，只能在這裡把關。
+    if (isNew && !can('group.create')) return toast.error('你的角色沒有建立團單的權限，請聯絡店長或訂位專員')
     // 單一旅客梯次以第一頁總人數為準（圈位頁不重複填，存檔時強制同步；司領桌不同步）
     const batchesToSave = guestBatches(draft).length === 1
       ? draft.batches.map(b => (b.isEscort ? b : { ...b, guests: Number(draft.counts?.total) || 0 }))
@@ -322,6 +336,10 @@ export default function GroupEditorStage({
   }
 
   const doDelete = async () => {
+    // 刪除會產生 deletedIds.groupReservations（需 group.delete）。外場沒有此權限，
+    // 硬刪會讓推送整包 403、整台裝置同步停擺；而且重整後雲端資料會回來，
+    // 使用者以為刪掉了其實沒有。與 PlanningView 的自動 purge 同一道防線。
+    if (!can('group.delete')) return toast.error('你的角色沒有刪除團單的權限，請聯絡店長')
     const ok = await confirm('刪除後無法復原，確定要刪除這筆團單嗎？', { title: '刪除團單', confirmLabel: '刪除', danger: true })
     if (!ok) return
     if (draft.id) removeGroup(draft.id)

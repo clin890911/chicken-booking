@@ -111,6 +111,24 @@ describe('applyCloudSnapshot — settings 基準線', () => {
     expect(sentBody.dataset.settings.openTime).toBe('10:00')
   })
 
+  // 反向守門：這條擋的是「乾脆不要同步 settings」這種偷懶解法。
+  // 雲端（別台裝置或店長）真的改了設定時，本機必須採用，且基準線要跟著前進。
+  it('雲端 settings 真的變更時，本機仍要採用，且之後不會被誤判為待推送', async () => {
+    applyCloudSnapshot({ bookings: [], settings: cloudSettingsPayload() })
+    applyCloudSnapshot({ bookings: [], settings: cloudSettingsPayload() })
+
+    // 別台把營業開始時間改成 09:30
+    applyCloudSnapshot({ bookings: [], settings: cloudSettingsPayload({ openTime: '09:30' }) })
+    expect(getSettings().openTime).toBe('09:30')
+
+    // 採用之後，這台不該反過來把它當成「本機變更」再推回去
+    const spy = vi.fn()
+    global.fetch = spy
+    const result = await pushChangedData()
+    expect(result.skipped).toBe(true)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
   it('基準線本身就是本機形式：markLocalAsSynced 後推送應為 skipped', async () => {
     applyCloudSnapshot({ bookings: [], settings: cloudSettingsPayload() })
     markLocalAsSynced()
