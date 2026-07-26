@@ -37,7 +37,11 @@ export const PERMISSIONS = {
     'table.read', 'table.update', 'table.block', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
-    'group.read',
+    // 外場帶團入座會寫 groupReservations（seatGroupBatch → groupService.setStatus('arrived')），
+    // 換日掃除的 complete-group 也會（opsSweep → finalizeGroup），且掃除是開機自動跑的。
+    // 少了 group.update，外場裝置只要昨天有團沒結，一開機就整包 403、整台同步全死。
+    // 只給 update（改既有團的狀態），不給 create/delete——團體預排規劃仍是店長/訂位專員的事。
+    'group.read', 'group.update',
   ]),
   host: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',

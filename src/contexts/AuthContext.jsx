@@ -58,7 +58,11 @@ const PERMISSIONS = {
     'table.read', 'table.update', 'table.block', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
-    'group.read', // 外場可看今日團體並帶位入座（入座本身走 table.update）
+    // 外場可看今日團體並帶位入座。⚠️ 入座**不是**只走 table.update——
+    // seatGroupBatch 會把團 status 改成 'arrived'（寫 groupReservations），
+    // 換日掃除的 complete-group 也會寫，且掃除開機自動跑。故必須有 group.update。
+    // 與後端 functions/lib/staffAccess.js 成對；不給 create/delete（規劃分頁的事）。
+    'group.read', 'group.update',
   ]),
   host: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',
