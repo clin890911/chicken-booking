@@ -141,10 +141,10 @@ export default function SettingsView({ onOpenCustomer }) {
 
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
   const handleSave = async () => {
-    // 🔴 非店長不可存設定。這不只是權限問題，更是同步的防線：
-    // 後端 settings 需 settings.update（僅 manager），且採「任一集合越權即整包 403」。
-    // 若讓非店長寫進本機 settings，它會永遠與雲端不一致 → 每次差異推送都夾帶 settings
-    // → 每次都 403 → 該裝置連 bookings/tables 都推不上去、與雲端永久分歧（現場曾整天壞掉）。
+    // 🔴 非店長不可存設定。這不只是權限問題，更是同步的防線：後端 settings 需
+    // settings.update（僅 manager）。非店長寫進本機 settings 後永遠與雲端不一致、
+    // 每次差異推送都夾帶並被拒，畫面會長期顯示雲端根本沒有的設定。
+    // （部分推送上線後不再連坐拖垮其他集合，但這筆本機變更仍然永遠上不了雲。）
     if (!can('settings.update')) {
       toast.error('你的角色沒有變更店家設定的權限，請聯絡店長')
       return
@@ -171,6 +171,7 @@ export default function SettingsView({ onOpenCustomer }) {
       }
       const r = await flushCloudNow()
       if (r.ok) toast.success('✅ 已儲存並同步雲端')
+      else if (r.rejected) toast.error(`本機已存，但雲端拒絕了這筆變更：${r.error}。請改用有權限的帳號，或到下方同步狀態列選擇以雲端為準`)
       else toast.error(`本機已存，但雲端同步失敗：${r.error}。請按「重試同步」或檢查網路後再試`)
     } finally {
       setSaving(false)

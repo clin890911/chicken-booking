@@ -15,6 +15,7 @@ import {
   computeOvertimeActions, computeDayRolloverActions,
   canRunSweeps, filterSweepActionsByPermission,
 } from '../utils/opsSweep'
+import { statusFromPushResult, statusAfterPull, statusAfterError } from '../utils/syncStatus'
 import { todayStr } from '../utils/timeSlots'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
@@ -84,27 +85,14 @@ export function BookingProvider({ children }) {
       const data = await cloudData.pullCloudData()
       cloudData.applyCloudSnapshot(data)
       refresh()
-      setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
+      // 狀態轉移規則見 utils/syncStatus——拉取成功**不得**清掉 'rejected'。
+      setCloudStatus(s => statusAfterPull(s, new Date().toISOString()))
       return data
     } catch (err) {
-      setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-sync-failed' }))
+      setCloudStatus(s => statusAfterError(s, err.message, 'cloud-sync-failed'))
       return null
     }
   }, [refresh])
-
-  // 推送結果 → cloudStatus。部分成功（有集合被角色權限擋下）不是「成功」也不是「離線」，
-  // 而是第三種狀態 'rejected'：可寫的已經上雲、被拒的仍只在本機。必須讓它看得見，
-  // 否則畫面會長期顯示雲端根本不存在的資料，而店員完全無從察覺。
-  const statusFromPush = (r) => (
-    r?.rejected
-      ? {
-          state: 'rejected',
-          lastSyncAt: new Date().toISOString(),
-          error: r.rejectedMessage || '部分變更因權限不足未能上雲',
-          rejected: r.rejected,
-        }
-      : { state: 'synced', lastSyncAt: new Date().toISOString(), error: '', rejected: null }
-  )
 
   const syncCloudSoon = useCallback(() => {
     if (!isStaffRef.current) return // 非員工不推送
@@ -112,7 +100,7 @@ export function BookingProvider({ children }) {
     syncTimerRef.current = window.setTimeout(async () => {
       try {
         const r = await cloudData.pushChangedData()
-        setCloudStatus(statusFromPush(r))
+        setCloudStatus(statusFromPushResult(r, new Date().toISOString()))
         if (r?.rejected) {
           const now = Date.now()
           if (now - lastPushErrorToastRef.current > 8000) {
@@ -121,7 +109,7 @@ export function BookingProvider({ children }) {
           }
         }
       } catch (err) {
-        setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
+        setCloudStatus(s => statusAfterError(s, err.message, 'cloud-push-failed'))
         // F-D：把推送失敗主動回饋給觸發操作的店員，避免「以為存檔成功、實際沒上雲」。
         const now = Date.now()
         if (now - lastPushErrorToastRef.current > 8000) {
@@ -141,7 +129,7 @@ export function BookingProvider({ children }) {
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     try {
       const r = await cloudData.pushChangedData()
-      setCloudStatus(statusFromPush(r))
+      setCloudStatus(statusFromPushResult(r, new Date().toISOString()))
       // 有被拒的部分就不算成功——呼叫端（例如「儲存」）必須據此顯示誠實的失敗訊息，
       // 而不是本機存好就宣告成功。
       if (r?.rejected) return { ok: false, error: r.rejectedMessage || '部分變更因權限不足未能上雲', rejected: r.rejected }

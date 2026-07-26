@@ -262,6 +262,28 @@ describe('discardRejectedChanges（使用者主動放棄）', () => {
     expect(JSON.parse(localStorage.getItem(AGENCIES))).toHaveLength(0)
   })
 
+  it('放棄「被拒的刪除」後，文件會從雲端回到本機，且不再重送刪除', async () => {
+    applyCloudSnapshot({ groupReservations: [{ id: 'g1' }], settings: cloudSettingsPayload() })
+    applyCloudSnapshot({ groupReservations: [{ id: 'g1' }], settings: cloudSettingsPayload() })
+    localStorage.setItem('chicken_group_reservations_v1', JSON.stringify([])) // 本機刪掉
+
+    global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true, rejected: { writes: [], deletes: ['groupReservations'], settings: false }, rejectedMessage: 'x' }) }))
+    await pushChangedData()
+
+    // 放棄前：pendingDeletes 擋著，雲端的文件不會被帶回本機
+    applyCloudSnapshot({ groupReservations: [{ id: 'g1' }], settings: cloudSettingsPayload() })
+    expect(JSON.parse(localStorage.getItem('chicken_group_reservations_v1'))).toHaveLength(0)
+
+    // 放棄後：下一次拉取把文件從雲端帶回來
+    discardRejectedChanges({ deletes: ['groupReservations'] })
+    applyCloudSnapshot({ groupReservations: [{ id: 'g1' }], settings: cloudSettingsPayload() })
+    expect(JSON.parse(localStorage.getItem('chicken_group_reservations_v1'))).toHaveLength(1)
+
+    // 且不再重送刪除
+    const r = await pushChangedData()
+    expect(r.skipped).toBe(true)
+  })
+
   it('放棄後不再重送該集合', async () => {
     applyCloudSnapshot({ agencies: [], settings: cloudSettingsPayload() })
     applyCloudSnapshot({ agencies: [], settings: cloudSettingsPayload() })

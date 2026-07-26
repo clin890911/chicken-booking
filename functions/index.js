@@ -194,7 +194,8 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     const { rejected, writable, message: rejectedMessage, hasRejection } =
       classifyDatasetByPermission(dataset, role, Object.keys(SYNC_COLLECTION_IDKEYS))
     // 舊客戶端（未表態）維持「任一集合越權即整包 403」。
-    if (hasRejection && !partial) {
+    // 嚴格比對 true：避免 "false" 這類字串因 truthiness 而誤啟部分模式。
+    if (hasRejection && partial !== true) {
       return res.status(403).json({ ok: false, error: rejectedMessage })
     }
     // 新客戶端：越權的部分已被 classifyDatasetByPermission 剔除，其餘照寫。目的是不讓
