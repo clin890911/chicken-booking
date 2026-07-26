@@ -92,13 +92,34 @@ export function BookingProvider({ children }) {
     }
   }, [refresh])
 
+  // 推送結果 → cloudStatus。部分成功（有集合被角色權限擋下）不是「成功」也不是「離線」，
+  // 而是第三種狀態 'rejected'：可寫的已經上雲、被拒的仍只在本機。必須讓它看得見，
+  // 否則畫面會長期顯示雲端根本不存在的資料，而店員完全無從察覺。
+  const statusFromPush = (r) => (
+    r?.rejected
+      ? {
+          state: 'rejected',
+          lastSyncAt: new Date().toISOString(),
+          error: r.rejectedMessage || '部分變更因權限不足未能上雲',
+          rejected: r.rejected,
+        }
+      : { state: 'synced', lastSyncAt: new Date().toISOString(), error: '', rejected: null }
+  )
+
   const syncCloudSoon = useCallback(() => {
     if (!isStaffRef.current) return // 非員工不推送
     window.clearTimeout(syncTimerRef.current)
     syncTimerRef.current = window.setTimeout(async () => {
       try {
-        await cloudData.pushChangedData()
-        setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
+        const r = await cloudData.pushChangedData()
+        setCloudStatus(statusFromPush(r))
+        if (r?.rejected) {
+          const now = Date.now()
+          if (now - lastPushErrorToastRef.current > 8000) {
+            lastPushErrorToastRef.current = now
+            toastRef.current?.warning?.(`部分變更未能上雲：${r.rejectedMessage || '權限不足'}。其餘已同步，詳見設定頁同步狀態`)
+          }
+        }
       } catch (err) {
         setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
         // F-D：把推送失敗主動回饋給觸發操作的店員，避免「以為存檔成功、實際沒上雲」。
@@ -120,7 +141,10 @@ export function BookingProvider({ children }) {
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     try {
       const r = await cloudData.pushChangedData()
-      setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
+      setCloudStatus(statusFromPush(r))
+      // 有被拒的部分就不算成功——呼叫端（例如「儲存」）必須據此顯示誠實的失敗訊息，
+      // 而不是本機存好就宣告成功。
+      if (r?.rejected) return { ok: false, error: r.rejectedMessage || '部分變更因權限不足未能上雲', rejected: r.rejected }
       return { ok: true, skipped: !!r?.skipped }
     } catch (err) {
       setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
@@ -553,6 +577,15 @@ export function BookingProvider({ children }) {
   const reseatGroupBatchTable = (groupId, batchId, fromTable, toTable) => { const r = seatingService.reseatGroupBatchTable(groupId, batchId, fromTable, toTable); refresh(); syncCloudSoon(); return r }
   const cancelGroup = (groupId) => { const r = seatingService.cancelGroup(groupId); refresh(); syncCloudSoon(); return r }
 
+  // 使用者主動放棄「因權限不足而推不上雲」的本機變更，改以雲端為準。
+  // 不自動執行——是否丟棄由店家決定；這裡只在他明確按下時才動手，並立刻拉一次雲端對齊。
+  const discardRejectedChanges = useCallback(async (rejected) => {
+    cloudData.discardRejectedChanges(rejected || {})
+    await pullCloud()
+    refresh()
+    return { ok: true }
+  }, [pullCloud, refresh])
+
   const migrateLocalToCloud = async () => {
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     const result = await cloudData.pushCloudData()
@@ -581,7 +614,7 @@ export function BookingProvider({ children }) {
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
     createAndReserveGroup, purgeBlankGroups,
     seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
-    updateSettings, flushCloudNow,
+    updateSettings, flushCloudNow, discardRejectedChanges,
   }
 
   return <BookingContext.Provider value={value}>{children}</BookingContext.Provider>

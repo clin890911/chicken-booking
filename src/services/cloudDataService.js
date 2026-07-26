@@ -200,11 +200,14 @@ export async function pullCloudData() {
   })
 }
 
-export async function pushCloudData(dataset = localDataset()) {
+// partial=true 告訴後端「這個客戶端看得懂部分成功的回應」：越權的集合會被剔除、
+// 其餘照寫，並在回應的 rejected 裡如實回報。不送這個旗標時後端維持舊的
+// 「任一集合越權即整包 403」行為（新後端＋舊前端的部署時間窗需要這個相容性）。
+export async function pushCloudData(dataset = localDataset(), { partial = false } = {}) {
   return requestJson(endpoint('adminPushData'), {
     method: 'POST',
     headers: await authHeader(),
-    body: JSON.stringify({ dataset }),
+    body: JSON.stringify(partial ? { dataset, partial: true } : { dataset }),
   })
 }
 
@@ -236,17 +239,49 @@ export async function pushChangedData() {
 
   const payload = { ...changed }
   if (Object.keys(deletedIds).length) payload.deletedIds = deletedIds
-  const result = await pushCloudData(payload)
-  // 推送成功後，把已上傳的文件記為「與雲端一致」、把已刪除的文件移出基準與待刪集合。
+  const result = await pushCloudData(payload, { partial: true })
+  // 推送後推進基準線。
+  // 🔴 只有**真的被寫進雲端**的部分才可以推進。被拒的集合若也標記為已同步，
+  //    那些本機變更會被當成「已上雲」→ 下一次拉取不再保護它們 → 直接被雲端值覆蓋
+  //    → 靜默資料遺失。這是整個部分推送機制最容易寫錯、後果也最嚴重的一步。
+  const rejected = result?.rejected || {}
+  const rejectedWrites = new Set(rejected.writes || [])
+  const rejectedDeletes = new Set(rejected.deletes || [])
   for (const col of DIFF_COLLECTIONS) {
-    if (changed[col]) changed[col].forEach(doc => { lastSynced[col][idOf(col, doc)] = stable(doc) })
-    if (deletedIds[col]) deletedIds[col].forEach(id => {
-      delete lastSynced[col][id]
-      pendingDeletes[col].delete(id)
-    })
+    if (changed[col] && !rejectedWrites.has(col)) {
+      changed[col].forEach(doc => { lastSynced[col][idOf(col, doc)] = stable(doc) })
+    }
+    if (deletedIds[col] && !rejectedDeletes.has(col)) {
+      deletedIds[col].forEach(id => {
+        delete lastSynced[col][id]
+        pendingDeletes[col].delete(id)
+      })
+    }
   }
-  if (settingsChanged) lastSynced.settings = stable(ds.settings)
+  if (settingsChanged && !rejected.settings) lastSynced.settings = stable(ds.settings)
   return result
+}
+
+// 使用者主動「放棄被拒的本機變更、改以雲端為準」。
+// 這些變更推不上雲（角色無權），若一直留在本機，畫面會長期顯示雲端不存在的假資料。
+// 是否放棄由店家決定，所以這裡**只提供能力、不自動執行**。
+// 作法：把相關文件的基準線設成目前本機值 → 它們不再被視為待推送 →
+// 下一次拉取時 applyCloudSnapshot 不再保護它們，雲端值就會蓋回來（本機新增的則消失）。
+export function discardRejectedChanges({ writes = [], deletes = [], settings = false } = {}) {
+  const ds = localDataset()
+  for (const col of writes) {
+    if (!DIFF_COLLECTIONS.includes(col)) continue
+    for (const [id, doc] of Object.entries(indexDocs(col, ds[col]))) {
+      lastSynced[col][id] = stable(doc)
+    }
+  }
+  for (const col of deletes) {
+    if (!DIFF_COLLECTIONS.includes(col)) continue
+    // 放棄刪除：移出待刪集合並清掉基準線，讓下一次拉取把文件從雲端帶回來。
+    pendingDeletes[col].forEach(id => { delete lastSynced[col][id] })
+    pendingDeletes[col].clear()
+  }
+  if (settings) lastSynced.settings = stable(getSettings())
 }
 
 export async function migrateLocalToCloudOnce() {

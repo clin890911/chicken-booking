@@ -28,6 +28,7 @@ import {
   canWriteCollection,
   canDeleteCollection,
   canWriteSettings,
+  classifyDatasetByPermission,
 } from './lib/staffAccess.js'
 import {
   projectForRead,
@@ -181,26 +182,27 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
   }
   try {
-    const { dataset = {} } = req.body || {}
-    // 後端 RBAC：依角色把關每個集合的「寫入/刪除」與「改設定」。合法前端只送該角色可改的
-    // 髒集合，故正常操作不受影響；此檢查擋的是繞過 UI 直接打 API 的越權（如 kitchen 改設定/刪訂位）。
+    // partial=true 是**客戶端明確表態**「我看得懂部分成功的回應」。
+    // 🔴 不可預設開啟：舊前端把 HTTP 200 一律當成全部寫入成功、並據此把本機資料標記為
+    //    「已同步」，若後端逕自改成部分寫入，被拒的那些變更會被舊前端靜默丟棄。
+    //    functions 與前端是分開部署的（functions 先、前端後），中間必然存在新後端＋舊前端的
+    //    時間窗，故沿用舊行為當預設，由新前端送 partial:true 才啟用。
+    const { dataset = {}, partial = false } = req.body || {}
+    // 後端 RBAC：依角色把關每個集合的「寫入/刪除」與「改設定」。
+    // 擋的是繞過 UI 直接打 API 的越權（如 kitchen 改設定/刪訂位）。
     const role = staff.role
-    const denied = []
-    for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
-      if (Array.isArray(dataset[name]) && dataset[name].length && !canWriteCollection(role, name)) denied.push(`寫入 ${name}`)
+    const { rejected, writable, message: rejectedMessage, hasRejection } =
+      classifyDatasetByPermission(dataset, role, Object.keys(SYNC_COLLECTION_IDKEYS))
+    // 舊客戶端（未表態）維持「任一集合越權即整包 403」。
+    if (hasRejection && !partial) {
+      return res.status(403).json({ ok: false, error: rejectedMessage })
     }
-    const deletedIdsCheck = dataset.deletedIds || {}
-    for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
-      if (Array.isArray(deletedIdsCheck[name]) && deletedIdsCheck[name].length && !canDeleteCollection(role, name)) denied.push(`刪除 ${name}`)
-    }
-    if (dataset.settings && !canWriteSettings(role)) denied.push('變更設定')
-    if (denied.length) {
-      return res.status(403).json({ ok: false, error: `角色「${role}」無權：${denied.join('、')}` })
-    }
+    // 新客戶端：越權的部分已被 classifyDatasetByPermission 剔除，其餘照寫。目的是不讓
+    // 單一集合的權限問題連坐拖垮該裝置**所有**集合的同步（帶位、訂位曾因此整天推不上雲）。
     // commit「前」讀舊值：同時供 (a) 寫入路徑判 new-vs-existing + 保 server-owned 欄位、(b) 下方通知 diff。
     // ⚠️ 安全關鍵：id 集合非空但快照讀取失敗時，snapshotBookingsByIds（strict）會丟出 → 由外層 catch 回 500，
     //   絕不落到「全判新單 → 重鑄 manageToken → 輪替（毀掉）所有既有客人管理連結」的災難分支。
-    const pushedBookingIds = (dataset.bookings || []).map(b => b?.id)
+    const pushedBookingIds = (writable.bookings || []).map(b => b?.id)
     const beforeBookings = await snapshotBookingsByIds(pushedBookingIds, { strict: true })
     // 泛型遍歷所有同步集合做 merge-upsert（接受「部分資料集」，未帶的集合略過）。
     const ops = []
@@ -208,7 +210,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       if (name === COLLECTIONS.bookings) {
         // bookings 走欄位級白名單：server-owned 欄位（manageToken/history/… ）永不取自客戶端，
         // 新單伺服器鑄 token、既有單靠 merge 省略保留既存值。擋掉繞過 UI 直接注入敏感欄位的越權（修 item 2）。
-        for (const item of (dataset.bookings || [])) {
+        for (const item of (writable.bookings || [])) {
           const id = String(item?.id || '').trim()
           if (!id) continue
           ops.push({
@@ -221,20 +223,20 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
         }
       } else if (name === COLLECTIONS.customers) {
         // customers：phoneDigits 一律伺服器推導（既有 upsertOps 已覆寫；此處再剝一層防禦）。
-        ops.push(...upsertOps(name, (dataset[name] || []).map(stripServerOwnedCustomerFields), idKey))
+        ops.push(...upsertOps(name, (writable[name] || []).map(stripServerOwnedCustomerFields), idKey))
       } else {
-        ops.push(...upsertOps(name, dataset[name] || [], idKey))
+        ops.push(...upsertOps(name, writable[name] || [], idKey))
       }
     }
     // 差異同步的刪除路徑：前端把「本機已刪」的文件 id 放在 dataset.deletedIds，
     // 後端逐集合刪除，避免硬刪除的文件在下一輪拉取時復活（修 F-A）。
-    const deletedIds = dataset.deletedIds || {}
+    const deletedIds = writable.deletedIds || {}
     for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
       ops.push(...deleteOps(name, deletedIds[name]))
     }
-    if (dataset.settings) {
+    if (writable.settings) {
       ops.push({ ref: db.collection('settings').doc('main'), data: {
-        ...normalizeStoreSettings(dataset.settings),
+        ...normalizeStoreSettings(writable.settings),
         updatedAt: new Date().toISOString(),
       } })
     }
@@ -242,17 +244,23 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     // 店員端改訂位 LINE 通知（feature flag lineNotifyOnAdminChange，預設關）：
     // 開關開啟時才在 commit「前」讀舊值（merge-upsert 不讀舊值，diff 需要 before 快照），
     // commit「成功後」才分類入列——先寫成功才通知，避免通知了卻沒寫進去。
-    const notifySettings = await readSettingsForAdminNotify(dataset.settings)
+    const notifySettings = await readSettingsForAdminNotify(writable.settings)
     // beforeBookings 已於上方 commit 前無條件讀取（strict），此處直接重用做通知 diff，不再重讀。
     // 硬刪除的訂位只出現在 deletedIds，commit 後就查不到；先抓刪除前完整舊值，Telegram 才能附完整 JSON 供還原。
-    const deletedBookingIds = (dataset.deletedIds || {}).bookings || []
+    const deletedBookingIds = (writable.deletedIds || {}).bookings || []
     const deletedBefore = (notifySettings.telegramNotifyOnAdminChange === true && deletedBookingIds.length)
       ? await snapshotBookingsByIds(deletedBookingIds)
       : new Map()
     // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
     await commitInChunks(ops)
-    await notifyAdminBookingChanges(beforeBookings, dataset.bookings, notifySettings)
-    await notifyAdminBookingTelegram(beforeBookings, deletedBefore, dataset.bookings, deletedBookingIds, notifySettings)
+    await notifyAdminBookingChanges(beforeBookings, writable.bookings, notifySettings)
+    await notifyAdminBookingTelegram(beforeBookings, deletedBefore, writable.bookings, deletedBookingIds, notifySettings)
+    // 有越權時如實回報被拒的部分（僅 partial 客戶端會走到這裡）。ok 仍為 true——
+    // 「可寫的已經寫進去了」是事實，前端需要據此推進那些集合的基準線；
+    // 被拒的部分由前端隔離、不得標記為已同步。
+    if (hasRejection) {
+      return res.json({ ok: true, rejected, rejectedMessage, role })
+    }
     return res.json({ ok: true })
   } catch (err) {
     console.error('adminPushData failed:', err)
