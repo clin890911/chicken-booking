@@ -11,7 +11,10 @@ import * as groupReservationService from '../services/groupReservationService'
 import * as tg from '../services/telegramService'
 import * as cloudData from '../services/cloudDataService'
 import * as opsLogService from '../services/opsLogService'
-import { computeOvertimeActions, computeDayRolloverActions } from '../utils/opsSweep'
+import {
+  computeOvertimeActions, computeDayRolloverActions,
+  canRunSweeps, filterSweepActionsByPermission,
+} from '../utils/opsSweep'
 import { todayStr } from '../utils/timeSlots'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
@@ -34,7 +37,7 @@ export function BookingProvider({ children }) {
   // 只有登入的員工才會啟動「全量雲端同步」。
   // 客人端（公開頁）一律不碰 admin 同步，避免把所有顧客個資灌進客人的瀏覽器，
   // 也避免未授權的全量讀寫（真正的把關在後端 requireStaff）。
-  const { user, getToken, usingFirebase } = useAuth() || {}
+  const { user, getToken, usingFirebase, can } = useAuth() || {}
   const isStaff = !!user
   const toast = useToast()
   const toastRef = useRef(toast)
@@ -54,6 +57,10 @@ export function BookingProvider({ children }) {
   const syncTimerRef = useRef(null)
   const isStaffRef = useRef(isStaff)
   isStaffRef.current = isStaff
+  // can() 走 ref：runSweeps 是 useCallback + setInterval 長期持有，不想因權限函式的
+  // 參考變動而重建。無 AuthProvider 的測試環境會是 undefined，屆時視為不設限（維持既有行為）。
+  const canRef = useRef(can)
+  canRef.current = can
 
   // 把員工 ID Token 提供者注入 cloudDataService（admin 端點需要 Bearer token）。
   useEffect(() => {
@@ -138,6 +145,11 @@ export function BookingProvider({ children }) {
 
   const runSweeps = useCallback((opts = {}) => {
     if (!isStaffRef.current) return
+    // 🔴 掃除是**自動**跑的（首拉後 force 一次、之後每 60 秒），會改寫本機 tables/bookings。
+    // 無寫入權的角色（例如 kitchen）若照跑，等於使用者什麼都沒做、裝置就自己把整個
+    // session 的同步毒殺掉。政策與理由見 utils/opsSweep 的權限區塊。
+    const permit = canRef.current
+    if (!canRunSweeps(permit)) return
     const nowMs = Date.now()
     const last = Number(localStorage.getItem('chicken_ops_sweep_at') || 0)
     if (!opts.force && nowMs - last < 45000) return // 跨分頁節流
@@ -154,9 +166,13 @@ export function BookingProvider({ children }) {
 
     // 換日掃除：每裝置每日一次（跨午夜開著的分頁也會在 interval 中觸發）
     if (settings.dayRolloverEnabled !== false && localStorage.getItem('chicken_ops_day_sweep_v1') !== today) {
-      const done = seatingService.executeSweepActions(
-        computeDayRolloverActions({ ...state, settings, today }))
-      localStorage.setItem('chicken_ops_day_sweep_v1', today)
+      // complete-group 會寫 groupReservations（需 group.update）：濾掉無權的，其餘照常。
+      const wanted = computeDayRolloverActions({ ...state, settings, today })
+      const allowed = filterSweepActionsByPermission(wanted, permit)
+      const done = seatingService.executeSweepActions(allowed)
+      // 只有「這台把該做的都做完了」才記今日已掃。若因權限濾掉了東西就不記，
+      // 留給之後在這台登入、且有權限的帳號補做——與 PlanningView 的 PURGE_FLAG 同一套語義。
+      if (allowed.length === wanted.length) localStorage.setItem('chicken_ops_day_sweep_v1', today)
       if (done.length) {
         done.forEach(a => opsLogService.append({ kind: 'day-rollover', ...a, message: sweepActionMsg(a) }))
         doneCount += done.length
@@ -165,8 +181,10 @@ export function BookingProvider({ children }) {
     }
 
     // 超時釋桌（預設 5 小時：高概率忘記按清桌）
-    const done = seatingService.executeSweepActions(
-      computeOvertimeActions({ tables: state.tables, settings, now: nowMs }))
+    // 同樣套權限過濾：目前超時的三種 action 都只寫 tables/bookings、濾了等於 no-op，
+    // 但不留這個不對稱——日後新增會寫別的集合的 action 時才不會只有換日那邊守住。
+    const done = seatingService.executeSweepActions(filterSweepActionsByPermission(
+      computeOvertimeActions({ tables: state.tables, settings, now: nowMs }), permit))
     if (done.length) {
       done.forEach(a => opsLogService.append({ kind: 'auto-release', ...a, message: sweepActionMsg(a) }))
       doneCount += done.length

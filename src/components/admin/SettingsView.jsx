@@ -81,6 +81,11 @@ export default function SettingsView({ onOpenCustomer }) {
     })
   }, [form, settings])
   const isDirty = dirtyKeys.length > 0
+  // 只有店長能存設定（見 handleSave 的守門）。非店長時整頁視為唯讀：
+  // 不武裝 beforeunload、不顯示「儲存」CTA——否則使用者手滑改到一個欄位後，
+  // 會永遠卡在「有未儲存變更」且每次離開/重新整理都被瀏覽器攔下來，
+  // 而重新整理正是同步異常時的標準排除手段，等於把解藥擋掉。
+  const canEditSettings = can('settings.update')
   // 是否動到會影響容量／時段的設定（B1）
   const capacityDirty = dirtyKeys.some(k => CAPACITY_FIELDS.includes(k))
   // 未來已確認訂位筆數（保守估計：date>=今天 && status==='confirmed'）
@@ -115,14 +120,14 @@ export default function SettingsView({ onOpenCustomer }) {
 
   // B14：離開前提醒尚有未儲存變更
   useEffect(() => {
-    if (!isDirty) return
+    if (!isDirty || !canEditSettings) return
     const handler = (e) => {
       e.preventDefault()
       e.returnValue = ''
     }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
-  }, [isDirty])
+  }, [isDirty, canEditSettings])
 
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
   const handleSave = async () => {
@@ -295,11 +300,18 @@ export default function SettingsView({ onOpenCustomer }) {
         </div>
       )}
 
+      {/* 非店長：整頁唯讀提示。改了也存不了，先講清楚，免得白填。 */}
+      {!canEditSettings && (
+        <div className="-mx-1 rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">
+          🔒 唯讀：你的角色無法變更店家設定。下方仍可查看內容與同步狀態，變更不會被儲存。
+        </div>
+      )}
+
       {/* B14：未儲存變更 sticky 提示 + 統一儲存 CTA（全域，跨分類反映所有未存變更） */}
       {isDirty && (
         <div className="sticky top-0 z-30 -mx-1 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
           <div className="text-sm font-bold text-amber-800">
-            ⚠️ 有未儲存變更（{dirtyKeys.length} 項）
+            {canEditSettings ? `⚠️ 有未儲存變更（${dirtyKeys.length} 項）` : `🔒 這些變更不會被儲存（${dirtyKeys.length} 項）`}
             {capacityDirty && affectedBookingCount > 0 && (
               <span className="ml-2 inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">
                 ⚠️ 影響現有訂位
@@ -314,13 +326,15 @@ export default function SettingsView({ onOpenCustomer }) {
             >
               還原
             </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="btn-primary min-h-[44px] px-5 py-2 disabled:opacity-60"
-            >
-              {saving ? '儲存中…' : '儲存全部變更'}
-            </button>
+            {canEditSettings && (
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="btn-primary min-h-[44px] px-5 py-2 disabled:opacity-60"
+              >
+                {saving ? '儲存中…' : '儲存全部變更'}
+              </button>
+            )}
           </div>
         </div>
       )}
