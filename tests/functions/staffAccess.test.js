@@ -85,13 +85,28 @@ describe('canWriteCollection', () => {
       expect(canWriteCollection('kitchen', c)).toBe(false)
     }
   })
-  it('floor 可寫 bookings/tables/waitlist/customers，但不可寫 groupReservations/agencies', () => {
+  it('floor 可寫 bookings/tables/waitlist/customers，但不可寫 agencies', () => {
     expect(canWriteCollection('floor', 'bookings')).toBe(true)
     expect(canWriteCollection('floor', 'tables')).toBe(true)
     expect(canWriteCollection('floor', 'waitlist')).toBe(true)
     expect(canWriteCollection('floor', 'customers')).toBe(true)
-    expect(canWriteCollection('floor', 'groupReservations')).toBe(false)
     expect(canWriteCollection('floor', 'agencies')).toBe(false)
+  })
+  // 🔴 此條原本斷言 floor 不可寫 groupReservations——那是把 bug 當規格釘住了。
+  // 外場帶團入座（seatGroupBatch → setStatus('arrived')）與**開機自動跑的**換日掃除
+  // complete-group（opsSweep → finalizeGroup）都會寫 groupReservations。
+  // 後端採「任一集合越權即整包 403」，因此少了 group.update 會讓外場裝置
+  // 一開機就整包被拒 → 連 bookings/tables 都推不上雲 → 與雲端永久分歧。不可回退。
+  it('floor 必須可寫 groupReservations（帶團入座＋換日掃除會寫，否則整台同步全死）', () => {
+    expect(canWriteCollection('floor', 'groupReservations')).toBe(true)
+    expect(roleCan('floor', 'group.update')).toBe(true)
+  })
+  it('但 floor 仍不可建立/刪除團單，也不可改設定（規劃與設定仍是店長/訂位專員的事）', () => {
+    expect(roleCan('floor', 'group.create')).toBe(false)
+    expect(roleCan('floor', 'group.delete')).toBe(false)
+    expect(canDeleteCollection('floor', 'groupReservations')).toBe(false)
+    expect(canWriteSettings('floor')).toBe(false)
+    expect(roleCan('floor', 'table.config')).toBe(false)
   })
   it('host 可寫 bookings/tables/groupReservations/agencies（領位台需帶位指派桌）', () => {
     expect(canWriteCollection('host', 'bookings')).toBe(true)

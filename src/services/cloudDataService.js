@@ -164,7 +164,14 @@ export function applyCloudSnapshot(data = {}) {
   }
   if (data.settings) {
     const settingsDirty = stable(getSettings()) !== lastSynced.settings
-    if (!settingsDirty) { saveSettings(data.settings); lastSynced.settings = stable(data.settings) }
+    // 🔴 基準線必須取「存進本機後再讀出來」的形式（getSettings()），不可用雲端原始 payload。
+    // saveSettings 會走 withDefaults（{...DEFAULT, ...value}）＝本機 DEFAULT 的 key 順序，
+    // 與後端 normalizeStoreSettings 的字面順序不同（例如 seatings/closures 的位置）。
+    // 用 stable(data.settings) 當基準線會與 stable(localDataset().settings) 永遠不相等 →
+    // settings 被誤判為永久 dirty → 每次 pushChangedData 都夾帶 settings →
+    // 非店長角色（無 settings.update）每次推送都被整包 403 → 該裝置永遠無法同步。
+    // 另兩處寫基準線（seedLastSyncedFromLocal、push 成功後）本就用本機形式，此處與之對齊。
+    if (!settingsDirty) { saveSettings(data.settings); lastSynced.settings = stable(getSettings()) }
   }
 }
 

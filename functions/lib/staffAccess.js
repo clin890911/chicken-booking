@@ -37,7 +37,14 @@ export const PERMISSIONS = {
     'table.read', 'table.update', 'table.block', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
-    'group.read',
+    // 外場帶團入座會寫 groupReservations（seatGroupBatch → groupService.setStatus('arrived')），
+    // 換日掃除的 complete-group 也會（opsSweep → finalizeGroup），且掃除是開機自動跑的。
+    // 少了 group.update，外場裝置只要昨天有團沒結，一開機就整包 403、整台同步全死。
+    // ⚠️ 只給 update、不給 create/delete，但要清楚它們的把關層級不同：
+    //   delete 由後端真的擋（COLLECTION_DELETE_PERM.groupReservations = 'group.delete'）。
+    //   create **後端擋不了**——集合層的 upsert 分不出新建與更新，兩者都只看 group.update。
+    //   「外場不建新團單」是前端 GroupEditorStage 的 can('group.create') 在守。
+    'group.read', 'group.update',
   ]),
   host: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',

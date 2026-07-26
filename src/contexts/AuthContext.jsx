@@ -58,7 +58,13 @@ const PERMISSIONS = {
     'table.read', 'table.update', 'table.block', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update',
-    'group.read', // 外場可看今日團體並帶位入座（入座本身走 table.update）
+    // 外場可看今日團體並帶位入座。⚠️ 入座**不是**只走 table.update——
+    // seatGroupBatch 會把團 status 改成 'arrived'（寫 groupReservations），
+    // 換日掃除的 complete-group 也會寫，且掃除開機自動跑。故必須有 group.update。
+    // 與後端 functions/lib/staffAccess.js 成對。不給 create/delete：delete 後端真的擋，
+    // create 後端擋不了（集合層 upsert 分不出新建/更新），靠 GroupEditorStage 的
+    // can('group.create') 把關——那道前端門是這個不變量唯一的實作，不可拿掉。
+    'group.read', 'group.update',
   ]),
   host: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',

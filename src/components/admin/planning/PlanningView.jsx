@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
+import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../ui/Toast'
 import { generateTimeSlots, todayStr, addDays, formatDate, dayLabel, seatingForSlot } from '../../../utils/timeSlots'
 import { totalActiveSeats, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
@@ -37,6 +38,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     createAndReserveGroup, purgeBlankGroups,
   } = useBooking()
   const toast = useToast()
+  const { can } = useAuth()
 
   const today = todayStr()
   const [pane, setPane] = useState('day') // day=月曆+當日總覽 | map=排位地圖全寬
@@ -65,8 +67,12 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   }
 
   // 首次進入清除既有殘留空白團單（草稿優先改版前的舊資料），每裝置一次。
+  // ⚠️ 刪除團單需要 group.delete；外場沒有這個權限，硬跑會讓 deletedIds 進入推送
+  // → 後端「任一集合越權即整包 403」→ 該裝置整個 session 同步全死（且這是進分頁就自動跑的）。
+  // 沒權限時直接跳過，且**不設旗標**，留給之後有權限的帳號在這台裝置補做。
   useEffect(() => {
     if (localStorage.getItem(PURGE_FLAG) === '1') return
+    if (!can('group.delete')) return
     const n = purgeBlankGroups()
     localStorage.setItem(PURGE_FLAG, '1')
     if (n) toast.info(`已清除 ${n} 筆未完成的空白團單`)
