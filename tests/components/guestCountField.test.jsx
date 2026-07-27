@@ -41,6 +41,19 @@ describe('GuestCountField 渲染', () => {
     expect(html).toContain('9+ ▾')
     expect(html).not.toContain('type="number"')
   })
+  // 🔴 chips 的 aria-label 必須是「N 位」（不可回退成裸數字）——現場帶位的 lg 版也一樣
+  it('size="lg" 放大 chips 但 aria-label 仍是「N 位」', () => {
+    const html = renderToStaticMarkup(<GuestCountField value={4} onChange={() => {}} size="lg" />)
+    expect(html).toContain('aria-label="4 位"')
+    expect(html).toContain('h-[60px]')
+    expect(html).toContain('9+ ▾')
+  })
+  it('預設尺寸不受 lg 影響（其他呼叫點行為不變）', () => {
+    const html = renderToStaticMarkup(<GuestCountField value={4} onChange={() => {}} />)
+    expect(html).toContain('aria-label="4 位"')
+    expect(html).toContain('w-11 h-11')
+    expect(html).not.toContain('h-[60px]')
+  })
 })
 
 // 互動回歸：輸入兩位數（如 12）時，鍵入第一位「1」的瞬間 value=1 ≤ 8，

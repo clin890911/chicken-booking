@@ -31,7 +31,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
     findSuitableTables, suggestTable, suggestTableCombo,
   } = useBooking()
   const toast = useToast()
-  const { can } = useAuth()
+  const { can, user } = useAuth()
 
   const [floor, setFloor] = useState('1F')
   const [view, setView] = useState('map') // map=SVG 桌況圖 ｜ schedule=當日排程（每桌 turns）
@@ -474,43 +474,55 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* 上部チップ群：高さ固定（捲動しない）。地図＋右側欄に最大高さを譲る */}
-      <div className="flex-shrink-0 space-y-3">
-      <StatusBar tables={tables} waitlist={waitlist} bookings={bookings} />
+      {/* 上部チップ群：高さ固定（捲動しない）。地図＋右側欄に最大高さを譲る。
+          ⚠️ 用 flex gap 而不是 space-y-*：`space-y` 的 `> * + *` 會替 display:none 的
+          兄弟（lg 以上被隱藏的手機版 StatusBar）照樣算一份 margin，白吃 8px 高度，
+          左欄就會從「剛好不捲」變成捲。flex gap 不會替 display:none 的子項留空隙。 */}
+      <div className="flex-shrink-0 flex flex-col gap-2">
+      {/* 統計列：lg 以上壓成單列 pill（把高度還給桌況圖）；lg 以下用原本的六格 grid。
+          ⚠️ compact 單列不可用在窄螢幕——375px 時六格 pill 會被整個擠出可視範圍
+          （不是可橫向捲，是直接看不到），店員在手機上永遠讀不到那些數字。 */}
+      <div className="lg:hidden">
+        <StatusBar tables={tables} waitlist={waitlist} bookings={bookings} />
+      </div>
 
-      {/* 「現在該做什麼」提示列：過時未到 / 超時 / 待清 / 自動處理紀錄 / 節奏單句 */}
-      <OpsHintBar
-        onOpenUpcoming={() => { setSelectedTable(null); setRailTab('upcoming') }}
-        onOpenLog={() => setShowOpsLog(true)}
-      />
+      {/* lg 以上＝一條頂列（約 44px）：現場・時間 + 六格 pill + 樓層 + 視圖 + 編輯佈局 + 登入者。
+          lg 以下＝改版前的樓層/視圖列（大尺寸、可換行），統計已在上面那塊 grid。 */}
+      <div className="flex items-center gap-2 flex-wrap lg:flex-nowrap">
+        <div className="hidden lg:flex min-w-0">
+          <StatusBar variant="compact" tables={tables} waitlist={waitlist} bookings={bookings} />
+        </div>
 
-      {/* 樓層切換 + 模式 banner */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+        <div className="hidden lg:block flex-1 min-w-0" />
+
+        <div className="flex-none flex gap-1.5">
           {['1F', '2F'].map(f => (
             <button
               key={f}
               onClick={() => setFloor(f)}
-              className={`whitespace-nowrap px-4 py-2 rounded-xl text-sm font-bold transition-all border-2 ${
+              title={f === '1F' ? '1F 主用餐區' : '2F 用餐區'}
+              className={`whitespace-nowrap px-4 py-2 rounded-xl text-sm lg:px-3 lg:py-1.5 lg:rounded-lg lg:text-xs font-bold transition-all border-2 ${
                 floor === f
                   ? 'bg-chicken-red border-chicken-red text-white shadow'
                   : 'bg-white border-chicken-brown/15 text-chicken-brown'
               }`}
             >
-              {f === '1F' ? '1F 主用餐區' : '2F 用餐區'}
-              <span className="ml-1.5 text-[10px] opacity-75">({tables.filter(t => t.floor === f).length})</span>
+              {/* 窄螢幕有空間就寫全名；lg 的單列只放得下代號（全名在 title） */}
+              <span className="lg:hidden">{f === '1F' ? '1F 主用餐區' : '2F 用餐區'}</span>
+              <span className="hidden lg:inline">{f}</span>
+              <span className="ml-1.5 lg:ml-1 text-[10px] opacity-75">({tables.filter(t => t.floor === f).length})</span>
             </button>
           ))}
         </div>
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
         {!mode && (
-          <div className="flex gap-1 rounded-xl bg-chicken-cream p-1 border-2 border-chicken-brown/10">
+          <div className="flex-none flex gap-1 rounded-xl lg:rounded-lg bg-chicken-cream p-1 lg:p-0.5 border-2 border-chicken-brown/10">
             {[['map', '地圖'], ['summary', '摘要'], ['schedule', '排程']].map(([k, label]) => (
               <button
                 key={k}
                 onClick={() => setView(k)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                className={`px-3 py-1.5 rounded-lg lg:px-2.5 lg:py-1 lg:rounded-md text-xs font-bold transition-all ${
                   view === k ? 'bg-chicken-red text-white shadow' : 'text-chicken-brown/70 hover:text-chicken-brown'
                 }`}
               >{label}</button>
@@ -518,20 +530,26 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
           </div>
         )}
 
-        <div className="flex-1" />
-        {!mode && (
-          <button
-            onClick={() => { setSelectedTable(null); setRailTab('walkin') }}
-            className="px-4 py-2 rounded-xl text-sm font-black bg-amber-500 text-white shadow hover:bg-amber-600 transition-all"
-          >🪑 立即帶位</button>
-        )}
         {!mode && can('table.config') && (
           <button
             onClick={() => setShowLayoutEditor(true)}
-            className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown hover:border-chicken-red"
+            className="flex-none px-3 py-2 rounded-xl text-xs lg:px-2.5 lg:py-1.5 lg:rounded-lg lg:text-[11px] font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown hover:border-chicken-red"
           >編輯佈局</button>
         )}
+
+        {/* 登入者/角色：現場分頁不渲染桌面版頁首，這裡是它唯一的落點。
+            lg 以下不顯示——手機版頂部 Header 本來就有，重複只是佔空間。 */}
+        <div className="flex-none hidden lg:block text-right leading-tight">
+          <div className="text-[11px] font-bold text-chicken-brown">{user?.displayName}</div>
+          <div className="text-[10px] text-chicken-brown/60">{user?.roleLabel}</div>
+        </div>
       </div>
+
+      {/* 「現在該做什麼」提示列：過時未到 / 超時 / 待清 / 自動處理紀錄 / 節奏單句 */}
+      <OpsHintBar
+        onOpenUpcoming={() => { setSelectedTable(null); setRailTab('upcoming') }}
+        onOpenLog={() => setShowOpsLog(true)}
+      />
 
       {/* Mode banner — 依模式不同底色 + emoji，避免誤判 */}
       <ModeBanner
@@ -549,7 +567,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
 
       {/* 主區：左＝操作/帶位欄（常駐、內部捲動）｜右＝桌況（地圖/摘要/排程，填滿）。
           一面式機制不變：外層 flex-1 min-h-0；左欄自身 overflow-y-auto；右欄 flex-1 min-h-0、SVG 自動縮放 */}
-      <div className="flex-1 min-h-0 mt-3 grid grid-cols-1 md:grid-cols-[340px_1fr] lg:grid-cols-[380px_1fr] gap-3">
+      <div className="flex-1 min-h-0 mt-2 grid grid-cols-1 md:grid-cols-[400px_1fr] lg:grid-cols-[470px_1fr] gap-3">
         {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/今日訂位/候位/團體）
             TableDrawer 是長內容 → 外層捲動；OpsRail 自己管內部捲動與釘底動作列 → 外層只給 flex 容器 */}
         <div className={`h-full min-h-0 ${selectedTableObj ? 'overflow-y-auto space-y-3' : 'flex flex-col'}`}>

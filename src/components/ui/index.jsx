@@ -12,12 +12,13 @@ export function Card({ className = '', children, ...rest }) {
 }
 
 // label 用 htmlFor 綁到 input（id 未傳則以 useId 自動產生）：改善鍵盤/螢幕閱讀器與 getByLabel 測試。
-export function Input({ label, error, id, className = '', ...rest }) {
+// labelClassName：讓密集版面（現場 iPad 左欄）把 label 壓成 text-xs，不必動全域 .label
+export function Input({ label, error, id, className = '', labelClassName = '', ...rest }) {
   const auto = useId()
   const inputId = id || auto
   return (
     <div>
-      {label && <label htmlFor={inputId} className="label">{label}</label>}
+      {label && <label htmlFor={inputId} className={`label ${labelClassName}`}>{label}</label>}
       <input id={inputId} className={`input ${error ? 'border-chicken-red ring-2 ring-chicken-red/30' : ''} ${className}`} {...rest} />
       {error && <p className="text-xs text-chicken-red mt-1">{error}</p>}
     </div>

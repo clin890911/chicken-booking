@@ -101,8 +101,8 @@ test('現場：稱謂＋姓氏快選組成姓名，全程不用鍵盤', async ({
   await page.getByRole('button', { name: '2 位', exact: true }).click()
   const tableNo = await readSuggestedTable(page)
 
-  // 稱謂在上、姓氏在下（領檯看到人先知道先生/小姐，才問貴姓）
-  await page.getByRole('button', { name: '先生', exact: true }).click()
+  // iPad v2：稱謂併進姓氏格、預設「先生」（循環鈕，點不出「沒有稱謂」）→ 常態只點姓氏一下
+  await expect(page.getByRole('button', { name: /^稱謂：先生/ })).toBeVisible()
   await page.getByRole('button', { name: '陳', exact: true }).click()
 
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
@@ -200,10 +200,14 @@ test('現場：「沿用上一組」不可把上一組的過敏註記帶給下�
   await loginToOps(page)
 
   // 第一組：輸入該電話帶出顧客檔（過敏：花生）＋店員自己打「靠窗」
+  // iPad v2：電話欄常駐，點它才浮出漂浮數字鍵盤；按 OK 收起鍵盤與遮罩才能繼續點桌況圖
   await page.getByRole('button', { name: '2 位', exact: true }).click()
-  await page.getByRole('button', { name: /電話（帶顧客檔/ }).click()
-  await page.getByPlaceholder('0912345678').fill('0912000111')
-  await expect(page.getByText(/過敏：花生/)).toBeVisible()
+  await page.getByLabel('電話').click()
+  await expect(page.getByRole('dialog', { name: '電話數字鍵盤' })).toBeVisible()
+  await page.getByLabel('電話').fill('0912000111')
+  await expect(page.getByText(/忌花生/)).toBeVisible()          // 漂浮鍵盤上的常客比對
+  await page.getByRole('button', { name: 'OK', exact: true }).click()
+  await expect(page.getByText(/過敏：花生/)).toBeVisible()       // 左欄常客徽章
   await page.getByPlaceholder('例：靠窗、慶生、過敏').fill('靠窗')
 
   const t1 = await readSuggestedTable(page)

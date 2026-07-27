@@ -67,7 +67,9 @@ export default function OpsHintBar({ onOpenUpcoming, onOpenLog }) {
 
   if (!hints.length) return null
   return (
-    <div className="flex flex-wrap gap-2">
+    // 細長條：兩則提示串在同一行（iPad 頂部每一像素都要還給桌況圖）。
+    // 內容過長時各自 truncate，不換行、不長高。
+    <div className="flex items-center gap-2">
       {hints.map((h, i) => (
         <button
           key={i}
@@ -75,7 +77,7 @@ export default function OpsHintBar({ onOpenUpcoming, onOpenLog }) {
             if (h.action === 'open-upcoming') onOpenUpcoming?.()
             if (h.action === 'open-log') onOpenLog?.()
           }}
-          className={`flex-1 min-w-[200px] text-left px-3 py-2 rounded-xl border text-xs font-bold ${LEVEL_CLS[h.level]} ${h.action ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+          className={`flex-1 min-w-0 truncate text-left px-3 py-1 rounded-lg border text-xs font-bold ${LEVEL_CLS[h.level]} ${h.action ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
         >
           {h.text}
         </button>
