@@ -20,6 +20,16 @@ const STATUS_PILL_BG = Object.fromEntries(
   Object.entries(STATUS_COLOR).map(([status, c]) => [status, c.badge])
 )
 
+// 孤兒桌：桌況說「已預訂／用餐中」卻找不到對應訂位（訂位被刪掉或資料清理過），也不是團體桌。
+// ★ 為什麼要特別處理：下方所有動作鈕的渲染條件都要 booking（reserved/dining 兩段），孤兒桌會讓
+//   抽屜變成「一顆鈕都沒有」——vacant/cleaning/blocked 的分支也全都不成立——桌就一直佔著容量，
+//   只能等換日掃除。這裡給一條明確的脫困路徑。
+// 團體桌（currentRef 指向存在的團）不算孤兒：它的操作在 GroupTableSection 內，出口是通的。
+export function isOrphanTable(table, booking, groupRef) {
+  if (!table || booking || groupRef) return false
+  return table.status === 'reserved' || table.status === 'dining'
+}
+
 function fmtTime(d) {
   const t = new Date(d)
   return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
@@ -39,8 +49,8 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const toast = useToast()
   const confirmDialog = useConfirm()
   const {
-    setTableStatus, blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, undoCancelBooking,
+    blockTable, unblockTable, walkInSeat,
+    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking,
     setTableOutage, clearTableOutage,
     settings, groupReservations,
   } = useBooking()
@@ -82,6 +92,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
 
   const canEdit = can('table.update')
   const canBlock = can('table.block')
+  const orphan = isOrphanTable(table, booking, groupRef)
 
   const handleWalkIn = () => {
     if (!walkInForm.guests || walkInForm.guests < 1) return toast.error('請填人數')
@@ -170,15 +181,31 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
 
   const handleClear = () => {
     const tableNumber = table.number
-    const prevBookingId = table.currentBookingId
+    // clearTable 會把 currentBookingId/currentRef 一起清掉 → 復原所需的快照只能在動手前先存
+    const snapshot = { bookingId: table.currentBookingId, ref: table.currentRef }
     clearTable(tableNumber)
-    // 復原窗口：把桌位還原回「等待清桌」狀態（重新標 cleaning + 還原 booking 綁定）
+    // 復原窗口：把桌位還原回「等待清桌」狀態。★ 這幾秒內下一組很可能已經被帶上桌
+    //（清空本來就是為了讓下一組坐），所以復原走 undoClearTable 的「仍是空桌才還原」守門，
+    // 不可改回 setTableStatus 硬寫——那會把剛入座那組從桌況圖上抹掉。
     toast.action(`${tableNumber} 已清桌完成`,
       { label: '↩ 復原', onClick: () => {
-        setTableStatus(tableNumber, 'cleaning', prevBookingId ? { currentBookingId: prevBookingId } : {})
+        const r = undoClearTable(tableNumber, snapshot)
+        if (!r?.ok) return toast.error('復原失敗：' + (r?.error || '未知錯誤'))
         toast.success(`已復原 ${tableNumber} 為等待清桌`)
       } },
       { duration: 8000 })
+    onClose?.()
+  }
+
+  // 孤兒桌脫困（見 isOrphanTable）：桌況說有人但找不到訂位，常規動作鈕一顆都不會出現。
+  // 確認後直接釋出為空桌。不給復原窗——復原只會把桌變回同樣卡死的狀態。
+  const handleForceRelease = async () => {
+    const ok = await confirmDialog(
+      `${table.number} 目前是「${STATUS_LABELS[table.status]}」，但找不到對應的訂位資料。\n請先確認桌邊確實沒有客人，再釋出為空桌。`,
+      { title: '強制釋出桌位', confirmLabel: '確認沒人，釋出', danger: true })
+    if (!ok) return
+    clearTable(table.number)
+    toast.success(`${table.number} 已釋出為空桌`)
     onClose?.()
   }
 
@@ -339,6 +366,21 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           />
         )}
 
+        {/* 孤兒桌警示：桌況說有人、卻查無訂位。講清楚原因，並在下方動作區給「強制釋出」。 */}
+        {orphan && (
+          <div className="px-3 py-2.5 bg-chicken-red/5 border border-chicken-red/30 rounded-lg text-xs space-y-1">
+            <div className="font-bold text-chicken-red">⚠️ 找不到這張桌對應的訂位</div>
+            <div className="text-chicken-brown/70">
+              桌況顯示「{STATUS_LABELS[table.status]}」，但
+              {table.currentBookingId ? `訂位 #${table.currentBookingId} 已不存在` : '桌上沒有訂位編號'}
+              （可能已被刪除或資料清理過）。這張桌會一直佔著可訂容量。
+            </div>
+            {/* 唯讀角色（kitchen）看不到下方動作區，不要叫他們去按一顆不存在的鈕 */}
+            <div className="text-chicken-brown/50">
+              {canEdit ? '請確認桌邊實際狀況後，用下方「強制釋出」把桌收回。' : '請找有權限的同事處理。'}
+            </div>
+          </div>
+        )}
         {table.status === 'cleaning' && !groupRef && (
           <p className="text-chicken-brown/60 text-center py-4">外場清桌中</p>
         )}
@@ -457,6 +499,14 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
 
           {table.status === 'blocked' && canBlock && (
             <button onClick={handleUnblock} className="btn-primary w-full">恢復可用</button>
+          )}
+
+          {/* 孤兒桌唯一的出口：上面 reserved/dining 兩段都要 booking，這裡不給就完全無鈕可按 */}
+          {orphan && (
+            <button
+              onClick={handleForceRelease}
+              className="w-full text-sm rounded-2xl font-bold py-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5"
+            >✨ 強制釋出為空桌</button>
           )}
         </div>
       )}
