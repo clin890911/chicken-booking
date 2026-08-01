@@ -202,9 +202,12 @@ test('現場：「沿用上一組」不可把上一組的過敏註記帶給下�
   // 第一組：輸入該電話帶出顧客檔（過敏：花生）＋店員自己打「靠窗」
   // iPad v2：電話欄常駐，點它才浮出漂浮數字鍵盤；按 OK 收起鍵盤與遮罩才能繼續點桌況圖
   await page.getByRole('button', { name: '2 位', exact: true }).click()
-  await page.getByLabel('電話').click()
+  // getByLabel('電話') 是子字串比對，會同時命中漂浮鍵盤的 aria-label「電話數字鍵盤」→ strict mode violation。
+  // getByRole 的 name 是整串比對，只會命中電話欄本身。
+  const phoneField = page.getByRole('textbox', { name: '電話' })
+  await phoneField.click()
   await expect(page.getByRole('dialog', { name: '電話數字鍵盤' })).toBeVisible()
-  await page.getByLabel('電話').fill('0912000111')
+  await phoneField.fill('0912000111')
   await expect(page.getByText(/忌花生/)).toBeVisible()          // 漂浮鍵盤上的常客比對
   await page.getByRole('button', { name: 'OK', exact: true }).click()
   await expect(page.getByText(/過敏：花生/)).toBeVisible()       // 左欄常客徽章
