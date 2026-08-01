@@ -409,6 +409,24 @@ export function searchNoshow(phone) {
     .map(([k, v]) => ({ phone: k, ...v }))
 }
 
+// recordNoshow 的反向操作：店員誤標 No-show 後按「復原」，把剛才加上去的一次扣回。
+// count 有下限 0（不會變負數）。優先用 bookingId 精準找出對應的那一筆 dates 記錄刪除，
+// 讓 count 與 dates 陣列筆數保持一致；找不到（例如舊資料沒存 bookingId）則退而求其次移除最後一筆。
+// ★ 只在「使用者主動按復原」時呼叫——系統自動換日標記的 no-show 本來就不記罰則（見
+//   seatingService.executeSweepActions 的 mark-noshow-auto），沒有對應的復原需求。
+export function revokeNoshow(phone, bookingId) {
+  if (!phone) return
+  const all = readNoshow()
+  const rec = all[phone]
+  if (!rec || !rec.count) return
+  rec.count = Math.max(0, rec.count - 1)
+  if (Array.isArray(rec.dates) && rec.dates.length) {
+    const idx = bookingId ? rec.dates.findIndex(d => d.bookingId === bookingId) : rec.dates.length - 1
+    rec.dates.splice(idx >= 0 ? idx : rec.dates.length - 1, 1)
+  }
+  writeNoshow(all)
+}
+
 // === 工具 ===
 // 找出指定時段「即將到達」的訂位（用於即時通知外場）
 export function listUpcoming(date, withinMinutes = 60) {

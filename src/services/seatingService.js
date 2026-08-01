@@ -123,6 +123,53 @@ export function finalizeBooking(bookingId) {
   return { ok: true, tableNumber: booking.assignedTableId, tableNumbers }
 }
 
+// === 過時未到 → 直接標記完成（未透過系統走過入座）===
+// 差異於 checkoutBooking／finalizeBooking：那兩者假設訂位已經真的 status==='arrived'
+// （客人有點過「客人到了」，桌況也真的 dining 過）。這裡專門處理「過時未到」清單的補登場景——
+// 店員事後確認「這組客人其實有來、也吃完了，只是當下沒點系統入座」，所以：
+//   1) 不要求前置狀態（confirmed 直接可標，不必先 arrived）
+//   2) 不記 actualArrivalTime（沒有真實入座時間可記，硬記反而誤導「用餐時長」等統計）
+//   3) 若有指派桌位、且該桌目前仍由這筆訂位持有（防呆：桌可能已被改派/被別筆訂位接手），
+//      直接釋出為空桌（vacant）——不像 checkoutBooking 進待清桌，因為客人根本沒真的坐上那張桌，
+//      沒有「清潔」這回事；桌況不動的話會永遠卡在 reserved、白白佔掉容量。
+// ⚠️ 不得放寬 checkoutBooking／finalizeBooking 既有的前置條件守門，本函式是獨立入口。
+export function completeWithoutSeating(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  const releasedTables = []
+  for (const n of bookingTableNumbers(booking)) {
+    const t = tableService.getByNumber(n)
+    if (t && t.currentBookingId === bookingId) {
+      tableService.clearTable(n)
+      releasedTables.push(n)
+    }
+  }
+  bookingService.setStatus(bookingId, 'completed')
+  return { ok: true, releasedTables }
+}
+
+// completeWithoutSeating 的復原（誤觸「已完成」後按「↩ 復原」）：
+// booking 改回 confirmed；剛才釋出的桌位若「仍是空桌」就搶回 reserved（不是 dining——
+// 這些桌從未真的入座過）。若在復原前那幾秒內已被別組帶位/預配佔走，不搶桌（不搶別組的桌），
+// 只復原 booking 狀態，並在 failed 回報哪些桌沒搶回，交由 UI 提示店員手動再指派。
+export function undoCompleteWithoutSeating(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  const restored = []
+  const failed = []
+  for (const n of bookingTableNumbers(booking)) {
+    const t = tableService.getByNumber(n)
+    if (t && t.status === 'vacant') {
+      tableService.reserveTable(n, bookingId)
+      restored.push(n)
+    } else {
+      failed.push(n)
+    }
+  }
+  bookingService.setStatus(bookingId, 'confirmed')
+  return { ok: true, restored, failed }
+}
+
 // === 清桌完成 → 桌位釋出 ===
 export function clearTable(tableNumber) {
   return tableService.clearTable(tableNumber)

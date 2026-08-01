@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '../ui'
 import EditBookingModal from './EditBookingModal'
-import { getNoshowCount } from '../../services/bookingService'
+import { getNoshowCount, revokeNoshow } from '../../services/bookingService'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { copyText } from '../../utils/clipboard'
@@ -52,6 +52,34 @@ function diningStage(minutes, settings = {}) {
   if (minutes >= diningDuration) return 'overtime'
   if (minutes >= Math.max(0, diningDuration - 30)) return 'late'
   return 'normal'
+}
+
+// No-show 標記：抽成不依賴元件 state 的純函式方便單測（注入 setStatus/getNoshowCount/
+// revokeNoshow/toast，不必掛載整個 BookingCard——那需要 BookingProvider/AuthProvider/
+// ToastProvider/ConfirmProvider 才能跑，不划算，見 tests/components/operationsArrive.test.js
+// 的 handleArriveNow 同一套手法）。confirm() 對話框留在元件內（非同步、綁 hook），這裡只涵蓋
+// 確認後的邏輯。文案與 UpcomingPanel.jsx 的過時未到清單同一套：講清楚累計第幾次；
+// 復原要把 recordNoshow 加上去的那一次扣回，否則店員按錯再復原，客人身上仍留著一次爽約紀錄。
+export function markNoshow(booking, { setStatus, getNoshowCount, revokeNoshow, toast }) {
+  setStatus(booking.id, 'noshow')
+  const count = getNoshowCount(booking.phone)
+  const countMsg = count > 0 ? `這支電話累計第 ${count} 次，之後訂位會提醒` : '已記錄這支電話的爽約次數'
+  toast.action(`已標記 ${booking.name} No-show — ${countMsg}`,
+    { label: '↩ 復原', onClick: () => {
+        setStatus(booking.id, 'confirmed')
+        revokeNoshow(booking.phone, booking.id)
+        toast.success(`已復原 ${booking.name} 為待到，爽約次數已扣回`)
+    } },
+    { duration: 8000 })
+}
+
+// 卡片常駐的「↩ 恢復為待到」鈕邏輯：只在 booking.status==='noshow' 時出現（見下方 render），
+// 是 No-show 復原的另一個入口（toast 的復原鈕會在幾秒後消失，這顆是之後回來也能用的常駐入口）。
+// 同樣要扣回爽約次數，否則店員晚點才點這顆，客人身上仍留著一次爽約紀錄。
+export function restoreFromNoshow(booking, { setStatus, revokeNoshow, toast }) {
+  setStatus(booking.id, 'confirmed')
+  revokeNoshow(booking.phone, booking.id)
+  toast.success(`${booking.name} 已恢復為待到，爽約次數已扣回`)
 }
 
 export default function BookingCard({ booking, onAssign, onClick }) {
@@ -124,18 +152,18 @@ export default function BookingCard({ booking, onAssign, onClick }) {
       { label: '復原', onClick: () => setStatus(booking.id, 'confirmed') })
   }
 
+  // 確認對話框留在元件內（非同步、綁 hook）；確認後的邏輯見上方純函式 markNoshow。
   const handleNoshow = async () => {
     const ok = await confirm(`標記 ${booking.name} 為 No-show？`,
       { title: 'No-show', confirmLabel: '標記', danger: true })
     if (!ok) return
-    setStatus(booking.id, 'noshow')
-    toast.action(`${booking.name} 已標記 No-show`,
-      { label: '復原', onClick: () => setStatus(booking.id, 'confirmed') })
+    markNoshow(booking, { setStatus, getNoshowCount, revokeNoshow, toast })
   }
 
+  // 卡片常駐的「↩ 恢復為待到」鈕：只在 booking.status==='noshow' 時出現（見下方 render）。
+  // 邏輯見上方純函式 restoreFromNoshow。
   const handleRestore = () => {
-    setStatus(booking.id, 'confirmed')
-    toast.success(`${booking.name} 已恢復為待到`)
+    restoreFromNoshow(booking, { setStatus, revokeNoshow, toast })
   }
 
   // === 卡片邊框依時長階段變色（僅 arrived 狀態）===

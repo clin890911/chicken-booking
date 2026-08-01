@@ -408,6 +408,19 @@ export function BookingProvider({ children }) {
     return r
   }
   const clearTable = (number) => { seatingService.clearTable(number); refresh(); syncCloudSoon() }
+  // 過時未到補登「已完成」：見 seatingService.completeWithoutSeating 註解——
+  // 與 checkoutBooking/finalizeBooking 不同，這裡不假設訂位曾經真的入座過。
+  const completeWithoutSeating = (bookingId) => {
+    const r = seatingService.completeWithoutSeating(bookingId)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
+  // 上述動作的復原：booking 改回 confirmed，剛釋出的桌位若仍空則搶回 reserved。
+  const undoCompleteWithoutSeating = (bookingId) => {
+    const r = seatingService.undoCompleteWithoutSeating(bookingId)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
   const cancelBooking = (bookingId) => {
     const before = bookingService.getById(bookingId)
     const r = seatingService.cancelBooking(bookingId)
@@ -595,6 +608,7 @@ export function BookingProvider({ children }) {
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
     assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
+    completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     addWaitlist, callWaitlist, seatWaitlist, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,

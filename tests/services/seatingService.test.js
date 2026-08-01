@@ -299,6 +299,112 @@ describe('seatingService 整合層', () => {
   })
 
   // ===========================================================
+  // completeWithoutSeating / undoCompleteWithoutSeating
+  // 過時未到清單的「已完成」補登：客人其實有來、也吃完了，只是沒點系統入座過。
+  // ===========================================================
+  describe('completeWithoutSeating', () => {
+    beforeEach(() => { seedDefaultTables() })
+
+    it('訂位不存在 → 擋', () => {
+      const r = seating.completeWithoutSeating('NOPE')
+      expect(r).toEqual({ ok: false, error: '訂位不存在' })
+    })
+
+    it('沒有指派桌位：只改 booking 為 completed，不動任何桌', () => {
+      const b = mkBooking({ guests: 2 })
+      const r = seating.completeWithoutSeating(b.id)
+      expect(r.ok).toBe(true)
+      expect(r.releasedTables).toEqual([])
+      expect(bookingService.getById(b.id).status).toBe('completed')
+    })
+
+    it('有指派桌位（reserved，未曾入座）：booking → completed，桌直接釋出為空桌（非待清）', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      expect(tableService.getByNumber('101').status).toBe('reserved')
+      const r = seating.completeWithoutSeating(b.id)
+      expect(r.ok).toBe(true)
+      expect(r.releasedTables).toEqual(['101'])
+      expect(bookingService.getById(b.id).status).toBe('completed')
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('vacant')
+      expect(t.currentBookingId).toBeNull()
+    })
+
+    it('桌已被改派給別筆訂位持有（currentBookingId 不是這筆）：不動那張桌，只改 booking', () => {
+      const a = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(a.id, '101')
+      const other = mkBooking({ guests: 2, phone: '0900000002' })
+      tableService.seatTable('101', other.id) // 模擬 101 現在其實被別筆訂位持有
+      const r = seating.completeWithoutSeating(a.id)
+      expect(r.ok).toBe(true)
+      expect(r.releasedTables).toEqual([]) // a 的舊桌不是它真的持有的，不釋出
+      expect(bookingService.getById(a.id).status).toBe('completed')
+      expect(tableService.getByNumber('101').currentBookingId).toBe(other.id) // 別人的桌不受影響
+    })
+
+    it('不記錄 actualArrivalTime（沒有真實入座時間可記）', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.completeWithoutSeating(b.id)
+      expect(bookingService.getById(b.id).actualArrivalTime).toBeFalsy()
+    })
+
+    it('不會觸碰 checkoutBooking／finalizeBooking 既有行為（各自獨立入口）', () => {
+      // checkoutBooking 仍是 arrived → completed + 桌進 cleaning（不是 vacant）
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      seating.seatBooking(b.id)
+      seating.checkoutBooking(b.id)
+      expect(tableService.getByNumber('101').status).toBe('cleaning')
+    })
+  })
+
+  describe('undoCompleteWithoutSeating', () => {
+    beforeEach(() => { seedDefaultTables() })
+
+    it('訂位不存在 → 擋', () => {
+      const r = seating.undoCompleteWithoutSeating('NOPE')
+      expect(r).toEqual({ ok: false, error: '訂位不存在' })
+    })
+
+    it('復原：booking 改回 confirmed，桌改回 reserved（非 dining——從未真的入座過）', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      seating.completeWithoutSeating(b.id)
+      const r = seating.undoCompleteWithoutSeating(b.id)
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual(['101'])
+      expect(r.failed).toEqual([])
+      expect(bookingService.getById(b.id).status).toBe('confirmed')
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('reserved')
+      expect(t.currentBookingId).toBe(b.id)
+    })
+
+    it('復原時桌已被別組佔用：不搶桌，只復原 booking，回報 failed', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      seating.completeWithoutSeating(b.id)
+      seating.walkInSeat('101', { name: '別組', guests: 2 }) // 桌在復原前被別組坐走
+      const r = seating.undoCompleteWithoutSeating(b.id)
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual([])
+      expect(r.failed).toEqual(['101'])
+      expect(bookingService.getById(b.id).status).toBe('confirmed')
+      expect(tableService.getByNumber('101').status).toBe('dining') // 別組桌況不受影響、不被搶
+    })
+
+    it('沒有指派桌位：只復原 booking', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.completeWithoutSeating(b.id)
+      const r = seating.undoCompleteWithoutSeating(b.id)
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual([])
+      expect(bookingService.getById(b.id).status).toBe('confirmed')
+    })
+  })
+
+  // ===========================================================
   // clearTable（純委派）
   // ===========================================================
   describe('clearTable', () => {
