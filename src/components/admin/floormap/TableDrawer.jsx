@@ -8,17 +8,16 @@ import GroupTableSection from './GroupTableSection'
 import { STATUS_ZH as STATUS_LABELS } from '../../../utils/tableStatus'
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr } from '../../../utils/timeSlots'
+import { STATUS_COLOR } from './statusColors'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
 // 與桌位地圖 (TableShape) 同色語義：綠=可入座 / 藍=已預訂 / 橙=用餐 / 琥珀=清桌 / 灰=不可用
-const STATUS_PILL_BG = {
-  vacant: 'bg-emerald-600',
-  reserved: 'bg-sky-600',
-  dining: 'bg-orange-500',
-  cleaning: 'bg-amber-600',
-  blocked: 'bg-slate-500',
-}
+// 2026-08：色值收斂進 ./statusColors.js（單一來源）。pill 是小面積白字徽章，用各狀態的
+// badge 色（同色相、比桌況圖淡底更深，確保白字對比）而非直接借用桌況圖的淡 fill。
+const STATUS_PILL_BG = Object.fromEntries(
+  Object.entries(STATUS_COLOR).map(([status, c]) => [status, c.badge])
+)
 
 function fmtTime(d) {
   const t = new Date(d)
@@ -247,7 +246,8 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           </div>
           <button onClick={onClose} className="text-chicken-brown/40 hover:text-chicken-brown text-2xl leading-none">×</button>
         </div>
-        <span className={`inline-block mt-3 px-3 py-1 rounded-full text-xs font-bold text-white ${STATUS_PILL_BG[table.status]}`}>
+        <span className="inline-block mt-3 px-3 py-1 rounded-full text-xs font-bold text-white"
+              style={{ background: STATUS_PILL_BG[table.status] }}>
           {STATUS_LABELS[table.status]}
         </span>
         {outToday && (

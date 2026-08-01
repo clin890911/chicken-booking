@@ -15,28 +15,23 @@
 //     確保「桌況圖色彩語義不可回退」。整桌填分區色只發生在 LayoutEditor 內。
 //   - 字級啟發式改用 min(w,h)：自由縮放後 h 不再恆為 75。
 import { diffMin, stageOf } from '../../../utils/diningStage'
+import { STATUS_COLOR, GROUP_HOLD_COLOR, DINING_STAGE_FILL } from './statusColors'
 
 // 配色層級「可坐醒目 vs 佔用降噪」（2026-07 依店家反饋反轉 PR#52）：
 //   可入座＝實心綠跳出（領檯第一眼要找的就是空桌）；用餐中/預訂/團保＝低彩度降噪；
 //   需處理狀態（待清＝琥珀、超時＝紅，見 DINING_STAGE_FILL）仍保留醒目色。
-const STATUS_COLOR = {
-  vacant:   { fill: '#86efac', stroke: '#15803d', text: '#14532d' },   // 可入座：實心綠、最醒目
-  reserved: { fill: '#eef2f7', stroke: '#9db4cd', text: '#3f5876' },   // 已預訂：低彩度灰藍降噪
-  dining:   { fill: '#eef0f2', stroke: '#cbd5e1', text: '#475569' },   // 用餐中：中性灰降噪（附已用餐分鐘）
-  cleaning: { fill: '#fde68a', stroke: '#d97706', text: '#92400e' },   // 待清桌：琥珀（需翻桌）
-  blocked:  { fill: '#e5e7eb', stroke: '#9ca3af', text: '#6b7280' },   // 停用：淡灰
-}
+// 2026-08：色值本身收斂進 ./statusColors.js（單一來源，圖例/pill/排程視圖同步引用），
+// 這裡只留語義排版邏輯。
 
-// 團體保留（vacant 但今日被團 hold）：低彩度靛（有「團保」字樣即可辨識，不搶過可坐綠）
-const GROUP_HOLD = { fill: '#e0e7ff', stroke: '#818cf8', text: '#3730a3' }
-
-// dining 階段顏色：normal/late 為橘系（仍在用餐，警示但非超時），超時才轉紅
-// normal/late 維持中性灰降噪（用光暈提示接近時限）；overtime 才轉紅跳出（需處理）。
-const DINING_STAGE_FILL = {
-  normal:   '#eef0f2',  // 用餐中：中性灰
-  late:     '#eef0f2',  // 接近時限：仍中性灰，改用橘色光暈提示（見下方 late 光暈）
-  overtime: '#dc2626',  // 已達用餐時間：紅
-  'buffer-overtime': '#b91c1c',  // 超過清桌緩衝：深紅
+// 桌上顯示的訂位客人姓名截斷保護：桌寬有限（預設 80 unit），姓名用 JS 依 fontSize 與桌寬
+// 動態算可容納字數，超過才截斷加「…」（不用 CSS，避免不同瀏覽器截斷行為不一致）。
+function truncateGuestName(name, w, fontSize) {
+  const s = String(name || '')
+  if (!s) return ''
+  const charWidth = fontSize * 1.05   // 中文全形字寬約等於 fontSize，留一點安全係數
+  const maxChars = Math.max(1, Math.floor((w - 12) / charWidth))
+  if (s.length <= maxChars) return s
+  return s.slice(0, Math.max(1, maxChars - 1)) + '…'
 }
 
 export default function TableShape({
@@ -176,20 +171,21 @@ export default function TableShape({
   const minutes = (status === 'dining' && table.seatedAt) ? diffMin(table.seatedAt) : 0
   const stage = status === 'dining' ? stageOf(minutes, settings) : null
 
-  // 填色：vacant 被團 hold → 實心靛色；dining 用 stage 對應顏色；其餘用基本 status color
+  // 填色：vacant 被團 hold → 實心紫色；dining 用 stage 對應顏色；其餘用基本 status color
   const isGroupHold = status === 'vacant' && !!groupHoldLabel
-  const palette = isGroupHold ? GROUP_HOLD : (STATUS_COLOR[status] || STATUS_COLOR.vacant)
+  const palette = isGroupHold ? GROUP_HOLD_COLOR : (STATUS_COLOR[status] || STATUS_COLOR.vacant)
   let fill = palette.fill
   let textColor = palette.text   // 淡底用深字、實心用白字
   if (status === 'dining' && stage) {
     fill = DINING_STAGE_FILL[stage]
-    // normal/late 淺灰底→深字；overtime/buffer 紅底→白字
+    // normal/late 暖灰褐底→深字；overtime/buffer 紅底→白字
     textColor = (stage === 'overtime' || stage === 'buffer-overtime') ? '#ffffff' : palette.text
   }
 
-  // 邊框：選中 / 高亮優先；超時也用紅邊。base 2px 讓淡底狀態的色框讀得出語義
+  // 邊框：選中 / 高亮優先；超時也用紅邊。base 寬度依狀態各自帶（見 statusColors.js），
+  // 讓淡底狀態的色框讀得出語義（已預訂加粗到 3px、團保 2.5px，與用餐中的 2px 拉開層次）。
   let stroke = palette.stroke
-  let strokeWidth = 2
+  let strokeWidth = palette.strokeWidth || 2
   let strokeDash = null
   let className = ''
 
@@ -231,42 +227,72 @@ export default function TableShape({
       {zoneDot}
 
       <g transform={textTransform}>
-        {/* 桌號 */}
-        <text x={cx} y={y + (small ? 25 : 28)}
-              fontSize={small ? 20 : 22} fontWeight={900} fill={textColor} textAnchor="middle" pointerEvents="none">
-          {number}
-        </text>
-        {/* 容量 */}
-        <text x={cx} y={y + (small ? 44 : 48)}
-              fontSize={small ? 13 : 14} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
-          {capacity} 人
-        </text>
+        {status === 'reserved' ? (
+          // reserved 專用版面：讓出中段空間給訂位人姓名（店主反饋：到店只顯示時段、
+          // 不顯示姓名，忙的時候要點開抽屜才知道是誰，兩下才入座不順手）。
+          // 容量降權移到右上角、桌號字級略降，中段兩行改放「時段」＋「姓名」。
+          // 只動 reserved 這個分支；其他狀態的文字版面維持原樣。
+          <>
+            {/* 桌號（略降字級，讓中段有空間） */}
+            <text x={cx} y={y + (small ? 23 : 25)}
+                  fontSize={small ? 18 : 20} fontWeight={900} fill={textColor} textAnchor="middle" pointerEvents="none">
+              {number}
+            </text>
+            {/* 容量：右上角小字，降低視覺權重 */}
+            <text x={x + w - 8} y={y + 13}
+                  fontSize={10} fontWeight={700} fill={textColor} opacity={0.65} textAnchor="end" pointerEvents="none">
+              {capacity}人
+            </text>
+            {booking && (
+              <>
+                {/* 訂位時段 */}
+                <text x={cx} y={y + (small ? 43 : 46)}
+                      fontSize={13} fontWeight={700} fill={textColor} textAnchor="middle"
+                      className="tabular-nums" pointerEvents="none">
+                  {booking.timeSlot || ''}
+                </text>
+                {/* 訂位人姓名（截斷保護：依桌寬/字級動態算可容納字數） */}
+                <text x={cx} y={y + h - 8}
+                      fontSize={13} fontWeight={800} fill={textColor} textAnchor="middle" pointerEvents="none">
+                  {truncateGuestName(booking.name, w, 13)}
+                </text>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {/* 桌號 */}
+            <text x={cx} y={y + (small ? 25 : 28)}
+                  fontSize={small ? 20 : 22} fontWeight={900} fill={textColor} textAnchor="middle" pointerEvents="none">
+              {number}
+            </text>
+            {/* 容量 */}
+            <text x={cx} y={y + (small ? 44 : 48)}
+                  fontSize={small ? 13 : 14} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
+              {capacity} 人
+            </text>
 
-        {/* 時間/時長 */}
-        {status === 'reserved' && booking && (
-          <text x={cx} y={y + h - 8}
-                fontSize={10} fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
-            📋 {booking.timeSlot || ''}
-          </text>
-        )}
-        {status === 'dining' && table.seatedAt && (
-          <text x={cx} y={y + h - 8}
-                fontSize={stage === 'overtime' || stage === 'buffer-overtime' ? 11 : 10}
-                fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
-            {(stage === 'overtime' || stage === 'buffer-overtime') && '⚠ '}{minutes} 分
-          </text>
-        )}
-        {status === 'cleaning' && (
-          <text x={cx} y={y + h - 8}
-                fontSize={9} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
-            待清桌
-          </text>
-        )}
-        {status === 'vacant' && (
-          <text x={cx} y={y + h - 8}
-                fontSize={9} fontWeight={groupHoldLabel || preassignLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
-            {groupHoldLabel || preassignLabel || '✓ 可入座'}
-          </text>
+            {/* 時間/時長 */}
+            {status === 'dining' && table.seatedAt && (
+              <text x={cx} y={y + h - 8}
+                    fontSize={stage === 'overtime' || stage === 'buffer-overtime' ? 11 : 10}
+                    fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
+                {(stage === 'overtime' || stage === 'buffer-overtime') && '⚠ '}{minutes} 分
+              </text>
+            )}
+            {status === 'cleaning' && (
+              <text x={cx} y={y + h - 8}
+                    fontSize={9} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
+                待清桌
+              </text>
+            )}
+            {status === 'vacant' && (
+              <text x={cx} y={y + h - 8}
+                    fontSize={9} fontWeight={groupHoldLabel || preassignLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
+                {groupHoldLabel || preassignLabel || '✓ 可入座'}
+              </text>
+            )}
+          </>
         )}
       </g>
     </g>

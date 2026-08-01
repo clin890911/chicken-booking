@@ -3,6 +3,24 @@ import TableShape from './TableShape'
 import { FLOOR_VIEWBOX, FIXTURES } from '../../../data/tables'
 import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr } from '../../../utils/timeSlots'
+import { overdueMinOf } from '../../../utils/bookingPulse'
+import { GROUP_HOLD_COLOR } from './statusColors'
+
+// 「到了」一鍵入座的出現窗：訂位時間前 30 分 ~ 後 60 分。寫成具名常數方便日後調整。
+// ★ 2026-08 二版：鈕本身已從桌況圖搬到地圖下方的「報到列」（見 ArrivalStrip.jsx）——
+//   地圖容器只有數百 px 寬、一張桌換算下來常常 <40px，任何 ≥40px 實體熱區都會壓到鄰桌
+//   甚至壓住「另一顆到了鈕」讓它整個點不到（獨立驗收在相鄰兩桌同時進窗時實測踩到，會
+//   誤觸把不相干的訂位標記入座）。這個判定純函式留在這裡，ArrivalStrip 引用同一份。
+export const ARRIVE_WINDOW_BEFORE_MIN = 30
+export const ARRIVE_WINDOW_AFTER_MIN = 60
+
+// 純函式抽出方便單測：桌是否該顯示「到了」入口。
+export function isArriveEligible(table, booking, now = Date.now()) {
+  if (!table || table.status !== 'reserved') return false
+  if (!booking || !booking.timeSlot) return false
+  const overdue = overdueMinOf(booking.timeSlot, now)
+  return overdue >= -ARRIVE_WINDOW_BEFORE_MIN && overdue <= ARRIVE_WINDOW_AFTER_MIN
+}
 
 // 渲染樓層設施（醬料台/出菜口/結帳口/冰箱/樓梯/洗手間…）— 純標示、不可點選。
 // items 由 FloorMap 解析（settings.floorPlan.fixtures 優先，fallback 預設 FIXTURES）。
@@ -178,7 +196,7 @@ export default function FloorMap({
           ? (holdBatch?.isEscort ? '司領桌' : `${holdBatch?.timeSlot || ''} 團保`.trim())
           : null
         // 預配標記：空桌但已被今日訂位預先配走（預配不動桌況、桌仍綠色可入座）。
-        // 團保優先（實心靛色已表達更強的保留語意）；桌面下緣以「📌 時段 預配」提示。
+        // 團保優先（實心紫色已表達更強的保留語意）；桌面下緣以「📌 時段 預配」提示。
         const pre = preassignTables[t.number]
         const preassignLabel = t.status === 'vacant' && !holdLabel && pre
           ? `📌 ${pre.timeSlot} 預配`.trim()
@@ -205,8 +223,10 @@ export default function FloorMap({
         )
       })}
 
-      {/* 今日團體 hold 唯讀疊加：空桌團保已由 TableShape 以實心靛色桌面表示，不再疊框；
-          只有「非空桌但被 hold」（如待清桌接下一梯）才畫靛色虛線提示 + 「團」標記。 */}
+      {/* 今日團體 hold 唯讀疊加：空桌團保已由 TableShape 以實心紫色桌面表示，不再疊框；
+          只有「非空桌但被 hold」（如待清桌接下一梯）才畫紫色虛線提示 + 「團」標記。
+          色相跟著 GROUP_HOLD_COLOR 走（2026-08 團保從靛藍改紫，避免跟新的訂位藍混淆），
+          文字色沿用同色相加深版本，維持與 TableShape 的團保視覺一致。 */}
       {!planningMode && floorTables.map(t => {
         const hold = groupHoldTables[t.number]
         if (!hold || t.status === 'vacant') return null
@@ -215,8 +235,8 @@ export default function FloorMap({
         return (
           <g key={`hold-${t.number}`} pointerEvents="none" transform={holdTransform}>
             <rect x={t.x - 3} y={t.y - 3} width={t.w + 6} height={t.h + 6} rx={11}
-                  fill="none" stroke="#6366f1" strokeWidth={2.5} strokeDasharray="5 3" opacity={0.9} />
-            <text x={t.x + t.w - 7} y={t.y + 15} fontSize={11} fontWeight={800} fill="#4338ca" textAnchor="end" pointerEvents="none">團</text>
+                  fill="none" stroke={GROUP_HOLD_COLOR.stroke} strokeWidth={2.5} strokeDasharray="5 3" opacity={0.9} />
+            <text x={t.x + t.w - 7} y={t.y + 15} fontSize={11} fontWeight={800} fill={GROUP_HOLD_COLOR.text} textAnchor="end" pointerEvents="none">團</text>
           </g>
         )
       })}

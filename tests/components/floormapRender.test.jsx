@@ -73,3 +73,83 @@ describe('FloorMap 渲染', () => {
     expect(html).toContain('醬料台')
   })
 })
+
+// 2026-08 桌況圖辨識度：已預訂／用餐中/團保三色收斂進 statusColors.js，
+// 確認 TableShape 實際輸出的是新色值，且彼此可辨（不是換湯不換藥）。
+describe('TableShape 新配色（已預訂／用餐中／團保）', () => {
+  it('reserved：填色為新的淡藍 #d8eaff、邊框 3px 深藍，且與 dining 的暖灰褐不同色', () => {
+    const html = wrapSvg(<TableShape table={baseTable({ status: 'reserved' })} onClick={() => {}} />)
+    expect(html).toContain('fill="#d8eaff"')
+    expect(html).toContain('stroke="#1d4ed8"')
+    expect(html).toContain('stroke-width="3"')
+  })
+
+  it('dining（用餐正常階段）：填色為新的暖灰褐 #ded7cc，與 reserved 的淡藍不同色', () => {
+    const html = wrapSvg(<TableShape table={baseTable({ status: 'dining', seatedAt: new Date().toISOString() })} onClick={() => {}} />)
+    expect(html).toContain('fill="#ded7cc"')
+    expect(html).not.toContain('#d8eaff')
+  })
+
+  it('團體保留（vacant + groupHoldLabel）：填色為新的淡紫 #e9e4fb，不是舊的靛藍 #e0e7ff', () => {
+    const html = wrapSvg(
+      <TableShape table={baseTable({ status: 'vacant' })} groupHoldLabel="18:00 團保" onClick={() => {}} />
+    )
+    expect(html).toContain('fill="#e9e4fb"')
+    expect(html).not.toContain('#e0e7ff')
+  })
+
+  it('vacant 底色維持不動（店主已拍板、有既有測試鎖定，這裡重申不受本次改動影響）', () => {
+    const html = wrapSvg(<TableShape table={baseTable({ status: 'vacant' })} onClick={() => {}} />)
+    expect(html).toContain('fill="#86efac"')
+  })
+
+  it('不加任何紋理／斜線：SVG 輸出不含 pattern／hatch 相關標記', () => {
+    const html = wrapSvg(<TableShape table={baseTable({ status: 'dining', seatedAt: new Date().toISOString() })} onClick={() => {}} />)
+    expect(html).not.toContain('<pattern')
+    expect(html).not.toContain('hatch')
+  })
+})
+
+// reserved 桌新版面：時段＋姓名兩行、容量移到右上角、姓名截斷保護。
+describe('TableShape reserved 版面（時段＋姓名）', () => {
+  const bookingOf = (over = {}) => ({ id: 'b1', name: '王小明', timeSlot: '18:30', ...over })
+
+  it('顯示訂位時段（不再帶 📋 emoji）與姓名', () => {
+    const html = wrapSvg(
+      <TableShape table={baseTable({ status: 'reserved' })} booking={bookingOf()} onClick={() => {}} />
+    )
+    expect(html).toContain('18:30')
+    expect(html).not.toContain('📋')
+    expect(html).toContain('王小明')
+  })
+
+  it('容量移到右上角小字（textAnchor=end），不再顯示於桌面中段', () => {
+    const html = wrapSvg(
+      <TableShape table={baseTable({ status: 'reserved', capacity: 6 })} booking={bookingOf()} onClick={() => {}} />
+    )
+    expect(html).toContain('6人')
+    expect(html).toContain('text-anchor="end"')
+  })
+
+  it('姓名超過可容納字數會被截斷加「…」，不會整段溢出', () => {
+    const longName = '王小明先生一家七口全部到齊'
+    const html = wrapSvg(
+      <TableShape table={baseTable({ status: 'reserved', w: 80 })} booking={bookingOf({ name: longName })} onClick={() => {}} />
+    )
+    expect(html).not.toContain(longName)
+    expect(html).toContain('…')
+  })
+
+  it('短姓名不截斷，原樣顯示', () => {
+    const html = wrapSvg(
+      <TableShape table={baseTable({ status: 'reserved' })} booking={bookingOf({ name: '陳' })} onClick={() => {}} />
+    )
+    expect(html).toContain('>陳<')
+    expect(html).not.toContain('…')
+  })
+
+  it('其他狀態（vacant）版面不受影響：容量仍是桌面置中「N 人」格式', () => {
+    const html = wrapSvg(<TableShape table={baseTable({ status: 'vacant', capacity: 6 })} onClick={() => {}} />)
+    expect(html).toContain('6 人')
+  })
+})

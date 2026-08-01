@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import FloorMap from './floormap/FloorMap'
+import ArrivalStrip from './floormap/ArrivalStrip'
 import StatusBar from './floormap/StatusBar'
 import TableDrawer from './floormap/TableDrawer'
 import ModeBanner from './ops/ModeBanner'
@@ -16,6 +17,42 @@ import { findPreassignedBooking } from '../../utils/capacity'
 import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
 import { buildTableTurns } from '../../utils/tableTurns'
 import { todayStr } from '../../utils/timeSlots'
+import { STATUS_COLOR, GROUP_HOLD_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
+
+// 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
+// （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
+function LegendSwatch({ fill, stroke, label }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <i className="h-2.5 w-2.5 rounded-sm" style={{ background: fill, border: `1.5px solid ${stroke}` }} />
+      {label}
+    </span>
+  )
+}
+
+// 「✓ 到了」一鍵入座：抽成不依賴元件 state 的純函式方便單測（注入 seatBooking/setStatus/
+// setTableStatus/toast）。不二次確認——這顆鈕本身就是「已經在合理時間窗內」的防呆。
+// 復原必須同時倒回 booking（confirmed）與 table（reserved + seatedAt:null）兩邊，
+// 不能只復原 booking——那是 repo 內其他復原路徑曾經犯過的不完整實作，這裡刻意都做。
+export function handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, toast }) {
+  const r = seatBooking(booking.id)
+  if (!r?.ok) {
+    toast.error('入座失敗：' + (r?.error || '未知錯誤'))
+    return r
+  }
+  toast.action(
+    `${booking.name} 已入座 ${table.number}`,
+    {
+      label: '↩ 復原',
+      onClick: () => {
+        setStatus(booking.id, 'confirmed')
+        setTableStatus(table.number, 'reserved', { seatedAt: null })
+      },
+    },
+    { duration: 5000 },
+  )
+  return r
+}
 
 // 「現場營運」主畫面
 // 模式：normal | assign-booking | seat-waitlist | move-table | group-reseat
@@ -27,7 +64,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
     assignBookingToTable, assignBookingTablesMulti, seatWaitlist, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
-    cancelBooking,
+    cancelBooking, seatBooking, setStatus, setTableStatus,
     findSuitableTables, suggestTable, suggestTableCombo,
   } = useBooking()
   const toast = useToast()
@@ -634,12 +671,12 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
           ) : (
             <>
               <div className="mb-2 flex-shrink-0 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-green-300 border-2 border-green-700" />可入座</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-100 border border-slate-400" />已預訂</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-gray-200 border border-gray-400" />用餐中</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-amber-200 border border-amber-600" />待清桌</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-red-600" />超時</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-100 border border-indigo-400" />團體保留</span>
+                <LegendSwatch fill={STATUS_COLOR.vacant.fill} stroke={STATUS_COLOR.vacant.stroke} label="可入座" />
+                <LegendSwatch fill={STATUS_COLOR.reserved.fill} stroke={STATUS_COLOR.reserved.stroke} label="已預訂" />
+                <LegendSwatch fill={DINING_STAGE_FILL.normal} stroke={STATUS_COLOR.dining.stroke} label="用餐中" />
+                <LegendSwatch fill={STATUS_COLOR.cleaning.fill} stroke={STATUS_COLOR.cleaning.stroke} label="待清桌" />
+                <LegendSwatch fill={DINING_STAGE_FILL.overtime} stroke={DINING_STAGE_FILL.overtime} label="超時" />
+                <LegendSwatch fill={GROUP_HOLD_COLOR.fill} stroke={GROUP_HOLD_COLOR.stroke} label="團體保留" />
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white ring-2 ring-chicken-red ring-inset" />選中</span>
               </div>
               <div className="flex-1 min-h-0">
@@ -666,6 +703,22 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
                 zones={zones}
               />
               </div>
+              {/* 報到列：地圖下方 in-flow（不是疊在地圖上），無符合條件的訂位時完全不佔高度。
+                  模式進行中（指派/換桌/候位/團體改派）或無 table.update 權限時不顯示——
+                  這些情境下桌況圖的點擊語意已被模式接管，疊加一條會觸發別的動作的列是額外誤觸風險。 */}
+              {!mode && can('table.update') && (
+                <ArrivalStrip
+                  tables={tables}
+                  bookings={bookings}
+                  currentFloor={floor}
+                  onSelectTable={(n) => {
+                    const t = tables.find(x => x.number === n)
+                    if (t) setFloor(t.floor)
+                    setSelectedTable(n)
+                  }}
+                  onArrive={(table, booking) => handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, toast })}
+                />
+              )}
             </>
           )}
         </div>
