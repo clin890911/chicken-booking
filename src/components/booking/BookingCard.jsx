@@ -82,8 +82,28 @@ export function restoreFromNoshow(booking, { setStatus, revokeNoshow, toast }) {
   toast.success(`${booking.name} 已恢復為待到，爽約次數已扣回`)
 }
 
+// 取消訂位 + 可復原 toast（與 markNoshow 同一套手法抽成純函式，方便單測；確認對話框留在元件內）。
+// TableDrawer 的「✕ 取消訂位」共用這支，兩個入口的復原行為一致。
+// ★ 復原一定要把 cancelBooking 的回傳快照原封帶回 undoCancelBooking：取消時桌位已被 clearTable
+//   釋出、booking 的 assignedTableId 也被清空，只呼叫 setStatus(id,'confirmed') 的話訂位會變回
+//   「待到」但桌沒了，而且畫面上看不出來——這是 2026-08 修掉的既有 bug，不可回退。
+//   桌位在復原前那幾秒被別組佔走時不硬搶，改在 toast 明講哪幾桌要重新指派。
+export function cancelWithUndo(booking, { cancelBooking, undoCancelBooking, toast }) {
+  const r = cancelBooking(booking.id)
+  if (!r?.ok) return toast.error('取消失敗：' + (r?.error || '未知錯誤'))
+  toast.action(`已取消 ${booking.name} 的訂位`,
+    { label: '↩ 復原', onClick: () => {
+        const u = undoCancelBooking(booking.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+        if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+        const okMsg = u.restored?.length ? `，${u.restored.join('、')} 已改回保留` : ''
+        const failMsg = u.failed?.length ? `（${u.failed.join('、')} 已被占用，桌位未搶回，請重新指派）` : ''
+        toast.success(`已復原 ${booking.name} 的訂位${okMsg}${failMsg}`)
+    } },
+    { duration: 8000 })
+}
+
 export default function BookingCard({ booking, onAssign, onClick }) {
-  const { tables, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, setStatus, clearTable, suggestTable } = useBooking()
+  const { tables, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking, setStatus, clearTable, suggestTable } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -147,9 +167,7 @@ export default function BookingCard({ booking, onAssign, onClick }) {
     const ok = await confirm(`取消 ${booking.name} ${booking.timeSlot} 的訂位？`,
       { title: '取消訂位', confirmLabel: '取消訂位', danger: true })
     if (!ok) return
-    cancelBooking(booking.id)
-    toast.action(`已取消 ${booking.name} 的訂位`,
-      { label: '復原', onClick: () => setStatus(booking.id, 'confirmed') })
+    cancelWithUndo(booking, { cancelBooking, undoCancelBooking, toast })
   }
 
   // 確認對話框留在元件內（非同步、綁 hook）；確認後的邏輯見上方純函式 markNoshow。

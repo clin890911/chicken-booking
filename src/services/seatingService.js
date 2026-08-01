@@ -176,15 +176,55 @@ export function clearTable(tableNumber) {
 }
 
 // === 取消訂位 ===
+// 回傳值帶著「復原所需的快照」：releasedTables（這次釋出的桌，主桌在前）與 previousStatus。
+// ★ 快照不可省：取消會把 assignedTableId/extraTableIds 清空，事後從 booking 上已經完全看不出
+//   原本佔了哪幾張桌 —— 復原只能靠呼叫端把這份回傳值原封帶回 undoCancelBooking。
 export function cancelBooking(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
+  const previousStatus = booking.status
   // 大組併桌：主桌 + 額外桌全部釋出。
-  bookingTableNumbers(booking).forEach(n => tableService.clearTable(n))
+  const releasedTables = bookingTableNumbers(booking)
+  releasedTables.forEach(n => tableService.clearTable(n))
   bookingService.setStatus(bookingId, 'cancelled')
   // 解除主桌與額外桌的指派（避免取消後仍掛著桌號）
   bookingService.update(bookingId, { assignedTableId: null, extraTableIds: [] })
-  return { ok: true }
+  return { ok: true, releasedTables, previousStatus }
+}
+
+// 取消訂位的入口只開在客人到店前：BookingCard 只在 confirmed/pending 顯示「取消訂位」，
+// TableDrawer 只在桌況 reserved 顯示 —— 所以復原後的正確狀態就是「已預訂、等客人來」。
+// 快照若帶進其他狀態（理論上到不了）一律當 confirmed，免得做出「booking 說用餐中、
+// 桌況卻只是 reserved」的矛盾狀態。
+const CANCEL_RESTORABLE_STATUSES = ['confirmed', 'pending']
+
+// cancelBooking 的反向操作（店員誤按「取消訂位」後按「↩ 復原」）。
+// 與 undoCompleteWithoutSeating 同一套桌位口徑：只搶「仍是空桌」的桌，被別組帶位/預配佔走的
+// 不硬寫（不搶別組的桌），放進 failed 交由 UI 明講，避免店員以為復原了、其實那組客人的桌沒了。
+// ⚠️ booking 的 assignedTableId/extraTableIds 只依「真的搶回來的桌」重建：全都搶不回 → 回到
+//    未指派（卡片會重新長出「指派桌位」鈕），絕不留下指向別組桌位的孤兒桌號。
+export function undoCancelBooking(bookingId, { tableNumbers = [], status } = {}) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  // 復原期間若這筆訂位已被別的操作改動（例如又被重新建立/改狀態），不覆寫別人的結果。
+  if (booking.status !== 'cancelled') return { ok: false, error: '這筆訂位已不是「已取消」狀態，無法復原' }
+
+  const restored = []
+  const failed = []
+  for (const n of [...new Set((tableNumbers || []).map(String).filter(Boolean))]) {
+    const t = tableService.getByNumber(n)
+    if (t && t.status === 'vacant') {
+      tableService.reserveTable(n, bookingId)
+      restored.push(n)
+    } else {
+      failed.push(n)
+    }
+  }
+  const restoreStatus = CANCEL_RESTORABLE_STATUSES.includes(status) ? status : 'confirmed'
+  bookingService.setStatus(bookingId, restoreStatus)
+  // restored[0] 當主桌、其餘為額外桌；空陣列 → assignedTableId 回 null、extraTableIds 回 []
+  bookingService.assignTables(bookingId, restored)
+  return { ok: true, restored, failed, status: restoreStatus }
 }
 
 // === 候位 → 入座（拖到空桌）===

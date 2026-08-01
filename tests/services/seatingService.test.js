@@ -439,7 +439,8 @@ describe('seatingService 整合層', () => {
       const b = mkBooking({ guests: 2 })
       seating.assignBookingToTable(b.id, '101')
       const r = seating.cancelBooking(b.id)
-      expect(r).toEqual({ ok: true })
+      // releasedTables / previousStatus 是復原用的快照（取消後 booking 上已查不到桌號）
+      expect(r).toEqual({ ok: true, releasedTables: ['101'], previousStatus: 'confirmed' })
       const updated = bookingService.getById(b.id)
       expect(updated.status).toBe('cancelled')
       expect(updated.assignedTableId).toBeNull()
@@ -452,7 +453,127 @@ describe('seatingService 整合層', () => {
       const b = mkBooking({ guests: 2 })
       const r = seating.cancelBooking(b.id)
       expect(r.ok).toBe(true)
+      expect(r.releasedTables).toEqual([])
       expect(bookingService.getById(b.id).status).toBe('cancelled')
+    })
+  })
+
+  // ===========================================================
+  // undoCancelBooking
+  // 取消訂位的「↩ 復原」：cancelBooking 會 clearTable + 清掉 assignedTableId，
+  // 只把 status 改回 confirmed 的話訂位會變回「待到」但桌沒了，而且畫面上看不出來
+  // （2026-08 修掉的既有 bug）。桌位與 booking 必須一起倒回。
+  // ===========================================================
+  describe('undoCancelBooking', () => {
+    beforeEach(() => { seedDefaultTables() })
+
+    it('訂位不存在 → 擋', () => {
+      const r = seating.undoCancelBooking('NOPE')
+      expect(r).toEqual({ ok: false, error: '訂位不存在' })
+    })
+
+    it('取消 → 復原：booking 與桌位都回到原狀（status/指派/桌況/綁定）', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      const c = seating.cancelBooking(b.id)
+      // 取消後：桌真的被放掉了
+      expect(tableService.getByNumber('101').status).toBe('vacant')
+      expect(bookingService.getById(b.id).assignedTableId).toBeNull()
+
+      const r = seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: c.previousStatus })
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual(['101'])
+      expect(r.failed).toEqual([])
+
+      const updated = bookingService.getById(b.id)
+      expect(updated.status).toBe('confirmed')
+      expect(updated.assignedTableId).toBe('101')   // ★ 桌位倒回來了，不是只有狀態
+      expect(updated.extraTableIds).toEqual([])
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('reserved')             // 尚未到店 → reserved 不是 dining
+      expect(t.currentBookingId).toBe(b.id)
+    })
+
+    it('復原時桌已被別組佔用：不搶桌、回報 failed，booking 回到「未指派」而不是掛著別組的桌號', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      const c = seating.cancelBooking(b.id)
+      seating.walkInSeat('101', { name: '別組', guests: 2 })  // 復原前那幾秒被別組坐走
+
+      const r = seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: c.previousStatus })
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual([])
+      expect(r.failed).toEqual(['101'])             // ★ UI 據此告知店員要重新指派
+
+      const updated = bookingService.getById(b.id)
+      expect(updated.status).toBe('confirmed')      // 訂位仍然復原（不是整筆失敗）
+      expect(updated.assignedTableId).toBeNull()    // ★ 不留指向別組桌位的孤兒桌號
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('dining')               // 別組桌況不受影響、不被搶
+      expect(t.currentBookingId).not.toBe(b.id)
+    })
+
+    it('大組併桌：主桌被佔、額外桌還在 → 只倒回搶得回的那張，並升為主桌', () => {
+      const b = mkBooking({ guests: 8 })
+      seating.assignBookingTablesMulti(b.id, ['101', '108'])
+      const c = seating.cancelBooking(b.id)
+      expect(c.releasedTables).toEqual(['101', '108'])
+      seating.walkInSeat('101', { name: '別組', guests: 2 })
+
+      const r = seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: c.previousStatus })
+      expect(r.restored).toEqual(['108'])
+      expect(r.failed).toEqual(['101'])
+      const updated = bookingService.getById(b.id)
+      expect(updated.assignedTableId).toBe('108')
+      expect(updated.extraTableIds).toEqual([])
+      expect(tableService.getByNumber('108').currentBookingId).toBe(b.id)
+    })
+
+    it('沒有指派桌位的訂位：只復原 booking 狀態', () => {
+      const b = mkBooking({ guests: 2 })
+      const c = seating.cancelBooking(b.id)
+      const r = seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: c.previousStatus })
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual([])
+      expect(r.failed).toEqual([])
+      expect(bookingService.getById(b.id).status).toBe('confirmed')
+    })
+
+    it('pending 的訂位取消後復原回 pending（不會被升級成已確認）', () => {
+      const b = mkBooking({ guests: 2, status: 'pending' })
+      const c = seating.cancelBooking(b.id)
+      expect(c.previousStatus).toBe('pending')
+      seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: c.previousStatus })
+      expect(bookingService.getById(b.id).status).toBe('pending')
+    })
+
+    it('快照帶進到店後的狀態（理論上到不了）→ 退回 confirmed，不做出「用餐中卻只是 reserved」的矛盾', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      const c = seating.cancelBooking(b.id)
+      const r = seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: 'arrived' })
+      expect(r.status).toBe('confirmed')
+      expect(bookingService.getById(b.id).status).toBe('confirmed')
+      expect(tableService.getByNumber('101').status).toBe('reserved')
+    })
+
+    it('訂位已不是「已取消」→ 擋（不覆寫復原期間別的操作結果）', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      const c = seating.cancelBooking(b.id)
+      bookingService.setStatus(b.id, 'confirmed')   // 別的路徑先把它改回來了
+      const r = seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: c.previousStatus })
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain('已取消')
+    })
+
+    it('沒帶快照呼叫也安全（不炸、不亂搶桌）', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.cancelBooking(b.id)
+      const r = seating.undoCancelBooking(b.id)
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual([])
+      expect(bookingService.getById(b.id).status).toBe('confirmed')
     })
   })
 

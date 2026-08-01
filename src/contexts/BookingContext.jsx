@@ -429,6 +429,14 @@ export function BookingProvider({ children }) {
     if (r.ok && before) safeNotify(() => tg.notifyBookingCancelled(before))
     return r
   }
+  // 取消訂位的復原：booking 狀態與桌位一起倒回（見 seatingService.undoCancelBooking）。
+  // snapshot 必須是 cancelBooking 的回傳值（{ releasedTables, previousStatus }）——
+  // 取消已經把桌號從 booking 上清掉了，事後查不回來。
+  const undoCancelBooking = (bookingId, snapshot) => {
+    const r = seatingService.undoCancelBooking(bookingId, snapshot)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
   const walkInSeat = (tableNumber, guestData) => {
     const r = seatingService.walkInSeat(tableNumber, guestData)
     refresh()
@@ -607,7 +615,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     addWaitlist, callWaitlist, seatWaitlist, leaveWaitlist,

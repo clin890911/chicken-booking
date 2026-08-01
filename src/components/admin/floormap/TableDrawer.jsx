@@ -4,6 +4,7 @@ import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import TableCandidatePanel from './TableCandidatePanel'
+import { cancelWithUndo } from '../../booking/BookingCard'
 import GroupTableSection from './GroupTableSection'
 import { STATUS_ZH as STATUS_LABELS } from '../../../utils/tableStatus'
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
@@ -39,7 +40,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const confirmDialog = useConfirm()
   const {
     setTableStatus, blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, setStatus,
+    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, cancelBooking, undoCancelBooking,
     setTableOutage, clearTableOutage,
     settings, groupReservations,
   } = useBooking()
@@ -186,9 +187,8 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     const ok = await confirmDialog(`確定取消 ${booking.name} 的訂位？`,
       { title: '取消訂位', confirmLabel: '取消訂位', danger: true })
     if (!ok) return
-    cancelBooking(booking.id)
-    toast.action(`已取消 ${booking.name} 的訂位`,
-      { label: '復原', onClick: () => setStatus(booking.id, 'confirmed') })
+    // 復原要同時倒回 booking 與桌位，見 cancelWithUndo（只倒 booking 會讓客人的桌憑空消失）
+    cancelWithUndo(booking, { cancelBooking, undoCancelBooking, toast })
     onClose?.()
   }
 
