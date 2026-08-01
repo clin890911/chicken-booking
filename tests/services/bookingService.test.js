@@ -446,6 +446,52 @@ describe('No-show：recordNoshow / getNoshowCount / noshowRisk / searchNoshow', 
   })
 })
 
+describe('revokeNoshow：No-show 復原扣回爽約次數（2026-08 修復——復原原本不扣罰則）', () => {
+  it('標記→次數+1→復原→次數回到原值', () => {
+    bookingService.recordNoshow({ phone: '0911', date: 'd', id: 'B1' })
+    expect(bookingService.getNoshowCount('0911')).toBe(1)
+    bookingService.revokeNoshow('0911', 'B1')
+    expect(bookingService.getNoshowCount('0911')).toBe(0)
+  })
+
+  it('count 有下限 0，不會變成負數', () => {
+    bookingService.revokeNoshow('0911', 'B1') // 從沒記錄過也不會爆
+    expect(bookingService.getNoshowCount('0911')).toBe(0)
+    bookingService.recordNoshow({ phone: '0911', date: 'd', id: 'B1' })
+    bookingService.revokeNoshow('0911', 'B1')
+    bookingService.revokeNoshow('0911', 'B1') // 多按一次復原也不會扣成負數
+    expect(bookingService.getNoshowCount('0911')).toBe(0)
+  })
+
+  it('依 bookingId 精準移除對應的 dates 記錄，同電話其他筆不受影響', () => {
+    bookingService.recordNoshow({ phone: '0911', date: 'd1', id: 'B1' })
+    bookingService.recordNoshow({ phone: '0911', date: 'd2', id: 'B2' })
+    bookingService.revokeNoshow('0911', 'B1')
+    expect(bookingService.getNoshowCount('0911')).toBe(1)
+    const [rec] = bookingService.searchNoshow('0911')
+    expect(rec.dates).toEqual([{ date: 'd2', bookingId: 'B2' }])
+  })
+
+  it('找不到對應 bookingId（例如舊資料沒存）：退而求其次移除最後一筆，count 仍對得上', () => {
+    bookingService.recordNoshow({ phone: '0911', date: 'd1', id: 'B1' })
+    bookingService.recordNoshow({ phone: '0911', date: 'd2', id: 'B2' })
+    bookingService.revokeNoshow('0911', 'NOT-FOUND')
+    expect(bookingService.getNoshowCount('0911')).toBe(1)
+    const [rec] = bookingService.searchNoshow('0911')
+    expect(rec.dates).toHaveLength(1)
+  })
+
+  it('沒有電話時安全無操作', () => {
+    expect(() => bookingService.revokeNoshow('', 'B1')).not.toThrow()
+    expect(() => bookingService.revokeNoshow(null, 'B1')).not.toThrow()
+  })
+
+  it('未知電話（從未記錄過）：安全無操作', () => {
+    expect(() => bookingService.revokeNoshow('0000', 'B1')).not.toThrow()
+    expect(bookingService.getNoshowCount('0000')).toBe(0)
+  })
+})
+
 describe('isGuestEditable（固定時間 2026-06-15 12:00）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
