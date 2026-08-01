@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { statusFromPushResult, statusAfterPull, statusAfterError } from '../../src/utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded } from '../../src/utils/syncStatus'
 
 const T1 = '2026-07-26T10:00:00.000Z'
 const T2 = '2026-07-26T10:00:05.000Z'
@@ -77,5 +77,50 @@ describe('statusAfterError', () => {
 
   it('沒有訊息時用 fallback', () => {
     expect(statusAfterError({ state: 'synced' }, '', 'cloud-push-failed').error).toBe('cloud-push-failed')
+  })
+})
+
+// === shouldAlertPersistDegraded：本機同步基準線落地失敗，旗標翻轉才主動提醒一次 ===
+//
+// 背景（第三輪驗收回饋）：SettingsView 的靜態警示列店主很少看到（他大多停在現場頁），
+// 所以旗標 false→true 的當下要主動跳 toast，但只能跳一次——輪詢每 4 秒跑一次，
+// 若持續是 true 都跳，會變成疲勞轟炸反而被忽略。BookingContext 用一個 ref 記住
+// 「上一次輪詢看到的值」，每次輪詢呼叫這支純函式決定要不要跳。
+describe('shouldAlertPersistDegraded', () => {
+  it('false → true：該提醒', () => {
+    expect(shouldAlertPersistDegraded(false, true)).toBe(true)
+  })
+
+  it('true → true（連續多次輪詢仍是故障中）：不重複提醒', () => {
+    expect(shouldAlertPersistDegraded(true, true)).toBe(false)
+    // 模擬輪詢：一路 true 下去，只有第一次會被判定要提醒
+    let prev = false
+    let alerts = 0
+    const sequence = [true, true, true, true, true]
+    for (const next of sequence) {
+      if (shouldAlertPersistDegraded(prev, next)) alerts++
+      prev = next
+    }
+    expect(alerts).toBe(1)
+  })
+
+  it('false → false：不提醒（本來就沒事）', () => {
+    expect(shouldAlertPersistDegraded(false, false)).toBe(false)
+  })
+
+  it('true → false：不提醒（恢復正常不用特別講）', () => {
+    expect(shouldAlertPersistDegraded(true, false)).toBe(false)
+  })
+
+  it('旗標回復（true→false）後再次翻起（false→true）：可以再提醒一次', () => {
+    let prev = false
+    let alerts = 0
+    // false→true（提醒 #1）→ true→false（恢復，不提醒）→ false→true（再次故障，提醒 #2）
+    const sequence = [true, false, true]
+    for (const next of sequence) {
+      if (shouldAlertPersistDegraded(prev, next)) alerts++
+      prev = next
+    }
+    expect(alerts).toBe(2)
   })
 })

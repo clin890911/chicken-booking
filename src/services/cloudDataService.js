@@ -89,6 +89,87 @@ let lastSynced = { ...emptyColMap(), settings: null }
 const pendingDeletes = Object.fromEntries(DIFF_COLLECTIONS.map(c => [c, new Set()]))
 let initialized = false
 
+// === 佈局遺失根治：把同步基準線落地到 localStorage，撐過「整頁重新整理」===
+// initialized / lastSynced / pendingDeletes 原本全是模組層級記憶體變數：整頁重新整理＝
+// JS 模組重新載入＝全部歸零。歸零後的第一次拉取會誤判成「全新裝置」，走 applyCloudSnapshot
+// 的整包信任雲端分支，把本機剛排好、還沒推上雲端的桌位佈局整包蓋掉（雲端只要非空就會蓋，
+// 不看新舊）。這是店主「調整的座位每次更新都被重置」的根因。
+// 落地後，重新整理只是「這個分頁的記憶體重建」，同步基準線本身要能從 localStorage 復原。
+const SYNC_STATE_KEY = 'chicken_sync_state_v1'
+
+// 🔴 驗收回饋：persistSyncState 寫入失敗（localStorage 滿了、無痕/私密瀏覽模式拒寫）不可以
+// 完全靜默——那樣程式會原地退化回修復前的行為（每次重新整理都可能重演佈局被覆蓋），
+// 但故障當下沒有任何線索，店主要等到下次重新整理座位消失才會發現，而且連 console 都查不到。
+// 用一個模組層級旗標記錄「目前是否處於退化狀態」，供 BookingContext 輪詢後串進畫面上的
+// 同步狀態列（SettingsView）；寫入成功時自動清除旗標（例如私密瀏覽關閉、或釋出空間後）。
+let syncPersistDegraded = false
+export function isSyncPersistDegraded() {
+  return syncPersistDegraded
+}
+
+function persistSyncState() {
+  try {
+    localStorage.setItem(SYNC_STATE_KEY, JSON.stringify({
+      initialized,
+      lastSynced,
+      pendingDeletes: Object.fromEntries(DIFF_COLLECTIONS.map(c => [c, [...pendingDeletes[c]]])),
+    }))
+    syncPersistDegraded = false
+  } catch (err) {
+    syncPersistDegraded = true
+    // eslint-disable-next-line no-console
+    console.error(
+      '[cloudDataService] persistSyncState 寫入 localStorage 失敗，同步基準線退化為「只在本分頁存活」，' +
+      '整頁重新整理後可能重演佈局被雲端覆蓋的問題。常見原因：裝置儲存空間不足，或瀏覽器處於無痕/私密瀏覽模式。',
+      err
+    )
+  }
+}
+
+function loadPersistedSyncState() {
+  try {
+    const raw = localStorage.getItem(SYNC_STATE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+// 本機是否「真的」已經有實質資料——決定要不要把雲端當唯一真相整包覆寫的依據，
+// 改成這個而不是「這個 JS 模組是不是剛載入」（後者在重新整理後永遠是 true）。
+function hasAnyLocalData() {
+  return DIFF_COLLECTIONS.some(col => {
+    const arr = localArrayOf(col)
+    return Array.isArray(arr) && arr.length > 0
+  })
+}
+
+// 模組載入時（含整頁重新整理）嘗試從 localStorage 復原同步基準線。
+//   1) 有落地過的基準線 → 直接復原，讓 applyCloudSnapshot 照常走 diff-merge。
+//   2) 沒有落地過，但本機已經有實質資料（例如這支修正上線前就已存在資料的舊裝置、
+//      或使用者手動清過同步狀態但沒清資料）→ 用本機現況 seed 一份基準線，
+//      視同「已初始化過」，避免下一次拉取又把它當全新裝置整包覆寫。
+//   3) 兩者都沒有 → 保持 initialized=false，交給 applyCloudSnapshot 的首次拉取分支
+//      去接雲端的初始資料（真正的全新裝置需要這條路）。
+function restoreSyncStateFromStorage() {
+  const persisted = loadPersistedSyncState()
+  if (persisted?.initialized) {
+    initialized = true
+    lastSynced = { ...emptyColMap(), settings: null, ...(persisted.lastSynced || {}) }
+    for (const col of DIFF_COLLECTIONS) {
+      pendingDeletes[col] = new Set(persisted.pendingDeletes?.[col] || [])
+    }
+    return
+  }
+  if (hasAnyLocalData()) {
+    seedLastSyncedFromLocal()
+    initialized = true
+    persistSyncState()
+  }
+}
+
 function stable(doc) { return JSON.stringify(doc ?? null) }
 function idOf(collection, doc) {
   return String(doc?.[COLLECTION_ID_KEY[collection]] ?? doc?.id ?? '').trim()
@@ -120,10 +201,14 @@ function seedLastSyncedFromLocal() {
   lastSynced.settings = stable(ds.settings)
 }
 
+// 模組載入（含整頁重新整理）時立即嘗試復原同步基準線，見上方 restoreSyncStateFromStorage 註解。
+restoreSyncStateFromStorage()
+
 // 整份推送/採用後呼叫：把目前本機狀態標記為「與雲端一致」，重置差異基準。
 export function markLocalAsSynced() {
   seedLastSyncedFromLocal()
   initialized = true
+  persistSyncState()
 }
 
 export function applyCloudSnapshot(data = {}) {
@@ -138,6 +223,7 @@ export function applyCloudSnapshot(data = {}) {
     if (data.settings) saveSettings(data.settings)
     seedLastSyncedFromLocal()
     initialized = true
+    persistSyncState()
     return
   }
   // 後續拉取：合併。本機尚未推送的 dirty 文件保留本機版本，其餘採雲端最新值。
@@ -173,6 +259,7 @@ export function applyCloudSnapshot(data = {}) {
     // 另兩處寫基準線（seedLastSyncedFromLocal、push 成功後）本就用本機形式，此處與之對齊。
     if (!settingsDirty) { saveSettings(data.settings); lastSynced.settings = stable(getSettings()) }
   }
+  persistSyncState()
 }
 
 async function requestJson(url, options = {}) {
@@ -236,6 +323,9 @@ export async function pushChangedData() {
   const settingsChanged = stable(ds.settings) !== lastSynced.settings
   if (settingsChanged) { changed.settings = ds.settings; hasChange = true }
   if (!hasChange) return { ok: true, skipped: true }
+  // 先把「已標記待刪」的狀態落地：萬一接下來的網路請求整頁重新整理／中斷，
+  // 待刪保護（F-A）不會因為模組重載而消失。
+  persistSyncState()
 
   const payload = { ...changed }
   if (Object.keys(deletedIds).length) payload.deletedIds = deletedIds
@@ -259,6 +349,7 @@ export async function pushChangedData() {
     }
   }
   if (settingsChanged && !rejected.settings) lastSynced.settings = stable(ds.settings)
+  persistSyncState()
   return result
 }
 
@@ -282,6 +373,7 @@ export function discardRejectedChanges({ writes = [], deletes = [], settings = f
     pendingDeletes[col].clear()
   }
   if (settings) lastSynced.settings = stable(getSettings())
+  persistSyncState()
 }
 
 export async function migrateLocalToCloudOnce() {
@@ -291,6 +383,27 @@ export async function migrateLocalToCloudOnce() {
   return result
 }
 
+// === 未爆彈拆除：migrateTableLayoutOnce / migrateTableDimsOnce 都是自由佈局編輯器
+// （LayoutEditor）問世**之前**寫的一次性遷移，語意只適用於「桌位都還在出廠預設位置」的
+// 階段——它們會無條件把 x/y/w/h 打回 INITIAL_TABLES，沒有任何確認對話框，也完全不管
+// 店家是否已經在編輯器裡手動排過。若照跑，店主辛苦排好的佈局會被這兩支「幽靈遷移」默默蓋掉。
+// 判定依據：只要有任一桌號的 x/y/w/h 已偏離 INITIAL_TABLES 的出廠值，就代表店家自訂過，
+// 兩支遷移都要安全地不作為（旗標仍照樣標記完成——「已經有自訂佈局」本身就是終態，不需要
+// 也不該再被這兩支遷移碰）。
+// ⚠️ 刻意寧可誤判也不要漏判：只比對「桌號能對上 INITIAL_TABLES」的桌，抓不到「是店家自訂
+// 還是這台裝置單純還沒套用某次出廠尺寸更新」的差別，兩者一律當成「已自訂」跳過——
+// 跳過遷移最差就是某次視覺微調沒套用到（店家自己在編輯器調一下即可），
+// 照跑遷移最差是把店主排好的佈局整包蓋掉（正是這次要修的資料遺失事故），兩者代價不對等。
+function hasCustomTableLayout(list) {
+  if (!Array.isArray(list) || list.length === 0) return false
+  const defByNumber = new Map(INITIAL_TABLES.map(t => [t.number, t]))
+  return list.some(t => {
+    const def = defByNumber.get(t?.number)
+    if (!def) return false // 桌號對不上預設集合（例如尚未套用桌號遷移）：不計入這個判準
+    return ['x', 'y', 'w', 'h'].some(f => Number(t[f]) !== Number(def[f]))
+  })
+}
+
 // 一次性桌位佈局遷移：把雲端的舊桌號（如 A1–B19）刪除、改成「雞王座號圖」新桌號（101–267）。
 // 必須在首次 pull 之前執行，否則首拉會用雲端舊桌位覆寫本機新桌位（見 applyCloudSnapshot 首拉分支）。
 const TABLE_LAYOUT_VERSION = 'kingchicken-2026-06'
@@ -298,6 +411,11 @@ const LAYOUT_FLAG = 'chicken_table_layout_version'
 
 export async function migrateTableLayoutOnce() {
   if (localStorage.getItem(LAYOUT_FLAG) === TABLE_LAYOUT_VERSION) return { ok: true, skipped: true }
+  if (hasCustomTableLayout(readJson(KEYS.tables, []))) {
+    console.warn('[cloudDataService] migrateTableLayoutOnce：偵測到本機桌位已偏離出廠預設佈局（疑似店家自訂過），跳過一次性桌號遷移以免蓋掉店家排版。')
+    localStorage.setItem(LAYOUT_FLAG, TABLE_LAYOUT_VERSION)
+    return { ok: true, skipped: true, reason: 'custom-layout-detected' }
+  }
   // 先看雲端目前有哪些桌（用來算出要刪除的舊桌號）
   let cloudTables = []
   try {
@@ -336,6 +454,11 @@ export async function migrateTableDimsOnce() {
     // 還沒有本機桌位（會由 layout 遷移或首次 read seed 出新尺寸）→ 直接標記，避免日後誤改
     localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
     return { ok: true, skipped: true }
+  }
+  if (hasCustomTableLayout(local)) {
+    console.warn('[cloudDataService] migrateTableDimsOnce：偵測到本機桌位已偏離出廠預設佈局（疑似店家自訂過），跳過一次性尺寸正規化以免蓋掉店家排版。')
+    localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
+    return { ok: true, skipped: true, reason: 'custom-layout-detected' }
   }
   let changed = 0
   const patched = local.map(t => {

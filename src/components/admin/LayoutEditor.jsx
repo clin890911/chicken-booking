@@ -82,7 +82,7 @@ function downscaleImage(file, maxDim = 1280, quality = 0.6) {
 const genId = (prefix) => `${prefix}-${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`
 
 export default function LayoutEditor({ open, onClose }) {
-  const { tables, settings, saveFloorPlan } = useBooking()
+  const { tables, settings, saveFloorPlan, flushCloudNow } = useBooking()
   const toast = useToast()
   const confirmDialog = useConfirm()
 
@@ -100,6 +100,7 @@ export default function LayoutEditor({ open, onClose }) {
   const [activeZoneId, setActiveZoneId] = useState(null) // 分區模式：上色用的分區（null = 橡皮擦清除）
   const [showZoneColor, setShowZoneColor] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [showAddDialog, setShowAddDialog] = useState(null)
   const [marquee, setMarquee] = useState(null)
   const [guides, setGuides] = useState([])
@@ -492,13 +493,38 @@ export default function LayoutEditor({ open, onClose }) {
   }
 
   // === 存檔 / 取消 / 重設 ===
-  const handleSave = () => {
+  // 🔴 「已儲存」不可以是騙人的：saveFloorPlan 只確保寫進本機 localStorage，雲端推送
+  // 是背景 fire-and-forget（250ms 防抖）。若存完立刻 toast.success + onClose，店主一看到
+  // 「已儲存」就會離開／整頁重新整理／切走 App，推送可能根本沒送達（iPad Safari 背景分頁
+  // 尤其容易被系統回收）。改成 await flushCloudNow()（BookingContext 提供的立即推送、
+  // 不走防抖、回報後端真實結果）：真的推上雲端才顯示成功並關閉；失敗則顯示警告、
+  // 且**不**自動關閉，讓店主知道還沒真的存到雲端、不要現在離開。
+  const handleSave = async () => {
+    if (isSaving) return
     const r = saveFloorPlan({ tables: localTables, fixtures: localFixtures, zones: localZones, backgroundImages: localBg })
-    if (!r?.ok) return toast.error(r?.error || '儲存失敗')
-    toast.success(`✅ 已儲存佈局（${localTables.length} 桌）`)
-    onClose?.()
+    if (!r?.ok) { toast.error(r?.error || '儲存失敗'); return }
+    setIsSaving(true)
+    try {
+      const pushResult = await flushCloudNow?.()
+      if (!pushResult?.ok) {
+        toast.warning(`已存本機，雲端同步被拒（${pushResult?.error || '請檢查網路'}），請確認同步狀態後再離開，避免變更遺失`)
+        return // 不自動關閉：店主還需要知道剛才的佈局其實還沒真的上雲
+      }
+      toast.success(`✅ 已儲存佈局（${localTables.length} 桌）`)
+      onClose?.()
+    } catch (err) {
+      // 🔴 驗收回饋：flushCloudNow 用 Promise reject（不是回傳 {ok:false}）失敗時，若沒有這個
+      // catch 就是 unhandled rejection——三種 toast 全不會跳、按鈕卻恢復可點，店主完全看不出
+      // 剛才發生了什麼事。文案刻意跟上面的「同步被拒」（權限/後端明確拒絕）不同字眼，
+      // 讓人一看就知道這是「同步出錯」（例外/斷線），不是「同步被拒」。
+      toast.error(`已存本機，雲端同步發生錯誤（${err?.message || '未知錯誤'}），請確認同步狀態後再離開，避免變更遺失`)
+      // 不自動關閉：理由同上，且這裡本來就沒有 onClose 呼叫。
+    } finally {
+      setIsSaving(false)
+    }
   }
   const handleCancel = async () => {
+    if (isSaving) return // 推送進行中不可離開，避免看不到剛才的失敗警告就走掉
     if (isDirty) {
       const ok = await confirmDialog('有未儲存的變更，確定捨棄？', { title: '取消編輯', danger: true })
       if (!ok) return
@@ -555,7 +581,7 @@ export default function LayoutEditor({ open, onClose }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, isDirty, mode, selectedNumbers])
+  }, [open, isDirty, mode, selectedNumbers, isSaving])
 
   const bg = localBg[floor]
   const multi = selectedNumbers.size >= 2
@@ -577,11 +603,11 @@ export default function LayoutEditor({ open, onClose }) {
                 {isDirty && <span className="ml-2 px-1.5 py-0.5 bg-chicken-yellow text-chicken-brown rounded text-[10px] font-black">未儲存</span>}
               </p>
             </div>
-            <button onClick={handleReset} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg">↺ 重設預設</button>
-            <button onClick={handleCancel} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg">返回</button>
-            <button onClick={handleSave} disabled={!isDirty}
-                    className={`px-4 py-1.5 min-h-[44px] text-xs font-bold rounded-lg ${isDirty ? 'bg-chicken-green text-white hover:opacity-90' : 'bg-white/10 text-white/40 cursor-not-allowed'}`}>
-              💾 儲存並返回
+            <button onClick={handleReset} disabled={isSaving} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">↺ 重設預設</button>
+            <button onClick={handleCancel} disabled={isSaving} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">返回</button>
+            <button onClick={handleSave} disabled={!isDirty || isSaving}
+                    className={`px-4 py-1.5 min-h-[44px] text-xs font-bold rounded-lg ${isDirty && !isSaving ? 'bg-chicken-green text-white hover:opacity-90' : 'bg-white/10 text-white/40 cursor-not-allowed'}`}>
+              {isSaving ? '⏳ 同步中…' : '💾 儲存並返回'}
             </button>
           </header>
 

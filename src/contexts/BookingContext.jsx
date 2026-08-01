@@ -15,7 +15,7 @@ import {
   computeOvertimeActions, computeDayRolloverActions,
   canRunSweeps, filterSweepActionsByPermission,
 } from '../utils/opsSweep'
-import { statusFromPushResult, statusAfterPull, statusAfterError } from '../utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded } from '../utils/syncStatus'
 import { todayStr } from '../utils/timeSlots'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
@@ -55,6 +55,13 @@ export function BookingProvider({ children }) {
   const [groupReservations, setGroupReservations] = useState([])
   const [settings, setSettings] = useState(settingsService.getSettings())
   const [cloudStatus, setCloudStatus] = useState({ state: 'idle', lastSyncAt: null, error: '' })
+  // 🔴 驗收回饋：cloudDataService.persistSyncState 寫入 localStorage 失敗時會靜默退化回
+  // 修復前的行為（同步基準線只在本分頁存活），且完全沒有畫面提示。用輪詢把這個模組層級旗標
+  // 帶進畫面（見下方 effect），SettingsView 據此顯示明確警示，不再是只有 console.error。
+  const [localPersistDegraded, setLocalPersistDegraded] = useState(false)
+  // 旗標「上一次輪詢看到的值」——只在 false→true 的瞬間主動跳 toast（見下方 effect 與
+  // utils/syncStatus.shouldAlertPersistDegraded），避免每 4 秒轟炸。
+  const localPersistDegradedRef = useRef(false)
   const syncTimerRef = useRef(null)
   const isStaffRef = useRef(isStaff)
   isStaffRef.current = isStaff
@@ -287,6 +294,33 @@ export function BookingProvider({ children }) {
     return () => window.removeEventListener('storage', onStorage)
   }, [refresh])
 
+  // 輪詢 cloudDataService 的「同步基準線落地失敗」旗標（見 cloudDataService.persistSyncState）。
+  // 不掛在 usingFirebase 之下：這是純 localStorage 容量/隱私模式的問題，本機模式一樣會中。
+  // 用輪詢而不是逐一在每個呼叫點回傳這個旗標，是因為會寫入同步基準線的路徑太多（pullCloud／
+  // syncCloudSoon／flushCloudNow／discardRejectedChanges…），輪詢比逐一改寫呼叫點簡單可靠。
+  //
+  // 🔴 驗收回饋第三輪：店主日常幾乎都停在現場頁，很少主動點進設定頁看 SettingsView 的靜態
+  // 警示列——若故障發生在現場操作當下，他可能好幾天都看不到那條警示，直到真的弄丟佈局。
+  // 這裡在旗標 false→true 的當下主動跳一次 toast（沿用既有的 toastRef.current?.error?.(...)
+  // 模式，見上面 syncCloudSoon 的推送失敗提示），不論店主目前在哪個分頁都看得到；
+  // SettingsView 的靜態列保留，當作「之後想確認還在不在」的可查詢入口，兩者互補。
+  useEffect(() => {
+    if (!isStaff) { setLocalPersistDegraded(false); localPersistDegradedRef.current = false; return }
+    const check = () => {
+      const degraded = cloudData.isSyncPersistDegraded()
+      if (shouldAlertPersistDegraded(localPersistDegradedRef.current, degraded)) {
+        toastRef.current?.error?.(
+          '本機儲存空間不足或瀏覽器在無痕模式——你排的桌位可能在重新整理後消失，請聯絡技術支援'
+        )
+      }
+      localPersistDegradedRef.current = degraded
+      setLocalPersistDegraded(degraded)
+    }
+    check()
+    const id = window.setInterval(check, 4000)
+    return () => window.clearInterval(id)
+  }, [isStaff])
+
   // ============ 訂位動作 ============
   const addBooking = (data) => {
     const b = bookingService.create(data)
@@ -330,7 +364,6 @@ export function BookingProvider({ children }) {
   const bulkSaveTables = (list) => { const r = seatingService.bulkSaveTablesGuarded(list); if (r?.ok) { refresh(); syncCloudSoon() } return r }
   const addTable = (data) => { const t = tableService.addTable(data); refresh(); syncCloudSoon(); return t }
   const removeTable = (number) => { const r = tableService.removeTable(number); refresh(); syncCloudSoon(); return r }
-  const resetTables = () => { tableService.reset(); refresh(); syncCloudSoon() }
   // 桌位佈局一次存檔：桌位走守門（佔用/團 hold 不准停用刪除），設施/分區/底圖寫進 settings.floorPlan。
   const saveFloorPlan = ({ tables: list, fixtures, zones, backgroundImages } = {}) => {
     if (Array.isArray(list)) {
@@ -604,12 +637,12 @@ export function BookingProvider({ children }) {
   }
 
   const value = {
-    bookings, tables, waitlist, customers, settings, cloudStatus,
+    bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded,
     agencies, guides, groupReservations,
     refresh, pullCloud, migrateLocalToCloud,
     addBooking, updateBooking, cycleStatus, setStatus,
     toggleTable, setTableOutage, clearTableOutage, setTableStatus, blockTable, unblockTable, updateTablePosition,
-    bulkSaveTables, addTable, removeTable, resetTables, saveFloorPlan,
+    bulkSaveTables, addTable, removeTable, saveFloorPlan,
     // 桌位佈局便捷存取（FloorMap 消費端傳入 fixtures/zones 用）
     floorPlan: settings.floorPlan,
     fixtures: settings.floorPlan?.fixtures,
