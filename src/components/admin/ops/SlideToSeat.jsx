@@ -111,7 +111,7 @@ export default function SlideToSeat({ onConfirm, disabled = false, label = 'æ»‘å
       aria-label={label}
       aria-disabled={disabled ? 'true' : undefined}
       onKeyDown={handleKeyDown}
-      className={`relative w-full h-[58px] rounded-xl overflow-hidden select-none border-2 border-chicken-brown/15 bg-white ${
+      className={`relative w-full h-[66px] rounded-xl overflow-hidden select-none border-2 border-chicken-brown/15 bg-white ${
         disabled ? 'opacity-40 pointer-events-none' : ''}`}
     >
       <div
@@ -119,7 +119,7 @@ export default function SlideToSeat({ onConfirm, disabled = false, label = 'æ»‘å
         className={`absolute inset-y-0 left-0 bg-gradient-to-r from-chicken-red to-chicken-red/70 ${transitionClass}`}
         style={{ width: `${dragX + KNOB_WIDTH}px` }}
       />
-      <div className="absolute inset-0 flex items-center justify-center px-4 font-bold text-chicken-brown/80 pointer-events-none">
+      <div className="absolute inset-0 flex items-center justify-center px-4 text-[18px] font-bold text-chicken-brown/80 pointer-events-none">
         {disabled ? disabledText : label}
       </div>
       <div
@@ -129,7 +129,7 @@ export default function SlideToSeat({ onConfirm, disabled = false, label = 'æ»‘å
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
         style={{ width: `${KNOB_WIDTH}px`, transform: `translateX(${dragX}px)` }}
-        className={`absolute left-0 top-1.5 h-[46px] rounded-lg bg-white shadow-md flex items-center justify-center text-xl touch-none cursor-grab active:cursor-grabbing ${transitionClass}`}
+        className={`absolute left-0 top-1.5 h-[54px] rounded-lg bg-white shadow-md flex items-center justify-center text-xl touch-none cursor-grab active:cursor-grabbing ${transitionClass}`}
       >
         ðŸª‘
       </div>

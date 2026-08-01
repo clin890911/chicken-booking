@@ -153,7 +153,11 @@ export default function AdminPage() {
           />
         </div>
 
-        {/* 桌面版頁面標題（不重複 Header bar） */}
+        {/* 桌面版頁面標題（不重複 Header bar）。
+            現場分頁例外：compact 統計條已經寫了「現場 · 日期時間」，標題整條純重複，
+            在 iPad 橫向卻是 66px 的實體高度（左欄會因此捲動）→ ops 不渲染，
+            右邊的登入者/角色改由 OperationsView 接在統計條最右端。其他分頁完全不變。 */}
+        {tab !== 'ops' && (
         <div className="hidden lg:block flex-shrink-0 bg-white border-b border-chicken-brown/10 px-6 py-3">
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -166,6 +170,7 @@ export default function AdminPage() {
             </div>
           </div>
         </div>
+        )}
 
         <main className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 py-4 overflow-x-hidden max-w-[1600px] w-full mx-auto">
           {!usingFirebase && (

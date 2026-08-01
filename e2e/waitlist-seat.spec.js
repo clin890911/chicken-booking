@@ -32,7 +32,7 @@ test('管理端：現場頁內 取號 → 叫號 → 入座（二步確認）→
   // 新增取號
   await page.getByRole('button', { name: '新增取號' }).click()
   // M5：姓名改用稱謂＋姓氏快選（免切注音），組出來的字串一樣進 waitlist.name
-  await page.getByRole('button', { name: '先生', exact: true }).click()
+  // iPad v2：稱謂併進姓氏格且預設「先生」→ 常態只要點姓氏一下
   await page.getByRole('button', { name: '陳', exact: true }).click()
   await page.getByRole('button', { name: '取號', exact: true }).click()
 
@@ -93,10 +93,20 @@ test('候位：罕見姓走「其他…」手打也能取號', async ({ page }) 
   await page.getByRole('button', { name: '候位', exact: true }).click()
 
   await page.getByRole('button', { name: '新增取號' }).click()
-  await page.getByRole('button', { name: '小姐', exact: true }).click()
+  // 稱謂是循環鈕：預設「先生」→ 點一下換「小姐」
+  await page.getByRole('button', { name: /^稱謂：先生/ }).click()
+  await expect(page.getByRole('button', { name: /^稱謂：小姐/ })).toBeVisible()
+  await page.getByRole('button', { name: '其他', exact: true }).click()
+
+  // 單姓手打 → 仍接稱謂
+  await page.getByLabel('自訂姓氏').fill('鄭')
+  await page.getByRole('button', { name: '取號', exact: true }).click()
+  await expect(page.getByText('鄭小姐').first()).toBeVisible()
+
+  // 全名（≥2 字，含兩字複姓）→ 原樣使用，不接稱謂
+  await page.getByRole('button', { name: '新增取號' }).click()
   await page.getByRole('button', { name: '其他', exact: true }).click()
   await page.getByLabel('自訂姓氏').fill('歐陽')
   await page.getByRole('button', { name: '取號', exact: true }).click()
-
-  await expect(page.getByText('歐陽小姐').first()).toBeVisible()
+  await expect(page.getByText('歐陽', { exact: true }).first()).toBeVisible()
 })

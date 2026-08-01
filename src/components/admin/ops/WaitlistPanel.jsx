@@ -3,7 +3,7 @@ import { Modal, Input } from '../../ui'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 import GuestCountField from '../GuestCountField'
-import HonorificNameField, { composeName } from './HonorificNameField'
+import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import WaitlistHistorySheet from './WaitlistHistorySheet'
 
 function diffMin(d) {
@@ -24,7 +24,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
   const [form, setForm] = useState({ name: '', phone: '', partySize: 2, notes: '' })
   // 稱謂＋姓氏快選（與現場帶位共用同一套元件）：滿場尖峰時取號不必切注音。
   // 存進 waitlist 的仍是同一個 name 字串，資料結構不變。
-  const [title, setTitle] = useState(null)
+  const [title, setTitle] = useState(DEFAULT_TITLE)
   const [surname, setSurname] = useState(null)
   const [customName, setCustomName] = useState('')
 
@@ -50,7 +50,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
 
   const resetForm = () => {
     setForm({ name: '', phone: '', partySize: 2, notes: '' })
-    setTitle(null); setSurname(null); setCustomName('')
+    setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
   }
 
   const handleAdd = () => {
