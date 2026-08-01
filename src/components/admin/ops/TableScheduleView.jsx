@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { turnInPeriod } from '../../../utils/tableTurns'
+import { STATUS_COLOR } from '../floormap/statusColors'
 
 // 現場頁「排程視圖」：仿 inline 桌圖——每張桌卡堆疊顯示當天每一批用餐（turns）。
 // 與 SVG 桌況圖（FloorMap）並存切換；本視圖是「總覽／規劃」用途，不參與帶位模式。
@@ -18,10 +19,10 @@ const TURN_STYLE = {
 }
 const GROUP_STYLE = { box: 'bg-indigo-50 border-indigo-300', text: 'text-indigo-700', dot: 'bg-indigo-500' }
 
-const STATUS_DOT = {
-  vacant: 'bg-emerald-500', reserved: 'bg-sky-500', dining: 'bg-orange-500',
-  cleaning: 'bg-amber-500', blocked: 'bg-slate-400',
-}
+// 桌卡左上角狀態點：色值收斂自 statusColors.js（單一來源），與桌況圖/圖例/pill 同色。
+const STATUS_DOT_COLOR = Object.fromEntries(
+  Object.entries(STATUS_COLOR).map(([status, c]) => [status, c.stroke])
+)
 
 function TurnRow({ turn }) {
   const isGroup = turn.kind === 'group'
@@ -92,7 +93,7 @@ export default function TableScheduleView({ tables, turnsByTable, selectedTableN
               }`}
             >
               <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-chicken-brown/10">
-                <i className={`h-2 w-2 rounded-full ${STATUS_DOT[t.status] || 'bg-emerald-500'}`} />
+                <i className="h-2 w-2 rounded-full" style={{ background: STATUS_DOT_COLOR[t.status] || STATUS_COLOR.vacant.stroke }} />
                 <span className="text-sm font-black text-chicken-brown">{t.number}</span>
                 <span className="ml-auto text-[10px] font-bold text-chicken-brown/50">{t.capacity} 位 · 今日 {all.filter(x => !x.isExtra).length} 轉</span>
               </div>
