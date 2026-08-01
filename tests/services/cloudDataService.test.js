@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { INITIAL_TABLES } from '../../src/data/tables'
 
 // ⚠️ cloudDataService 的同步基準線（lastSynced / initialized / pendingDeletes）是
 // **模組層級的單例**，清 localStorage 清不掉它——這正是正式環境「只有重新整理頁面
 // 才會重置未推送狀態」的原因。測試必須每條都 resetModules + 動態 import，
 // 否則前一條的基準線會污染下一條（曾讓本檔的斷言假性失敗）。
-let applyCloudSnapshot, pushChangedData, localDataset, markLocalAsSynced, getSettings, discardRejectedChanges
+let applyCloudSnapshot, pushChangedData, localDataset, markLocalAsSynced, getSettings, discardRejectedChanges,
+  migrateTableLayoutOnce, migrateTableDimsOnce, isSyncPersistDegraded
 
 // === 差異同步基準線的回歸測試 ===
 //
@@ -43,7 +45,8 @@ beforeEach(async () => {
   vi.resetModules()
   const cloud = await import('../../src/services/cloudDataService')
   const settings = await import('../../src/services/settingsService')
-  ;({ applyCloudSnapshot, pushChangedData, localDataset, markLocalAsSynced, discardRejectedChanges } = cloud)
+  ;({ applyCloudSnapshot, pushChangedData, localDataset, markLocalAsSynced, discardRejectedChanges,
+    migrateTableLayoutOnce, migrateTableDimsOnce, isSyncPersistDegraded } = cloud)
   ;({ getSettings } = settings)
 })
 
@@ -300,5 +303,183 @@ describe('discardRejectedChanges（使用者主動放棄）', () => {
     discardRejectedChanges({ writes: ['agencies'] })
     const r = await pushChangedData()
     expect(r.skipped).toBe(true)
+  })
+})
+
+// === 整頁重新整理不得讓「本機未推送的桌位變更」被雲端整包覆寫 ===
+//
+// 根因：initialized 是模組層級記憶體變數，整頁重新整理（＝JS 模組重新載入）就會歸零；
+// 歸零後 applyCloudSnapshot 走「首次拉取＝整包信任雲端」分支，只要雲端 tables 非空就會
+// 用 writeArrayOf 整包覆寫本機——即使本機才剛排好、還沒來得及推上雲端的新佈局也一樣。
+// 這正是店主回報「每次更新，我調整的座位都會被重置」的根因。
+// 這支測試用 vi.resetModules() 真的模擬「整頁重新整理」（不是傳參數作弊）。
+describe('整頁重新整理：本機未推送的桌位變更不得被雲端覆寫', () => {
+  const TABLES_KEY = 'chicken_tables_v3'
+  const baseTable = (x) => ({ number: 'A1', capacity: 4, floor: '1F', x, y: 0, w: 80, h: 100 })
+
+  it('reload 後走 diff-merge、保護本機較新的桌位座標（雲端仍是舊值）', async () => {
+    // 第一輪：模擬「上次已經跟雲端同步過」的裝置狀態，本機與雲端都是 x=100
+    applyCloudSnapshot({ tables: [baseTable(100)] })
+    expect(JSON.parse(localStorage.getItem(TABLES_KEY))[0].x).toBe(100)
+
+    // 店主在編輯器把桌子拖到 x=500：本機寫入成功，但還沒等 250ms 防抖推播完成就整頁重新整理
+    localStorage.setItem(TABLES_KEY, JSON.stringify([baseTable(500)]))
+
+    // 真的模擬「整頁重新整理」：重置模組層級狀態，重新 import 出一份全新的 cloudDataService
+    vi.resetModules()
+    const reloaded = await import('../../src/services/cloudDataService')
+
+    // 重新整理後第一次拉取：雲端還是舊值（因為那筆推送根本沒送達）
+    reloaded.applyCloudSnapshot({ tables: [baseTable(100)] })
+
+    const stored = JSON.parse(localStorage.getItem(TABLES_KEY))
+    expect(stored[0].x).toBe(500)
+  })
+
+  it('全新裝置（localStorage 全空、無任何落地過的同步基準線）仍能從雲端取得初始桌位資料', async () => {
+    expect(localStorage.getItem(TABLES_KEY)).toBeNull()
+    applyCloudSnapshot({ tables: [baseTable(300)] })
+    const stored = JSON.parse(localStorage.getItem(TABLES_KEY))
+    expect(stored).toHaveLength(1)
+    expect(stored[0].x).toBe(300)
+  })
+
+  it('reload 後，雲端確實較新（別台裝置改的、本機沒有未推送變更）時仍要正常合併採用，不可矯枉過正', async () => {
+    // 第一輪：本機與雲端同步，x=100
+    applyCloudSnapshot({ tables: [baseTable(100)] })
+
+    // 重新整理：模組狀態應該從 localStorage 復原基準線（本機沒有任何未推送變更）
+    vi.resetModules()
+    const reloaded = await import('../../src/services/cloudDataService')
+
+    // 另一台裝置把桌子挪到 x=999，這次拉取雲端值真的比較新，應該要能正常合併進本機
+    reloaded.applyCloudSnapshot({ tables: [baseTable(999)] })
+
+    const stored = JSON.parse(localStorage.getItem(TABLES_KEY))
+    expect(stored[0].x).toBe(999)
+  })
+})
+
+// === 兩顆未爆彈：migrateTableLayoutOnce / migrateTableDimsOnce 偵測到自訂佈局要安全不作為 ===
+//
+// 兩支都是自由佈局編輯器問世前寫的一次性遷移，會無條件把 x/y/w/h 打回 INITIAL_TABLES、
+// 沒有任何確認對話框。店家一旦在編輯器排過自己的佈局，這兩支「幽靈遷移」只要旗標沒設就會
+// 在下次開機默默把排版蓋掉。修法：偵測到任一桌號的 x/y/w/h 已偏離出廠預設就跳過（見
+// hasCustomTableLayout）。
+describe('migrateTableLayoutOnce / migrateTableDimsOnce：已有自訂佈局時安全不作為', () => {
+  const TABLES_KEY = 'chicken_tables_v3'
+  const LAYOUT_FLAG_KEY = 'chicken_table_layout_version'
+  const DIMS_FLAG_KEY = 'chicken_table_dims_version'
+  const cloneDefaults = () => JSON.parse(JSON.stringify(INITIAL_TABLES))
+
+  function mockFetch() {
+    const calls = []
+    global.fetch = vi.fn(async (url, options = {}) => {
+      calls.push({ url, method: options.method })
+      if (options.method === 'GET') return { ok: true, json: async () => ({ ok: true, tables: [] }) }
+      return { ok: true, json: async () => ({ ok: true }) }
+    })
+    return calls
+  }
+
+  it('migrateTableLayoutOnce：本機桌位已偏離出廠預設（店家自訂過）→ 跳過遷移、完全不打雲端請求', async () => {
+    const custom = cloneDefaults()
+    custom[0] = { ...custom[0], x: custom[0].x + 999 } // 模擬店主在編輯器把第一張桌拖走
+    localStorage.setItem(TABLES_KEY, JSON.stringify(custom))
+    const calls = mockFetch()
+
+    const r = await migrateTableLayoutOnce()
+
+    expect(calls).toHaveLength(0) // 完全不該打任何雲端請求
+    expect(r).toMatchObject({ ok: true, skipped: true, reason: 'custom-layout-detected' })
+    expect(localStorage.getItem(LAYOUT_FLAG_KEY)).toBe('kingchicken-2026-06') // 旗標仍照樣標記完成
+    // 本機桌位維持店家自訂的樣子，不被打回預設
+    expect(JSON.parse(localStorage.getItem(TABLES_KEY))[0].x).toBe(custom[0].x)
+  })
+
+  it('migrateTableLayoutOnce：本機桌位仍是出廠預設值 → 遷移照常執行（不被新的守門誤擋）', async () => {
+    localStorage.setItem(TABLES_KEY, JSON.stringify(cloneDefaults()))
+    const calls = mockFetch()
+
+    const r = await migrateTableLayoutOnce()
+
+    expect(calls.length).toBeGreaterThan(0) // 照常打了雲端請求，代表沒被守門擋下
+    expect(r.reason).not.toBe('custom-layout-detected')
+    expect(localStorage.getItem(LAYOUT_FLAG_KEY)).toBe('kingchicken-2026-06')
+  })
+
+  it('migrateTableDimsOnce：本機桌位已偏離出廠預設（店家自訂過）→ 跳過遷移、完全不打雲端請求', async () => {
+    const custom = cloneDefaults()
+    const sixP = custom.find(t => t.capacity === 6)
+    custom[custom.indexOf(sixP)] = { ...sixP, w: sixP.w + 40, h: sixP.h + 40 } // 模擬店主自己調過尺寸
+    localStorage.setItem(TABLES_KEY, JSON.stringify(custom))
+    const calls = mockFetch()
+
+    const r = await migrateTableDimsOnce()
+
+    expect(calls).toHaveLength(0)
+    expect(r).toMatchObject({ ok: true, skipped: true, reason: 'custom-layout-detected' })
+    expect(localStorage.getItem(DIMS_FLAG_KEY)).toBe('wide-6p-2026-06')
+    // 本機桌位維持店家自訂的尺寸，不被打回預設
+    const stored = JSON.parse(localStorage.getItem(TABLES_KEY))
+    expect(stored.find(t => t.number === sixP.number).w).toBe(sixP.w + 40)
+  })
+
+  it('migrateTableDimsOnce：本機桌位仍是出廠預設值 → 遷移照常執行（不被新的守門誤擋）', async () => {
+    localStorage.setItem(TABLES_KEY, JSON.stringify(cloneDefaults()))
+    const calls = mockFetch()
+
+    const r = await migrateTableDimsOnce()
+
+    expect(r.reason).not.toBe('custom-layout-detected')
+    expect(localStorage.getItem(DIMS_FLAG_KEY)).toBe('wide-6p-2026-06')
+  })
+})
+
+// === 驗收回饋缺口 2：persistSyncState 寫入 localStorage 失敗不可以完全靜默 ===
+//
+// 背景：persistSyncState 把同步基準線（initialized/lastSynced/pendingDeletes）落地到
+// localStorage，這是本次修復的核心機制。若這個寫入本身失敗（裝置空間不足、無痕/私密瀏覽
+// 模式拒寫），程式會靜默退化回修復前的行為——整頁重新整理後同步基準線又歸零，可能重演
+// 佈局被雲端覆蓋的問題，但故障當下沒有任何線索。這裡鎖住：(a) 至少 console.error、
+// (b) isSyncPersistDegraded() 旗標被設起來供畫面（SettingsView）顯示警示、
+// (c) 寫入恢復正常後旗標會自動解除（不會卡死在警示狀態）。
+describe('persistSyncState 寫入 localStorage 失敗：不可靜默', () => {
+  const SYNC_STATE_KEY = 'chicken_sync_state_v1'
+
+  it('setItem 對同步狀態 key 拋錯 → console.error 記錄、isSyncPersistDegraded() 回傳 true', () => {
+    expect(isSyncPersistDegraded()).toBe(false) // 修復前的預設健康狀態
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const originalSetItem = localStorage.setItem.bind(localStorage)
+    const setItemSpy = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+      if (key === SYNC_STATE_KEY) throw new Error('QuotaExceededError（模擬裝置空間不足）')
+      return originalSetItem(key, value)
+    })
+
+    markLocalAsSynced() // 任何會呼叫 persistSyncState 的動作都可以，這支最直接
+
+    expect(errorSpy).toHaveBeenCalled()
+    expect(String(errorSpy.mock.calls[0][0])).toContain('persistSyncState')
+    expect(isSyncPersistDegraded()).toBe(true)
+
+    setItemSpy.mockRestore()
+    errorSpy.mockRestore()
+  })
+
+  it('寫入恢復正常後，旗標自動解除（不會卡死在警示狀態）', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const originalSetItem = localStorage.setItem.bind(localStorage)
+    const setItemSpy = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+      if (key === SYNC_STATE_KEY) throw new Error('quota')
+      return originalSetItem(key, value)
+    })
+    markLocalAsSynced()
+    expect(isSyncPersistDegraded()).toBe(true)
+    setItemSpy.mockRestore()
+    errorSpy.mockRestore()
+
+    markLocalAsSynced() // 這次 setItem 正常寫入
+    expect(isSyncPersistDegraded()).toBe(false)
   })
 })

@@ -676,20 +676,6 @@ describe('removeTable', () => {
 })
 
 // ============================================================
-// reset
-// ============================================================
-describe('reset', () => {
-  it('將桌位還原為 INITIAL_TABLES', () => {
-    tableService.bulkWrite([mkTable({ number: 'ONLY' })])
-    expect(tableService.listAll()).toHaveLength(1)
-    tableService.reset()
-    const all = tableService.listAll()
-    expect(all).toHaveLength(52)
-    expect(all.reduce((s, t) => s + t.capacity, 0)).toBe(246)
-  })
-})
-
-// ============================================================
 // 資料隔離：每個測試從乾淨狀態開始（setup.js 保證）
 // ============================================================
 describe('資料隔離', () => {

@@ -56,7 +56,7 @@ const DEFAULT_CATEGORY = 'ops-rules'
 const CategoryContext = createContext([])
 
 export default function SettingsView({ onOpenCustomer }) {
-  const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud, discardRejectedChanges } = useBooking()
+  const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud, discardRejectedChanges, localPersistDegraded } = useBooking()
   const { user, signOut, can, usingFirebase } = useAuth()
   const toast = useToast()
   const confirm = useConfirm()
@@ -343,6 +343,15 @@ export default function SettingsView({ onOpenCustomer }) {
               放棄這些變更，以雲端為準
             </button>
           )}
+        </div>
+      )}
+
+      {/* 🔴 驗收回饋：cloudDataService 的同步基準線落地 localStorage 若寫入失敗（裝置空間不足、
+          無痕/私密瀏覽模式拒寫），程式會靜默退化回「整頁重新整理可能把佈局蓋掉」的修復前行為。
+          不掛在 usingFirebase 底下：這是純 localStorage 問題，本機模式一樣會中。 */}
+      {localPersistDegraded && (
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-bold text-chicken-red">
+          <span>⚠️ 本機儲存空間不足或瀏覽器處於無痕/私密瀏覽模式，佈局變更可能在重新整理後遺失。建議清出裝置空間，或關閉無痕/私密瀏覽模式後重新整理頁面。</span>
         </div>
       )}
 

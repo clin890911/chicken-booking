@@ -223,11 +223,6 @@ export function summary() {
   return { counts, occupiedSeats, total: list.filter(counted).length }
 }
 
-// === 重設 ===
-export function reset() {
-  write(INITIAL_TABLES.slice())
-}
-
 // === 編輯桌位位置（後台設定用）===
 export function updatePosition(number, { x, y, w, h }) {
   return patchOne(number, { x, y, w, h })
