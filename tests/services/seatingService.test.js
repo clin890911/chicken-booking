@@ -425,6 +425,93 @@ describe('seatingService 整合層', () => {
   })
 
   // ===========================================================
+  // undoClearTable
+  // 「✨ 清桌完成」的復原。清桌後那幾秒正是下一組被帶上桌的高峰（清空就是為了讓下一組坐），
+  // 舊實作用 tableService.setStatus 無條件硬寫回 cleaning，會把剛入座那組從桌況圖上抹掉。
+  // ===========================================================
+  describe('undoClearTable', () => {
+    beforeEach(() => { seedDefaultTables() })
+
+    it('桌不存在 → 擋', () => {
+      expect(seating.undoClearTable('999')).toEqual({ ok: false, error: '桌位不存在' })
+    })
+
+    it('復原：空桌 → 待清桌，並還原原本的 booking 綁定', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      seating.seatBooking(b.id)
+      seating.checkoutBooking(b.id)
+      const before = tableService.getByNumber('101')
+      expect(before.status).toBe('cleaning')
+
+      seating.clearTable('101')
+      expect(tableService.getByNumber('101').status).toBe('vacant')
+
+      const r = seating.undoClearTable('101', { bookingId: before.currentBookingId, ref: before.currentRef })
+      expect(r).toEqual({ ok: true, tableNumber: '101' })
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('cleaning')
+      expect(t.currentBookingId).toBe(b.id)
+      expect(t.seatedAt).toBeNull()
+    })
+
+    it('★ 桌已被下一組入座：不硬寫、回報失敗，剛入座那組完全不受影響', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.assignBookingToTable(b.id, '101')
+      seating.seatBooking(b.id)
+      seating.checkoutBooking(b.id)
+      seating.clearTable('101')
+      // 清桌後幾秒內，領位台把等候的客人帶上這張桌
+      const next = seating.walkInSeat('101', { name: '下一組', guests: 2 })
+      expect(next.ok).toBe(true)
+
+      const r = seating.undoClearTable('101', { bookingId: b.id })
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain('101')
+      expect(r.error).toContain('已被下一組使用')
+
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('dining')                       // 桌況沒被抹掉
+      expect(t.currentBookingId).toBe(next.booking.id)      // 仍指向新那組，不是舊的
+      expect(t.seatedAt).not.toBeNull()
+    })
+
+    it('桌已被別筆訂位預配（reserved）：同樣不搶', () => {
+      const b = mkBooking({ guests: 2 })
+      seating.clearTable('101')
+      const other = mkBooking({ guests: 2, name: '別組' })
+      seating.assignBookingToTable(other.id, '101')
+
+      const r = seating.undoClearTable('101', { bookingId: b.id })
+      expect(r.ok).toBe(false)
+      expect(tableService.getByNumber('101').currentBookingId).toBe(other.id)
+    })
+
+    it('團體梯次的待清桌：currentRef 也要一起還原（散客走 bookingId、團體走 ref）', () => {
+      const ref = { type: 'group', groupId: 'G1', batchId: 'B1' }
+      tableService.setStatus('101', 'cleaning', { currentBookingId: null, currentRef: ref })
+      seating.clearTable('101')
+      expect(tableService.getByNumber('101').currentRef).toBeNull()
+
+      const r = seating.undoClearTable('101', { bookingId: null, ref })
+      expect(r.ok).toBe(true)
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('cleaning')
+      expect(t.currentRef).toEqual(ref)
+    })
+
+    it('沒帶快照呼叫也安全（還原成無綁定的待清桌，不亂掛別人的訂位）', () => {
+      seating.clearTable('101')
+      const r = seating.undoClearTable('101')
+      expect(r.ok).toBe(true)
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('cleaning')
+      expect(t.currentBookingId).toBeNull()
+      expect(t.currentRef).toBeNull()
+    })
+  })
+
+  // ===========================================================
   // cancelBooking
   // ===========================================================
   describe('cancelBooking', () => {

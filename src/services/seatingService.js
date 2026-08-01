@@ -175,6 +175,27 @@ export function clearTable(tableNumber) {
   return tableService.clearTable(tableNumber)
 }
 
+// clearTable 的反向操作（誤按「✨ 清桌完成」後按「↩ 復原」）：桌況還原成待清桌。
+// ★ 與其他復原同一套口徑：只在桌「仍是空桌」時還原。清桌完成後的那幾秒正是下一組被帶上桌的
+//   高峰（把桌清空本來就是為了讓下一組坐），若已經有人坐下卻硬寫回 cleaning，會把剛入座那組
+//   從桌況圖上抹掉——他們的 booking 還是 arrived 卻沒有桌，而且畫面完全看不出來。
+//   ⚠️ 不可改回 tableService.setStatus 直接 patch（那是無條件覆寫，正是本函式要根治的）。
+// snapshot 帶 clearTable 前的 currentBookingId / currentRef：兩個都被 clearTable 清掉了，
+// 事後從桌上查不回來（散客走 currentBookingId、團體梯次走 currentRef）。
+export function undoClearTable(tableNumber, { bookingId = null, ref = null } = {}) {
+  const t = tableService.getByNumber(tableNumber)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  if (t.status !== 'vacant') {
+    return { ok: false, error: `${tableNumber} 已被下一組使用（${statusZh(t.status)}），未復原` }
+  }
+  tableService.setStatus(tableNumber, 'cleaning', {
+    currentBookingId: bookingId,
+    currentRef: ref,
+    seatedAt: null,   // 待清桌本來就沒有入座時間（checkoutTable 同口徑）
+  })
+  return { ok: true, tableNumber }
+}
+
 // === 取消訂位 ===
 // 回傳值帶著「復原所需的快照」：releasedTables（這次釋出的桌，主桌在前）與 previousStatus。
 // ★ 快照不可省：取消會把 assignedTableId/extraTableIds 清空，事後從 booking 上已經完全看不出
