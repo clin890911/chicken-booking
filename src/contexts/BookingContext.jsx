@@ -140,7 +140,11 @@ export function BookingProvider({ children }) {
     }
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
+  // hydrated：本機資料已灌入 state（本機模式的「資料備妥」訊號）。
+  // 用途見 utils/newBookingAlerts——掛載當下 bookings 還是 []，把它當基準會讓首次
+  // refresh 的既有訂位全被誤判成「剛進來的新訂位」而洗版。
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => { refresh(); setHydrated(true) }, [refresh])
 
   // ── 現場自動清檯（sweep）編排 ──
   // 規則計算在 utils/opsSweep（純函式）、執行在 seatingService.executeSweepActions（前置重驗、冪等）。
@@ -596,7 +600,7 @@ export function BookingProvider({ children }) {
   }
 
   const value = {
-    bookings, tables, waitlist, customers, settings, cloudStatus,
+    bookings, tables, waitlist, customers, settings, cloudStatus, hydrated,
     agencies, guides, groupReservations,
     refresh, pullCloud, migrateLocalToCloud,
     addBooking, updateBooking, cycleStatus, setStatus,
