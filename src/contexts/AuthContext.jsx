@@ -43,7 +43,8 @@ const ALLOWED_EMAILS = (
 
 // === 權限規則 ===
 // can[action] 可由元件呼叫 useAuth().can('xxx') 來判斷
-const PERMISSIONS = {
+// 匯出供測試綁定真實角色矩陣（元件的權限門測試不該自己抄一份角色表，否則這裡改了測試不會紅）
+export const PERMISSIONS = {
   manager: new Set([
     'booking.read', 'booking.create', 'booking.update', 'booking.delete', 'booking.assign',
     'table.read', 'table.update', 'table.block', 'table.merge', 'table.config',

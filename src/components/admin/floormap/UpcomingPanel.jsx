@@ -10,10 +10,22 @@ import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
 import { findPreassignedBooking } from '../../../utils/capacity'
 import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
 
-function BookingCard({ b, now, onClickBooking, onAssignTable, onSeat, onNoshow, onComplete, canComplete }) {
+function BookingCard({ b, now, onClickBooking, onAssignTable, onSeat, onNoshow, onComplete, perms }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
   const overdue = overdueMin > 15 // 與 classifyTodayPulse graceMin 同口徑
   const assigned = !!b.assignedTableId
+
+  // 前端權限門（與 TableDrawer 的 can('table.update') 同慣例）：後端 staffAccess 會擋，
+  // 但沒有前端門的話 kitchen 按下去會寫進本機 localStorage、推送時被剔除，
+  // 畫面上卻毫無錯誤提示 → 本機與雲端永久不一致。權限不足一律不渲染。
+  // 「指派桌位」「客人到了」都會同時寫 bookings 與 tables，故兩個權限都要。
+  const showAssign = !assigned && perms.booking && perms.table
+  const showSeat = assigned && perms.booking && perms.table
+  const showNoshow = overdue && perms.booking
+  const showComplete = overdue && (assigned ? perms.booking && perms.table : perms.booking)
+  // 已指派徽章是唯讀資訊，唯讀角色仍該看得到；整列全空時才不渲染（免留空白 margin）
+  const showActions = assigned || showAssign || showNoshow || showComplete
+
   return (
     <div
       className={`p-3 rounded-xl border-2 cursor-pointer transition-all
@@ -43,47 +55,50 @@ function BookingCard({ b, now, onClickBooking, onAssignTable, onSeat, onNoshow, 
         </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-2 flex-wrap">
-        {assigned ? (
-          <>
+      {showActions && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          {assigned && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-chicken-green/15 text-chicken-green rounded-md text-[11px] font-bold">
               ✓ 已指派 {b.assignedTableId}
             </span>
-            {/* 客人到了（含遲到後才到）：直接入座，免再點桌位 → 抽屜 */}
+          )}
+          {/* 客人到了（含遲到後才到）：直接入座，免再點桌位 → 抽屜 */}
+          {showSeat && (
             <button
               onClick={(e) => { e.stopPropagation(); onSeat?.(b) }}
               className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-[11px] font-bold hover:opacity-90"
             >
               ✅ 客人到了
             </button>
-          </>
-        ) : (
-          <button
-            onClick={(e) => { e.stopPropagation(); onAssignTable?.(b) }}
-            className="px-3 min-h-[44px] bg-chicken-red text-white rounded-md text-[11px] font-bold hover:opacity-90"
-          >
-            指派桌位
-          </button>
-        )}
-        {overdue && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onNoshow?.(b) }}
-            title="標記後會計入這支電話的爽約次數，影響之後訂位風險提示"
-            className="px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-md text-[11px] font-bold hover:bg-chicken-red/5"
-          >
-            標 No-show
-          </button>
-        )}
-        {overdue && canComplete && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onComplete?.(b) }}
-            title="客人其實有來、也吃完了，只是當下沒點系統入座"
-            className="px-3 min-h-[44px] bg-white border border-chicken-green/50 text-chicken-green rounded-md text-[11px] font-bold hover:bg-chicken-green/5"
-          >
-            ✓ 已完成
-          </button>
-        )}
-      </div>
+          )}
+          {showAssign && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onAssignTable?.(b) }}
+              className="px-3 min-h-[44px] bg-chicken-red text-white rounded-md text-[11px] font-bold hover:opacity-90"
+            >
+              指派桌位
+            </button>
+          )}
+          {showNoshow && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onNoshow?.(b) }}
+              title="標記後會計入這支電話的爽約次數，影響之後訂位風險提示"
+              className="px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-md text-[11px] font-bold hover:bg-chicken-red/5"
+            >
+              標 No-show
+            </button>
+          )}
+          {showComplete && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onComplete?.(b) }}
+              title="客人其實有來、也吃完了，只是當下沒點系統入座"
+              className="px-3 min-h-[44px] bg-white border border-chicken-green/50 text-chicken-green rounded-md text-[11px] font-bold hover:bg-chicken-green/5"
+            >
+              ✓ 已完成
+            </button>
+          )}
+        </div>
+      )}
 
       {(b.notes?.pet || b.notes?.child || b.notes?.mobility) && (
         <div className="flex gap-1 mt-1.5">
@@ -104,10 +119,10 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
   const today = todayStr()
   const [showLater, setShowLater] = useState(false)
 
-  // 「已完成」需要改 booking，若該筆有指派桌位還要一併釋出桌 → 兩個權限都要有才顯示鈕。
-  // 沒指派桌位的訂位只需 booking.update。
-  const canCompleteBooking = !!can?.('booking.update')
-  const canCompleteWithTable = canCompleteBooking && !!can?.('table.update')
+  // 卡片上四顆動作鈕的權限底料（誰要哪個組合由 BookingCard 決定）。
+  // 後端 functions/lib/staffAccess.js 對 bookings/tables 集合各自把關，前端這道門是為了
+  // 不讓唯讀角色（kitchen）按了才發現寫不上雲——那會造成本機／雲端不一致且無錯誤提示。
+  const perms = { booking: !!can?.('booking.update'), table: !!can?.('table.update') }
 
   // 今日團體圈桌（未入座）→ 散客直接入座前用來防呆，避免坐掉團體保留桌
   const groupHoldTables = useMemo(
@@ -199,7 +214,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
           {overdue.map(b => (
             <BookingCard key={b.id} b={b} now={now}
               onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
-              onComplete={handleComplete} canComplete={b.assignedTableId ? canCompleteWithTable : canCompleteBooking} />
+              onComplete={handleComplete} perms={perms} />
           ))}
         </div>
       )}
@@ -210,7 +225,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
           {soon.map(b => (
             <BookingCard key={b.id} b={b} now={now}
               onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
-              onComplete={handleComplete} canComplete={b.assignedTableId ? canCompleteWithTable : canCompleteBooking} />
+              onComplete={handleComplete} perms={perms} />
           ))}
         </div>
       )}
@@ -229,7 +244,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
               {later.map(b => (
                 <BookingCard key={b.id} b={b} now={now}
                   onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
-                  onComplete={handleComplete} canComplete={b.assignedTableId ? canCompleteWithTable : canCompleteBooking} />
+                  onComplete={handleComplete} perms={perms} />
               ))}
             </div>
           )}
