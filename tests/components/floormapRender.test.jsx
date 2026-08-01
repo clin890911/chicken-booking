@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import TableShape from '../../src/components/admin/floormap/TableShape'
-import FloorMap from '../../src/components/admin/floormap/FloorMap'
+import FloorMap, { computeFloorContentBBox, computeFloorViewBox } from '../../src/components/admin/floormap/FloorMap'
+import { FLOOR_VIEWBOX, INITIAL_TABLES, FIXTURES } from '../../src/data/tables'
 
 // 桌位佈局升級的渲染煙霧測試：旋轉 / 分區角點 / 自由尺寸 / 資料驅動設施
 // 不依賴 DOM 事件，只確認「會不會炸 + 關鍵輸出有出現」。
@@ -71,6 +72,140 @@ describe('FloorMap 渲染', () => {
   it('未傳 fixtures 時 fallback 預設 FIXTURES（醬料台等）', () => {
     const html = renderToStaticMarkup(<FloorMap floor="1F" tables={tables} onSelectTable={() => {}} />)
     expect(html).toContain('醬料台')
+  })
+})
+
+// 桌況圖自動裁切（2026-08）：viewBox 不再寫死 1200x800，改依當前樓層桌位＋設施的
+// 實際 bounding box 動態裁切（各樓層各自算，四周留白 60）。純函式 + 元件渲染兩層驗證。
+describe('computeFloorContentBBox / computeFloorViewBox（自動裁切純函式）', () => {
+  it('無桌無設施：bbox 回 null，viewBox 退回原本的 FLOOR_VIEWBOX（不產生 NaN／0 寬高）', () => {
+    expect(computeFloorContentBBox([], [])).toBeNull()
+    const vb = computeFloorViewBox([], [])
+    expect(vb).toEqual({ x: 0, y: 0, width: FLOOR_VIEWBOX.width, height: FLOOR_VIEWBOX.height })
+    expect(Number.isFinite(vb.x)).toBe(true)
+    expect(Number.isFinite(vb.y)).toBe(true)
+    expect(Number.isFinite(vb.width)).toBe(true)
+    expect(Number.isFinite(vb.height)).toBe(true)
+    expect(vb.width).toBeGreaterThan(0)
+    expect(vb.height).toBeGreaterThan(0)
+  })
+
+  it('只有一張桌：能算出合理的 viewBox（桌尺寸 + 60 留白四周）', () => {
+    const t = { x: 100, y: 200, w: 90, h: 75, rotation: 0 }
+    const bbox = computeFloorContentBBox([t], [])
+    expect(bbox).toEqual({ minX: 100, minY: 200, maxX: 190, maxY: 275 })
+    const vb = computeFloorViewBox([t], [])
+    expect(vb).toEqual({ x: 40, y: 140, width: 210, height: 195 })
+  })
+
+  it('旋轉桌：bbox 用旋轉後四角的 AABB，比未旋轉時更大（不會把斜擺的桌算漏）', () => {
+    const flat = { x: 100, y: 100, w: 90, h: 75, rotation: 0 }
+    const rotated = { x: 100, y: 100, w: 90, h: 75, rotation: 45 }
+    const bboxFlat = computeFloorContentBBox([flat], [])
+    const bboxRot = computeFloorContentBBox([rotated], [])
+    const flatArea = (bboxFlat.maxX - bboxFlat.minX) * (bboxFlat.maxY - bboxFlat.minY)
+    const rotArea = (bboxRot.maxX - bboxRot.minX) * (bboxRot.maxY - bboxRot.minY)
+    expect(rotArea).toBeGreaterThan(flatArea)
+  })
+
+  it('設施（含 0 寬高的 label 錨點）也納入 bbox 計算', () => {
+    const label = { x: 500, y: 500, w: 0, h: 0 }
+    const bbox = computeFloorContentBBox([], [label])
+    expect(bbox).toEqual({ minX: 500, minY: 500, maxX: 500, maxY: 500 })
+  })
+
+  it('多桌：bbox 取所有桌位＋設施的聯集邊界', () => {
+    const tables = [
+      { x: 120, y: 150, w: 90, h: 75, rotation: 0 },
+      { x: 640, y: 622, w: 80, h: 75, rotation: 0 },
+    ]
+    const fixtures = [{ x: 735, y: 300, w: 24, h: 230 }]
+    const bbox = computeFloorContentBBox(tables, fixtures)
+    expect(bbox).toEqual({ minX: 120, minY: 150, maxX: 759, maxY: 697 })
+  })
+})
+
+// 2026-08 二版：viewBox 不得比原始 FLOOR_VIEWBOX（0,0,1200,800）更差。用真實 1F/2F 資料
+// （data/tables.js 的 INITIAL_TABLES/FIXTURES）鎖住兩種情境，再用合成資料鎖住「內容真的
+// 超出原畫布」時夾限不能反過來裁掉內容（見 FloorMap.jsx 內 BASE_CANVAS 註解的完整理由）。
+describe('computeFloorViewBox：夾限下界（不得比原始 FLOOR_VIEWBOX 更差，但不裁掉真實內容）', () => {
+  const floorTablesOf = (floor) => INITIAL_TABLES.filter(t => t.floor === floor)
+
+  it('1F 型（內容遠小於畫布）：夾限不生效，裁切正常放大，viewBox 明顯小於 1200×800', () => {
+    const vb = computeFloorViewBox(floorTablesOf('1F'), FIXTURES['1F'])
+    expect(vb).toEqual({ x: 60, y: 90, width: 795, height: 705 })
+    expect(vb.width).toBeLessThan(FLOOR_VIEWBOX.width)
+    expect(vb.height).toBeLessThan(FLOOR_VIEWBOX.height)
+    // 完全落在原始畫布內
+    expect(vb.x).toBeGreaterThanOrEqual(0)
+    expect(vb.y).toBeGreaterThanOrEqual(0)
+    expect(vb.x + vb.width).toBeLessThanOrEqual(FLOOR_VIEWBOX.width)
+    expect(vb.y + vb.height).toBeLessThanOrEqual(FLOOR_VIEWBOX.height)
+  })
+
+  it('2F 型（內容＋留白超出畫布）：被夾回原始畫布邊界內，不得比今天線上的畫面更差', () => {
+    const vb = computeFloorViewBox(floorTablesOf('2F'), FIXTURES['2F'])
+    // 右緣/下緣被夾到畫布邊界（1200/800）；左緣本來就在畫布內（28≥0）不需要夾，
+    // 所以不是整組歸零回 0,0,1200,800，而是逐邊各自收攏——比今天（1200×800）稍微更緊，
+    // 這仍然符合「不比原始更差」（更差＝比今天更小），只是沒有到剛好等於今天。
+    expect(vb).toEqual({ x: 28, y: 0, width: 1172, height: 800 })
+    // 硬底線：整個結果必須落在原始畫布邊界內（這才是「不比今天差」的可驗證定義）
+    expect(vb.x).toBeGreaterThanOrEqual(0)
+    expect(vb.y).toBeGreaterThanOrEqual(0)
+    expect(vb.x + vb.width).toBeLessThanOrEqual(FLOOR_VIEWBOX.width)
+    expect(vb.y + vb.height).toBeLessThanOrEqual(FLOOR_VIEWBOX.height)
+  })
+
+  it('極端情況：桌位旋轉後 AABB 超出原畫布右緣（editor 的拖曳移動會夾住 x/y，但旋轉不會重新夾——見 LayoutEditor.jsx:285-286,343），夾限不得把桌子切掉', () => {
+    // 貼著畫布右邊緣的桌（x/y 仍在 0~1200/0~800 內，是拖曳移動夾限後合法的落點），
+    // 轉 45 度後 AABB 右緣會超出 1200。
+    const edgeTable = { x: 1150, y: 400, w: 80, h: 75, rotation: 45 }
+    const bbox = computeFloorContentBBox([edgeTable], [])
+    expect(bbox.maxX).toBeGreaterThan(FLOOR_VIEWBOX.width) // 前提成立：內容真的超出畫布
+    const vb = computeFloorViewBox([edgeTable], [])
+    // 硬底線：viewBox 必須完整包住這張桌（不能為了夾回畫布而裁掉它）
+    expect(vb.x).toBeLessThanOrEqual(bbox.minX)
+    expect(vb.y).toBeLessThanOrEqual(bbox.minY)
+    expect(vb.x + vb.width).toBeGreaterThanOrEqual(bbox.maxX)
+    expect(vb.y + vb.height).toBeGreaterThanOrEqual(bbox.maxY)
+  })
+
+  it('極端情況：桌位座標整個落在原畫布外（如資料匯入/舊資料座標未經編輯器夾限），夾限不得讓桌子從畫面上消失', () => {
+    const farTable = { x: 1500, y: 300, w: 80, h: 75, rotation: 0 }
+    const vb = computeFloorViewBox([farTable], [])
+    // 桌子完整落在算出的 viewBox 內：右緣可見（不是被裁到 1200 外看不到）
+    expect(vb.x).toBeLessThanOrEqual(1500)
+    expect(vb.x + vb.width).toBeGreaterThanOrEqual(1500 + 80)
+    expect(vb.y).toBeLessThanOrEqual(300)
+    expect(vb.y + vb.height).toBeGreaterThanOrEqual(300 + 75)
+  })
+})
+
+describe('FloorMap 元件：自動裁切邊界情況（無桌無設施 fallback）', () => {
+  it('該樓層完全沒有桌也沒有設施 → viewBox 退回 FLOOR_VIEWBOX，不丟例外、不產生 NaN', () => {
+    const html = renderToStaticMarkup(
+      <FloorMap floor="1F" tables={[]} fixtures={{ '1F': [], '2F': [] }} onSelectTable={() => {}} />
+    )
+    expect(html).toContain(`viewBox="0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}"`)
+    expect(html).not.toContain('NaN')
+  })
+
+  it('其中一樓層有桌、另一樓層沒有：查詢空樓層仍 fallback（不會誤用另一樓層的 bbox）', () => {
+    const tables = [{ number: '201', capacity: 6, floor: '2F', x: 360, y: 162, w: 90, h: 75, rotation: 0, zoneId: null, isActive: true, outage: null, status: 'vacant', currentBookingId: null, currentRef: null, seatedAt: null, mergedWith: null, blockReason: null, updatedAt: null }]
+    const html = renderToStaticMarkup(
+      <FloorMap floor="1F" tables={tables} fixtures={{ '1F': [], '2F': [] }} onSelectTable={() => {}} />
+    )
+    expect(html).toContain(`viewBox="0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}"`)
+  })
+
+  it('有內容時 viewBox 不是寫死的 0 0 1200 800（真的有依內容裁切）', () => {
+    const tables = [{ number: '101', capacity: 4, floor: '1F', x: 120, y: 150, w: 80, h: 75, rotation: 0, zoneId: null, isActive: true, outage: null, status: 'vacant', currentBookingId: null, currentRef: null, seatedAt: null, mergedWith: null, blockReason: null, updatedAt: null }]
+    const html = renderToStaticMarkup(
+      <FloorMap floor="1F" tables={tables} fixtures={{ '1F': [], '2F': [] }} onSelectTable={() => {}} />
+    )
+    expect(html).not.toContain(`viewBox="0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}"`)
+    // 單桌 80x75 + 60 留白：x=60 y=90 width=200 height=195
+    expect(html).toContain('viewBox="60 90 200 195"')
   })
 })
 

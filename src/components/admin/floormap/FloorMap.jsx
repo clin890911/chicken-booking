@@ -22,6 +22,114 @@ export function isArriveEligible(table, booking, now = Date.now()) {
   return overdue >= -ARRIVE_WINDOW_BEFORE_MIN && overdue <= ARRIVE_WINDOW_AFTER_MIN
 }
 
+// === 桌況圖自動裁切（2026-08）===
+// 店主反饋「桌況圖看起來有點小，自動就好、不要手動調」：1F 只用了畫布 41% 的面積
+// （右側大片空白），iPad 上一張六人桌只畫成 ~42×35 CSS px、桌號字實測僅 13.5px。
+// 解法：viewBox 不再寫死 1200x800，改依「當前樓層」桌位＋設施的實際 bounding box
+// 動態裁切，每個樓層各自算（不能用聯集——2F 本來就佔滿畫布，聯集會讓 1F 拿不到
+// 放大效果）。★ 只用在 FloorMap（現場/規劃/統一佔用圖），LayoutEditor 仍固定用
+// FLOOR_VIEWBOX——編輯器需要看到完整 1200×800 空間才能往空白處新增桌位/設施，
+// 若編輯器也裁切，拖桌子時裁切框會即時跳動，體感很差，見該檔案內註解。
+const AUTOFIT_PADDING = 60 // 四周留白（user unit）：label 型設施是 0 寬高錨點，實際文字
+  // 寬度不在資料裡（fontSize 15 依字數往右畫），沒有留白會被裁掉；此值已依現有設施文字
+  // （「玻璃門入口」「冷藏自選冰箱」直書、「結帳口」等）實測夠用。
+
+// 依「單一樓層」的桌位＋設施算內容 bounding box（含桌位旋轉，避免斜擺的桌被裁到）。
+// 無桌無設施（floor 不存在任何內容）時回傳 null，由呼叫端 fallback 回 FLOOR_VIEWBOX。
+// 純函式抽出方便單測。
+export function computeFloorContentBBox(floorTables, fixtureItems) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const expand = (px, py) => {
+    if (px < minX) minX = px
+    if (py < minY) minY = py
+    if (px > maxX) maxX = px
+    if (py > maxY) maxY = py
+  }
+  ;(floorTables || []).forEach(t => {
+    const x = Number(t.x) || 0
+    const y = Number(t.y) || 0
+    const w = Number(t.w) || 0
+    const h = Number(t.h) || 0
+    const rot = Number(t.rotation) || 0
+    if (!rot) {
+      expand(x, y)
+      expand(x + w, y + h)
+      return
+    }
+    // 旋轉桌：算旋轉後四角的 AABB（與 TableShape 同一套「繞中心轉」公式），
+    // 避免斜擺的桌被算漏、實際渲染時超出裁切框。
+    const cx = x + w / 2
+    const cy = y + h / 2
+    const rad = (rot * Math.PI) / 180
+    const cos = Math.cos(rad)
+    const sin = Math.sin(rad)
+    ;[[x, y], [x + w, y], [x, y + h], [x + w, y + h]].forEach(([px, py]) => {
+      const dx = px - cx
+      const dy = py - cy
+      expand(cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
+    })
+  })
+  ;(fixtureItems || []).forEach(f => {
+    const x = Number(f.x) || 0
+    const y = Number(f.y) || 0
+    const w = Number(f.w) || 0
+    const h = Number(f.h) || 0
+    expand(x, y)
+    expand(x + w, y + h)
+  })
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+    return null
+  }
+  return { minX, minY, maxX, maxY }
+}
+
+// 2026-08 二版：夾限下界——viewBox 不得比「今天線上」的原始畫布更差。
+// 店主拍板：1F 內容遠小於畫布，裁切生效、照放大；但 2F 原本內容就已經佔畫布 91–93%，
+// bbox＋固定留白會讓總尺寸（1212×862）「超過」原畫布 1200×800，preserveAspectRatio
+// 反而把 2F 整體再縮小約 1%——不是本來要的「放大」，等於比今天更差。解法：把 bbox＋留白
+// 的四個邊界，各自朝「原始畫布」BASE_CANVAS（0,0,1200,800）收攏，但收攏的優先序低於
+// 「不裁掉真實內容」——也就是說,BASE_CANVAS 只是收攏的下界目標,不是絕對上限。
+// 為什麼不能無條件夾死在 0/0/1200/800：桌位佈局編輯器的「拖曳移動」雖然會把 x/y 夾在
+// 0~1200/0~800 內（LayoutEditor.jsx:285-286），但「旋轉」只改 rotation、不重新夾 x/y
+// （LayoutEditor.jsx:343），所以貼著畫布邊緣的桌轉個角度，AABB 四角完全可能超出 1200×800
+// ——這不是理論上的極端值，是現有編輯器功能就能做到的真實狀態。若無條件夾死在畫布邊界，
+// 這張桌會被裁掉、比不裁切還糟。因此規則是：
+//   最終邊界 = 「盡量收攏到 BASE_CANVAS」，但絕不收得比實際內容（bbox）更緊。
+const BASE_CANVAS = { minX: 0, minY: 0, maxX: FLOOR_VIEWBOX.width, maxY: FLOOR_VIEWBOX.height }
+
+function clampPaddedToBaseCanvas(padded, bbox) {
+  return {
+    // 左/上緣：往 BASE_CANVAS 的 0 收攏，但不得收到比內容本身（bbox.minX/minY）更靠右/下
+    minX: Math.min(bbox.minX, Math.max(padded.minX, BASE_CANVAS.minX)),
+    minY: Math.min(bbox.minY, Math.max(padded.minY, BASE_CANVAS.minY)),
+    // 右/下緣：往 BASE_CANVAS 的 1200/800 收攏，但不得收到比內容本身（bbox.maxX/maxY）更靠左/上
+    maxX: Math.max(bbox.maxX, Math.min(padded.maxX, BASE_CANVAS.maxX)),
+    maxY: Math.max(bbox.maxY, Math.min(padded.maxY, BASE_CANVAS.maxY)),
+  }
+}
+
+// 依 bbox 加固定留白算出 viewBox，並夾限不得比原始 FLOOR_VIEWBOX 更差（見上方 BASE_CANVAS
+// 說明）。該樓層完全無內容（bbox 算不出來）時退回原本的 FLOOR_VIEWBOX，避免 NaN／0 寬高。
+export function computeFloorViewBox(floorTables, fixtureItems) {
+  const bbox = computeFloorContentBBox(floorTables, fixtureItems)
+  if (!bbox) {
+    return { x: 0, y: 0, width: FLOOR_VIEWBOX.width, height: FLOOR_VIEWBOX.height }
+  }
+  const padded = {
+    minX: bbox.minX - AUTOFIT_PADDING,
+    minY: bbox.minY - AUTOFIT_PADDING,
+    maxX: bbox.maxX + AUTOFIT_PADDING,
+    maxY: bbox.maxY + AUTOFIT_PADDING,
+  }
+  const c = clampPaddedToBaseCanvas(padded, bbox)
+  return {
+    x: c.minX,
+    y: c.minY,
+    width: c.maxX - c.minX,
+    height: c.maxY - c.minY,
+  }
+}
+
 // 渲染樓層設施（醬料台/出菜口/結帳口/冰箱/樓梯/洗手間…）— 純標示、不可點選。
 // items 由 FloorMap 解析（settings.floorPlan.fixtures 優先，fallback 預設 FIXTURES）。
 function FixtureLayer({ items = [] }) {
@@ -115,7 +223,10 @@ export default function FloorMap({
   }, [bookings])
 
   // 設施：settings.floorPlan.fixtures 優先，未設定 fallback 程式內預設 FIXTURES。
-  const fixtureItems = (fixtures && fixtures[floor]) || FIXTURES?.[floor] || []
+  const fixtureItems = useMemo(
+    () => (fixtures && fixtures[floor]) || FIXTURES?.[floor] || [],
+    [fixtures, floor]
+  )
   // 分區色解析：zoneId → color（無分區回 null）
   const zoneColorOf = useMemo(() => {
     const m = {}
@@ -123,14 +234,20 @@ export default function FloorMap({
     return (zoneId) => (zoneId && m[zoneId]) || null
   }, [zones])
 
+  // 自動裁切 viewBox：每個樓層各自依當前內容算，切樓層/改佈局都會重算。
+  const viewBox = useMemo(
+    () => computeFloorViewBox(floorTables, fixtureItems),
+    [floorTables, fixtureItems]
+  )
+
   return (
     <svg
-      viewBox={`0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}`}
+      viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
       preserveAspectRatio="xMidYMid meet"
       className="w-full h-full"
     >
-      {/* 樓層標籤 */}
-      <text x={20} y={36} fontSize={28} fontWeight={800} fill="#3a2e26" opacity={0.15}>
+      {/* 樓層標籤：座標跟著 viewBox 原點走（裁切後 viewBox 原點不再固定是 0,0） */}
+      <text x={viewBox.x + 20} y={viewBox.y + 36} fontSize={28} fontWeight={800} fill="#3a2e26" opacity={0.15}>
         {floor === '1F' ? '1F · 主用餐區' : '2F · 用餐區'}
       </text>
 
