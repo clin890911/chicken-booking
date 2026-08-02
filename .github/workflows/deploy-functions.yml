@@ -8,6 +8,33 @@ name: Deploy Cloud Functions
 #
 # 觸發：main 上動到 functions/** 或 firebase.json 時自動跑；也可在 Actions 頁手動觸發。
 # 只部署 functions，不碰 Firestore 規則（規則變更風險不同，維持手動）。
+#
+# ── 部署帳戶需要的設定（2026-08 首次實際上線時逐一踩出來的，別再重試一遍）──
+#
+# secret：FIREBASE_SERVICE_ACCOUNT = 服務帳戶 JSON 金鑰全文
+#         （Settings → Secrets and variables → Actions）
+#
+# 該服務帳戶需要這 9 個角色。本專案是 Gen 2 函式（firebase-functions/v2），實體是 Cloud Run、
+# 要先經 Cloud Build 打包、映像檔進 Artifact Registry、暫存放 Cloud Storage，
+# 且程式碼用 defineSecret 宣告了 Telegram/LINE 三把金鑰要從 Secret Manager 綁定：
+#   roles/firebase.admin              CLI 讀專案設定
+#   roles/cloudfunctions.admin        建立/更新函式
+#   roles/run.admin                   Gen2 函式本體是 Cloud Run 服務
+#   roles/cloudbuild.builds.editor    Gen2 部署要 build 容器
+#   roles/artifactregistry.admin      映像檔存放
+#   roles/iam.serviceAccountUser      以執行期服務帳戶身分部署
+#   roles/secretmanager.admin         綁定 defineSecret 宣告的金鑰
+#   roles/storage.admin               Cloud Build 暫存 bucket
+#   roles/cloudscheduler.admin        ★ 排程函式（onSchedule）用。cloudfunctions.admin
+#                                       **不包含**它，少了這個會出現「Failed to upsert
+#                                       schedule function X」——HTTP 函式全部成功、只有
+#                                       dailyBackup / notificationHeartbeat /
+#                                       retryNotifications 三支失敗。
+#
+# 另需由專案擁有者手動啟用一次（部署帳戶刻意不給 serviceusage.serviceUsageAdmin，
+# 否則它能開啟專案裡任何 Google 服務，權限過大）：
+#   cloudbilling.googleapis.com  — CLI 會查帳單狀態確認專案在 Blaze 方案
+#   https://console.cloud.google.com/apis/library/cloudbilling.googleapis.com
 
 on:
   push:
@@ -31,9 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22' # 對齊 functions/package.json engines
           cache: npm
