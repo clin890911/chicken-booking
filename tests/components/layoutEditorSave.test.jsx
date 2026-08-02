@@ -52,7 +52,7 @@ describe('LayoutEditor：儲存要 await 雲端推送結果', () => {
   // 「返回」按鈕文字固定叫「返回」，「重設」按鈕會觸發 confirmDialog（已 mock 為必定同意）
   // 讓 isDirty 變 true，不必真的模擬拖拉桌位的 pointer 事件幾何運算。
   const makeDirty = async () => {
-    const resetBtn = findButton('重設預設')
+    const resetBtn = findButton('重設本樓層預設')
     await act(async () => { resetBtn.click(); await flushMicrotasks() })
   }
 
