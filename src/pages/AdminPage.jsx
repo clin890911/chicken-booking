@@ -123,7 +123,9 @@ export default function AdminPage() {
     setPendingRosterPhone(phone)
     navTo('roster')
   }
-  // 名冊 →「新增訂位」：帶入顧客電話/姓名，切到訂位頁（BookingsView 收到 openAdd 跳「新增」子分頁）
+  // 名冊 →「新增訂位」：帶入顧客電話/姓名，切到訂位頁（BookingsView 收到 openAdd 跳「新增」子分頁）。
+  // 現場頁「＋ 新增今日訂位」也走這條（傳 null＝不預填顧客）：新增表單的日期本來就預設今天，
+  // 不必另做一套表單，也不會與名冊帶入的預填邏輯分岔。
   const openAddBooking = (c) => {
     setAddPrefill({ phone: c?.phone || '', name: c?.name || '', source: 'phone', seq: Date.now() })
     setTab('bookings')
@@ -188,6 +190,7 @@ export default function AdminPage() {
                 <OperationsView
                   pendingAssign={pendingAssign}
                   onAssignDone={handleAssignDone}
+                  onAddBooking={() => openAddBooking(null)}
                 />
               )}
               {tab === 'planning' && (

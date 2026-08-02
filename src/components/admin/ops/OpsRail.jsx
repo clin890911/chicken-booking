@@ -13,6 +13,7 @@ import FastWalkInPanel from './FastWalkInPanel'
 // 選中桌時整欄被 TableDrawer 取代（由 OperationsView 控制），籤狀態保留在外層不重設。
 export default function OpsRail({
   activeTab, onTabChange, onClickBooking, onAssignTable, onSeatWaitlist, onFocusTable, onReseatBatch,
+  onAddBooking,
   // 帶位籤（v3）：桌與人數的真相在 OperationsView，這裡純轉發給 FastWalkInPanel
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
   walkinWarning, onWalkinSeat, lastParty,
@@ -91,7 +92,20 @@ export default function OpsRail({
       ) : (
         <div className="flex-1 min-h-0 overflow-y-auto p-4">
           {effective === 'upcoming' && (
-            <UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} />
+            <>
+              {/* 現場接到電話要加今天的訂位時，原本得跳去「訂位 → 新增」子分頁才找得到入口。
+                  這顆按鈕直接把人帶過去（新增表單的日期本來就預設今天），少繞兩層。
+                  無 booking.create 權限（廚房唯讀）不渲染，與卡片動作鈕同慣例。 */}
+              {onAddBooking && (
+                <button
+                  onClick={onAddBooking}
+                  className="w-full mb-3 min-h-[44px] rounded-lg border-2 border-dashed border-chicken-red/40 text-chicken-red text-sm font-bold hover:bg-chicken-red/5"
+                >
+                  ＋ 新增今日訂位
+                </button>
+              )}
+              <UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} />
+            </>
           )}
           {effective === 'waitlist' && (
             <WaitlistPanel onSeatWaitlist={onSeatWaitlist} />

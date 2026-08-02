@@ -286,6 +286,58 @@ export function seatWaitlist(waitId, tableNumber) {
   return { ok: true, booking, tableNumber }
 }
 
+// === 候位 → 多桌入座（併桌）===
+// 候位大組（人數超過任何單桌容量，例如 9 位但只剩幾張 4 人桌）→ 一筆 walk-in booking 佔多張桌：
+// tableNumbers[0]=主桌，其餘=額外桌，全部桌 dining + currentBookingId 指向同一 booking。
+// 補的缺口：過去候位入座只有單桌路徑，湊不到單桌就只回「目前無符合容量的空桌」，
+// 明明併兩三張小桌就坐得下（訂位指派早就有併桌路徑，候位沒有）。
+// 與 walkInSeatMulti / assignBookingTablesMulti 同口徑：每張桌須存在/今日可用/空桌、
+// 合計容量≥人數、且同一樓層。單桌時退回 seatWaitlist（維持單一路徑）。
+export function seatWaitlistMulti(waitId, tableNumbers) {
+  const nums = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
+  if (nums.length === 0) return { ok: false, error: '請至少選一張桌' }
+  if (nums.length === 1) return seatWaitlist(waitId, nums[0])
+
+  const wait = waitlistService.getById(waitId)
+  if (!wait) return { ok: false, error: '候位記錄不存在' }
+
+  let totalCap = 0
+  const floors = new Set()
+  for (const n of nums) {
+    const t = tableService.getByNumber(n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(n) }
+    if (t.status !== 'vacant') return { ok: false, error: `${n} 目前不是空桌（${statusZh(t.status)}）` }
+    totalCap += Number(t.capacity) || 0
+    floors.add(t.floor)
+  }
+  // ★ 併桌必須同一樓層（一組客人不可能分坐兩層）——service 層硬擋，繞過 UI 也擋得住
+  if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
+  const guests = Number(wait.partySize) || 0
+  if (guests > totalCap) return { ok: false, error: `所選桌合計 ${totalCap} 席，不足 ${guests} 位` }
+
+  const [mainTable, ...extra] = nums
+  const booking = bookingService.create({
+    name: wait.name,
+    phone: wait.phone,
+    guests,
+    date: todayStr(),
+    timeSlot: nowTimeSlot(),
+    source: 'walkin',
+    status: 'arrived',
+    assignedTableId: mainTable,
+    extraTableIds: extra,
+    lineUserId: wait.lineUserId,
+    createdBy: 'waitlist',
+    notes: { text: wait.notes || '' },
+  })
+  nums.forEach(n => tableService.seatTable(n, booking.id))
+  // 候位記錄只記主桌（欄位是單數 assignedTableNumber）；完整桌組在 booking 上，
+  // 釋出/復原都以 booking 為準（見 reseatBookingTables / bookingTableNumbers）。
+  waitlistService.seat(waitId, mainTable)
+  return { ok: true, booking, tableNumbers: nums }
+}
+
 // === 直接入座（外場手動現場開檯）===
 // 用於：沒訂位、沒取候位的散客直接入座
 export function walkInSeat(tableNumber, guestData) {
