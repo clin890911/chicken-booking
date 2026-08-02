@@ -1,0 +1,81 @@
+name: Deploy Cloud Functions
+
+# 後端（Cloud Functions）自動部署。
+#
+# 為什麼需要這支：前端由 Zeabur 接 GitHub 自動 build，後端一直是手動 firebase deploy。
+# 兩邊不同步就會出現「前端更新了、後端 RBAC 還是舊的 → 操作一直被 403 擋」這類難查的問題
+# （#95 訂位專員帶位跳雲端同步失敗即是一例）。
+#
+# 觸發：main 上動到 functions/** 或 firebase.json 時自動跑；也可在 Actions 頁手動觸發。
+# 只部署 functions，不碰 Firestore 規則（規則變更風險不同，維持手動）。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - 'firebase.json'
+      - '.github/workflows/deploy-functions.yml'
+  workflow_dispatch:
+
+# 同時只跑一個部署，避免兩次 push 交錯把舊版蓋回去。
+concurrency:
+  group: deploy-functions
+  cancel-in-progress: false
+
+env:
+  FIREBASE_PROJECT: chicken-booking-tw
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22' # 對齊 functions/package.json engines
+          cache: npm
+
+      # 部署前先跑根目錄單元測試：functions/lib 的純邏輯（RBAC 權限矩陣、資料投影、
+      # 通知 diff）都在這裡測。測不過就不該上線。
+      - name: Install root deps
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+
+      # firebase deploy 會實際載入 functions 程式碼來探索匯出的函式，所以本地要有 node_modules。
+      - name: Install functions deps
+        run: npm ci
+        working-directory: functions
+
+      - name: Syntax check
+        run: npm run lint
+        working-directory: functions
+
+      - name: Check deploy credentials
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::缺少 repo secret FIREBASE_SERVICE_ACCOUNT（Firebase 服務帳戶 JSON 金鑰全文）。"
+            echo "::error::設定路徑：Settings → Secrets and variables → Actions → New repository secret。"
+            exit 1
+          fi
+
+      - name: Write service account key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+
+      - name: Deploy functions
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        # 釘大版號：小版更新照吃，避免哪天 firebase-tools 出大版把部署弄壞。
+        run: npx --yes firebase-tools@^15 deploy --only functions --project "$FIREBASE_PROJECT" --non-interactive --force
+
+      # 金鑰檔在 runner 上是臨時檔，但明確刪掉，即使後續步驟失敗也不留在磁碟。
+      - name: Remove service account key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa.json"
