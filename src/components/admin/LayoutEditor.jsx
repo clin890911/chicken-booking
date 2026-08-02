@@ -531,16 +531,21 @@ export default function LayoutEditor({ open, onClose }) {
     }
     onClose?.()
   }
+  // 🔴 只重設「編輯器當前顯示的樓層」：舊版一次重設全部 52 桌＋兩層設施/底圖，
+  // 在 2F 按重設會把使用者剛編好、還沒存的 1F 也整個蓋掉。分區（zoneId）不分樓層存放
+  // （localZones 是單一扁平陣列，一個分區可能同時被兩層桌子引用），若整個清空一樣會
+  // 波及沒在編輯的樓層，因此重設不動 localZones——回到預設的當前樓層桌位 zoneId 本來
+  // 就是 null，視覺上等同該樓層已清分區，其他樓層的分區指派原封不動。
   const handleReset = async () => {
-    const ok = await confirmDialog('將桌位、設施、分區、底圖全部重設為預設值？目前所有變更會被覆蓋。', { title: '重設預設佈局', danger: true })
+    const ok = await confirmDialog(`將本樓層（${floor}）桌位與設施重設為預設值？目前變更會被覆蓋，其他樓層不受影響。`, { title: '重設本樓層預設佈局', danger: true })
     if (!ok) return
-    setLocalTables(INITIAL_TABLES.map(t => ({ ...t })))
-    setLocalFixtures(deepFixtures(FIXTURES))
-    setLocalZones([])
-    setLocalBg({ ...DEFAULT_BACKGROUND_IMAGES })
+    const defaultsForFloor = INITIAL_TABLES.filter(t => t.floor === floor).map(t => ({ ...t }))
+    setLocalTables(list => [...list.filter(t => t.floor !== floor), ...defaultsForFloor])
+    setLocalFixtures(fx => ({ ...fx, [floor]: deepFixtures(FIXTURES)[floor] }))
+    setLocalBg(bg => ({ ...bg, [floor]: DEFAULT_BACKGROUND_IMAGES[floor] ?? null }))
     setSelectedNumber(null); setSelectedNumbers(new Set()); setSelectedFixtureId(null)
     setIsDirty(true)
-    toast.info('已載入預設佈局，記得按儲存')
+    toast.info(`已載入 ${floor} 預設佈局，記得按儲存`)
   }
 
   // === 新增桌位 ===
@@ -603,7 +608,7 @@ export default function LayoutEditor({ open, onClose }) {
                 {isDirty && <span className="ml-2 px-1.5 py-0.5 bg-chicken-yellow text-chicken-brown rounded text-[10px] font-black">未儲存</span>}
               </p>
             </div>
-            <button onClick={handleReset} disabled={isSaving} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">↺ 重設預設</button>
+            <button onClick={handleReset} disabled={isSaving} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">↺ 重設本樓層預設</button>
             <button onClick={handleCancel} disabled={isSaving} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">返回</button>
             <button onClick={handleSave} disabled={!isDirty || isSaving}
                     className={`px-4 py-1.5 min-h-[44px] text-xs font-bold rounded-lg ${isDirty && !isSaving ? 'bg-chicken-green text-white hover:opacity-90' : 'bg-white/10 text-white/40 cursor-not-allowed'}`}>

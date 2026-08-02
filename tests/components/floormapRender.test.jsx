@@ -143,12 +143,13 @@ describe('computeFloorViewBox：夾限下界（不得比原始 FLOOR_VIEWBOX 更
     expect(vb.y + vb.height).toBeLessThanOrEqual(FLOOR_VIEWBOX.height)
   })
 
-  it('2F 型（內容＋留白超出畫布）：被夾回原始畫布邊界內，不得比今天線上的畫面更差', () => {
+  it('2F 型（內容＋留白超出畫布下緣）：被夾回原始畫布邊界內，不得比今天線上的畫面更差', () => {
     const vb = computeFloorViewBox(floorTablesOf('2F'), FIXTURES['2F'])
-    // 右緣/下緣被夾到畫布邊界（1200/800）；左緣本來就在畫布內（28≥0）不需要夾，
-    // 所以不是整組歸零回 0,0,1200,800，而是逐邊各自收攏——比今天（1200×800）稍微更緊，
-    // 這仍然符合「不比原始更差」（更差＝比今天更小），只是沒有到剛好等於今天。
-    expect(vb).toEqual({ x: 28, y: 0, width: 1172, height: 800 })
+    // 2026-08 版本 B（區塊間距拉開到能分島，見 data/tables.js 開頭註解）：內容 bbox
+    // 從 (90,10)-(890,795)：上緣留白（10-60=-50）需夾回 0；下緣留白（795+60=855）
+    // 超出畫布 800 需夾回 800；左右緣留白都還在畫布內（30、950）不需要夾。
+    // 仍然是「逐邊各自收攏」，不是整組歸零回 0,0,1200,800。
+    expect(vb).toEqual({ x: 30, y: 0, width: 920, height: 800 })
     // 硬底線：整個結果必須落在原始畫布邊界內（這才是「不比今天差」的可驗證定義）
     expect(vb.x).toBeGreaterThanOrEqual(0)
     expect(vb.y).toBeGreaterThanOrEqual(0)
