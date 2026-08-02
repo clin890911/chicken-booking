@@ -56,7 +56,12 @@ test('訂位脈動：遲到且已指派的訂位可直接「客人到了」入�
   // 點「客人到了」→ 直接入座成功（status→arrived、桌→用餐中），卡片離開脈動
   await seatBtn.click()
   await expect(page.getByText(/遲到客 已入座 113/)).toBeVisible()
-  await expect(page.getByText('遲到客')).toHaveCount(0)
+  // 「卡片離開脈動」不能用 getByText('遲到客') 掃全頁來驗：成功 toast 本身就是
+  // 「✅ 遲到客 已入座 113」，也含這三個字，於是永遠數不到 0（這條斷言長期是紅的）。
+  // 改驗「過時未到區整段消失」——該區只在還有過時未到訂位時才渲染，等價於卡片已離開，
+  // 且這句文案不會出現在任何 toast。順帶確認入座鈕也跟著消失。
+  await expect(page.getByText('⚠ 過時未到（1 組）— 請聯絡或標記')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /客人到了/ })).toHaveCount(0)
 })
 
 test('訂位脈動：入座撞到團體保留桌時跳確認，確認後仍可入座', async ({ page }) => {
