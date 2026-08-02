@@ -61,7 +61,7 @@ export default function GroupEditorStage({
   onBack, onSaved, onDeleted,
   reserveExisting, createGroup, removeGroup,
   addAgency, addGuide,
-  rescheduleFrom = null, initialStep = 1,
+  rescheduleFrom = null, initialStep = 1, initialBatchId = null,
 }) {
   const toast = useToast()
   // 權限門的用意不只是「不給做」，更是防止越權寫入毒化整台裝置的同步：
@@ -72,9 +72,14 @@ export default function GroupEditorStage({
   const { fixtures, zones } = useBooking()
 
   const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(initialGroup)))
-  // 改期進入時直接落在「圈選座位」頁（日期已由改期 modal 選定，缺的只有重新圈桌）
+  // 改期 / 詳情頁「改桌」進入時直接落在「圈選座位」頁（缺的只有重新圈桌）
   const [step, setStep] = useState(initialStep)
-  const [activeBatchId, setActiveBatchId] = useState(draft.batches?.[0]?.id || null)
+  // 從某梯次的「改桌」進來時預選那一梯，省掉「畫面在改哪一梯？」的猜測
+  const [activeBatchId, setActiveBatchId] = useState(
+    () => (initialBatchId && draft.batches?.some(b => b.id === initialBatchId))
+      ? initialBatchId
+      : (draft.batches?.[0]?.id || null),
+  )
   const [floor, setFloor] = useState('1F')
   const [busy, setBusy] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)

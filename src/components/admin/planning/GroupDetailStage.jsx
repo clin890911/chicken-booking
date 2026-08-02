@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
+import { useAuth } from '../../../contexts/AuthContext'
 import { Button } from '../../ui'
 import FloorMap from '../floormap/FloorMap'
 import GroupSheet from '../group/GroupSheet'
@@ -21,11 +22,17 @@ const QUICK_NEEDS = [
   { key: 'wheelchair', label: '輪椅', cls: 'bg-violet-100 text-violet-700' },
 ]
 
-// 團單詳情（唯讀確認頁）：點團卡 / 儲存後落地於此。
-// 領位與備餐視角的彙整 + 回傳單輸出；要改內容才進編輯精靈（onEdit）。
-export default function GroupDetailStage({ group, tables, settings, onBack, onEdit, onReschedule }) {
+// 團單詳情（確認頁）：點團卡 / 儲存後落地於此。
+// 領位與備餐視角的彙整 + 回傳單輸出；改資料進編輯精靈第一頁（onEdit），
+// 改桌則由每個梯次與座位示意上的「改桌」直達精靈的圈桌頁（onEditTables(batchId)）——
+// 「在詳情頁發現圈錯桌」是最常見的路徑，不該讓人自己回想要去哪一頁改。
+export default function GroupDetailStage({ group, tables, settings, onBack, onEdit, onEditTables, onReschedule }) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const { fixtures, zones } = useBooking()
+  const { can } = useAuth()
+  // 唯讀角色（廚房）改了只會寫進本機、推雲被整包剔除 → 本機與雲端默默不一致，故不給入口。
+  const canEdit = can('group.update')
+  const editTables = (batchId) => onEditTables?.(typeof batchId === 'string' ? batchId : null)
 
   const st = STATUS_LABEL[group.status] || STATUS_LABEL.planned
   // 可改期：僅限尚未入座的團（planned/confirmed）。入座後 status→arrived，桌帶 currentRef，
@@ -57,12 +64,15 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
       <div className="bg-white rounded-xl border border-chicken-brown/10 p-3 space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <button onClick={onBack} className="text-sm font-bold text-chicken-brown/70 hover:text-chicken-brown">← 返回當日總覽</button>
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5 flex-wrap justify-end">
             <Button variant="secondary" onClick={() => setSheetOpen(true)}>🖨 回傳單</Button>
-            {canReschedule && onReschedule && (
+            {canEdit && canReschedule && onReschedule && (
               <Button variant="secondary" onClick={onReschedule}>📅 改期</Button>
             )}
-            <Button onClick={onEdit}>✏️ 編輯</Button>
+            {canEdit && onEditTables && (
+              <Button variant="secondary" onClick={() => editTables(null)}>🪑 改圈桌</Button>
+            )}
+            {canEdit && <Button onClick={() => onEdit?.()}>✏️ 編輯</Button>}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -90,9 +100,12 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
         </div>
       </div>
 
-      {/* 梯次與桌位 */}
+      {/* 梯次與桌位（每列自帶改桌入口：發現這梯排錯桌，就在這一列改） */}
       <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
-        <h3 className="font-bold text-chicken-brown text-sm mb-2">梯次與桌位</h3>
+        <div className="flex items-baseline justify-between gap-2 mb-2">
+          <h3 className="font-bold text-chicken-brown text-sm">梯次與桌位</h3>
+          {canEdit && onEditTables && <span className="text-[11px] text-chicken-brown/45">排錯位子？點該梯次的「改桌」</span>}
+        </div>
         <div className="space-y-2">
           {batches.map(b => {
             const sea = seatingForSlot(settings, b.timeSlot)
@@ -111,6 +124,13 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">未圈桌</span>
+                )}
+                {canEdit && onEditTables && (
+                  <button onClick={() => editTables(b.id)}
+                    title={nums.length ? '改這梯次的圈桌' : '為這梯次圈桌'}
+                    className="ml-auto shrink-0 px-2.5 py-1 rounded-lg text-xs font-black border-2 border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-colors">
+                    {nums.length ? '↔ 改桌' : '＋ 圈桌'}
+                  </button>
                 )}
                 {b.note && <span className="text-xs text-chicken-brown/55 w-full">📝 {b.note}</span>}
               </div>
@@ -174,14 +194,16 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
         <div className="bg-white rounded-xl border border-chicken-brown/10 p-3">
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
             <h3 className="font-bold text-chicken-brown text-sm">座位示意</h3>
-            {floorsWithTables.length > 1 && (
-              <div className="flex gap-1.5">
-                {floorsWithTables.map(f => (
-                  <button key={f} onClick={() => setFloor(f)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${activeFloor === f ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>{f}</button>
-                ))}
-              </div>
-            )}
+            <div className="flex gap-1.5 flex-wrap">
+              {floorsWithTables.length > 1 && floorsWithTables.map(f => (
+                <button key={f} onClick={() => setFloor(f)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${activeFloor === f ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>{f}</button>
+              ))}
+              {canEdit && onEditTables && (
+                <button onClick={() => editTables(null)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-black border-2 border-indigo-600 bg-indigo-600 text-white">✏️ 調整圈桌</button>
+              )}
+            </div>
           </div>
           <div className="rounded-lg overflow-hidden border border-chicken-brown/5 min-h-[320px]" style={{ background: '#faf8f5' }}>
             <FloorMap
@@ -197,7 +219,9 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
               onSelectTable={() => {}}
             />
           </div>
-          <div className="text-center text-[11px] text-chicken-brown/45 mt-2">藍紫色＝本團保留桌 · 要調整圈桌請點右上「✏️ 編輯」</div>
+          <div className="text-center text-[11px] text-chicken-brown/45 mt-2">
+            藍紫色＝本團保留桌{canEdit && onEditTables ? ' · 排錯桌就點上方「✏️ 調整圈桌」直接改' : ''}
+          </div>
         </div>
       )}
 

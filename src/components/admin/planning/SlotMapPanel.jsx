@@ -2,21 +2,37 @@ import { useMemo, useState, useEffect } from 'react'
 import FloorMap from '../floormap/FloorMap'
 import StatsCard from '../StatsCard'
 import { useBooking } from '../../../contexts/BookingContext'
+import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../ui/Toast'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
 import { resolveSlotOccupancy, isSeatingClosed, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 
+// 這筆散客訂位目前佔到的桌（主桌 + 併桌的額外桌），去重去空。
+function bookingTablesOf(b) {
+  return [...new Set([b?.assignedTableId, ...(b?.extraTableIds || [])].filter(Boolean).map(String))]
+}
+
 // 排位地圖（自 SlotOverviewView 拆出、嵌入規劃主控台）：
 // 依「日期（受控 prop）+ 場次（內部 state）」呈現散客（暖色）×團客（冷色）佔位，
 // 支援「散客預先配桌」（只記 booking.assignedTableId，不動今日即時桌況）。
 // assignRequest（{ bookingId, seatingId }）：容器要求自動切場次並進入該散客的預配模式
-// （來源：當日總覽散客列「→ 配桌」、訂位頁未來日「指派桌位（預配）」跨頁導向）。
-// focusRequest（{ tableNumbers, seatingId, agencyName, batchLabel }）：時間軸點團 → 自動切場次/樓層
-// 並在那些桌畫白圈脈動，幫外場一眼定位「這團坐哪」。
-export default function SlotMapPanel({ date, assignRequest = null, onAssignHandled, focusRequest = null, onFocusHandled }) {
-  const { settings, bookings, groupReservations, tables, fixtures, zones, preassignBookingTable, preassignBookingTables, clearBookingPreassign } = useBooking()
+// （來源：當日總覽散客列「→ 配桌 / 換桌」、訂位頁未來日「指派桌位（預配）」跨頁導向）。
+//   ★ 已配桌的訂位也吃這個請求 → 進「改桌」模式（排錯位子要能當場改，不必先解除再重配）。
+// focusRequest（{ tableNumbers, seatingId, agencyName, batchLabel, groupId, batchId }）：時間軸點團
+// → 自動切場次/樓層並在那些桌畫白圈脈動，幫外場一眼定位「這團坐哪」；帶 groupId 時可就地改圈桌。
+// onEditGroupTables（{ groupId, batchId }）：地圖上發現團體圈錯桌 → 交給容器開團單編輯器的圈桌頁。
+export default function SlotMapPanel({
+  date, assignRequest = null, onAssignHandled, focusRequest = null, onFocusHandled,
+  onEditGroupTables = null,
+}) {
+  const { settings, bookings, groupReservations, tables, fixtures, zones, preassignBookingTables, clearBookingPreassign } = useBooking()
   const toast = useToast()
+  const { can } = useAuth()
+  // 唯讀角色（廚房）按下去只會寫進本機、推雲時被後端整包剔除 → 本機與雲端默默不一致。
+  // 與 UpcomingPanel 同慣例：沒權限就不給入口。
+  const canAssign = can('booking.assign')
+  const canEditGroup = can('group.update') && !!onEditGroupTables
 
   const seatings = Array.isArray(settings?.seatings) ? settings.seatings : []
   const [seatingId, setSeatingId] = useState(seatings[0]?.id || '')
@@ -34,15 +50,20 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     setFocus(null)
   }, [date])
 
-  // 消費 assignRequest：切場次 + 自動進預配模式（宣告在換日 reset 之後——mount 同輪執行時本 effect 勝出）
+  // 消費 assignRequest：切場次 + 自動進預配 / 改桌模式（宣告在換日 reset 之後——mount 同輪執行時本 effect 勝出）
   useEffect(() => {
     if (!assignRequest) return
     if (assignRequest.seatingId) setSeatingId(assignRequest.seatingId)
     const b = (bookings || []).find(x => x.id === assignRequest.bookingId)
-    if (b && !b.assignedTableId) {
+    if (b) {
+      const current = bookingTablesOf(b)
       setAssignBooking(b)
-      setAssignSelected([])
+      // 已有桌 → 改桌模式：現況先帶進選取（併桌時可直接加減桌），並把樓層切到原本坐的那層
+      setAssignSelected(current)
+      const cur = current.length ? (tables || []).find(t => String(t.number) === current[0]) : null
+      if (cur?.floor) setFloor(cur.floor)
       setSelectedTable(null)
+      setFocus(null)
     }
     onAssignHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -58,7 +79,13 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     setAssignBooking(null)
     setAssignSelected([])
     setSelectedTable(null)
-    setFocus(nums.length ? { tables: nums, agencyName: focusRequest.agencyName || '', batchLabel: focusRequest.batchLabel || '' } : null)
+    setFocus(nums.length ? {
+      tables: nums,
+      agencyName: focusRequest.agencyName || '',
+      batchLabel: focusRequest.batchLabel || '',
+      groupId: focusRequest.groupId || null,
+      batchId: focusRequest.batchId || null,
+    } : null)
     onFocusHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest])
@@ -71,22 +98,36 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     [tables, bookings, groupReservations, date, seating, settings],
   )
 
-  // 此日此場次「未配桌」的散客（供右側清單 + 預先配桌）
-  const unassignedWalkins = useMemo(() => {
+  // 此日此場次的所有散客（右側清單）：未配桌排前面（要處理的先看到），其餘依時間。
+  // 已配桌的也留在清單上——排錯位子時要能一眼找到那筆、直接改桌。
+  const seatingWalkins = useMemo(() => {
     if (!seating) return []
-    return (bookings || []).filter(b =>
-      b.date === date && b.timeSlot && !b.assignedTableId &&
-      !CAPACITY_EXCLUDED_STATUSES.includes(b.status) &&
-      seatingForSlot(settings, b.timeSlot)?.id === seating.id,
-    )
+    return (bookings || [])
+      .filter(b =>
+        b.date === date && b.timeSlot &&
+        !CAPACITY_EXCLUDED_STATUSES.includes(b.status) &&
+        seatingForSlot(settings, b.timeSlot)?.id === seating.id,
+      )
+      .sort((a, b) =>
+        (a.assignedTableId ? 1 : 0) - (b.assignedTableId ? 1 : 0) ||
+        String(a.timeSlot).localeCompare(String(b.timeSlot)),
+      )
   }, [bookings, date, seating, settings])
+  const unassignedWalkins = useMemo(() => seatingWalkins.filter(b => !b.assignedTableId), [seatingWalkins])
 
   const guestsNeeded = assignBooking ? (Number(assignBooking.guests) || 1) : 0
+  // 改桌模式：這筆訂位目前已佔的桌（進來時即帶入選取；地圖上算「自己的桌」可再選）
+  const assignCurrentTables = useMemo(() => bookingTablesOf(assignBooking), [assignBooking])
+  const isChangeMode = !!assignBooking && assignCurrentTables.length > 0
 
   // 預先配桌模式可選的空桌（此場次未被佔、該日可用）。
+  // ★ 自己目前佔的桌視同可選——不然改桌時原桌會被自己擋住，變成「得先解除再重配」。
   const freeTables = useMemo(() => {
     if (!assignBooking) return []
-    return (tables || []).filter(t => isTableUsableOnDate(t, date) && !byTable[t.number])
+    return (tables || []).filter(t =>
+      isTableUsableOnDate(t, date) &&
+      (!byTable[t.number] || byTable[t.number].booking?.id === assignBooking.id),
+    )
   }, [assignBooking, tables, byTable, date])
 
   // 有無單桌能容納整團 → 容量足夠的空桌（單桌即點即配）。
@@ -95,7 +136,8 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     [freeTables, guestsNeeded],
   )
   // 無單桌容納（大組）→ 進入併桌預配：累加選多張同層小桌湊滿席數。
-  const assignMulti = !!assignBooking && singleFitTables.length === 0
+  // 原本就併了多桌的訂位改桌時也走併桌流程（要能加減桌、確認後才落地）。
+  const assignMulti = !!assignBooking && (singleFitTables.length === 0 || assignCurrentTables.length > 1)
 
   // 地圖高亮：單桌模式只亮容量足夠的桌；多桌模式亮所有可選空桌（含小桌，供併桌）。
   const highlightTables = useMemo(() => {
@@ -109,14 +151,37 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     [assignSelected, tables],
   )
 
-  const startAssign = (booking) => { setAssignBooking(booking); setAssignSelected([]); setSelectedTable(null) }
+  // 開始配桌 / 改桌：已有桌的先把現況帶進選取，並把樓層切到原本坐的那層
+  const startAssign = (booking) => {
+    if (!canAssign) return toast.error('你的角色沒有配桌的權限，請聯絡店長')
+    const current = bookingTablesOf(booking)
+    setAssignBooking(booking)
+    setAssignSelected(current)
+    const cur = current.length ? (tables || []).find(t => String(t.number) === current[0]) : null
+    if (cur?.floor) setFloor(cur.floor)
+    setSelectedTable(null)
+    setFocus(null)
+  }
   const cancelAssign = () => { setAssignBooking(null); setAssignSelected([]) }
+
+  // 解除配桌（配桌 / 改桌模式中，或側欄選中桌時）：主桌與併桌額外桌一起清
+  const clearAssign = (booking) => {
+    if (!canAssign) return toast.error('你的角色沒有配桌的權限，請聯絡店長')
+    clearBookingPreassign(booking.id)
+    setAssignBooking(null)
+    setAssignSelected([])
+    setSelectedTable(null)
+    toast.info(`已解除 ${booking.name || '此訂位'} 的配桌`)
+  }
 
   const handleTableClick = (number) => {
     if (assignBooking) {
-      if (byTable[number]) return toast.error(`${number} 在此場次已被佔用`)
+      const occupant = byTable[number]
+      const isOwn = occupant?.booking?.id === assignBooking.id
+      if (occupant && !isOwn) return toast.error(`${number} 在此場次已被佔用`)
       const t = tables.find(x => x.number === number)
       if (!t || !isTableUsableOnDate(t, date)) return toast.error(`${number} 停用/維修中`)
+      if (!assignMulti && isOwn) return toast.info(`${assignBooking.name} 本來就在 ${number}，請點要換去的桌`)
       if (assignMulti) {
         // 併桌預配：點桌加入/移除（同層守門）；席數夠才在 banner 確認
         const isRemove = assignSelected.includes(number)
@@ -129,11 +194,15 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
         setAssignSelected(prev => isRemove ? prev.filter(n => n !== number) : [...prev, number])
         return
       }
-      // 單桌：容量足夠即點即配
+      // 單桌：容量足夠即點即配（改桌時同一步完成搬移，不必先解除）
       if (t.capacity < guestsNeeded) return toast.error(`${number} 容量不足（${t.capacity} < ${assignBooking.guests}）`)
-      preassignBookingTable(assignBooking.id, number)
-      toast.success(`✅ ${assignBooking.name} 已預先配到 ${number}`)
+      // 走多桌 API（單元素陣列）：舊資料若殘留 extraTableIds，改成單桌時一併清乾淨
+      preassignBookingTables(assignBooking.id, [number])
+      toast.success(isChangeMode
+        ? `✅ ${assignBooking.name} 已從 ${assignCurrentTables.join('、')} 改到 ${number}`
+        : `✅ ${assignBooking.name} 已預先配到 ${number}`)
       setAssignBooking(null)
+      setAssignSelected([])
       setSelectedTable(number)
       return
     }
@@ -143,13 +212,22 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
   // 併桌預配確認：席數夠 → 一筆 booking 記多桌（主桌 + 額外桌），不動今日桌況
   const confirmAssignMulti = () => {
     if (!assignBooking) return
+    if (!assignSelected.length) return toast.error('請先點地圖選桌')
     if (assignSelectedSeats < guestsNeeded) return toast.error(`還差 ${guestsNeeded - assignSelectedSeats} 席，請再加桌`)
     const picked = assignSelected
     preassignBookingTables(assignBooking.id, picked)
-    toast.success(`✅ ${assignBooking.name}（${guestsNeeded} 位）已併桌預配到 ${picked.join(' + ')}`)
+    toast.success(isChangeMode
+      ? `✅ ${assignBooking.name}（${guestsNeeded} 位）已改配到 ${picked.join(' + ')}`
+      : `✅ ${assignBooking.name}（${guestsNeeded} 位）已併桌預配到 ${picked.join(' + ')}`)
     setAssignBooking(null)
     setAssignSelected([])
     setSelectedTable(picked[0])
+  }
+
+  // 地圖上的團體圈錯桌 → 交給容器開團單編輯器的「圈選座位」頁（帶梯次）
+  const editGroupTables = (groupId, batchId) => {
+    if (!groupId || !canEditGroup) return
+    onEditGroupTables?.({ groupId, batchId: batchId || null })
   }
 
   const occ = selectedTable ? byTable[selectedTable] : null
@@ -212,43 +290,64 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
         </div>
       )}
 
-      {/* 時間軸點團標示橫幅（團客冷色系，呼應地圖團客＝靛色） */}
+      {/* 時間軸點團標示橫幅（團客冷色系，呼應地圖團客＝靛色）
+          — 標示的當下就是最容易發現「圈錯桌」的時機，故就地給改圈桌入口。 */}
       {focus && (
         <div className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl shadow-md flex items-center justify-between gap-3 flex-wrap">
           <div className="text-sm font-bold">🎯 標示 🚌 {focus.agencyName || '團體'}{focus.batchLabel ? ` · ${focus.batchLabel}` : ''} 的座位（桌 {focus.tables.join('、')}）</div>
-          <button onClick={() => setFocus(null)} className="text-xs px-3 py-2 bg-white text-indigo-700 rounded-lg font-bold">關閉標示</button>
+          <div className="flex gap-1.5 flex-wrap">
+            {focus.groupId && canEditGroup && (
+              <button onClick={() => editGroupTables(focus.groupId, focus.batchId)}
+                className="text-xs px-3 py-2 bg-white text-indigo-700 rounded-lg font-bold">✏️ 改這團圈桌</button>
+            )}
+            <button onClick={() => setFocus(null)} className="text-xs px-3 py-2 bg-white/20 text-white rounded-lg font-bold">關閉標示</button>
+          </div>
         </div>
       )}
 
-      {/* 預先配桌模式橫幅（大組無單桌容納 → 併桌：累加選同層小桌，席數夠才確認） */}
+      {/* 配桌 / 改桌模式橫幅
+          — 四態：預先配桌（單桌即點即配）、併桌預配（湊席數後確認）、改桌、併桌改桌。
+          改桌態多顯示「目前 桌X」與「解除配桌」，讓排錯位子在同一條橫幅內就能修好。 */}
       {assignBooking && (
         <div className="bg-orange-600 text-white px-4 py-2.5 rounded-xl shadow-md space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="text-sm font-bold flex items-center gap-2 flex-wrap">
-              <span className="text-base leading-none">🪑</span>
-              <span>{assignMulti ? '併桌預配' : '預先配桌'}：{assignBooking.name}（{assignBooking.guests} 位 · {assignBooking.timeSlot}）</span>
+              <span className="text-base leading-none">{isChangeMode ? '↔' : '🪑'}</span>
+              <span>{`${isChangeMode ? (assignMulti ? '併桌改桌' : '改桌') : (assignMulti ? '併桌預配' : '預先配桌')}：${assignBooking.name}（${assignBooking.guests} 位 · ${assignBooking.timeSlot}）`}</span>
+              {isChangeMode && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/20 font-black text-xs tabular-nums">
+                  目前 桌 {assignCurrentTables.join('、')}
+                </span>
+              )}
               {assignMulti ? (
                 <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-black text-sm shadow-sm ${assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
                   已選 {assignSelectedSeats}/{guestsNeeded} 席 · {assignSelected.length} 桌
                 </span>
               ) : (
-                <span className="text-xs opacity-90">— 請點地圖上高亮的空桌</span>
+                <span className="text-xs opacity-90">— {isChangeMode ? '請點要換去的空桌，一點就換好' : '請點地圖上高亮的空桌'}</span>
               )}
             </div>
-            <button onClick={cancelAssign} className="text-xs px-3 py-2 bg-white text-orange-700 rounded-lg font-bold whitespace-nowrap">取消</button>
+            <div className="flex gap-1.5 flex-wrap">
+              {isChangeMode && (
+                <button onClick={() => clearAssign(assignBooking)}
+                  className="text-xs px-3 py-2 bg-white/20 text-white rounded-lg font-bold whitespace-nowrap">解除配桌</button>
+              )}
+              <button onClick={cancelAssign} className="text-xs px-3 py-2 bg-white text-orange-700 rounded-lg font-bold whitespace-nowrap">取消</button>
+            </div>
           </div>
           {assignMulti && (
             <div className="bg-white/15 rounded-lg px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
               <div className="text-sm font-bold">
                 {assignSelected.length ? `已選：${assignSelected.join(' + ')}` : '尚未選桌（點同層空桌加入，可併多張小桌）'}
                 {assignSelectedSeats < guestsNeeded && <span className="ml-2 opacity-90">— 還差 {guestsNeeded - assignSelectedSeats} 席</span>}
+                {isChangeMode && <span className="ml-2 opacity-90">— 點已選的桌可移除</span>}
               </div>
               <button
                 onClick={confirmAssignMulti}
                 disabled={assignSelectedSeats < guestsNeeded}
                 className={`text-xs px-4 py-2 rounded-lg font-black whitespace-nowrap shadow-sm ${
                   assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-              >✓ 確認併桌預配</button>
+              >{isChangeMode ? '✓ 確認改桌' : '✓ 確認併桌預配'}</button>
             </div>
           )}
         </div>
@@ -283,14 +382,16 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
               scopedByTable={byTable}
               scopedClosed={closed}
               scopedHighlightTables={highlightTables}
-              scopedFocusTables={assignMulti ? assignSelected : (focus?.tables || [])}
+              scopedFocusTables={assignBooking
+                ? (assignMulti ? assignSelected : assignCurrentTables)
+                : (focus?.tables || [])}
               mapDate={date}
               fixtures={fixtures}
               zones={zones}
             />
           </div>
           <div className="text-center text-[11px] text-chicken-brown/45 mt-2">
-            點桌看佔用者 · 點右側未配桌散客可在圖上預先配桌 · 暖色＝散客 / 冷色＝團客
+            點桌看佔用者、可就地改桌 / 改圈桌 · 點右側散客可配桌或換桌 · 暖色＝散客 / 冷色＝團客
           </div>
         </div>
 
@@ -308,34 +409,68 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
                 <div className="space-y-2">
                   <div className="text-sm"><span className="text-chicken-brown/60">散客：</span><span className="font-bold text-chicken-brown">{occ.booking?.name}</span></div>
                   <div className="text-xs text-chicken-brown/60">{occ.booking?.guests} 位 · {occ.booking?.timeSlot} · {occ.booking?.phone || '—'}</div>
-                  <button onClick={() => { clearBookingPreassign(occ.booking.id); setSelectedTable(null); toast.info('已解除預先配桌') }}
-                    className="mt-1 w-full text-xs font-bold text-chicken-red border-2 border-chicken-red/30 rounded-lg py-2">解除預先配桌</button>
+                  {bookingTablesOf(occ.booking).length > 1 && (
+                    <div className="text-xs font-bold text-orange-700">併桌：{bookingTablesOf(occ.booking).join(' + ')}</div>
+                  )}
+                  {canAssign && (
+                    <div className="flex gap-1.5 pt-0.5">
+                      <button onClick={() => startAssign(occ.booking)}
+                        className="flex-1 text-xs font-black bg-orange-600 text-white rounded-lg py-2">↔ 改桌</button>
+                      <button onClick={() => clearAssign(occ.booking)}
+                        className="flex-1 text-xs font-bold text-chicken-red border-2 border-chicken-red/30 rounded-lg py-2">解除配桌</button>
+                    </div>
+                  )}
                 </div>
               )}
               {occ?.kind === 'group' && (
-                <div className="space-y-1">
+                <div className="space-y-2">
                   <div className="text-sm"><span className="text-chicken-brown/60">團客：</span><span className="font-bold text-chicken-brown">🚌 {occ.group?.agencyName || '團體'}</span></div>
                   <div className="text-xs text-chicken-brown/60">{occ.batch?.label} · {occ.batch?.timeSlot} · {occ.group?.guideName || ''}</div>
+                  {canEditGroup && (
+                    <button onClick={() => editGroupTables(occ.group?.id, occ.batch?.id)}
+                      className="w-full text-xs font-black bg-indigo-600 text-white rounded-lg py-2">✏️ 改這團圈桌</button>
+                  )}
                 </div>
               )}
             </div>
           )}
 
-          {/* 未配桌散客清單 */}
+          {/* 本場次散客清單：未配桌在前（待辦），已配桌在後（可直接改桌）。
+              排錯位子的人第一時間會來這裡找那筆訂位，所以已配桌的不能從清單消失。 */}
           <div className="bg-white rounded-2xl border border-chicken-brown/10 p-4">
-            <h3 className="font-bold text-chicken-brown mb-2 text-sm">未配桌散客（{seating.name}）</h3>
-            {unassignedWalkins.length === 0 ? (
-              <p className="text-xs text-chicken-brown/50">此場次散客都已配桌或無散客訂位。</p>
+            <div className="flex items-baseline justify-between gap-2 mb-2">
+              <h3 className="font-bold text-chicken-brown text-sm">本場次散客（{seating.name}）</h3>
+              {unassignedWalkins.length > 0 && (
+                <span className="text-[11px] font-black text-amber-600">未配桌 {unassignedWalkins.length}</span>
+              )}
+            </div>
+            {seatingWalkins.length === 0 ? (
+              <p className="text-xs text-chicken-brown/50">此場次沒有散客訂位。</p>
             ) : (
               <div className="space-y-1.5">
-                {unassignedWalkins.map(b => (
-                  <button key={b.id} onClick={() => startAssign(b)} disabled={closed}
-                    className={`w-full text-left rounded-lg border-2 px-3 py-2 transition-all ${
-                      assignBooking?.id === b.id ? 'border-orange-500 bg-orange-50' : 'border-chicken-brown/10 hover:border-orange-400'} ${closed ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                    <div className="text-sm font-bold text-chicken-brown">{b.name} · {b.guests} 位</div>
-                    <div className="text-xs text-chicken-brown/55">{b.timeSlot} · 點選後於地圖配桌</div>
-                  </button>
-                ))}
+                {seatingWalkins.map(b => {
+                  const nums = bookingTablesOf(b)
+                  const active = assignBooking?.id === b.id
+                  const disabled = closed || !canAssign
+                  return (
+                    <button key={b.id} onClick={() => startAssign(b)} disabled={disabled}
+                      title={disabled ? undefined : (nums.length ? '改桌' : '在地圖上配桌')}
+                      className={`w-full text-left rounded-lg border-2 px-3 py-2 transition-all ${
+                        active ? 'border-orange-500 bg-orange-50' : 'border-chicken-brown/10 hover:border-orange-400'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-chicken-brown truncate">{b.name} · {b.guests} 位</span>
+                        {nums.length ? (
+                          <span className="shrink-0 text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 tabular-nums">🪑 {nums.join('+')}</span>
+                        ) : (
+                          <span className="shrink-0 text-[11px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">未配桌</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-chicken-brown/55">
+                        {b.timeSlot} · {disabled ? '唯讀' : (nums.length ? '點我改桌（可換到別桌）' : '點選後於地圖配桌')}
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             )}
           </div>

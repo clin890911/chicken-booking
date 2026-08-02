@@ -88,6 +88,36 @@ test('日曆點明天 → 收合週條 → 日期 guard → 預配導到規劃�
   await expect(page.getByText(/林未來 已預先配到 101/)).toBeVisible()
 })
 
+// 排錯位子要能改（2026-08）：已預配的未來日訂位，訂位卡上直接有「↔ 改桌」，
+// 走同一條跨頁導向 → 規劃地圖自動進「改桌」模式（帶出目前的桌），點新桌一步換好。
+test('未來日已預配訂位 → 訂位卡「↔ 改桌」→ 規劃地圖改桌模式 → 點新桌換好', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+
+  await page.getByRole('button', { name: /日曆/ }).click()
+  await expect(page.getByText(/點日期看當天訂位/)).toBeVisible()
+  const today = new Date()
+  if (tomorrow.getMonth() !== today.getMonth()) {
+    await page.getByRole('button', { name: '›' }).click()
+  }
+  await page.getByRole('button')
+    .filter({ has: page.getByText(String(tomorrow.getDate()), { exact: true }) })
+    .filter({ hasText: '組' })
+    .first().click()
+
+  // 陳已配（已預配到 102）：卡片上有改桌入口，不再只剩「當天才可報到」
+  await expect(page.getByText('陳已配')).toBeVisible()
+  await page.getByRole('button', { name: /↔ 改桌/ }).click()
+
+  // 規劃地圖進改桌模式（帶出目前的桌），點 101 一步換好
+  await expect(page.getByText(/改桌：陳已配/)).toBeVisible()
+  await expect(page.getByText(/目前 桌 102/)).toBeVisible()
+  await page.locator('svg g:has(:text-is("101"))').first().click()
+  await expect(page.getByText(/已從 102 改到 101/)).toBeVisible()
+})
+
 // 大組併桌預配（2026-06-12）：未來日 12 人訂位無單桌可容（最大 6 人桌）→ 規劃地圖進「併桌預配」，
 // 累加選兩張 6 人桌湊滿 12 席後一鍵預配。
 test('未來日 12 人訂位 → 規劃地圖併桌預配（選兩張桌）成功', async ({ page }) => {

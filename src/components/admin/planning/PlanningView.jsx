@@ -49,6 +49,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   })
   const [editorGroup, setEditorGroup] = useState(null) // 傳給編輯器的初始資料（既有團複本 或 空白範本）
   const [editorIsNew, setEditorIsNew] = useState(false)
+  const [editorStep, setEditorStep] = useState(1) // 進編輯器的起始頁（改桌入口直接落在 2＝圈選座位）
+  const [editorBatchId, setEditorBatchId] = useState(null) // 改桌入口指定的梯次（圈桌頁預選該梯）
   const [rescheduleFrom, setRescheduleFrom] = useState(null) // 改期進入編輯器時的原日期（顯示橫幅 + 起始頁=圈桌）
   const [reschedulingGroup, setReschedulingGroup] = useState(null) // 改期 modal 對象（null=關閉）
   const [detailGroupId, setDetailGroupId] = useState(null) // 詳情頁顯示的團單 id（live 查找）
@@ -171,8 +173,26 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   const openEditorFromDetail = () => {
     if (!detailGroup) return
     setRescheduleFrom(null)
+    setEditorStep(1)
+    setEditorBatchId(null)
     setEditorGroup(detailGroup)
     setEditorIsNew(false)
+  }
+
+  // 「改桌 / 調整圈桌」：跳過第一頁，直接進編輯器的圈選座位頁（可指定要改的梯次）。
+  // 詳情頁與排位地圖共用——在哪裡發現排錯位子，就在哪裡有入口。
+  const openTableEditor = (groupId, batchId = null) => {
+    const g = groupReservations.find(x => x.id === groupId)
+    if (!g) return
+    jumpToDate(g.date)
+    setRescheduleFrom(null)
+    setEditorStep(2)
+    setEditorBatchId(typeof batchId === 'string' ? batchId : null)
+    setEditorGroup(g)
+    setEditorIsNew(false)
+  }
+  const openTableEditorFromDetail = (batchId) => {
+    if (detailGroup) openTableEditor(detailGroup.id, batchId)
   }
 
   // 「📅 改期」第一步：開改期 modal（選新日期）。
@@ -188,6 +208,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     setReschedulingGroup(null)
     setDetailGroupId(null)
     setRescheduleFrom(src.date)
+    setEditorStep(2)
+    setEditorBatchId(null)
     jumpToDate(newDate)
     setEditorGroup(draft)
     setEditorIsNew(false)
@@ -202,6 +224,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   }
 
   // 抵達時間軸點某團某梯次 → 跳排位地圖該場次，並在這團的桌位畫白圈標示「坐這邊」
+  // 帶上 groupId/batchId：地圖上看出圈錯桌時，橫幅能直接開圈桌編輯器。
   const focusBatchOnMap = (row) => {
     const nums = row?.batch?.tableNumbers || row?.tableNumbers || []
     if (!nums.length) return
@@ -211,6 +234,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
       seatingId: seatingForSlot(settings, row.timeSlot || row.batch?.timeSlot)?.id || null,
       agencyName: row.group?.agencyName || '',
       batchLabel: row.batch?.label || '',
+      groupId: row.group?.id || null,
+      batchId: row.batch?.id || null,
     })
     setPane('map')
   }
@@ -242,13 +267,18 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     const draft = groupReservationService.cloneGroupForDuplicate(src, { date: target })
     if (target !== selectedDate) setSelectedDate(target)
     setRescheduleFrom(null)
+    setEditorStep(1)
+    setEditorBatchId(null)
     setEditorGroup(draft)
     setEditorIsNew(true)
     toast.info('已複製為新團單草稿，請重新圈桌後儲存')
   }
 
   // 編輯器返回：只清編輯器——從詳情進編輯時自然落回詳情頁；新增草稿（無詳情）回當日總覽。
-  const closeEditor = () => { setEditorGroup(null); setEditorIsNew(false); setRescheduleFrom(null) }
+  const closeEditor = () => {
+    setEditorGroup(null); setEditorIsNew(false); setRescheduleFrom(null)
+    setEditorStep(1); setEditorBatchId(null)
+  }
   // 儲存後（新增與編輯一致）：進詳情頁，立即可印回傳單傳給導遊。
   const handleSaved = (id) => {
     closeEditor()
@@ -268,7 +298,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
         isNew={editorIsNew}
         date={editorGroup.date}
         rescheduleFrom={rescheduleFrom}
-        initialStep={rescheduleFrom ? 2 : 1}
+        initialStep={editorStep}
+        initialBatchId={editorBatchId}
         slots={slots}
         tables={tables}
         settings={settings}
@@ -298,6 +329,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
           settings={settings}
           onBack={() => setDetailGroupId(null)}
           onEdit={openEditorFromDetail}
+          onEditTables={openTableEditorFromDetail}
           onReschedule={openReschedule}
         />
         <GroupRescheduleModal
@@ -359,7 +391,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
             onGoToday={onGoToday}
             onPrintSheet={() => setSheetOpen(true)}
             onOpenMap={() => setPane('map')}
-            onAssignWalkin={goAssignWalkin}
+            // 唯讀角色（廚房）不給配桌/換桌入口：寫得進本機、推雲會被整包剔除
+            onAssignWalkin={can('booking.assign') ? goAssignWalkin : null}
             onFocusBatch={focusBatchOnMap}
             onNewWalkin={() => setShowAddWalkin(true)}
           />
@@ -371,6 +404,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
           onAssignHandled={() => setMapAssign(null)}
           focusRequest={mapFocus}
           onFocusHandled={() => setMapFocus(null)}
+          onEditGroupTables={({ groupId, batchId }) => openTableEditor(groupId, batchId)}
         />
       )}
 

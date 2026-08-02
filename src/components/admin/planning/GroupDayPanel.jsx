@@ -28,17 +28,26 @@ const WALKIN_STATUS = {
 }
 
 // 場次內散客列（暖色系，對齊排位地圖「散客=暖色」的視覺語言）
+// 已配桌的桌號 pill 本身就是「換桌」入口——排錯位子時不必先解除再重配。
 function WalkinRow({ row, onAssign }) {
   const b = row.booking
   const st = WALKIN_STATUS[row.status] || WALKIN_STATUS.confirmed
+  const nums = [...new Set([b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean).map(String))]
   return (
     <div className="flex items-center gap-2 rounded-lg border border-orange-200/60 bg-white px-2.5 py-1.5">
       <span className="text-xs font-bold text-chicken-brown truncate">{b.name || '（未填姓名）'}</span>
       <span className="text-[11px] font-bold text-chicken-brown/60 tabular-nums shrink-0">{row.guests} 位 · 🕐 {row.timeSlot || '未排'}</span>
       <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${st.cls}`}>{st.label}</span>
       <div className="flex-1" />
-      {row.assignedTableId ? (
-        <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0">🪑 {row.assignedTableId}</span>
+      {nums.length > 0 ? (
+        onAssign ? (
+          <button onClick={() => onAssign(b)} title="換桌（排錯位子點這裡改）"
+            className="text-[11px] font-black px-2 py-1 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0 border border-orange-200 hover:bg-orange-600 hover:text-white transition-colors">
+            🪑 {nums.join('+')} <span className="font-bold">↔ 換桌</span>
+          </button>
+        ) : (
+          <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0">🪑 {nums.join('+')}</span>
+        )
       ) : onAssign ? (
         <button onClick={() => onAssign(b)}
           className="text-[11px] font-black px-2 py-1 rounded-lg bg-orange-600 text-white shrink-0">→ 配桌</button>

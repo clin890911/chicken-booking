@@ -214,7 +214,8 @@ export default function BookingCard({ booking, onAssign, onClick }) {
                 ${booking.status === 'arrived'
                   ? 'bg-orange-600 text-white'
                   : 'bg-emerald-600 text-white'}`}>
-                桌 {booking.assignedTableId}
+                {/* 併桌的額外桌一起顯示，否則卡片上看起來只坐了一張桌 */}
+                桌 {[booking.assignedTableId, ...(booking.extraTableIds || [])].filter(Boolean).join('+')}
               </span>
             )}
             {booking.status === 'arrived' && (
@@ -313,7 +314,17 @@ export default function BookingCard({ booking, onAssign, onClick }) {
               >客人到了</button>
             )}
             {booking.status === 'confirmed' && booking.assignedTableId && dayKind === 'future' && (
-              <span className="text-xs font-bold text-chicken-brown/50 py-2">未來訂位 · 當天才可報到</span>
+              <>
+                {/* 預配到錯的桌是常態（訂位當下先卡一張、之後才發現不合適）。
+                    走同一條 onAssign 路徑：規劃頁排位地圖會自動進「改桌」模式。 */}
+                {onAssign && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onAssign(booking) }}
+                    className="text-sm px-3.5 min-h-[44px] bg-white border-2 border-chicken-red/30 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5"
+                  >↔ 改桌</button>
+                )}
+                <span className="text-xs font-bold text-chicken-brown/50 py-2">未來訂位 · 當天才可報到</span>
+              </>
             )}
             {/* A5：主操作「客人已離席」顯眼、次操作「直接釋出」降權較小，避免誤點 */}
             {booking.status === 'arrived' && (

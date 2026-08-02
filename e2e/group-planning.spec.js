@@ -239,6 +239,99 @@ test('規劃：已到店（arrived）團單不顯示改期按鈕', async ({ page
   await expect(page.getByRole('button', { name: /📅 改期/ })).toHaveCount(0)
 })
 
+// 排錯位子要能當場改（2026-08）：店長回報「點進詳細資訊發現排錯桌，但改不了」。
+// 以下三條覆蓋修好後的三個入口：散客桌號 pill 換桌、團單詳情梯次改桌、地圖標示橫幅改圈桌。
+test('規劃：散客排錯桌 → 當日總覽點桌號「換桌」→ 地圖一點改到別桌', async ({ page }) => {
+  // 種一筆今日已配到 101 的散客（11:30 → 午餐第一批）
+  await page.addInitScript(() => {
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify([{
+      id: 'BKE2E_MOVE', name: '王小明', phone: '0987654321', guests: 4,
+      date: today, timeSlot: '11:30', status: 'confirmed', assignedTableId: '101',
+      extraTableIds: [], source: 'phone', notes: { pet: false, child: false, mobility: false, text: '' },
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }]))
+  })
+  await loginAndOpenPlanning(page)
+
+  // 散客列的桌號 pill 就是換桌入口（不必先解除再重配）
+  await page.getByRole('button', { name: /換桌/ }).click()
+  await expect(page.getByText(/改桌：王小明/)).toBeVisible()
+  await expect(page.getByText(/目前 桌 101/)).toBeVisible()
+
+  // 點另一張空桌 103 → 一步改好
+  await page.locator('svg g:has(:text-is("103"))').first().click()
+  await expect(page.getByText(/已從 101 改到 103/)).toBeVisible()
+
+  // 已配桌的散客仍留在側欄清單（可再改），且顯示新桌號
+  await expect(page.getByText('本場次散客（午餐第一批）')).toBeVisible()
+  await expect(page.getByText('🪑 103').first()).toBeVisible()
+})
+
+test('規劃：團單詳情點梯次「改桌」→ 直接進圈選座位頁（預選該梯）→ 改桌儲存', async ({ page }) => {
+  // 兩梯團單：第一梯 101、第二梯 102（12:30 → 午餐第二批）
+  await page.addInitScript(() => {
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_group_reservations_v1', JSON.stringify([{
+      id: 'GE2E_FIXSEAT', schemaVersion: 2, date: today,
+      agencyName: '排錯桌旅行社', guideName: '林導', guidePhone: '0911555666',
+      counts: { total: 10, vegetarian: 0, child: 0, mobility: 0, wheelchair: 0 },
+      allergyText: '', status: 'confirmed',
+      batches: [
+        { id: 'BFX1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101'], guests: 6, note: '' },
+        { id: 'BFX2', label: '第二梯', timeSlot: '12:30', tableNumbers: ['102'], guests: 4, note: '' },
+      ],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }]))
+  })
+  await loginAndOpenPlanning(page)
+
+  await page.getByRole('button', { name: /排錯桌旅行社/ }).filter({ hasNotText: '看地圖' }).first().click()
+  await expect(page.getByText('梯次與桌位')).toBeVisible()
+
+  // 第二梯那一列的「改桌」→ 跳過第一頁，直接落在圈選座位頁
+  const secondBatchRow = page.locator('div.rounded-lg.border').filter({ hasText: '第二梯' }).first()
+  await secondBatchRow.getByRole('button', { name: /改桌/ }).click()
+  await expect(page.getByRole('button', { name: /儲存團單/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /下一步：圈選座位/ })).toHaveCount(0)
+
+  // 而且預選的是「第二梯」（不必自己再點一次圈此梯桌）
+  const editorSecond = page.locator('div.rounded-lg.border-2').filter({ hasText: '第二梯' }).first()
+  await expect(editorSecond.getByRole('button', { name: '圈桌中' })).toBeVisible()
+
+  // 改到 103 後儲存（groupReserveTables 已 mock）→ 落回詳情頁
+  await page.locator('svg g:has(:text-is("103"))').first().click()
+  await page.getByRole('button', { name: /儲存團單/ }).click()
+  await expect(page.getByText(/團單已儲存/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /回傳單/ })).toBeVisible()
+})
+
+test('規劃：時間軸看地圖 → 標示橫幅可直接「改這團圈桌」', async ({ page }) => {
+  await page.addInitScript(() => {
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_group_reservations_v1', JSON.stringify([{
+      id: 'GE2E_MAPFIX', schemaVersion: 2, date: today,
+      agencyName: '地圖改桌團', guideName: '吳導', guidePhone: '0911999000',
+      counts: { total: 6, vegetarian: 0, child: 0, mobility: 0, wheelchair: 0 },
+      allergyText: '', status: 'confirmed',
+      batches: [{ id: 'BMF1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101'], guests: 6, note: '' }],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    }]))
+  })
+  await loginAndOpenPlanning(page)
+
+  await page.getByRole('button', { name: /看地圖/ }).first().click()
+  await expect(page.getByText(/🎯/)).toBeVisible()
+
+  // 在地圖上發現圈錯桌 → 橫幅直接進圈桌頁
+  await page.getByRole('button', { name: /改這團圈桌/ }).click()
+  await expect(page.getByRole('button', { name: /儲存團單/ })).toBeVisible()
+  await expect(page.getByText(/桌 101/).first()).toBeVisible()
+})
+
 test('規劃：當日總覽「新增散客」快速表單 → 落地當日散客名單', async ({ page }) => {
   // 確保 bookings 乾淨，散客數從 0 起算
   await page.addInitScript(() => localStorage.setItem('chicken_bookings_v1', JSON.stringify([])))
