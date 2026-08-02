@@ -1,0 +1,44 @@
+name: CI
+
+# PR 與 main 的自動檢查：單元測試 + 正式 build。
+#
+# 背景：這個 repo 到目前為止完全沒有 CI，每個 PR 是否會壞全靠人在本機記得跑。
+# 實際代價已經出現過——2026-08 一次合併前才發現既有測試被改紅、以及一支 e2e 早就
+# 是紅的卻沒人知道。這支只做檢查，不部署、不需要任何 secret。
+#
+# 為什麼不含 e2e：整套 playwright 約 15 分鐘且要下載瀏覽器，放進每個 PR 太重。
+# 改由需要時手動跑 `npm run test:e2e`（動到桌況圖／帶位流程時務必跑）。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 同一分支連續 push 時取消前一輪，省 runner 時間。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 與 deploy-functions.yml 對齊。注意根 package.json 的 engines 目前寫 "20"、
+          # functions/ 寫 "22"，兩者不一致；先統一在 22 上驗（本機實測通過的版本），
+          # engines 要不要收斂另案處理。
+          node-version: '22'
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
