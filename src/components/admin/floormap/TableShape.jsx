@@ -5,7 +5,8 @@
 //   超過用餐時間/清桌緩衝：加深與警示
 // 配色原則「平靜 vs 需處理」：不需動作的桌（可入座/已預訂）用淡色低存在感，
 // 需要動作的桌（用餐中/待清/超時/團保）才用實心色跳出。色相語義：
-//   綠=可入座（淡）/ 藍=已預訂（淡）/ 橙=用餐 / 黃=待清（與橙以飽和度區隔）/ 紅=超時 / 靛=團保 / 灰=不可用
+//   綠=可入座（淡）/ 藍=已預訂＋預配（淡；預配用虛線框表示桌實體仍空）/ 橙=用餐 /
+//   黃=待清（與橙以飽和度區隔）/ 紅=超時 / 靛=團保 / 灰=不可用
 // 每格 fill 各自帶 text 色，淡底用深字、實心用白字（對比 ≥4.5:1）。
 //
 // 旋轉與分區（2026-06 桌位佈局升級）：
@@ -15,7 +16,7 @@
 //     確保「桌況圖色彩語義不可回退」。整桌填分區色只發生在 LayoutEditor 內。
 //   - 字級啟發式改用 min(w,h)：自由縮放後 h 不再恆為 75。
 import { diffMin, stageOf } from '../../../utils/diningStage'
-import { STATUS_COLOR, GROUP_HOLD_COLOR, DINING_STAGE_FILL } from './statusColors'
+import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './statusColors'
 
 // 配色層級「可坐醒目 vs 佔用降噪」（2026-07 依店家反饋反轉 PR#52）：
 //   可入座＝實心綠跳出（領檯第一眼要找的就是空桌）；用餐中/預訂/團保＝低彩度降噪；
@@ -171,9 +172,15 @@ export default function TableShape({
   const minutes = (status === 'dining' && table.seatedAt) ? diffMin(table.seatedAt) : 0
   const stage = status === 'dining' ? stageOf(minutes, settings) : null
 
-  // 填色：vacant 被團 hold → 實心紫色；dining 用 stage 對應顏色；其餘用基本 status color
+  // 填色：vacant 被團 hold → 實心紫色；vacant 被預配 → 訂位藍（虛線框）；
+  // dining 用 stage 對應顏色；其餘用基本 status color。
+  // 預配改藍是為了讓「訂位卡寫已指派、地圖卻是綠色可入座」不再互相矛盾（見 statusColors.PREASSIGN_COLOR）；
+  // 團保優先——實心紫已表達更強的保留語意，且 FloorMap 已保證兩個 label 不會同時傳進來。
   const isGroupHold = status === 'vacant' && !!groupHoldLabel
-  const palette = isGroupHold ? GROUP_HOLD_COLOR : (STATUS_COLOR[status] || STATUS_COLOR.vacant)
+  const isPreassigned = status === 'vacant' && !isGroupHold && !!preassignLabel
+  const palette = isGroupHold ? GROUP_HOLD_COLOR
+    : isPreassigned ? PREASSIGN_COLOR
+    : (STATUS_COLOR[status] || STATUS_COLOR.vacant)
   let fill = palette.fill
   let textColor = palette.text   // 淡底用深字、實心用白字
   if (status === 'dining' && stage) {
@@ -186,13 +193,15 @@ export default function TableShape({
   // 讓淡底狀態的色框讀得出語義（已預訂加粗到 3px、團保 2.5px，與用餐中的 2px 拉開層次）。
   let stroke = palette.stroke
   let strokeWidth = palette.strokeWidth || 2
-  let strokeDash = null
+  let strokeDash = palette.strokeDash || null   // 目前只有預配帶虛線（桌實體仍空）
   let className = ''
 
-  if (isSelected) { stroke = '#e60012'; strokeWidth = 3 }
-  else if (isPendingConfirm) { stroke = '#d97706'; strokeWidth = 4; className = 'animate-pulse' }
-  else if (isAssignSuggestion) { stroke = '#9eb63a'; strokeWidth = 4; className = 'animate-pulse' }
-  else if (isJustAssigned) { stroke = '#9eb63a'; strokeWidth = 4 }
+  // 這幾個覆蓋分支的邊框表達的是「當下的模式」而非桌況，故一併清掉狀態帶來的虛線
+  // （預配桌被選中時該讀成紅色實線選取框，不是紅色虛線的另一種狀態）。
+  if (isSelected) { stroke = '#e60012'; strokeWidth = 3; strokeDash = null }
+  else if (isPendingConfirm) { stroke = '#d97706'; strokeWidth = 4; strokeDash = null; className = 'animate-pulse' }
+  else if (isAssignSuggestion) { stroke = '#9eb63a'; strokeWidth = 4; strokeDash = null; className = 'animate-pulse' }
+  else if (isJustAssigned) { stroke = '#9eb63a'; strokeWidth = 4; strokeDash = null }
   else if (isHighlight) { stroke = '#9eb63a'; strokeWidth = 3; strokeDash = '4 2' }
   else if (stage === 'buffer-overtime') { stroke = '#7f1d1d'; strokeWidth = 3; className = 'animate-pulse' }
   else if (stage === 'overtime') { stroke = '#7f1d1d'; strokeWidth = 3 }

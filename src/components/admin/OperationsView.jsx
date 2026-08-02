@@ -17,14 +17,16 @@ import { findPreassignedBooking } from '../../utils/capacity'
 import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
 import { buildTableTurns } from '../../utils/tableTurns'
 import { todayStr } from '../../utils/timeSlots'
-import { STATUS_COLOR, GROUP_HOLD_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
+import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
-function LegendSwatch({ fill, stroke, label }) {
+// dashed：對應地圖上「同色但虛線」的狀態（預配＝桌實體仍空），圖例與地圖的線型也要對得上，
+// 否則兩格同樣的藍會被讀成圖例畫錯。
+function LegendSwatch({ fill, stroke, label, dashed = false }) {
   return (
     <span className="inline-flex items-center gap-1">
-      <i className="h-2.5 w-2.5 rounded-sm" style={{ background: fill, border: `1.5px solid ${stroke}` }} />
+      <i className="h-2.5 w-2.5 rounded-sm" style={{ background: fill, border: `1.5px ${dashed ? 'dashed' : 'solid'} ${stroke}` }} />
       {label}
     </span>
   )
@@ -673,6 +675,7 @@ export default function OperationsView({ pendingAssign, onAssignDone }) {
               <div className="mb-2 flex-shrink-0 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
                 <LegendSwatch fill={STATUS_COLOR.vacant.fill} stroke={STATUS_COLOR.vacant.stroke} label="可入座" />
                 <LegendSwatch fill={STATUS_COLOR.reserved.fill} stroke={STATUS_COLOR.reserved.stroke} label="已預訂" />
+                <LegendSwatch fill={PREASSIGN_COLOR.fill} stroke={PREASSIGN_COLOR.stroke} dashed label="預配（桌仍可坐）" />
                 <LegendSwatch fill={DINING_STAGE_FILL.normal} stroke={STATUS_COLOR.dining.stroke} label="用餐中" />
                 <LegendSwatch fill={STATUS_COLOR.cleaning.fill} stroke={STATUS_COLOR.cleaning.stroke} label="待清桌" />
                 <LegendSwatch fill={DINING_STAGE_FILL.overtime} stroke={DINING_STAGE_FILL.overtime} label="超時" />

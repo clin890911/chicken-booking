@@ -62,9 +62,12 @@ const ALL_BOOKINGS = [OVERDUE_ASSIGNED, OVERDUE_UNASSIGNED, SOON_UNASSIGNED]
 describe('UpcomingPanel 動作鈕的前端權限門', () => {
   let container, root
 
-  const render = (can, bookings = ALL_BOOKINGS) => {
+  // tables 影響「已指派」徽章的兩種寫法（見 utils/tableStatus.assignmentKind）：預設不給桌，
+  // 等同「查不到桌況」→ 一律當預配（不宣稱桌已鎖），權限測試本身不受影響。
+  const render = (can, bookings = ALL_BOOKINGS, tables = []) => {
     currentAuth = can ? { can } : null
     bookingCtx.bookings = bookings
+    bookingCtx.tables = tables
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
@@ -104,8 +107,36 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     expect(container.textContent).toContain('未指派客')
     expect(container.textContent).toContain('將到客')
     expect(container.textContent).toContain('19:00')
-    // 「✓ 已指派 101」是唯讀資訊徽章（非按鈕），唯讀角色仍該看得到桌號
-    expect(container.textContent).toContain('已指派 101')
+    // 桌號徽章是唯讀資訊（非按鈕），唯讀角色仍該看得到（2026-08 起文案依指派種類分「已指派／已預配」）
+    expect(container.textContent).toMatch(/(已指派|已預配) 101/)
+  })
+
+  // 2026-08：訂位卡的「已指派」徽章原本不分兩種指派，與桌況圖一藍一綠對不起來（店主回報）。
+  // 徽章文案／配色改為跟著 assignmentKind 走，這裡鎖住兩種寫法不會再被合併回同一個。
+  describe('已指派徽章分辨「桌況已鎖」與「只是預配」', () => {
+    const table = (over = {}) => ({ number: '101', status: 'vacant', currentBookingId: null, ...over })
+
+    it('現場指派（桌況 reserved 且指向這筆）→「✓ 已指派 101」', () => {
+      render(roleCan('manager'), [OVERDUE_ASSIGNED], [table({ status: 'reserved', currentBookingId: 'b1' })])
+      expect(container.textContent).toContain('✓ 已指派 101')
+      expect(container.textContent).not.toContain('已預配')
+    })
+
+    it('規劃頁預配（桌況仍是空桌）→「📌 已預配 101」', () => {
+      render(roleCan('manager'), [OVERDUE_ASSIGNED], [table()])
+      expect(container.textContent).toContain('📌 已預配 101')
+      expect(container.textContent).not.toContain('✓ 已指派')
+    })
+
+    it('預配的桌被別筆訂位鎖走 →仍是「已預配」（桌並不屬於這筆）', () => {
+      render(roleCan('manager'), [OVERDUE_ASSIGNED], [table({ status: 'reserved', currentBookingId: 'b9' })])
+      expect(container.textContent).toContain('📌 已預配 101')
+    })
+
+    it('未指派的訂位不出現任何桌號徽章', () => {
+      render(roleCan('manager'), [OVERDUE_UNASSIGNED], [table()])
+      expect(container.textContent).not.toMatch(/(已指派|已預配) 101/)
+    })
   })
 
   it('floor／host：兩者都有 booking.update + table.update → 三顆鈕都在（不誤傷有權限的角色）', () => {

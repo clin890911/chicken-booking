@@ -41,6 +41,16 @@ export const STATUS_COLOR = {
   },
 }
 
+// 預配（2026-08 加入）：桌況仍 vacant、只記在 booking.assignedTableId 上的「已指派」。
+// 店主回報：兩筆同樣顯示「已指派」的訂位，地圖上一個藍（現場指派→桌況 reserved）、一個綠
+// （規劃頁預配→桌況沒動），看不出差在哪。改與「已預訂」同一支藍，讓「藍＝有人要來」語意一致。
+// 與 reserved 的區隔改用邊框：reserved 實線 3px＝桌已鎖起來；預配虛線 2.5px＝桌實體還是空的
+// （walk-in 坐得進去且會蓋掉預配，也仍計入頂端「可入座」數）。虛線就是「還沒真的鎖桌」的視覺對應。
+export const PREASSIGN_COLOR = {
+  fill: '#d8eaff', stroke: '#1d4ed8', strokeWidth: 2.5, strokeDash: '5 3', text: '#0f2f6b',
+  badge: '#1d4ed8',
+}
+
 // 團體保留（vacant 但今日被團 hold）：改用淡紫，避免與新的訂位藍混淆。
 export const GROUP_HOLD_COLOR = {
   fill: '#e9e4fb', stroke: '#7c3aed', strokeWidth: 2.5, text: '#4c2a91',

@@ -8,12 +8,17 @@ import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
 import { findPreassignedBooking } from '../../../utils/capacity'
+import { assignmentKind } from '../../../utils/tableStatus'
 import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
 
-function BookingCard({ b, now, onClickBooking, onAssignTable, onSeat, onNoshow, onComplete, perms }) {
+function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNoshow, onComplete, perms }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
   const overdue = overdueMin > 15 // 與 classifyTodayPulse graceMin 同口徑
   const assigned = !!b.assignedTableId
+  // 「已指派」有兩種（見 utils/tableStatus.assignmentKind），過去徽章一律寫「已指派」，
+  // 但地圖上 held 是藍色、preassign 是綠色可入座 —— 店員只看得到同樣的徽章卻兩個顏色。
+  // 徽章改為與地圖同語意：held＝綠（桌已鎖）、preassign＝藍（桌還是空的，別人坐得進去）。
+  const preassigned = kind === 'preassign'
 
   // 前端權限門（與 TableDrawer 的 can('table.update') 同慣例）：後端 staffAccess 會擋，
   // 但沒有前端門的話 kitchen 按下去會寫進本機 localStorage、推送時被剔除，
@@ -58,8 +63,15 @@ function BookingCard({ b, now, onClickBooking, onAssignTable, onSeat, onNoshow, 
       {showActions && (
         <div className="mt-2 flex items-center gap-2 flex-wrap">
           {assigned && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-chicken-green/15 text-chicken-green rounded-md text-[11px] font-bold">
-              ✓ 已指派 {b.assignedTableId}
+            <span
+              title={preassigned
+                ? `排位規劃已預配 ${b.assignedTableId}，但桌況仍是空桌：地圖上是藍色虛線，別人仍坐得進去。按「客人到了」才會真正佔桌。`
+                : `${b.assignedTableId} 已鎖給這筆訂位（地圖上是藍色實線的已預訂）。`}
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                preassigned ? 'bg-blue-100 text-blue-800' : 'bg-chicken-green/15 text-chicken-green'
+              }`}
+            >
+              {preassigned ? `📌 已預配 ${b.assignedTableId}` : `✓ 已指派 ${b.assignedTableId}`}
             </span>
           )}
           {/* 客人到了（含遲到後才到）：直接入座，免再點桌位 → 抽屜 */}
@@ -129,6 +141,14 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
     () => buildGroupHolds(todayActiveGroups(groupReservations, today), tables),
     [groupReservations, tables, today],
   )
+
+  // 徽章要分辨「桌況已鎖」與「只是預配」，需要對應的桌 → 先建號碼索引（桌數不多但卡片會重繪很多次）
+  const tableByNumber = useMemo(() => {
+    const m = {}
+    ;(tables || []).forEach(t => { if (t?.number != null) m[String(t.number)] = t })
+    return m
+  }, [tables])
+  const kindOf = (b) => assignmentKind(b, tableByNumber[String(b.assignedTableId)])
 
   // 30 秒 tick：時間推移會讓卡片從「將到」掉進「過時未到」
   const [now, setNow] = useState(Date.now())
@@ -212,7 +232,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
         <div className="space-y-2">
           <div className="text-[11px] font-black text-chicken-red">⚠ 過時未到（{overdue.length} 組）— 請聯絡或標記</div>
           {overdue.map(b => (
-            <BookingCard key={b.id} b={b} now={now}
+            <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
               onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
               onComplete={handleComplete} perms={perms} />
           ))}
@@ -223,7 +243,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
         <div className="space-y-2">
           <div className="text-[11px] font-black text-chicken-brown/65">🔜 90 分內將到（{soon.length} 組）</div>
           {soon.map(b => (
-            <BookingCard key={b.id} b={b} now={now}
+            <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
               onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
               onComplete={handleComplete} perms={perms} />
           ))}
@@ -242,7 +262,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
           {showLater && (
             <div className="mt-2 space-y-2">
               {later.map(b => (
-                <BookingCard key={b.id} b={b} now={now}
+                <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
                   onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
                   onComplete={handleComplete} perms={perms} />
               ))}
