@@ -392,10 +392,12 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
         {/* 預配提示：此空桌已於排位規劃預留給某散客（桌況仍空，現場入座／指派前先知會）。
             維修中時改由上方維修橫幅內的衝突警示呈現，避免兩條矛盾橫幅並列。 */}
         {table.status === 'vacant' && preassign && !outToday && (
-          <div className="px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-xs">
-            <span className="font-bold text-orange-700">🪑 已預留：</span>
-            <span className="text-orange-700/90">排位規劃已預先配給 {preassign.name}（{preassign.guests} 位{preassign.timeSlot ? ` · ${preassign.timeSlot}` : ''}）</span>
-            <p className="text-[11px] text-orange-700/70 mt-0.5">直接入座或指派他人會覆蓋此預留。</p>
+          // 配色跟著地圖走：預配桌 2026-08 起在桌況圖上是藍色虛線（PREASSIGN_COLOR），
+          // 抽屜再用橘色會變成同一件事兩種顏色，店員得各記一套。
+          <div className="px-3 py-2 bg-blue-50 border border-dashed border-blue-300 rounded-lg text-xs">
+            <span className="font-bold text-blue-800">📌 已預配：</span>
+            <span className="text-blue-800/90">排位規劃已預先配給 {preassign.name}（{preassign.guests} 位{preassign.timeSlot ? ` · ${preassign.timeSlot}` : ''}）</span>
+            <p className="text-[11px] text-blue-800/70 mt-0.5">桌況仍是空桌：直接入座或指派他人會覆蓋此預留。</p>
             {canEdit && (
               <button
                 onClick={handleSeatPreassigned}
