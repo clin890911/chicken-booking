@@ -538,6 +538,15 @@ export function BookingProvider({ children }) {
     if (r.ok && before) safeNotify(() => tg.notifyWaitlistSeated(before, tableNumber))
     return r
   }
+  // 候位併桌入座：TG 通知帶整組桌號（客人會看到自己坐哪幾桌，只報主桌會誤導）
+  const seatWaitlistMulti = (id, tableNumbers) => {
+    const before = waitlistService.getById(id)
+    const r = seatingService.seatWaitlistMulti(id, tableNumbers)
+    refresh()
+    syncCloudSoon()
+    if (r.ok && before) safeNotify(() => tg.notifyWaitlistSeated(before, (r.tableNumbers || []).join(' + ')))
+    return r
+  }
   const leaveWaitlist = (id) => { waitlistService.leave(id); refresh(); syncCloudSoon() }
 
   // ============ 顧客動作（不發 TG，太瑣碎）============
@@ -662,7 +671,7 @@ export function BookingProvider({ children }) {
     assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
-    addWaitlist, callWaitlist, seatWaitlist, leaveWaitlist,
+    addWaitlist, callWaitlist, seatWaitlist, seatWaitlistMulti, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,

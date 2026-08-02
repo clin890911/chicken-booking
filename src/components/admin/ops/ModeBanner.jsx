@@ -12,21 +12,25 @@ const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
 export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pendingGroupHold, multiSeats = 0, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
   if (!mode) return null
 
-  // 多桌帶位／指派（大組併桌）：累加式選桌，不走二步確認；席數夠才能確認
+  // 多桌指派／候位入座（大組併桌）：累加式選桌，不走二步確認；席數夠才能確認。
+  // mode.kind 區分兩條路徑——'waitlist' 是客人已在現場、確認即入座（沿用候位模式的綠）；
+  // 其餘為訂位指派，是先把桌佔起來、客人到了再入座（沿用指派模式的藍）。
   if (mode.type === 'assign-multi') {
-    const isAssign = mode.type === 'assign-multi'
+    const isWaitlist = mode.kind === 'waitlist'
     const need = mode.need || 0
     const selected = mode.selected || []
     const enough = multiSeats >= need
-    const name = isAssign ? (mode.booking?.name || '訂位') : (mode.guestData?.name || '散客')
-    const bg = isAssign ? 'bg-sky-600' : 'bg-amber-600'
-    const cancelBtn = isAssign ? 'text-sky-700' : 'text-amber-700'
+    const name = isWaitlist
+      ? `${mode.wait?.name || '候位'}${mode.wait?.queueNumber ? ` #${mode.wait.queueNumber}` : ''}`
+      : (mode.booking?.name || '訂位')
+    const bg = isWaitlist ? 'bg-emerald-600' : 'bg-sky-600'
+    const cancelBtn = isWaitlist ? 'text-emerald-700' : 'text-sky-700'
     return (
       <div className={`${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
-            <span className="text-base leading-none">{isAssign ? '📋' : '🪑'}</span>
-            <span>{isAssign ? '指派桌位' : '立即帶位'}（併桌）：{name} {need} 位</span>
+            <span className="text-base leading-none">{isWaitlist ? '🚦' : '📋'}</span>
+            <span>{isWaitlist ? '候位入座' : '指派桌位'}（併桌）：{name} {need} 位</span>
             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-black text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
@@ -44,7 +48,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
             disabled={!enough}
             className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-black whitespace-nowrap shadow-sm ${
               enough ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-          >✓ {isAssign ? '確認併桌指派' : '確認併桌入座'}</button>
+          >✓ {isWaitlist ? '確認併桌入座' : '確認併桌指派'}</button>
         </div>
       </div>
     )
