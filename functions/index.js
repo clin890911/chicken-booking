@@ -15,6 +15,8 @@ import {
   classifyAdminBookingBackupEvent,
   diffAdminBooking,
   resolveBackupChatId,
+  escapeTg,
+  tgBookingMessage,
 } from './lib/notify.js'
 import {
   normalizeOnlineGuardSettings,
@@ -472,17 +474,14 @@ async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, de
         } else if (event === 'updated') {
           const changes = diffAdminBooking(before, booking)
           const changedKeys = changes.map(c => c.key)
-          const changeLines = changes
-            .map(c => `• ${escapeTg(c.label)}：${escapeTg(c.from) || '（空）'} → <b>${escapeTg(c.to) || '（空）'}</b>`)
-            .join('\n')
           await enqueueAndTrySend({
             channel: 'telegram', event: 'admin_updated', bookingId: id,
             payload: {
               text: tgBookingMessage(
-                `✏️ <b>店員修改訂位</b> · ${id}`,
+                '✏️ <b>店員修改訂位</b>',   // 訂位編號由 tgBookingMessage 統一接在標題後
                 booking,
                 { event: 'admin_updated', booking, changedKeys, changes },
-                changeLines ? `變動：\n${changeLines}` : '',
+                fmtTgChangeLines(changes),
               ),
             },
           })
@@ -922,10 +921,11 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       bookingId: booking.id,
       payload: {
         text: tgBookingMessage(
-          `✏️ <b>客人自助修改訂位</b> · ${booking.id}`,
+          '✏️ <b>客人自助修改訂位</b>',   // 訂位編號由 tgBookingMessage 統一接在標題後
           updated,
           { event: 'guest_updated', booking: updated, changedKeys },
-          changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
+          // 與店員端同格式的「欄位：舊 → 新」清單（原本只列英文欄位名，看不出改了什麼）
+          fmtTgChangeLines(diffAdminBooking(booking, updated)),
         ),
       },
     })
@@ -2245,40 +2245,16 @@ function verifyLineSignature(rawBody, signature, secret) {
 }
 
 // ============== Telegram 內場通知（P0-4：bot token 不再進前端）==============
-function escapeTg(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
+// 訊息格式（escapeTg / tgBookingMessage）與「現場帶位不通知」規則都在 lib/notify.js，
+// 純函式、由根目錄 vitest 直接驗證。
 
-const TG_SOURCE_LABEL = {
-  online: '🌐 線上',
-  phone: '📞 電話',
-  walkin: '🚶 現場',
-  group: '👥 團體',
-  line: '💚 LINE',
-}
-
-// 組裝一則訂位通知：標題 + 訂位摘要（+ 可選補充行）+ 完整 JSON 備份
-function tgBookingMessage(title, booking, payload, extraLine = '') {
-  const lines = [
-    title,
-    `📅 ${booking.date} ${booking.timeSlot}`,
-    `👤 ${escapeTg(booking.name)}  ${booking.guests} 位`,
-    `📱 <code>${escapeTg(booking.phone)}</code>`,
-  ]
-  if (booking.assignedTableId) lines.push(`🪑 ${escapeTg(booking.assignedTableId)}`)
-  if (TG_SOURCE_LABEL[booking.source]) lines.push(TG_SOURCE_LABEL[booking.source])
-  if (booking.notes?.text) lines.push(`📝 ${escapeTg(booking.notes.text)}`)
-  const flags = []
-  if (booking.notes?.pet) flags.push('🐾 寵物')
-  if (booking.notes?.child) flags.push('👶 兒童')
-  if (booking.notes?.mobility) flags.push('♿ 行動不便')
-  if (flags.length) lines.push(flags.join(' · '))
-  if (extraLine) lines.push(extraLine)
-  const json = JSON.stringify(payload, null, 0)
-  return `${lines.join('\n')}\n\n<pre>${escapeTg(json)}</pre>`
+// diffAdminBooking 的結果 → 「• 欄位：舊 → 新」清單（店員改與客人自助改共用同一種呈現）
+function fmtTgChangeLines(changes) {
+  if (!Array.isArray(changes) || !changes.length) return ''
+  const rows = changes
+    .map(c => `• ${escapeTg(c.label)}：${escapeTg(c.from) || '（空）'} → <b>${escapeTg(c.to) || '（空）'}</b>`)
+    .join('\n')
+  return `變動：\n${rows}`
 }
 
 // ============== 通知 outbox（可靠送達：先寫一筆 → 立即試送 → 失敗排程重試）==============

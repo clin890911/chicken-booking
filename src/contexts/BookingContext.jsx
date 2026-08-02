@@ -481,11 +481,12 @@ export function BookingProvider({ children }) {
     if (r?.ok) { refresh(); syncCloudSoon() }
     return r
   }
+  // 現場帶位不發 Telegram（一天數十筆會洗版，且資料有每日全量備份）——
+  // 與後端 functions/lib/notify.js isOnsiteWalkIn 同一條規則。
   const walkInSeat = (tableNumber, guestData) => {
     const r = seatingService.walkInSeat(tableNumber, guestData)
     refresh()
     syncCloudSoon()
-    if (r.ok) safeNotify(() => tg.notifyWalkInSeated(r.booking))
     return r
   }
   // 大組多桌入座（併桌）：一筆 booking 佔多張桌。
@@ -493,7 +494,6 @@ export function BookingProvider({ children }) {
     const r = seatingService.walkInSeatMulti(tableNumbers, guestData)
     refresh()
     syncCloudSoon()
-    if (r.ok) safeNotify(() => tg.notifyWalkInSeated(r.booking))
     return r
   }
   const moveTable = (bookingId, newTableNumber) => {
@@ -530,21 +530,17 @@ export function BookingProvider({ children }) {
     return w
   }
   const callWaitlist = (id) => { waitlistService.call(id); refresh(); syncCloudSoon() }
+  // 候位「入座」＝現場排位，不發 Telegram（取號仍發：那是門口排隊的即時訊號）。
   const seatWaitlist = (id, tableNumber) => {
-    const before = waitlistService.getById(id)
     const r = seatingService.seatWaitlist(id, tableNumber)
     refresh()
     syncCloudSoon()
-    if (r.ok && before) safeNotify(() => tg.notifyWaitlistSeated(before, tableNumber))
     return r
   }
-  // 候位併桌入座：TG 通知帶整組桌號（客人會看到自己坐哪幾桌，只報主桌會誤導）
   const seatWaitlistMulti = (id, tableNumbers) => {
-    const before = waitlistService.getById(id)
     const r = seatingService.seatWaitlistMulti(id, tableNumbers)
     refresh()
     syncCloudSoon()
-    if (r.ok && before) safeNotify(() => tg.notifyWaitlistSeated(before, (r.tableNumbers || []).join(' + ')))
     return r
   }
   const leaveWaitlist = (id) => { waitlistService.leave(id); refresh(); syncCloudSoon() }

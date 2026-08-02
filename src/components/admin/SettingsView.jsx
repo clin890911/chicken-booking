@@ -865,7 +865,7 @@ export default function SettingsView({ onOpenCustomer }) {
       </SettingsSection>
 
       {/* Telegram 通知 + 備份 */}
-      <SettingsSection sectionKey="telegram" title="通知與備份" description="Telegram 事件推送與備份狀態。">
+      <SettingsSection sectionKey="telegram" title="通知與備份" description="Telegram 事件推送與備份狀態（現場帶位不推播，每日全量備份仍收）。">
         <TelegramSettings embedded />
       </SettingsSection>
 

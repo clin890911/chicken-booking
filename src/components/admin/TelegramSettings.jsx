@@ -117,8 +117,9 @@ export default function TelegramSettings({ embedded = false }) {
         <>
           <h2 className="font-bold text-chicken-brown mb-1">Telegram 通知 + 備份</h2>
           <p className="text-xs text-chicken-brown/60 mb-3">
-            所有訂位/候位事件即時推送到 Telegram chat，含完整 JSON 作為備份。
-            資料丟失時可從 chat 還原。
+            訂位事件（新增 / 改期時段人數 / 取消）與候位取號即時推送到 Telegram chat，附 JSON 備份。
+            <b>現場帶位不推播</b>（快速帶位 / 併桌 / 候位入座，一天數十筆會洗版）——
+            這些紀錄仍在每日 04:30 的全量備份檔裡。
           </p>
         </>
       )}
@@ -130,6 +131,9 @@ export default function TelegramSettings({ embedded = false }) {
           chat 已在後端（Secret Manager）設定，<b>前端無需、也不應設定 token</b>（安全考量，
           避免 token 外洩到瀏覽器）。
           <div className="mt-1.5 text-chicken-brown/55">
+            現場帶位（快速帶位 / 併桌 / 候位入座）刻意不推播，避免洗版；資料仍收在每日 04:30 全量備份檔。
+          </div>
+          <div className="mt-1 text-chicken-brown/55">
             下方的 chat 偵測 / 測試訊息工具僅供本機開發環境使用，正式站不需要。
           </div>
         </div>

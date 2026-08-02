@@ -9,6 +9,11 @@ import {
   classifyAdminBookingBackupEvent,
   diffAdminBooking,
   resolveBackupChatId,
+  isOnsiteWalkIn,
+  compactBookingForBackup,
+  bookingTableNumbers,
+  dateWithWeekday,
+  tgBookingMessage,
   LINE_PUSH_DEDUPE_WINDOW_MS,
 } from '../../functions/lib/notify.js'
 
@@ -200,6 +205,132 @@ describe('classifyAdminBookingBackupEvent（店員端 Telegram 備份分類：�
   it('guests 數字/字串混型仍正確比對', () => {
     expect(classifyAdminBookingBackupEvent({ ...base, guests: 4 }, { ...base, guests: '4' })).toBeNull()
     expect(classifyAdminBookingBackupEvent({ ...base, guests: '4' }, { ...base, guests: 6 })).toBe('updated')
+  })
+})
+
+// 現場帶位不通知（2026-08）：店長回報 Telegram 被「店員新增訂位」洗版——
+// 那些其實是外場每開一檯就送一則的現場散客紀錄（source=walkin），
+// 真正要看的線上/電話訂位異動反而被蓋掉。資料仍有每日 04:30 全量備份可還原。
+describe('isOnsiteWalkIn（現場帶位濾網）', () => {
+  it.each([
+    ['現場快速帶位（已入座）', { source: 'walkin', status: 'arrived' }, true],
+    ['現場帶位後離席', { source: 'walkin', status: 'completed' }, true],
+    ['誤開檯取消（仍是現場紀錄）', { source: 'walkin', status: 'cancelled' }, true],
+    ['線上訂位', { source: 'online', status: 'confirmed' }, false],
+    ['電話訂位', { source: 'phone', status: 'confirmed' }, false],
+    ['LINE 訂位', { source: 'line', status: 'confirmed' }, false],
+    ['沒有 source', { status: 'confirmed' }, false],
+  ])('%s → %s', (_label, booking, expected) => {
+    expect(isOnsiteWalkIn(booking)).toBe(expected)
+  })
+
+  it('現場帶位的整段生命週期都不進 Telegram', () => {
+    const walkin = { id: 'W1', source: 'walkin', status: 'arrived', date: '2026-08-02', timeSlot: '16:00', guests: 2 }
+    expect(classifyAdminBookingBackupEvent(null, walkin)).toBeNull()                                   // 開檯
+    expect(classifyAdminBookingBackupEvent(walkin, { ...walkin, guests: 4 })).toBeNull()               // 現場加人
+    expect(classifyAdminBookingBackupEvent(walkin, { ...walkin, status: 'cancelled' })).toBeNull()     // 誤開檯復原
+    expect(classifyAdminBookingBackupEvent(walkin, { ...walkin, status: 'completed' })).toBeNull()     // 離席
+  })
+
+  it('現場帶位的紀錄也不對客人發 LINE：候位入座會帶著候位者的 lineUserId，'
+    + '外場按「復原」誤帶位時客人會收到「訂位已取消」，但他根本沒訂過位', () => {
+    const walkin = { id: 'W2', source: 'walkin', status: 'arrived', date: '2026-08-02', timeSlot: '16:00', guests: 2 }
+    expect(classifyAdminBookingChange(walkin, { ...walkin, status: 'cancelled' })).toBeNull()
+    // 對照組：真的有訂位的客人，取消仍要通知
+    const online = { ...walkin, id: 'O1', source: 'online', status: 'confirmed' }
+    expect(classifyAdminBookingChange(online, { ...online, status: 'cancelled' })).toBe('cancelled')
+  })
+
+  it('電話/線上訂位不受影響（該通知的照常通知）', () => {
+    const phone = { id: 'P1', source: 'phone', status: 'confirmed', date: '2026-08-02', timeSlot: '18:00', guests: 4 }
+    expect(classifyAdminBookingBackupEvent(null, phone)).toBe('created')
+    expect(classifyAdminBookingBackupEvent(phone, { ...phone, guests: 6 })).toBe('updated')
+    expect(classifyAdminBookingBackupEvent(phone, { ...phone, status: 'cancelled' })).toBe('cancelled')
+  })
+})
+
+describe('tgBookingMessage（通知格式）', () => {
+  const booking = {
+    id: 'B123', date: '2026-08-02', timeSlot: '16:00', name: '王小明', guests: 2,
+    phone: '0912345678', status: 'arrived', source: 'phone', assignedTableId: '108',
+    extraTableIds: [], notes: { pet: false, child: true, mobility: false, text: '靠窗' },
+  }
+  const head = (b = booking, extra = '') => tgBookingMessage('🆕 <b>新訂位</b>', b, { event: 'x', booking: b }, extra).split('\n\n')[0]
+
+  it('標題帶訂位編號（回查時直接複製）', () => {
+    expect(head()).toContain('🆕 <b>新訂位</b> · <code>B123</code>')
+  })
+
+  it('日期補星期、來源併在同一行', () => {
+    expect(head()).toContain('📅 2026-08-02 (日) 16:00 · 📞 電話')
+  })
+
+  it('姓名／人數／狀態同一行——以前看不出這筆是待到還是已入座', () => {
+    expect(head()).toContain('👤 王小明 · 2 位 · 用餐中')
+  })
+
+  it('併桌顯示所有桌號', () => {
+    expect(head({ ...booking, extraTableIds: ['109'] })).toContain('🪑 桌 108＋109')
+  })
+
+  it('沒電話就不印空的 📱 行（現場散客常見）', () => {
+    const noPhone = head({ ...booking, phone: '' })
+    expect(noPhone).not.toContain('📱')
+    expect(head()).toContain('📱 <code>0912345678</code>')
+  })
+
+  it('備註與旗標只印有值的', () => {
+    expect(head()).toContain('📝 靠窗')
+    expect(head()).toContain('👶 兒童')
+    expect(head()).not.toContain('🐾 寵物')
+  })
+
+  it('補充段落（變動清單／取消原因）以空行隔開，接在摘要後', () => {
+    const text = tgBookingMessage('✏️ <b>修改</b>', booking, { event: 'x', booking }, '變動：\n• 人數：2 → 4')
+    expect(text).toContain('\n\n變動：\n• 人數：2 → 4\n\n<pre>')
+  })
+
+  it('JSON 備份仍在（還原用），但已瘦身：空值/衍生欄位不進訊息', () => {
+    const fat = {
+      ...booking,
+      extraTableIds: [], lineUserId: null, lastGuestEditAt: null, cancellationReason: null,
+      guestEditCount: 0, guestEditHistory: [], phoneDigits: '0912345678', manageToken: 'tok',
+    }
+    const text = tgBookingMessage('🆕 <b>新訂位</b>', fat, { event: 'admin_created', booking: fat })
+    const json = JSON.parse(text.split('<pre>')[1].split('</pre>')[0])
+    expect(json.event).toBe('admin_created')
+    expect(json.booking.id).toBe('B123')
+    expect(json.booking.manageToken).toBe('tok')       // 有值的照留（還原得回同一筆）
+    expect(json.booking.notes).toEqual({ text: '靠窗', child: true })  // 全 false 的旗標不寫
+    for (const k of ['lineUserId', 'lastGuestEditAt', 'cancellationReason', 'guestEditCount', 'guestEditHistory', 'extraTableIds', 'phoneDigits']) {
+      expect(json.booking).not.toHaveProperty(k)
+    }
+  })
+
+  it('HTML 特殊字元照樣跳脫（parse_mode=HTML 不可被姓名打壞）', () => {
+    expect(head({ ...booking, name: '<b>駭客</b>' })).toContain('&lt;b&gt;駭客&lt;/b&gt;')
+  })
+
+  it('欄位殘缺也不炸（舊資料 / 部分文件）', () => {
+    expect(() => tgBookingMessage('🆕', {}, { event: 'x' })).not.toThrow()
+    expect(() => tgBookingMessage('🆕', null, null)).not.toThrow()
+  })
+})
+
+describe('compactBookingForBackup / bookingTableNumbers / dateWithWeekday', () => {
+  it('空值一律不寫，有值的原樣保留', () => {
+    expect(compactBookingForBackup({ a: 1, b: null, c: '', d: [], e: {}, f: 0, g: false }))
+      .toEqual({ a: 1, f: 0, g: false })
+  })
+
+  it('主桌 + 併桌額外桌去重去空', () => {
+    expect(bookingTableNumbers({ assignedTableId: '108', extraTableIds: ['109', '108', '', null] })).toEqual(['108', '109'])
+    expect(bookingTableNumbers({ assignedTableId: null })).toEqual([])
+  })
+
+  it('日期補星期；壞日期原樣回傳', () => {
+    expect(dateWithWeekday('2026-08-02')).toBe('2026-08-02 (日)')
+    expect(dateWithWeekday('not-a-date')).toBe('not-a-date')
   })
 })
 

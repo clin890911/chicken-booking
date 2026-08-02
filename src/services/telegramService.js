@@ -128,14 +128,40 @@ const SOURCE_LABEL = {
   line:   '💚 LINE',
 }
 
+// 狀態一律顯示：以前看訊息分不出這筆是「待到」還是已經坐在店裡
+const STATUS_LABEL = {
+  pending: '待確認', confirmed: '待到', arrived: '用餐中',
+  completed: '已離席', cancelled: '已取消', noshow: 'No-show',
+}
+
+// 現場帶位（source='walkin'：快速帶位 / 併桌 / 候位入座）＝店內內務，不推 Telegram。
+// ★ 與後端 functions/lib/notify.js 的 isOnsiteWalkIn 同口徑，兩邊要一起改。
+const isOnsiteWalkIn = (b) => String(b?.source ?? '').trim() === 'walkin'
+const SKIPPED = { ok: false, reason: 'onsite-walkin' }
+
+const tablesOf = (b) => [...new Set(
+  [b?.assignedTableId, ...(Array.isArray(b?.extraTableIds) ? b.extraTableIds : [])]
+    .filter(v => v !== null && v !== undefined && v !== '')
+    .map(String),
+)]
+
+const dateWithWeekday = (dateStr) => {
+  const d = new Date(`${dateStr}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return String(dateStr ?? '')
+  return `${dateStr} (${['日', '一', '二', '三', '四', '五', '六'][d.getDay()]})`
+}
+
+// 摘要五行以內，空欄位不佔行（舊版沒電話也印一行孤零零的 📱）
 function fmtBookingHeader(b) {
-  const lines = [
-    `📅 ${b.date} ${b.timeSlot}`,
-    `👤 ${escapeHTML(b.name)}  ${b.guests} 位`,
-    `📱 <code>${escapeHTML(b.phone)}</code>`,
-  ]
-  if (b.assignedTableId) lines.push(`🪑 ${b.assignedTableId}`)
-  if (SOURCE_LABEL[b.source]) lines.push(SOURCE_LABEL[b.source])
+  const source = SOURCE_LABEL[b.source] || ''
+  const status = STATUS_LABEL[b.status] || ''
+  const tables = tablesOf(b)
+  const when = [b.date ? dateWithWeekday(b.date) : '', b.timeSlot || ''].filter(Boolean).join(' ')
+  const lines = []
+  if (when || source) lines.push(`📅 ${escapeHTML(when)}${source ? `${when ? ' · ' : ''}${source}` : ''}`)
+  lines.push(`👤 ${escapeHTML(b.name) || '（未填姓名）'} · ${Number(b.guests) || 0} 位${status ? ` · ${status}` : ''}`)
+  if (tables.length) lines.push(`🪑 桌 ${escapeHTML(tables.join('＋'))}`)
+  if (b.phone) lines.push(`📱 <code>${escapeHTML(b.phone)}</code>`)
   if (b.notes?.text) lines.push(`📝 ${escapeHTML(b.notes.text)}`)
   const flags = []
   if (b.notes?.pet) flags.push('🐾 寵物')
@@ -145,47 +171,83 @@ function fmtBookingHeader(b) {
   return lines.join('\n')
 }
 
-// 訊息底部附完整 JSON（給備份還原使用）
+// 備份 JSON 瘦身：空值 / 全 false 的備註旗標不寫，免得 <pre> 淹掉上面的摘要
+function compactBooking(b) {
+  if (!b || typeof b !== 'object') return b
+  const out = {}
+  for (const [k, v] of Object.entries(b)) {
+    if (v === null || v === undefined || v === '') continue
+    if (Array.isArray(v) && v.length === 0) continue
+    if (k === 'guestEditCount' && Number(v) === 0) continue
+    if (k === 'notes') {
+      const notes = {}
+      if (v?.text) notes.text = v.text
+      ;['pet', 'child', 'mobility'].forEach(f => { if (v?.[f]) notes[f] = true })
+      if (Object.keys(notes).length) out.notes = notes
+      continue
+    }
+    if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) continue
+    out[k] = v
+  }
+  return out
+}
+
+// 訊息底部附 JSON（給備份還原使用）
 function withBackupPayload(headerText, payload) {
-  const json = JSON.stringify(payload, null, 0)
+  const slim = (payload && typeof payload === 'object' && payload.booking)
+    ? { ...payload, booking: compactBooking(payload.booking) }
+    : payload
+  const json = JSON.stringify(slim, null, 0)
   return `${headerText}\n\n<pre>${escapeHTML(json)}</pre>`
 }
 
+// 標題統一接訂位編號（要回查 / 回報時直接複製）
+const titleWithId = (title, b) => `${title}${b?.id ? ` · <code>${escapeHTML(b.id)}</code>` : ''}`
+
 // ============== Event Templates ==============
+// 所有訂位事件都先過現場帶位濾網：現場開檯的整段生命週期（開檯/改人數/誤開檯取消/入座/離席）
+// 都不推播——一天數十筆會把真正要看的線上、電話訂位異動洗掉。
 export function notifyBookingCreated(booking) {
-  const head = `🆕 <b>新訂位</b>\n${fmtBookingHeader(booking)}`
+  if (isOnsiteWalkIn(booking)) return SKIPPED
+  const head = `${titleWithId('🆕 <b>新訂位</b>', booking)}\n${fmtBookingHeader(booking)}`
   return sendMessage(withBackupPayload(head, { event: 'booking_created', booking }))
 }
 
 export function notifyBookingUpdated(booking, changes = {}) {
+  if (isOnsiteWalkIn(booking)) return SKIPPED
   const changeKeys = Object.keys(changes).filter(k => k !== 'updatedAt')
-  const head = `✏️ <b>訂位修改</b> · ${booking.id}\n${fmtBookingHeader(booking)}` +
-    (changeKeys.length ? `\n\n變動欄位：<code>${changeKeys.join(', ')}</code>` : '')
+  const head = `${titleWithId('✏️ <b>訂位修改</b>', booking)}\n${fmtBookingHeader(booking)}` +
+    (changeKeys.length ? `\n\n變動欄位：<code>${escapeHTML(changeKeys.join(', '))}</code>` : '')
   return sendMessage(withBackupPayload(head, { event: 'booking_updated', booking, changes }))
 }
 
 export function notifyBookingCancelled(booking) {
-  const head = `❌ <b>訂位取消</b>\n${fmtBookingHeader(booking)}`
+  if (isOnsiteWalkIn(booking)) return SKIPPED
+  const head = `${titleWithId('❌ <b>訂位取消</b>', booking)}\n${fmtBookingHeader(booking)}`
   return sendMessage(withBackupPayload(head, { event: 'booking_cancelled', booking }))
 }
 
 export function notifyBookingAssigned(booking, tableNumber) {
-  const head = `🪑 <b>桌位已指派</b> → ${tableNumber}\n${fmtBookingHeader(booking)}`
+  if (isOnsiteWalkIn(booking)) return SKIPPED
+  const head = `${titleWithId(`🪑 <b>桌位已指派</b> → ${escapeHTML(tableNumber)}`, booking)}\n${fmtBookingHeader(booking)}`
   return sendMessage(withBackupPayload(head, { event: 'booking_assigned', booking, tableNumber }))
 }
 
 export function notifyBookingArrived(booking) {
-  const head = `✅ <b>客人到了</b>\n${fmtBookingHeader(booking)}`
+  if (isOnsiteWalkIn(booking)) return SKIPPED
+  const head = `${titleWithId('✅ <b>客人到了</b>', booking)}\n${fmtBookingHeader(booking)}`
   return sendMessage(withBackupPayload(head, { event: 'booking_arrived', booking }))
 }
 
 export function notifyBookingCompleted(booking, minutes) {
-  const head = `🚪 <b>已離席</b>（用餐 ${minutes} 分）\n${fmtBookingHeader(booking)}`
+  if (isOnsiteWalkIn(booking)) return SKIPPED
+  const head = `${titleWithId(`🚪 <b>已離席</b>（用餐 ${minutes} 分）`, booking)}\n${fmtBookingHeader(booking)}`
   return sendMessage(withBackupPayload(head, { event: 'booking_completed', booking, minutes }))
 }
 
 export function notifyBookingNoShow(booking) {
-  const head = `⚠️ <b>No-show</b>\n${fmtBookingHeader(booking)}`
+  if (isOnsiteWalkIn(booking)) return SKIPPED
+  const head = `${titleWithId('⚠️ <b>No-show</b>', booking)}\n${fmtBookingHeader(booking)}`
   return sendMessage(withBackupPayload(head, { event: 'booking_noshow', booking }))
 }
 
@@ -197,19 +259,12 @@ export function notifyWaitlistCreated(wait) {
   return sendMessage(withBackupPayload(head, { event: 'waitlist_created', wait }))
 }
 
-export function notifyWaitlistSeated(wait, tableNumber) {
-  const head = `✅ <b>候位入座</b> #${wait.queueNumber} → ${tableNumber}\n` +
-    `👤 ${escapeHTML(wait.name)}  ${wait.partySize} 位`
-  return sendMessage(withBackupPayload(head, { event: 'waitlist_seated', wait, tableNumber }))
-}
-
-export function notifyWalkInSeated(booking) {
-  const head = `🚶 <b>散客直接入座</b> → ${booking.assignedTableId}\n${fmtBookingHeader(booking)}`
-  return sendMessage(withBackupPayload(head, { event: 'walkin_seated', booking }))
-}
+// 候位入座 / 散客直接入座 / 現場換桌都是「現場排位」，一律不推播（見上方 isOnsiteWalkIn 註解）。
+// 候位「取號」保留通知：那是客人在門口排隊的即時訊號，不是排位動作。
 
 export function notifyTableMoved(booking, fromTable, toTable) {
-  const head = `↔ <b>換桌</b> ${fromTable} → ${toTable}\n${fmtBookingHeader(booking)}`
+  if (isOnsiteWalkIn(booking)) return SKIPPED
+  const head = `${titleWithId(`↔ <b>換桌</b> ${escapeHTML(fromTable)} → ${escapeHTML(toTable)}`, booking)}\n${fmtBookingHeader(booking)}`
   return sendMessage(withBackupPayload(head, { event: 'table_moved', booking, fromTable, toTable }))
 }
 
