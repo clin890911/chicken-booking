@@ -26,6 +26,11 @@ const TYPE_ICONS = {
 
 let _id = 0
 
+// 畫面上最多同時顯示幾則：超過就擠掉最舊的。
+// 這是最後一道防線——不管哪個來源一次推了幾則（例如同步回來一批新訂位），
+// toast 都不該疊到蓋住底下的桌況圖。
+const MAX_VISIBLE = 3
+
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
 
@@ -38,7 +43,14 @@ export function ToastProvider({ children }) {
     const type = opts.type || 'info'
     const duration = opts.duration ?? 4000
     const t = { id, message, type, action: opts.action }
-    setToasts(list => [...list, t])
+    // 擠掉最舊的：帶「復原」動作的那則例外——它是使用者唯一的反悔入口，
+    // 被別的通知擠掉等於動作做不回來。真的滿了就讓新的那則排在後面自然輪替。
+    setToasts(list => {
+      const next = [...list, t]
+      if (next.length <= MAX_VISIBLE) return next
+      const evictable = next.findIndex(x => !x.action)
+      return evictable === -1 ? next : next.filter((_, i) => i !== evictable)
+    })
     if (duration > 0) {
       setTimeout(() => dismiss(id), duration)
     }

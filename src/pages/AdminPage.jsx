@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
 import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
+import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts } from '../utils/newBookingAlerts'
 
 const TABS = [
   { key: 'ops',       label: '現場',  icon: '🪑', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
@@ -48,31 +49,29 @@ export default function AdminPage() {
   // addPrefill：名冊「新增訂位」帶入的預填（電話/姓名），導到訂位頁新增子分頁
   const [addPrefill, setAddPrefill] = useState(null)
   const { user, usingFirebase } = useAuth()
-  const { bookings, waitlist } = useBooking()
+  const { bookings, waitlist, cloudStatus, hydrated } = useBooking()
   const toast = useToast()
 
   // === 新訂位偵測（推 toast）===
+  // 口徑與「為什麼要壓數量」寫在 utils/newBookingAlerts；這裡只負責「何時開始比對」。
   const prevIdsRef = useRef(null)
+  const armedRef = useRef(false)
+  const ready = isAlertBaselineReady({ usingFirebase, cloudStatus, hydrated })
   useEffect(() => {
     // 偵測「任何日期」的新確認訂位（先前只看當天，會漏掉客人預訂未來日期的位）
-    const today = todayStr()
-    const confirmed = bookings.filter(b => b.status === 'confirmed')
-    const ids = new Set(confirmed.map(b => b.id))
-    if (prevIdsRef.current !== null) {
-      const added = confirmed.filter(b => !prevIdsRef.current.has(b.id))
-      added.forEach(b => {
-        const isToday = b.date === today
-        // 今日 = 顯眼且停留久；未來日 = 較不緊迫（標註「未來日」、縮短停留）
-        if (isToday) {
-          toast.info(`📋 新訂位：${b.name} ${b.guests} 位 · ${b.timeSlot}`, { duration: 6000 })
-        } else {
-          toast.info(`🗓 未來日新訂位：${b.name} ${b.guests} 位 · ${b.date} ${b.timeSlot}`, { duration: 3500 })
-        }
-      })
+    const ids = confirmedIdSet(bookings)
+    // 🔴 開機期間（雲端首拉未完成）不斷把當下快照當基準、一則都不推。
+    // 首個「備妥」的快照同樣只當基準——它就是登入時看到的全部既有訂位，不是剛進來的。
+    if (!ready || !armedRef.current) {
+      if (ready) armedRef.current = true
+      prevIdsRef.current = ids
+      return
     }
+    buildNewBookingAlerts(diffNewConfirmed(prevIdsRef.current, bookings), todayStr())
+      .forEach(a => toast.info(a.message, { duration: a.duration }))
     prevIdsRef.current = ids
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookings])
+  }, [bookings, ready])
 
   // === 計算 badge ===
   const badges = useMemo(() => {
