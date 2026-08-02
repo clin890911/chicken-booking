@@ -42,10 +42,13 @@ test('訂位脈動：遲到且已指派的訂位可直接「客人到了」入�
   // 右側欄改版後預設籤為「帶位」，訂位脈動移到「今日訂位」籤（badge 會使 accessible name 變成「今日訂位 1」）
   await page.getByRole('button', { name: /^今日訂位/ }).click()
 
-  // 訂位脈動：過時未到區出現遲到客卡，含「✓ 已指派 113」「✅ 客人到了」「標 No-show」
+  // 訂位脈動：過時未到區出現遲到客卡，含桌號徽章、「✅ 客人到了」「標 No-show」。
+  // 種子只寫了 booking.assignedTableId、沒把 113 設成 reserved（見上方 beforeEach 註解「空桌」），
+  // 即「預配」狀態 → 徽章是「📌 已預配」而非「✓ 已指派」（2026-08 起兩者分開，
+  // 免得訂位卡一律寫已指派、桌況圖卻一藍一綠）。
   await expect(page.getByText('⚠ 過時未到（1 組）— 請聯絡或標記')).toBeVisible()
   await expect(page.getByText('遲到客')).toBeVisible()
-  await expect(page.getByText('✓ 已指派 113')).toBeVisible()
+  await expect(page.getByText('📌 已預配 113')).toBeVisible()
   const seatBtn = page.getByRole('button', { name: /客人到了/ })
   await expect(seatBtn).toBeVisible()
   await expect(page.getByRole('button', { name: /標 No-show/ })).toBeVisible()
