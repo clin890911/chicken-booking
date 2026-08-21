@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import BookingCard from '../booking/BookingCard'
 import GroupBatchCard from '../booking/GroupBatchCard'
-import { Card, EmptyState } from '../ui'
+import { Card, EmptyState, Button } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { todayStr, formatDate, addDays, dayLabel } from '../../utils/timeSlots'
 import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
@@ -11,7 +11,7 @@ import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
 //   week＝週條（7 日快切 + 前後週）+ 當日訂位清單為主體（散客卡 + 團體梯次卡同框）
 // 解決「點日期後清單在月曆下方、使用者以為沒反應」：收合後清單直接在視口內。
 // 視圖切換用純條件渲染 + animate-soft-enter（動畫不變量：內容可見性不依賴 JS 回呼）。
-export default function CalendarView({ onAssignTable, onOpenGroup }) {
+export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking }) {
   const { bookings, groupReservations } = useBooking()
   const [cursor, setCursor] = useState(() => {
     const d = new Date()
@@ -93,6 +93,9 @@ export default function CalendarView({ onAssignTable, onOpenGroup }) {
     const g = summarizeDayGroups(groupReservations, selected)
     return { ...s, groupCount: g.groupCount, groupGuests: g.guests }
   }, [stats, groupReservations, selected])
+
+  // 過去的日期不該新增訂位（字串比較：日期格式皆為 'YYYY-MM-DD'）
+  const isPastSelected = selected < todayStr()
 
   // 週條的 7 天：從 selected 推導（週日起，與月曆一致；跨月自然正確）
   const weekDays = useMemo(() => {
@@ -315,9 +318,25 @@ export default function CalendarView({ onAssignTable, onOpenGroup }) {
                   ⚠ 待指派 {daySummary.unassigned}
                 </span>
               )}
+              {/* 過去的日期不該新增訂位；空狀態時另有 EmptyState 內建的入口 */}
+              {onAddBooking && !isPastSelected && dayEntries.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onAddBooking(selected)}
+                  className="ml-auto px-3 py-1.5 rounded-lg text-xs font-bold bg-chicken-red text-white hover:bg-chicken-red/90 active:scale-[.98] transition-all whitespace-nowrap min-h-[32px]"
+                >
+                  ＋ 新增訂位
+                </button>
+              )}
             </div>
             {dayEntries.length === 0 ? (
-              <EmptyState icon="📭" title="這天沒有訂位" />
+              <EmptyState
+                icon="📭"
+                title="這天沒有訂位"
+                action={onAddBooking && !isPastSelected ? (
+                  <Button onClick={() => onAddBooking(selected)}>＋ 新增訂位</Button>
+                ) : null}
+              />
             ) : (
               <div className="space-y-2">
                 {dayEntries.map(({ slot, bookings: list, groupBatches }) => (

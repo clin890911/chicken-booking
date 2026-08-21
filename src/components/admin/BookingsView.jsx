@@ -16,11 +16,25 @@ const SUB_TABS = [
 // 團體卡點擊呼叫 onOpenGroup → 規劃頁團單詳情
 export default function BookingsView({ onAssignTable, onOpenGroup, onCreated, openAdd }) {
   const [sub, setSub] = useState(openAdd ? 'add' : 'today')
+  // 新增表單的預填：可能來自名冊（openAdd prop）或日曆選日期後按「＋ 新增訂位」（本地觸發）。
+  // 兩條路共用同一個 state，誰後觸發就以誰為準（都帶 seq，AddBookingView 依 seq 變更才重灌欄位）。
+  const [addPrefill, setAddPrefill] = useState(openAdd || null)
   // 名冊帶入預填時跳到「新增」子分頁（seq 變更才觸發，避免重複跳）
   const lastSeq = useRef(openAdd?.seq)
   useEffect(() => {
-    if (openAdd && openAdd.seq !== lastSeq.current) { lastSeq.current = openAdd.seq; setSub('add') }
+    if (openAdd && openAdd.seq !== lastSeq.current) {
+      lastSeq.current = openAdd.seq
+      setAddPrefill(openAdd)
+      setSub('add')
+    }
   }, [openAdd])
+
+  // 日曆選定日期後按「＋ 新增訂位」：只帶日期（不含 phone/name/source），
+  // AddBookingView 端會依欄位是否存在守門，不會洗掉使用者已填的姓名電話。
+  const handleAddBookingFromCalendar = (dateStr) => {
+    setAddPrefill({ date: dateStr, seq: Date.now() })
+    setSub('add')
+  }
 
   return (
     <div className="space-y-3">
@@ -44,9 +58,9 @@ export default function BookingsView({ onAssignTable, onOpenGroup, onCreated, op
       {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
       <div key={sub} className="animate-soft-enter">
           {sub === 'today' && <TodayView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} />}
-          {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} />}
+          {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} onAddBooking={handleAddBookingFromCalendar} />}
           {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} />}
-          {sub === 'add' && <AddBookingView initial={openAdd} onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} />}
+          {sub === 'add' && <AddBookingView initial={addPrefill} onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} />}
       </div>
     </div>
   )
