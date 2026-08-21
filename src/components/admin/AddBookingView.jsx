@@ -77,12 +77,17 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
   // 換日重設時段
   useEffect(() => { setTimeSlot('') }, [date])
 
-  // 從名冊「新增訂位」帶入預填：initial.seq 變更時重帶（AddBookingView 已掛載時也生效）。
+  // 預填來源有兩條：名冊「新增訂位」（phone/name/source 一定會給，含空字串代表刻意清空——
+  // 例如現場頁「＋新增今日訂位」傳 null 顧客）／日曆選日期後「＋新增訂位」（只給 date）。
+  // 用「欄位是否存在於 initial」而非「truthy」判斷是否覆蓋：
+  // 這樣只帶 date 的日曆預填不會誤把使用者已填的姓名電話洗掉，名冊路徑的清空語意也不受影響。
+  // initial.seq 變更時才重帶（AddBookingView 已掛載時也生效）。
   useEffect(() => {
     if (!initial) return
-    setPhone(initial.phone || '')
-    setName(initial.name || '')
+    if (initial.phone !== undefined) setPhone(initial.phone)
+    if (initial.name !== undefined) setName(initial.name)
     if (initial.source) setSource(initial.source)
+    if (initial.date) setDate(initial.date)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial?.seq])
 
