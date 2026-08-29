@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   notificationStateHash,
   shouldSkipDuplicatePush,
@@ -12,6 +12,7 @@ import {
   buildTelegramBookingMessage,
   stripTelegramBookingJson,
   buildTelegramSendMessageBody,
+  postTelegramMessage,
   LINE_PUSH_DEDUPE_WINDOW_MS,
 } from '../../functions/lib/notify.js'
 
@@ -307,6 +308,22 @@ describe('Telegram 訂位通知脫敏', () => {
     expect(delivered).toContain('❌ <b>店員取消訂位</b>')
   })
 
+  it('legacy updated 標題的 raw ID 會 escape，且不重複顯示', () => {
+    const legacyPrefix = [
+      `✏️ <b>客人自助修改訂位</b> · ${booking.id}`,
+      '📅 2026-08-29 13:00',
+      '👤 李安  5 位',
+      '📱 <code>0988888888</code>',
+    ].join('\n')
+    const legacyJson = JSON.stringify({ event: 'guest_updated', booking })
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const legacyText = `${legacyPrefix}\n\n<pre>${legacyJson}</pre>`
+    const body = buildTelegramSendMessageBody('-100123', legacyText)
+    expect(body.text).toContain('B&lt;&amp;123')
+    expect(body.text).not.toContain('B<&123')
+    expect(body.text.match(/B&lt;&amp;123/g)).toHaveLength(1)
+  })
+
   it('tgSend request body 實際 seam 會脫敏並保留 Telegram 參數', () => {
     const rawText = buildTelegramBookingMessage('🆕 <b>新線上訂位</b>', booking, {
       event: 'booking_created', booking,
@@ -339,6 +356,31 @@ describe('Telegram 訂位通知脫敏', () => {
     expect(body.text).not.toContain('<b>')
     expect(body.text).not.toMatch(/&(?:amp|lt|gt)?$/)
     expect(body.text).not.toContain('manageToken')
+  })
+
+  it('真正 transport 只 fetch 一次，且 HTTP body 已脫敏並符合長度/參數契約', async () => {
+    const longBooking = { ...booking, notes: { text: '🐔'.repeat(5000) } }
+    const rawText = buildTelegramBookingMessage('🆕 <b>新線上訂位</b>', longBooking, {
+      event: 'booking_created', booking: longBooking,
+    })
+    const fetchFn = vi.fn().mockResolvedValue({ ok: true })
+    const signal = new AbortController().signal
+    await postTelegramMessage(fetchFn, 'https://telegram.invalid/sendMessage', '-100123', rawText, signal)
+
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    const [url, options] = fetchFn.mock.calls[0]
+    expect(url).toBe('https://telegram.invalid/sendMessage')
+    expect(options).toMatchObject({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+    })
+    const sent = JSON.parse(options.body)
+    expect(sent).toMatchObject({ chat_id: '-100123', parse_mode: 'HTML', disable_web_page_preview: true })
+    expect(sent.text.length).toBeLessThanOrEqual(4096)
+    expect([...sent.text].length).toBeLessThanOrEqual(4096)
+    expect(sent.text).not.toMatch(/CHICKEN_BOOKING_JSON|<pre>|manageToken|secret-manage-token/)
+    expect(sent.text).toContain('…（內容過長已截斷，完整事件留存於系統）')
   })
 })
 

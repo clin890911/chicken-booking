@@ -168,12 +168,12 @@ const LEGACY_TELEGRAM_EVENT_TITLE = {
   guest_cancelled: '❌ <b>客人自助取消訂位</b>',
 }
 
-function isLegacyTelegramBookingTail(prefix, encodedJson) {
+function sanitizeLegacyTelegramBookingPrefix(prefix, encodedJson) {
   try {
     const parsed = JSON.parse(decodeTelegramHtml(encodedJson))
     const expectedTitle = LEGACY_TELEGRAM_EVENT_TITLE[parsed?.event]
     const bookingId = String(parsed?.booking?.id ?? '').trim()
-    return Boolean(
+    const isLegacyBookingMessage = Boolean(
       expectedTitle
       && bookingId
       && prefix.startsWith(expectedTitle)
@@ -182,8 +182,11 @@ function isLegacyTelegramBookingTail(prefix, encodedJson) {
       && prefix.includes('\n📱 <code>')
       && prefix.includes('</code>'),
     )
+    if (!isLegacyBookingMessage) return null
+    // 舊 updated formatter 會把 booking.id 原樣插入標題；legacy 路徑在送出前一併修正。
+    return prefix.split(bookingId).join(escapeTelegramHtml(bookingId))
   } catch {
-    return false
+    return null
   }
 }
 
@@ -203,7 +206,7 @@ export function stripTelegramBookingJson(text) {
   if (legacyAt < 0) return input
   const prefix = input.slice(0, legacyAt)
   const encodedJson = input.slice(legacyAt + legacyOpening.length, -closingTag.length)
-  return isLegacyTelegramBookingTail(prefix, encodedJson) ? prefix : input
+  return sanitizeLegacyTelegramBookingPrefix(prefix, encodedJson) ?? input
 }
 
 function telegramHtmlToPlainText(html) {
@@ -235,6 +238,17 @@ export function buildTelegramSendMessageBody(chatId, rawText) {
     parse_mode: 'HTML',
     disable_web_page_preview: true,
   }
+}
+
+// 可注入 fetch 的最小 transport seam：生產環境傳 global fetch，測試傳 mock；
+// request body 必定先經過同一個脫敏/長度守門。
+export function postTelegramMessage(fetchFn, url, chatId, text, signal) {
+  return fetchFn(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildTelegramSendMessageBody(chatId, text)),
+    signal,
+  })
 }
 
 export function classifyAdminBookingBackupEvent(before, after) {
