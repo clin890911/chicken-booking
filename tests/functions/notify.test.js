@@ -9,6 +9,9 @@ import {
   classifyAdminBookingBackupEvent,
   diffAdminBooking,
   resolveBackupChatId,
+  buildTelegramBookingMessage,
+  stripTelegramBookingJson,
+  telegramDeliveryText,
   LINE_PUSH_DEDUPE_WINDOW_MS,
 } from '../../functions/lib/notify.js'
 
@@ -221,6 +224,75 @@ describe('resolveBackupChatId（每日全量備份的收件 chat 分流：PII �
 
   it('backup chat 前後有空白 → trim 後採用', () => {
     expect(resolveBackupChatId('  111222333  ', '999888777')).toBe('111222333')
+  })
+})
+
+describe('Telegram 訂位通知脫敏', () => {
+  const booking = {
+    id: 'B<&123',
+    date: '2026-08-29',
+    timeSlot: '13:00',
+    name: '李安',
+    phone: '0988888888',
+    guests: 5,
+    source: 'online',
+    notes: { text: '慶生' },
+    manageToken: 'secret-manage-token',
+  }
+
+  it('一般文字與非訂位 JSON block 原樣保留', () => {
+    expect(stripTelegramBookingJson('健康檢查')).toBe('健康檢查')
+    expect(stripTelegramBookingJson('報表\n\n<pre>{"status":"ok"}</pre>')).toBe(
+      '報表\n\n<pre>{"status":"ok"}</pre>',
+    )
+  })
+
+  it('合法訂位訊息尾端 JSON block 會移除，送出文字不含敏感欄位', () => {
+    const original = buildTelegramBookingMessage('🆕 <b>新訂位</b>', booking, {
+      event: 'booking_created',
+      booking,
+    })
+    expect(original).toContain('<pre>')
+    expect(original).toContain('manageToken')
+    const delivered = stripTelegramBookingJson(original)
+    expect(delivered).not.toContain('<pre>')
+    expect(delivered).not.toContain('manageToken')
+    expect(delivered).not.toContain('secret-manage-token')
+  })
+
+  it('備註內的 <pre> 類似文字不誤刪', () => {
+    const withPreNote = buildTelegramBookingMessage('🆕 <b>新訂位</b>', {
+      ...booking,
+      notes: { text: '<pre>{"event":"note","booking":{}}</pre>' },
+    }, { event: 'booking_created', booking })
+    const delivered = stripTelegramBookingJson(withPreNote)
+    expect(delivered).toContain('📝 &lt;pre&gt;{"event":"note","booking":{}}&lt;/pre&gt;')
+  })
+
+  it('摘要顯示 HTML escape 後的訂位編號；空 ID 不顯示', () => {
+    const withId = stripTelegramBookingJson(buildTelegramBookingMessage('標題', booking, {
+      event: 'booking_created', booking,
+    }))
+    expect(withId).toContain('🆔 訂位編號：<code>B&lt;&amp;123</code>')
+
+    const withoutIdBooking = { ...booking, id: '   ' }
+    const withoutId = stripTelegramBookingJson(buildTelegramBookingMessage('標題', withoutIdBooking, {
+      event: 'booking_created', booking: withoutIdBooking,
+    }))
+    expect(withoutId).not.toContain('訂位編號')
+    expect(withoutId).not.toContain('undefined')
+  })
+
+  it('既有 pending outbox payload 送出時也會脫敏，outbox 原文不變', () => {
+    const legacyText = buildTelegramBookingMessage('舊 pending', booking, {
+      event: 'admin_cancelled', booking,
+    })
+    const pendingPayload = { text: legacyText }
+    const delivered = telegramDeliveryText(pendingPayload)
+    expect(pendingPayload.text).toBe(legacyText)
+    expect(pendingPayload.text).toContain('secret-manage-token')
+    expect(delivered).not.toContain('secret-manage-token')
+    expect(delivered).toContain('舊 pending')
   })
 })
 

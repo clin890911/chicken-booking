@@ -105,6 +105,81 @@ export function resolveBackupChatId(backupRaw, mainRaw) {
   return String(mainRaw ?? '').trim()
 }
 
+export function escapeTelegramHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+const TELEGRAM_SOURCE_LABEL = {
+  online: '🌐 線上',
+  phone: '📞 電話',
+  walkin: '🚶 現場',
+  group: '👥 團體',
+  line: '💚 LINE',
+}
+
+// Telegram outbox 仍保留完整 JSON 作為稽核與重試來源；實際送出前由
+// telegramDeliveryText 移除訊息尾端的 JSON block，避免 manageToken 等敏感欄位進入店員群組。
+export function buildTelegramBookingMessage(title, booking = {}, payload = {}, extraLine = '') {
+  const lines = [
+    title,
+    `📅 ${booking.date ?? ''} ${booking.timeSlot ?? ''}`.trimEnd(),
+  ]
+  const bookingId = String(booking.id ?? '').trim()
+  if (bookingId) lines.push(`🆔 訂位編號：<code>${escapeTelegramHtml(bookingId)}</code>`)
+  lines.push(
+    `👤 ${escapeTelegramHtml(booking.name)}  ${booking.guests ?? ''} 位`,
+    `📱 <code>${escapeTelegramHtml(booking.phone)}</code>`,
+  )
+  if (booking.assignedTableId) lines.push(`🪑 ${escapeTelegramHtml(booking.assignedTableId)}`)
+  if (TELEGRAM_SOURCE_LABEL[booking.source]) lines.push(TELEGRAM_SOURCE_LABEL[booking.source])
+  if (booking.notes?.text) lines.push(`📝 ${escapeTelegramHtml(booking.notes.text)}`)
+  const flags = []
+  if (booking.notes?.pet) flags.push('🐾 寵物')
+  if (booking.notes?.child) flags.push('👶 兒童')
+  if (booking.notes?.mobility) flags.push('♿ 行動不便')
+  if (flags.length) lines.push(flags.join(' · '))
+  if (extraLine) lines.push(extraLine)
+  return `${lines.join('\n')}\n\n<pre>${escapeTelegramHtml(JSON.stringify(payload, null, 0))}</pre>`
+}
+
+function decodeTelegramHtml(value) {
+  // escapeTelegramHtml 的反向順序：先還原尖括號，最後才還原 &amp;，
+  // 避免把原始字串內的 &lt; 過度解碼成 <。
+  return value
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&')
+}
+
+// 只移除舊/新訂位 formatter 加在「訊息尾端」、且可解析為
+// { event, booking } 的 JSON block。一般文字、不合法 JSON，或使用者備註內的 <pre> 均不會被刪除。
+export function stripTelegramBookingJson(text) {
+  const input = String(text ?? '')
+  const match = /\n\n<pre>([\s\S]*)<\/pre>$/.exec(input)
+  if (!match) return input
+  try {
+    const parsed = JSON.parse(decodeTelegramHtml(match[1]))
+    const isBookingPayload = parsed
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && typeof parsed.event === 'string'
+      && parsed.event.length > 0
+      && parsed.booking
+      && typeof parsed.booking === 'object'
+      && !Array.isArray(parsed.booking)
+    return isBookingPayload ? input.slice(0, match.index) : input
+  } catch {
+    return input
+  }
+}
+
+export function telegramDeliveryText(payload) {
+  return stripTelegramBookingJson(payload?.text || '')
+}
+
 export function classifyAdminBookingBackupEvent(before, after) {
   if (!after) return null
   if (!before) return 'created'
