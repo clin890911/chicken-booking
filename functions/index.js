@@ -15,6 +15,9 @@ import {
   classifyAdminBookingBackupEvent,
   diffAdminBooking,
   resolveBackupChatId,
+  escapeTelegramHtml as escapeTg,
+  buildTelegramBookingMessage,
+  postTelegramMessage,
 } from './lib/notify.js'
 import {
   normalizeOnlineGuardSettings,
@@ -444,8 +447,8 @@ async function notifyAdminBookingChanges(beforeMap, bookings, settings) {
   }
 }
 
-// 店員端訂位變更 → 內場 Telegram 備份通知（feature flag telegramNotifyOnAdminChange，預設開）。
-// 目的＝資料還原：每則附完整 JSON（tgBookingMessage 內嵌），系統若出問題可從 Telegram 撈回。
+// 店員端訂位變更 → 內場 Telegram 通知（feature flag telegramNotifyOnAdminChange，預設開）。
+// 完整 JSON 只留在 outbox 稽核/重試與每日私人備份；店員 Telegram 群組只收人類可讀摘要。
 // 只發重要變更：新增 / 改期時段人數 / 取消 / 硬刪除；內務操作（指派桌、入座、結帳、noshow、備註）不發。
 // 差異同步只送變動文件、且以 commit 前 before 比對，多裝置重送同一變更時 before==after → 自然略過。
 // 走 enqueueAndTrySend（outbox：先寫一筆→立即試送→失敗由 retryNotifications 補送）。錯誤只記 log，不影響同步。
@@ -467,7 +470,7 @@ async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, de
         if (event === 'created') {
           await enqueueAndTrySend({
             channel: 'telegram', event: 'admin_created', bookingId: id,
-            payload: { text: tgBookingMessage('🆕 <b>店員新增訂位</b>', booking, { event: 'admin_created', booking }) },
+            payload: { text: buildTelegramBookingMessage('🆕 <b>店員新增訂位</b>', booking, { event: 'admin_created', booking }) },
           })
         } else if (event === 'updated') {
           const changes = diffAdminBooking(before, booking)
@@ -478,8 +481,8 @@ async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, de
           await enqueueAndTrySend({
             channel: 'telegram', event: 'admin_updated', bookingId: id,
             payload: {
-              text: tgBookingMessage(
-                `✏️ <b>店員修改訂位</b> · ${id}`,
+              text: buildTelegramBookingMessage(
+                '✏️ <b>店員修改訂位</b>',
                 booking,
                 { event: 'admin_updated', booking, changedKeys, changes },
                 changeLines ? `變動：\n${changeLines}` : '',
@@ -491,7 +494,7 @@ async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, de
           await enqueueAndTrySend({
             channel: 'telegram', event: 'admin_cancelled', bookingId: id,
             payload: {
-              text: tgBookingMessage(
+              text: buildTelegramBookingMessage(
                 '❌ <b>店員取消訂位</b>',
                 booking,
                 { event: 'admin_cancelled', booking },
@@ -510,7 +513,7 @@ async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, de
       if (!booking) continue // 查無刪除前舊值（可能早已不存在）→ 無資料可備份，略過
       await enqueueAndTrySend({
         channel: 'telegram', event: 'admin_deleted', bookingId: id,
-        payload: { text: tgBookingMessage('🗑️ <b>店員刪除訂位</b>', { id, ...booking }, { event: 'admin_deleted', booking: { id, ...booking } }) },
+        payload: { text: buildTelegramBookingMessage('🗑️ <b>店員刪除訂位</b>', { id, ...booking }, { event: 'admin_deleted', booking: { id, ...booking } }) },
       })
     }
   } catch (err) {
@@ -791,7 +794,7 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       channel: 'telegram',
       event: 'created',
       bookingId: booking.id,
-      payload: { text: tgBookingMessage('🆕 <b>新線上訂位</b>', booking, { event: 'booking_created', booking }) },
+      payload: { text: buildTelegramBookingMessage('🆕 <b>新線上訂位</b>', booking, { event: 'booking_created', booking }) },
     })
 
     // LINE-first：LIFF 內訂位時前端附帶 idToken——驗明身分後「建立訂位即綁定＋立即推播確認卡」，
@@ -921,8 +924,8 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       event: 'updated',
       bookingId: booking.id,
       payload: {
-        text: tgBookingMessage(
-          `✏️ <b>客人自助修改訂位</b> · ${booking.id}`,
+        text: buildTelegramBookingMessage(
+          '✏️ <b>客人自助修改訂位</b>',
           updated,
           { event: 'guest_updated', booking: updated, changedKeys },
           changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
@@ -984,7 +987,7 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       event: 'cancelled',
       bookingId: booking.id,
       payload: {
-        text: tgBookingMessage(
+        text: buildTelegramBookingMessage(
           '❌ <b>客人自助取消訂位</b>',
           cancelled,
           { event: 'guest_cancelled', booking: cancelled },
@@ -2244,43 +2247,6 @@ function verifyLineSignature(rawBody, signature, secret) {
   return crypto.timingSafeEqual(received, expectedBuffer)
 }
 
-// ============== Telegram 內場通知（P0-4：bot token 不再進前端）==============
-function escapeTg(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-const TG_SOURCE_LABEL = {
-  online: '🌐 線上',
-  phone: '📞 電話',
-  walkin: '🚶 現場',
-  group: '👥 團體',
-  line: '💚 LINE',
-}
-
-// 組裝一則訂位通知：標題 + 訂位摘要（+ 可選補充行）+ 完整 JSON 備份
-function tgBookingMessage(title, booking, payload, extraLine = '') {
-  const lines = [
-    title,
-    `📅 ${booking.date} ${booking.timeSlot}`,
-    `👤 ${escapeTg(booking.name)}  ${booking.guests} 位`,
-    `📱 <code>${escapeTg(booking.phone)}</code>`,
-  ]
-  if (booking.assignedTableId) lines.push(`🪑 ${escapeTg(booking.assignedTableId)}`)
-  if (TG_SOURCE_LABEL[booking.source]) lines.push(TG_SOURCE_LABEL[booking.source])
-  if (booking.notes?.text) lines.push(`📝 ${escapeTg(booking.notes.text)}`)
-  const flags = []
-  if (booking.notes?.pet) flags.push('🐾 寵物')
-  if (booking.notes?.child) flags.push('👶 兒童')
-  if (booking.notes?.mobility) flags.push('♿ 行動不便')
-  if (flags.length) lines.push(flags.join(' · '))
-  if (extraLine) lines.push(extraLine)
-  const json = JSON.stringify(payload, null, 0)
-  return `${lines.join('\n')}\n\n<pre>${escapeTg(json)}</pre>`
-}
-
 // ============== 通知 outbox（可靠送達：先寫一筆 → 立即試送 → 失敗排程重試）==============
 // 退避序列：第 1 次失敗等 1 分鐘、再 5/15/30/60/120 分鐘；用完 6 次轉 dead-letter。
 const NOTIFICATION_BACKOFF_MS = [60_000, 5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000, 120 * 60_000]
@@ -2297,12 +2263,13 @@ async function tgSend(text) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS)
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
-      signal: controller.signal,
-    })
+    const res = await postTelegramMessage(
+      fetch,
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      chatId,
+      text,
+      controller.signal,
+    )
     if (!res.ok) return { ok: false, error: `telegram-${res.status}: ${(await res.text()).slice(0, 300)}` }
     return { ok: true }
   } catch (err) {
