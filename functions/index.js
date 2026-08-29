@@ -17,7 +17,7 @@ import {
   resolveBackupChatId,
   escapeTelegramHtml as escapeTg,
   buildTelegramBookingMessage,
-  telegramDeliveryText,
+  buildTelegramSendMessageBody,
 } from './lib/notify.js'
 import {
   normalizeOnlineGuardSettings,
@@ -482,7 +482,7 @@ async function notifyAdminBookingTelegram(beforeMap, deletedBefore, bookings, de
             channel: 'telegram', event: 'admin_updated', bookingId: id,
             payload: {
               text: buildTelegramBookingMessage(
-                `✏️ <b>店員修改訂位</b> · ${id}`,
+                '✏️ <b>店員修改訂位</b>',
                 booking,
                 { event: 'admin_updated', booking, changedKeys, changes },
                 changeLines ? `變動：\n${changeLines}` : '',
@@ -925,7 +925,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       bookingId: booking.id,
       payload: {
         text: buildTelegramBookingMessage(
-          `✏️ <b>客人自助修改訂位</b> · ${booking.id}`,
+          '✏️ <b>客人自助修改訂位</b>',
           updated,
           { event: 'guest_updated', booking: updated, changedKeys },
           changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
@@ -2266,7 +2266,7 @@ async function tgSend(text) {
     const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+      body: JSON.stringify(buildTelegramSendMessageBody(chatId, text)),
       signal: controller.signal,
     })
     if (!res.ok) return { ok: false, error: `telegram-${res.status}: ${(await res.text()).slice(0, 300)}` }
@@ -2352,7 +2352,7 @@ async function lineSend(to, messages) {
 
 // 依 channel 實際送出一筆 outbox payload
 async function deliverNotification(data) {
-  if (data.channel === 'telegram') return tgSend(telegramDeliveryText(data.payload))
+  if (data.channel === 'telegram') return tgSend(data.payload?.text || '')
   if (data.channel === 'line') return lineSend(data.payload?.to, data.payload?.messages || [])
   return { ok: false, error: `unknown-channel-${data.channel}` }
 }

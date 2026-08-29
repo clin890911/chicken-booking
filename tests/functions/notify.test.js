@@ -11,7 +11,7 @@ import {
   resolveBackupChatId,
   buildTelegramBookingMessage,
   stripTelegramBookingJson,
-  telegramDeliveryText,
+  buildTelegramSendMessageBody,
   LINE_PUSH_DEDUPE_WINDOW_MS,
 } from '../../functions/lib/notify.js'
 
@@ -245,6 +245,17 @@ describe('Telegram 訂位通知脫敏', () => {
     expect(stripTelegramBookingJson('報表\n\n<pre>{"status":"ok"}</pre>')).toBe(
       '報表\n\n<pre>{"status":"ok"}</pre>',
     )
+    const manual = '一般訊息\n\n<pre>{"event":"manual","booking":{}}</pre>'
+    expect(stripTelegramBookingJson(manual)).toBe(manual)
+    const formatterLikeButMissingId = [
+      '🆕 <b>新線上訂位</b>',
+      '📅 2026-08-29 13:00',
+      '👤 李安  5 位',
+      '📱 <code>0988888888</code>',
+      '',
+      '<pre>{"event":"booking_created","booking":{}}</pre>',
+    ].join('\n')
+    expect(stripTelegramBookingJson(formatterLikeButMissingId)).toBe(formatterLikeButMissingId)
   })
 
   it('合法訂位訊息尾端 JSON block 會移除，送出文字不含敏感欄位', () => {
@@ -284,15 +295,50 @@ describe('Telegram 訂位通知脫敏', () => {
   })
 
   it('既有 pending outbox payload 送出時也會脫敏，outbox 原文不變', () => {
-    const legacyText = buildTelegramBookingMessage('舊 pending', booking, {
+    const markedText = buildTelegramBookingMessage('❌ <b>店員取消訂位</b>', booking, {
       event: 'admin_cancelled', booking,
     })
+    const legacyText = markedText.replace('<!--CHICKEN_BOOKING_JSON_V1-->', '')
     const pendingPayload = { text: legacyText }
-    const delivered = telegramDeliveryText(pendingPayload)
+    const delivered = buildTelegramSendMessageBody('-100123', pendingPayload.text).text
     expect(pendingPayload.text).toBe(legacyText)
     expect(pendingPayload.text).toContain('secret-manage-token')
     expect(delivered).not.toContain('secret-manage-token')
-    expect(delivered).toContain('舊 pending')
+    expect(delivered).toContain('❌ <b>店員取消訂位</b>')
+  })
+
+  it('tgSend request body 實際 seam 會脫敏並保留 Telegram 參數', () => {
+    const rawText = buildTelegramBookingMessage('🆕 <b>新線上訂位</b>', booking, {
+      event: 'booking_created', booking,
+    })
+    const body = buildTelegramSendMessageBody('-100123', rawText)
+    expect(body).toMatchObject({
+      chat_id: '-100123',
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+    })
+    expect(body.text).not.toContain('manageToken')
+    expect(body.text).not.toContain('secret-manage-token')
+    expect(body.text).not.toContain('<pre>')
+  })
+
+  it('tgSend request body 不誤刪普通 manual pre', () => {
+    const manual = '一般訊息\n\n<pre>{"event":"manual","booking":{}}</pre>'
+    expect(buildTelegramSendMessageBody('-100123', manual).text).toBe(manual)
+  })
+
+  it('5000 字備註改為安全純文字並截斷在 4096 內', () => {
+    const longBooking = { ...booking, notes: { text: `<b>&${'🐔'.repeat(5000)}` } }
+    const rawText = buildTelegramBookingMessage('🆕 <b>新線上訂位</b>', longBooking, {
+      event: 'booking_created', booking: longBooking,
+    })
+    const body = buildTelegramSendMessageBody('-100123', rawText)
+    expect(body.text.length).toBeLessThanOrEqual(4096)
+    expect([...body.text].length).toBeLessThanOrEqual(4096)
+    expect(body.text).toContain('…（內容過長已截斷，完整事件留存於系統）')
+    expect(body.text).not.toContain('<b>')
+    expect(body.text).not.toMatch(/&(?:amp|lt|gt)?$/)
+    expect(body.text).not.toContain('manageToken')
   })
 })
 

@@ -120,8 +120,12 @@ const TELEGRAM_SOURCE_LABEL = {
   line: '💚 LINE',
 }
 
+const TELEGRAM_BOOKING_JSON_MARKER = '<!--CHICKEN_BOOKING_JSON_V1-->'
+const TELEGRAM_MESSAGE_LIMIT = 4096
+const TELEGRAM_TRUNCATED_SUFFIX = '\n…（內容過長已截斷，完整事件留存於系統）'
+
 // Telegram outbox 仍保留完整 JSON 作為稽核與重試來源；實際送出前由
-// telegramDeliveryText 移除訊息尾端的 JSON block，避免 manageToken 等敏感欄位進入店員群組。
+// buildTelegramSendMessageBody 移除訊息尾端的 JSON block，避免 manageToken 等敏感欄位進入店員群組。
 export function buildTelegramBookingMessage(title, booking = {}, payload = {}, extraLine = '') {
   const lines = [
     title,
@@ -142,7 +146,7 @@ export function buildTelegramBookingMessage(title, booking = {}, payload = {}, e
   if (booking.notes?.mobility) flags.push('♿ 行動不便')
   if (flags.length) lines.push(flags.join(' · '))
   if (extraLine) lines.push(extraLine)
-  return `${lines.join('\n')}\n\n<pre>${escapeTelegramHtml(JSON.stringify(payload, null, 0))}</pre>`
+  return `${lines.join('\n')}\n\n${TELEGRAM_BOOKING_JSON_MARKER}<pre>${escapeTelegramHtml(JSON.stringify(payload, null, 0))}</pre>`
 }
 
 function decodeTelegramHtml(value) {
@@ -154,30 +158,83 @@ function decodeTelegramHtml(value) {
     .replace(/&amp;/g, '&')
 }
 
-// 只移除舊/新訂位 formatter 加在「訊息尾端」、且可解析為
-// { event, booking } 的 JSON block。一般文字、不合法 JSON，或使用者備註內的 <pre> 均不會被刪除。
-export function stripTelegramBookingJson(text) {
-  const input = String(text ?? '')
-  const match = /\n\n<pre>([\s\S]*)<\/pre>$/.exec(input)
-  if (!match) return input
+const LEGACY_TELEGRAM_EVENT_TITLE = {
+  admin_created: '🆕 <b>店員新增訂位</b>',
+  admin_updated: '✏️ <b>店員修改訂位</b> ·',
+  admin_cancelled: '❌ <b>店員取消訂位</b>',
+  admin_deleted: '🗑️ <b>店員刪除訂位</b>',
+  booking_created: '🆕 <b>新線上訂位</b>',
+  guest_updated: '✏️ <b>客人自助修改訂位</b> ·',
+  guest_cancelled: '❌ <b>客人自助取消訂位</b>',
+}
+
+function isLegacyTelegramBookingTail(prefix, encodedJson) {
   try {
-    const parsed = JSON.parse(decodeTelegramHtml(match[1]))
-    const isBookingPayload = parsed
-      && typeof parsed === 'object'
-      && !Array.isArray(parsed)
-      && typeof parsed.event === 'string'
-      && parsed.event.length > 0
-      && parsed.booking
-      && typeof parsed.booking === 'object'
-      && !Array.isArray(parsed.booking)
-    return isBookingPayload ? input.slice(0, match.index) : input
+    const parsed = JSON.parse(decodeTelegramHtml(encodedJson))
+    const expectedTitle = LEGACY_TELEGRAM_EVENT_TITLE[parsed?.event]
+    const bookingId = String(parsed?.booking?.id ?? '').trim()
+    return Boolean(
+      expectedTitle
+      && bookingId
+      && prefix.startsWith(expectedTitle)
+      && prefix.includes('\n📅 ')
+      && prefix.includes('\n👤 ')
+      && prefix.includes('\n📱 <code>')
+      && prefix.includes('</code>'),
+    )
   } catch {
-    return input
+    return false
   }
 }
 
-export function telegramDeliveryText(payload) {
-  return stripTelegramBookingJson(payload?.text || '')
+// 新 formatter 以內部 marker 精準辨識。無 marker 只為相容部署前已入列的 pending，
+// 且必須同時符合正式 event、非空 booking.id 與舊 formatter 摘要特徵才會移除。
+export function stripTelegramBookingJson(text) {
+  const input = String(text ?? '')
+  const closingTag = '</pre>'
+  if (!input.endsWith(closingTag)) return input
+
+  const markedOpening = `\n\n${TELEGRAM_BOOKING_JSON_MARKER}<pre>`
+  const markedAt = input.lastIndexOf(markedOpening)
+  if (markedAt >= 0) return input.slice(0, markedAt)
+
+  const legacyOpening = '\n\n<pre>'
+  const legacyAt = input.lastIndexOf(legacyOpening)
+  if (legacyAt < 0) return input
+  const prefix = input.slice(0, legacyAt)
+  const encodedJson = input.slice(legacyAt + legacyOpening.length, -closingTag.length)
+  return isLegacyTelegramBookingTail(prefix, encodedJson) ? prefix : input
+}
+
+function telegramHtmlToPlainText(html) {
+  const withoutFormatterTags = html.replace(/<\/?(?:b|code)>/g, '')
+  return decodeTelegramHtml(withoutFormatterTags)
+}
+
+function truncateTelegramPlainText(plainText) {
+  let escaped = ''
+  for (const character of plainText) {
+    const next = escapeTelegramHtml(character)
+    if (escaped.length + next.length + TELEGRAM_TRUNCATED_SUFFIX.length > TELEGRAM_MESSAGE_LIMIT) break
+    escaped += next
+  }
+  return `${escaped}${TELEGRAM_TRUNCATED_SUFFIX}`
+}
+
+// tgSend 的單一 request-body seam：在真正 JSON.stringify/fetch 前完成脫敏與 4096 字守門。
+// 超長時改成重新 escape 的純文字，不會留下未閉合 HTML tag/entity，也不拆多則。
+export function buildTelegramSendMessageBody(chatId, rawText) {
+  const sanitized = stripTelegramBookingJson(rawText)
+  const codePointLength = [...sanitized].length
+  const text = sanitized.length <= TELEGRAM_MESSAGE_LIMIT && codePointLength <= TELEGRAM_MESSAGE_LIMIT
+    ? sanitized
+    : truncateTelegramPlainText(telegramHtmlToPlainText(sanitized))
+  return {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  }
 }
 
 export function classifyAdminBookingBackupEvent(before, after) {
