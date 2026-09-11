@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../ui/Toast'
+import { useScrollToTopOn } from '../../../hooks/useScrollToTopOn'
 import { generateTimeSlots, todayStr, addDays, formatDate, dayLabel, seatingForSlot } from '../../../utils/timeSlots'
 import { totalActiveSeats, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
 import { summarizeGroupMonth, buildGroupDaySummary } from '../../../utils/groupDaySummary'
@@ -14,6 +15,7 @@ import GroupEditorStage from './GroupEditorStage'
 import GroupRescheduleModal from './GroupRescheduleModal'
 import AddWalkinModal from './AddWalkinModal'
 import SlotMapPanel from './SlotMapPanel'
+import BookingDetailSheet from '../../booking/BookingDetailSheet'
 
 const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 
@@ -56,6 +58,11 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   const [showAddWalkin, setShowAddWalkin] = useState(false) // 規劃頁快速新增散客
   const [mapAssign, setMapAssign] = useState(null) // { bookingId, seatingId }：跳排位地圖並自動進預配模式
   const [mapFocus, setMapFocus] = useState(null) // { tableNumbers, seatingId, agencyName, batchLabel }：時間軸點團 → 跳地圖白圈標示
+  // 排位地圖的「場次 / 樓層」放在這層：pane 切回當日總覽再回地圖時不會被重置成第一場次 1F
+  // （SlotMapPanel 走條件渲染會 remount；以前每次回來都得重選晚餐場次、2F，體感就是「卡卡的」）。
+  const [mapSeatingId, setMapSeatingId] = useState('')
+  const [mapFloor, setMapFloor] = useState('1F')
+  const [detailBookingId, setDetailBookingId] = useState(null) // 散客訂位詳情（當日總覽散客列點擊）
 
   // map 態的前一日/後一日：同步月曆游標，回 day 態時月曆停在正確的月份
   const shiftDay = (delta) => {
@@ -196,8 +203,25 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   // 當日總覽散客列「→ 配桌」：跳排位地圖該場次並自動進預配模式
   const goAssignWalkin = (booking) => {
     const sid = seatingForSlot(settings, booking.timeSlot)?.id
-    if (!sid) return
+    if (!sid) return toast.error('此時段未對應任何場次，無法在地圖配桌（請先到設定調整場次）')
+    setDetailBookingId(null)
     setMapAssign({ bookingId: booking.id, seatingId: sid })
+    setPane('map')
+  }
+
+  // 散客列的桌號 pill / 詳情表「在地圖標示」：跳排位地圖該場次，在這筆訂位的桌（含併桌）畫白圈
+  const focusWalkinOnMap = (booking) => {
+    const nums = [booking.assignedTableId, ...(Array.isArray(booking.extraTableIds) ? booking.extraTableIds : [])]
+      .filter(Boolean).map(String)
+    if (!nums.length) return
+    setDetailBookingId(null)
+    setMapAssign(null)
+    setMapFocus({
+      tableNumbers: nums,
+      seatingId: seatingForSlot(settings, booking.timeSlot)?.id || null,
+      agencyName: `🧍 ${booking.name || '散客'}`,
+      batchLabel: `${booking.guests || 0} 位 · ${booking.timeSlot || ''}`,
+    })
     setPane('map')
   }
 
@@ -259,9 +283,14 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     setDetailGroupId(null)
   }
 
+  // 換畫面（總覽⇄地圖⇄團單詳情⇄編輯器）就捲回頂端：捲到很下面再切頁，新畫面才不會停在半路。
+  const screenKey = editorGroup ? `editor:${editorIsNew ? 'new' : editorGroup.id}` : detailGroup ? `detail:${detailGroup.id}` : `pane:${pane}`
+  const rootRef = useScrollToTopOn(screenKey)
+
   // 編輯精靈整頁接管（與既有 stage==='editor' 行為一致）。
   if (editorGroup) {
     return (
+      <div ref={rootRef}>
       <GroupEditorStage
         key={editorIsNew ? 'new' : editorGroup.id}
         initialGroup={editorGroup}
@@ -285,13 +314,14 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
         addAgency={addAgency}
         addGuide={addGuide}
       />
+      </div>
     )
   }
 
   // 團單詳情頁（唯讀確認 + 回傳單）整頁接管
   if (detailGroup) {
     return (
-      <>
+      <div ref={rootRef}>
         <GroupDetailStage
           group={detailGroup}
           tables={tables}
@@ -306,20 +336,21 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
           onClose={() => setReschedulingGroup(null)}
           onConfirm={confirmReschedule}
         />
-      </>
+      </div>
     )
   }
 
   return (
-    <div className="space-y-3">
-      {/* 視圖切換 +（map 態）精簡日期列 */}
-      <div className="flex items-center gap-2 flex-wrap">
+    <div ref={rootRef} className="space-y-3">
+      {/* 視圖切換 +（map 態）精簡日期列。
+          sticky：手機上當日總覽很長，捲到下面要切地圖／換日不必先捲回頂端。 */}
+      <div className="sticky top-0 z-20 py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap">
         <div className="inline-flex rounded-xl border-2 border-chicken-brown/15 bg-white p-1">
           {[['day', '📋 當日總覽'], ['map', '🗺️ 排位地圖']].map(([k, label]) => (
             <button
               key={k}
               onClick={() => setPane(k)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-bold transition-all ${
+              className={`tap px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${
                 pane === k ? 'bg-chicken-red text-white shadow' : 'text-chicken-brown/60 hover:text-chicken-brown'
               }`}
             >{label}</button>
@@ -327,11 +358,11 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
         </div>
         {pane === 'map' && (
           <div className="flex items-center gap-1.5">
-            <button onClick={() => shiftDay(-1)} className="px-3 py-1.5 rounded-lg text-sm font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">‹ 前一日</button>
-            <span className="inline-flex items-center gap-1.5 rounded-lg bg-chicken-cream px-3 py-1.5 text-sm font-black text-chicken-brown">
+            <button onClick={() => shiftDay(-1)} className="tap px-3 py-1.5 rounded-lg text-sm font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">‹ 前一日</button>
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-white border-2 border-chicken-brown/10 px-3 py-1.5 text-sm font-black text-chicken-brown">
               📅 {dayLabel(selectedDate)}{settings?.closures?.closedDates?.includes(selectedDate) ? ' · 公休' : ''}
             </span>
-            <button onClick={() => shiftDay(1)} className="px-3 py-1.5 rounded-lg text-sm font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">後一日 ›</button>
+            <button onClick={() => shiftDay(1)} className="tap px-3 py-1.5 rounded-lg text-sm font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">後一日 ›</button>
           </div>
         )}
       </div>
@@ -360,6 +391,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
             onPrintSheet={() => setSheetOpen(true)}
             onOpenMap={() => setPane('map')}
             onAssignWalkin={goAssignWalkin}
+            onOpenWalkin={(b) => setDetailBookingId(b.id)}
+            onFocusTable={focusWalkinOnMap}
             onFocusBatch={focusBatchOnMap}
             onNewWalkin={() => setShowAddWalkin(true)}
           />
@@ -367,12 +400,24 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
       ) : (
         <SlotMapPanel
           date={selectedDate}
+          seatingId={mapSeatingId}
+          onSeatingChange={setMapSeatingId}
+          floor={mapFloor}
+          onFloorChange={setMapFloor}
           assignRequest={mapAssign}
           onAssignHandled={() => setMapAssign(null)}
           focusRequest={mapFocus}
           onFocusHandled={() => setMapFocus(null)}
         />
       )}
+
+      {/* 散客訂位詳情（當日總覽散客列點擊）：配桌 → 跳地圖預配；在地圖標示 → 跳地圖白圈 */}
+      <BookingDetailSheet
+        bookingId={pane === 'day' ? detailBookingId : null}
+        onClose={() => setDetailBookingId(null)}
+        onAssign={goAssignWalkin}
+        onFocusTable={focusWalkinOnMap}
+      />
 
       {sheetOpen && (
         <GroupDaySheet

@@ -64,18 +64,23 @@ export function Badge({ color = 'red', children, className = '' }) {
   return <span className={`badge ${map[color] || map.gray} ${className}`}>{children}</span>
 }
 
-export function Modal({ open, onClose, title, children, footer }) {
+// size：md（預設，表單）/ lg（詳情頁等資訊較多的表）。手機一律全寬 bottom sheet。
+// 內容區 overscroll-contain：手機上捲到底不會把捲動「穿透」到底下的頁面（bottom sheet 常見的卡頓感來源）。
+export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
+  const width = size === 'lg' ? 'sm:max-w-lg' : 'sm:max-w-md'
   return (
     <AnimatePresence>
       {open && (
         <motion.div
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          transition={{ duration: 0.16 }}
           className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
           onClick={onClose}
         >
           <motion.div
             initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
-            className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl shadow-xl max-h-[90vh] overflow-y-auto"
+            transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+            className={`bg-white w-full ${width} rounded-t-3xl sm:rounded-3xl shadow-xl max-h-[90vh] overflow-y-auto overscroll-contain safe-bottom`}
             onClick={e => e.stopPropagation()}
           >
             {title && <div className="px-5 pt-5 pb-2 text-lg font-bold text-chicken-brown">{title}</div>}

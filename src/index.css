@@ -12,13 +12,31 @@ body {
   color: #3A2E26;
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
+  /* 手機：可點元素不等雙擊縮放判定，點下去立刻回應（少掉 iOS/Android 的點擊延遲判定） */
+  touch-action: manipulation;
+}
+
+button, a, [role="button"] {
+  touch-action: manipulation;
+}
+
+/* 可點的列 / 卡片：按下去立刻縮一下，讓「有沒有點到」不用猜（現場/規劃頁多是手機或 iPad 操作）。
+   只動 transform，不動 layout；桌面 hover 不影響。 */
+.tap {
+  transition: transform 90ms ease-out, opacity 90ms ease-out;
+}
+.tap:active {
+  transform: scale(.985);
+  opacity: .92;
 }
 
 @media (prefers-reduced-motion: no-preference) {
   /* 不用 fill-mode：動畫結束後 transform 回到 none。若用 both/forwards，
-     殘留的 transform 會讓容器變成 fixed 子孫（如 Modal）的 containing block，定位會壞。 */
+     殘留的 transform 會讓容器變成 fixed 子孫（如 Modal）的 containing block，定位會壞。
+     2026-09：由 420ms translate+scale 改為 240ms 純 translate——scale 會讓整頁內容在動畫期間
+     重新光柵化（規劃/訂位頁 DOM 大，手機上明顯掉幀，「切分頁卡一下」的來源）。 */
   .animate-soft-enter {
-    animation: soft-enter 420ms cubic-bezier(.2,.8,.2,1);
+    animation: soft-enter 240ms cubic-bezier(.2,.8,.2,1);
   }
   .animate-check-pop {
     animation: check-pop 150ms cubic-bezier(.2,.8,.2,1);
@@ -39,10 +57,10 @@ body {
    省電模式等）時內容會整片看不見；只動 transform 最壞只是位移 10px，內容永遠可見。 */
 @keyframes soft-enter {
   from {
-    transform: translateY(10px) scale(.985);
+    transform: translateY(8px);
   }
   to {
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 

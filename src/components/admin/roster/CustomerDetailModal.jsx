@@ -3,7 +3,7 @@ import { Modal } from '../../ui'
 import { useBooking } from '../../../contexts/BookingContext'
 import { customerBookings } from '../../../utils/customerHistory'
 import { getNoshowCount } from '../../../services/bookingService'
-import { STATUS_MAP, SOURCE_MAP } from '../../booking/BookingCard'
+import { STATUS_MAP, SOURCE_MAP } from '../../booking/bookingLabels'
 
 const VIP_LABEL = { none: '一般', bronze: '銅卡', silver: '銀卡', gold: '金卡' }
 
