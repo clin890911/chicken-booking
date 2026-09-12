@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useScrollToTopOn } from '../../hooks/useScrollToTopOn'
 import TodayView from './TodayView'
 import CalendarView from './CalendarView'
 import AddBookingView from './AddBookingView'
@@ -36,14 +37,18 @@ export default function BookingsView({ onAssignTable, onOpenGroup, onCreated, op
     setSub('add')
   }
 
+  // 子分頁切換捲回頂端（今日清單捲到很下面再切「新增」，表單不該停在半路）
+  const rootRef = useScrollToTopOn(sub)
+
   return (
-    <div className="space-y-3">
+    <div ref={rootRef} className="space-y-3">
+      <div className="sticky top-0 z-20 py-1 bg-chicken-cream">
       <div className="flex gap-1.5 bg-white p-1 rounded-xl border border-chicken-brown/10 max-w-fit">
         {SUB_TABS.map(t => (
           <button
             key={t.key}
             onClick={() => setSub(t.key)}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-1.5 ${
+            className={`tap px-4 py-2 rounded-lg text-sm font-bold transition-colors flex items-center gap-1.5 ${
               sub === t.key
                 ? 'bg-chicken-red text-white'
                 : 'text-chicken-brown/60 hover:text-chicken-brown'
@@ -53,6 +58,7 @@ export default function BookingsView({ onAssignTable, onOpenGroup, onCreated, op
             <span>{t.label}</span>
           </button>
         ))}
+      </div>
       </div>
 
       {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}

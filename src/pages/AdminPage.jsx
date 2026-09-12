@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Header from '../components/layout/Header'
 import SidebarNav from '../components/layout/SidebarNav'
@@ -30,12 +30,14 @@ export default function AdminPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const rawTab = searchParams.get('tab')
   const tab = VALID_TABS.includes(rawTab) ? rawTab : 'bookings'
-  const setTab = (next) => setSearchParams(prev => {
+  // useCallback：底下的跨頁 handler（指派桌 / 開團單）會一路傳進 React.memo 化的訂位卡，
+  // 參考穩定才能讓卡片在清單重繪時真的跳過。
+  const setTab = useCallback((next) => setSearchParams(prev => {
     const p = new URLSearchParams(prev)
     p.set('tab', next)
     if (next !== 'settings') p.delete('section') // 離開設定頁時清掉殘留的 section 參數
     return p
-  }) // push（非 replace）→ 瀏覽器上一頁/下一頁可用
+  }), [setSearchParams]) // push（非 replace）→ 瀏覽器上一頁/下一頁可用
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式
   // （候位入座已是現場頁內互動，無需跨頁機制）
   const [pendingAssign, setPendingAssign] = useState(null)
@@ -101,7 +103,7 @@ export default function AdminPage() {
   const tabInfo = TABS.find(t => t.key === tab) || TABS[0]
 
   // 從 BookingsView 觸發「指派桌」：今天 → 現場頁即時指派；未來日 → 規劃頁排位地圖預配
-  const handleAssignTable = (booking) => {
+  const handleAssignTable = useCallback((booking) => {
     if (!booking.date || booking.date === todayStr()) {
       setPendingAssign(booking)
       setTab('ops')
@@ -109,14 +111,14 @@ export default function AdminPage() {
       setPendingPlanAssign(booking)
       setTab('planning')
     }
-  }
+  }, [setTab])
   const handleAssignDone = () => setPendingAssign(null)
 
   // 訂位頁團體卡點擊 → 規劃頁開該團單詳情
-  const handleOpenGroup = (group) => {
+  const handleOpenGroup = useCallback((group) => {
     setPendingGroupOpen({ groupId: group.id, date: group.date })
     setTab('planning')
-  }
+  }, [setTab])
 
   // 設定→No-show 查詢點「顧客檔」→ 名冊頁帶入該電話
   const handleOpenCustomer = (phone) => {
@@ -185,7 +187,7 @@ export default function AdminPage() {
           )}
           {/* 分頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
           {/* 現場分頁＝一面式（不整頁捲動，捲動只發生在右側欄內）；其他分頁＝內容內部捲動、側邊欄固定 */}
-          <div key={tab} className={`animate-soft-enter flex-1 min-h-0 ${tab === 'ops' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'}`}>
+          <div key={tab} className={`animate-soft-enter flex-1 min-h-0 ${tab === 'ops' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto overscroll-y-contain'}`}>
               {tab === 'ops' && (
                 <OperationsView
                   pendingAssign={pendingAssign}

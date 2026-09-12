@@ -45,6 +45,25 @@ export function statusAfterError(prev, message, fallback) {
   return { ...prev, state: 'offline', error: message || fallback }
 }
 
+// 拉取成功後「要不要真的換掉 cloudStatus 物件」。
+//
+// 背景（後台卡頓根因之一）：拉取每 5 秒一次，statusAfterPull 每次都回新物件（lastSyncAt
+// 變了），BookingContext 的 value 跟著換參考 → 所有 useBooking() 的元件每 5 秒整棵重繪。
+// 但 lastSyncAt 只有設定頁的「最近同步 hh:mm:ss」在看，沒必要每 5 秒逼整個後台重畫。
+// 規則：state / error / rejected 任一有變 → 一定要換（那是警示語意）；
+//       都沒變、只有時間前進 → 距上次落地的 lastSyncAt 不到 minIntervalMs 就沿用舊物件。
+// 首次拉取（prev.lastSyncAt 為 null）一定換：newBookingAlerts 靠 lastSyncAt 判斷「資料備妥」。
+export function shouldCommitPullStatus(prev, next, { minIntervalMs = 30000 } = {}) {
+  if (!prev || !next) return true
+  if (!prev.lastSyncAt) return true
+  if (prev.state !== next.state || (prev.error || '') !== (next.error || '')) return true
+  if (JSON.stringify(prev.rejected || null) !== JSON.stringify(next.rejected || null)) return true
+  const a = new Date(prev.lastSyncAt).getTime()
+  const b = new Date(next.lastSyncAt).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return true
+  return b - a >= minIntervalMs
+}
+
 // 本機同步基準線落地失敗（cloudDataService.persistSyncState）的「旗標翻轉才主動提醒」判斷。
 //
 // 背景：這個故障的後果是「下次整頁重新整理，剛排好的佈局可能消失」——店主大多停留在

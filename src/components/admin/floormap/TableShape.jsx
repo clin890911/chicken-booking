@@ -15,6 +15,7 @@
 //   - zoneColor（由 FloorMap 依 zoneId 解析）：只在桌左上角畫小圓點，★ 絕不取代 status 填色，
 //     確保「桌況圖色彩語義不可回退」。整桌填分區色只發生在 LayoutEditor 內。
 //   - 字級啟發式改用 min(w,h)：自由縮放後 h 不再恆為 75。
+import { memo } from 'react'
 import { diffMin, stageOf } from '../../../utils/diningStage'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './statusColors'
 
@@ -35,10 +36,13 @@ function truncateGuestName(name, w, fontSize) {
   return s.slice(0, Math.max(1, maxChars - 1)) + '…'
 }
 
-export default function TableShape({
+// React.memo（見檔尾）：FloorMap 一層 50+ 張桌，任何一張桌變動都會讓 FloorMap 重繪；
+// memo 後 props 沒變的桌直接跳過（FloorMap 端已保證 onClick / table / settings 參考穩定）。
+function TableShape({
   table,
   booking,                    // 對應的 reservation（reserved / dining 狀態才有）
   settings = {},
+  now = 0,                    // 用餐計時基準（FloorMap 每 15 秒更新、只傳給 dining 桌）；0 = 用當下時間
   isSelected = false,
   isHighlight = false,
   isDimmed = false,
@@ -169,7 +173,7 @@ export default function TableShape({
   }
 
   // === 計算用餐時長階段（僅 dining）===
-  const minutes = (status === 'dining' && table.seatedAt) ? diffMin(table.seatedAt) : 0
+  const minutes = (status === 'dining' && table.seatedAt) ? diffMin(table.seatedAt, now || Date.now()) : 0
   const stage = status === 'dining' ? stageOf(minutes, settings) : null
 
   // 填色：vacant 被團 hold → 實心紫色；vacant 被預配 → 訂位藍（虛線框）；
@@ -308,4 +312,5 @@ export default function TableShape({
   )
 }
 
+export default memo(TableShape)
 export { STATUS_COLOR }

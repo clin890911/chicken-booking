@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import * as bookingService from '../services/bookingService'
 import * as tableService from '../services/tableService'
 import * as settingsService from '../services/settingsService'
@@ -15,7 +15,8 @@ import {
   computeOvertimeActions, computeDayRolloverActions,
   canRunSweeps, filterSweepActionsByPermission,
 } from '../utils/opsSweep'
-import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded } from '../utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus } from '../utils/syncStatus'
+import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
@@ -76,15 +77,21 @@ export function BookingProvider({ children }) {
     return () => cloudData.setAuthTokenProvider(null)
   }, [getToken])
 
+  // refresh：從 localStorage 重讀全部集合。
+  // ★ 內容沒變就沿用舊參考（reconcileList / reconcileValue，見 utils/stableState）：
+  //   這支每 5 秒隨雲端輪詢跑一次，若每次都塞新陣列進 state，所有 useMemo（容量引擎、
+  //   當日總覽、排位地圖佔位）與 React.memo 全部失效，整棵後台每 5 秒重繪——
+  //   店主回報「訂位／規劃頁常常卡卡的」主因之一。
   const refresh = useCallback(() => {
-    setBookings(bookingService.listAll())
-    setTables(tableService.listAll())
-    setWaitlist(waitlistService.listAll())
-    setCustomers(customerService.listAll())
-    setAgencies(agencyService.listAll())
-    setGuides(guideService.listAll())
-    setGroupReservations(groupReservationService.listAll())
-    setSettings(settingsService.getSettings())
+    const byId = (x) => x.id
+    setBookings(prev => reconcileList(prev, bookingService.listAll(), byId))
+    setTables(prev => reconcileList(prev, tableService.listAll(), t => t.number))
+    setWaitlist(prev => reconcileList(prev, waitlistService.listAll(), byId))
+    setCustomers(prev => reconcileList(prev, customerService.listAll(), c => c.phone))
+    setAgencies(prev => reconcileList(prev, agencyService.listAll(), byId))
+    setGuides(prev => reconcileList(prev, guideService.listAll(), byId))
+    setGroupReservations(prev => reconcileList(prev, groupReservationService.listAll(), byId))
+    setSettings(prev => reconcileValue(prev, settingsService.getSettings()))
   }, [])
 
   const pullCloud = useCallback(async () => {
@@ -93,7 +100,11 @@ export function BookingProvider({ children }) {
       cloudData.applyCloudSnapshot(data)
       refresh()
       // 狀態轉移規則見 utils/syncStatus——拉取成功**不得**清掉 'rejected'。
-      setCloudStatus(s => statusAfterPull(s, new Date().toISOString()))
+      // 狀態沒變時不每 5 秒換一次物件（shouldCommitPullStatus）：避免整個後台跟著重繪。
+      setCloudStatus(s => {
+        const next = statusAfterPull(s, new Date().toISOString())
+        return shouldCommitPullStatus(s, next) ? next : s
+      })
       return data
     } catch (err) {
       setCloudStatus(s => statusAfterError(s, err.message, 'cloud-sync-failed'))
@@ -656,7 +667,12 @@ export function BookingProvider({ children }) {
     return result
   }
 
-  const value = {
+  // ★ value 用 useMemo：以前每次 Provider 重繪（含每 4 秒的 persist 旗標輪詢 setState、
+  //   每 5 秒的同步狀態更新）都會造出一個全新的 value 物件，讓「所有」useBooking() 消費端
+  //   一律重繪。現在只有底下列出的資料真的變了才換參考。
+  //   動作函式在每次 render 都會重建，但被記住的是「上次 deps 變動時」那一批——它們的
+  //   閉包只讀 settings / usingFirebase（都在 deps 內）、其餘走 ref 或 service，因此不會過期。
+  const value = useMemo(() => ({
     bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated,
     agencies, guides, groupReservations,
     refresh, pullCloud, migrateLocalToCloud,
@@ -678,7 +694,11 @@ export function BookingProvider({ children }) {
     createAndReserveGroup, purgeBlankGroups,
     seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
     updateSettings, flushCloudNow, discardRejectedChanges,
-  }
+  }), [
+    bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated,
+    agencies, guides, groupReservations, usingFirebase,
+    refresh, pullCloud, syncCloudSoon, flushCloudNow, discardRejectedChanges,
+  ])
 
   return <BookingContext.Provider value={value}>{children}</BookingContext.Provider>
 }

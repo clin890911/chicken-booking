@@ -1,6 +1,7 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import FloorMap from '../floormap/FloorMap'
 import StatsCard from '../StatsCard'
+import BookingDetailSheet from '../../booking/BookingDetailSheet'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useToast } from '../../ui/Toast'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
@@ -8,23 +9,35 @@ import { resolveSlotOccupancy, isSeatingClosed, CAPACITY_EXCLUDED_STATUSES } fro
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 
 // 排位地圖（自 SlotOverviewView 拆出、嵌入規劃主控台）：
-// 依「日期（受控 prop）+ 場次（內部 state）」呈現散客（暖色）×團客（冷色）佔位，
+// 依「日期（受控 prop）+ 場次」呈現散客（暖色）×團客（冷色）佔位，
 // 支援「散客預先配桌」（只記 booking.assignedTableId，不動今日即時桌況）。
+// 場次 / 樓層可由容器受控（seatingId/onSeatingChange、floor/onFloorChange）：PlanningView 持有它們，
+// 讓 pane 切換 remount 後仍停在同一場次同一樓層；未傳則退回內部 state（相容既有用法）。
 // assignRequest（{ bookingId, seatingId }）：容器要求自動切場次並進入該散客的預配模式
 // （來源：當日總覽散客列「→ 配桌」、訂位頁未來日「指派桌位（預配）」跨頁導向）。
 // focusRequest（{ tableNumbers, seatingId, agencyName, batchLabel }）：時間軸點團 → 自動切場次/樓層
 // 並在那些桌畫白圈脈動，幫外場一眼定位「這團坐哪」。
-export default function SlotMapPanel({ date, assignRequest = null, onAssignHandled, focusRequest = null, onFocusHandled }) {
+export default function SlotMapPanel({
+  date, assignRequest = null, onAssignHandled, focusRequest = null, onFocusHandled,
+  seatingId: seatingIdProp, onSeatingChange, floor: floorProp, onFloorChange,
+}) {
   const { settings, bookings, groupReservations, tables, fixtures, zones, preassignBookingTable, preassignBookingTables, clearBookingPreassign } = useBooking()
   const toast = useToast()
 
   const seatings = Array.isArray(settings?.seatings) ? settings.seatings : []
-  const [seatingId, setSeatingId] = useState(seatings[0]?.id || '')
-  const [floor, setFloor] = useState('1F')
+  const [seatingIdState, setSeatingIdState] = useState(seatings[0]?.id || '')
+  const [floorState, setFloorState] = useState('1F')
+  const seatingControlled = typeof onSeatingChange === 'function'
+  const floorControlled = typeof onFloorChange === 'function'
+  const seatingId = (seatingControlled ? seatingIdProp : seatingIdState) || seatings[0]?.id || ''
+  const floor = (floorControlled ? floorProp : floorState) || '1F'
+  const setSeatingId = useCallback((id) => { if (seatingControlled) onSeatingChange(id); else setSeatingIdState(id) }, [seatingControlled, onSeatingChange])
+  const setFloor = useCallback((f) => { if (floorControlled) onFloorChange(f); else setFloorState(f) }, [floorControlled, onFloorChange])
   const [selectedTable, setSelectedTable] = useState(null)
   const [assignBooking, setAssignBooking] = useState(null) // 預先配桌中的散客訂位
   const [assignSelected, setAssignSelected] = useState([]) // 併桌預配：累加式已選桌（大組超過單桌容量時）
   const [focus, setFocus] = useState(null) // 時間軸點團標示：{ tables:[], agencyName, batchLabel }
+  const [detailBookingId, setDetailBookingId] = useState(null) // 側欄散客列 / 選中桌散客 → 訂位詳情
 
   // date 由容器（PlanningView 月曆）控制：換日重置選桌與預配模式（場次保留，換日通常仍看同場次）
   useEffect(() => {
@@ -32,6 +45,7 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     setAssignBooking(null)
     setAssignSelected([])
     setFocus(null)
+    setDetailBookingId(null)
   }, [date])
 
   // 消費 assignRequest：切場次 + 自動進預配模式（宣告在換日 reset 之後——mount 同輪執行時本 effect 勝出）
@@ -43,6 +57,8 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
       setAssignBooking(b)
       setAssignSelected([])
       setSelectedTable(null)
+      setFocus(null)
+      setDetailBookingId(null)
     }
     onAssignHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -58,6 +74,7 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     setAssignBooking(null)
     setAssignSelected([])
     setSelectedTable(null)
+    setDetailBookingId(null)
     setFocus(nums.length ? { tables: nums, agencyName: focusRequest.agencyName || '', batchLabel: focusRequest.batchLabel || '' } : null)
     onFocusHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,8 +126,18 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
     [assignSelected, tables],
   )
 
-  const startAssign = (booking) => { setAssignBooking(booking); setAssignSelected([]); setSelectedTable(null) }
+  const startAssign = (booking) => { setDetailBookingId(null); setAssignBooking(booking); setAssignSelected([]); setSelectedTable(null); setFocus(null) }
   const cancelAssign = () => { setAssignBooking(null); setAssignSelected([]) }
+
+  // 詳情表「在地圖標示」：切到該桌樓層並畫白圈（散客用暖色系文案，與團客標示共用同一個 focus 機制）
+  const focusBookingTables = (booking) => {
+    const nums = [booking.assignedTableId, ...(Array.isArray(booking.extraTableIds) ? booking.extraTableIds : [])].filter(Boolean).map(String)
+    if (!nums.length) return
+    const first = (tables || []).find(t => nums.includes(t.number))
+    if (first?.floor) setFloor(first.floor)
+    setSelectedTable(null)
+    setFocus({ tables: nums, agencyName: `🧍 ${booking.name || '散客'}`, batchLabel: `${booking.guests || 0} 位 · ${booking.timeSlot || ''}` })
+  }
 
   const handleTableClick = (number) => {
     if (assignBooking) {
@@ -175,7 +202,7 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
             return (
               <button key={s.id}
                 onClick={() => { setSeatingId(s.id); setSelectedTable(null); setAssignBooking(null); setAssignSelected([]); setFocus(null) }}
-                className={`px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
+                className={`tap px-3 py-2 rounded-xl text-sm font-bold border-2 transition-colors ${
                   seatingId === s.id
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow'
                     : c ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
@@ -212,11 +239,11 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
         </div>
       )}
 
-      {/* 時間軸點團標示橫幅（團客冷色系，呼應地圖團客＝靛色） */}
+      {/* 時間軸點團標示橫幅（團客冷色系，呼應地圖團客＝靛色；散客標示帶 🧍 前綴則走暖色） */}
       {focus && (
-        <div className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl shadow-md flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-sm font-bold">🎯 標示 🚌 {focus.agencyName || '團體'}{focus.batchLabel ? ` · ${focus.batchLabel}` : ''} 的座位（桌 {focus.tables.join('、')}）</div>
-          <button onClick={() => setFocus(null)} className="text-xs px-3 py-2 bg-white text-indigo-700 rounded-lg font-bold">關閉標示</button>
+        <div className={`${focus.agencyName?.startsWith('🧍') ? 'bg-orange-600' : 'bg-indigo-600'} text-white px-4 py-2.5 rounded-xl shadow-md flex items-center justify-between gap-3 flex-wrap`}>
+          <div className="text-sm font-bold">🎯 標示 {focus.agencyName?.startsWith('🧍') ? '' : '🚌 '}{focus.agencyName || '團體'}{focus.batchLabel ? ` · ${focus.batchLabel}` : ''} 的座位（桌 {focus.tables.join('、')}）</div>
+          <button onClick={() => setFocus(null)} className={`tap text-xs px-3 py-2 bg-white rounded-lg font-bold ${focus.agencyName?.startsWith('🧍') ? 'text-orange-700' : 'text-indigo-700'}`}>關閉標示</button>
         </div>
       )}
 
@@ -261,7 +288,7 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
             <div className="flex gap-1.5">
               {['1F', '2F'].map(f => (
                 <button key={f} onClick={() => setFloor(f)}
-                  className={`px-4 py-2 rounded-xl text-sm font-bold border-2 ${floor === f ? 'bg-chicken-red border-chicken-red text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
+                  className={`tap px-4 py-2 rounded-xl text-sm font-bold border-2 ${floor === f ? 'bg-chicken-red border-chicken-red text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
                   {f === '1F' ? '1F 主用餐區' : '2F 用餐區'}
                 </button>
               ))}
@@ -306,10 +333,14 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
               {!occ && <p className="text-sm text-chicken-brown/60">此場次空桌（可預先配給未配桌散客）</p>}
               {occ?.kind === 'walkin' && (
                 <div className="space-y-2">
-                  <div className="text-sm"><span className="text-chicken-brown/60">散客：</span><span className="font-bold text-chicken-brown">{occ.booking?.name}</span></div>
-                  <div className="text-xs text-chicken-brown/60">{occ.booking?.guests} 位 · {occ.booking?.timeSlot} · {occ.booking?.phone || '—'}</div>
+                  <button type="button" onClick={() => setDetailBookingId(occ.booking?.id || null)} title="點擊看訂位詳情"
+                    className="tap w-full text-left rounded-lg -mx-1 px-1 py-0.5">
+                    <div className="text-sm"><span className="text-chicken-brown/60">散客：</span><span className="font-bold text-chicken-brown">{occ.booking?.name}</span><span className="ml-1 text-[11px] text-chicken-brown/40">詳情 ›</span></div>
+                    <div className="text-xs text-chicken-brown/60">{occ.booking?.guests} 位 · {occ.booking?.timeSlot} · {occ.booking?.phone || '—'}</div>
+                    {occ.booking?.notes?.text && <div className="text-[11px] text-chicken-brown/55 italic mt-0.5 line-clamp-2">「{occ.booking.notes.text}」</div>}
+                  </button>
                   <button onClick={() => { clearBookingPreassign(occ.booking.id); setSelectedTable(null); toast.info('已解除預先配桌') }}
-                    className="mt-1 w-full text-xs font-bold text-chicken-red border-2 border-chicken-red/30 rounded-lg py-2">解除預先配桌</button>
+                    className="tap mt-1 w-full text-xs font-bold text-chicken-red border-2 border-chicken-red/30 rounded-lg py-2">解除預先配桌</button>
                 </div>
               )}
               {occ?.kind === 'group' && (
@@ -329,18 +360,31 @@ export default function SlotMapPanel({ date, assignRequest = null, onAssignHandl
             ) : (
               <div className="space-y-1.5">
                 {unassignedWalkins.map(b => (
-                  <button key={b.id} onClick={() => startAssign(b)} disabled={closed}
-                    className={`w-full text-left rounded-lg border-2 px-3 py-2 transition-all ${
-                      assignBooking?.id === b.id ? 'border-orange-500 bg-orange-50' : 'border-chicken-brown/10 hover:border-orange-400'} ${closed ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                    <div className="text-sm font-bold text-chicken-brown">{b.name} · {b.guests} 位</div>
-                    <div className="text-xs text-chicken-brown/55">{b.timeSlot} · 點選後於地圖配桌</div>
-                  </button>
+                  <div key={b.id}
+                    className={`flex items-stretch rounded-lg border-2 overflow-hidden transition-colors ${
+                      assignBooking?.id === b.id ? 'border-orange-500 bg-orange-50' : 'border-chicken-brown/10 hover:border-orange-400'} ${closed ? 'opacity-40' : ''}`}>
+                    <button type="button" onClick={() => startAssign(b)} disabled={closed}
+                      className={`tap flex-1 min-w-0 text-left px-3 py-2 ${closed ? 'cursor-not-allowed' : ''}`}>
+                      <div className="text-sm font-bold text-chicken-brown truncate">{b.name} · {b.guests} 位</div>
+                      <div className="text-xs text-chicken-brown/55">{b.timeSlot} · 點選後於地圖配桌</div>
+                    </button>
+                    <button type="button" onClick={() => setDetailBookingId(b.id)} title="看訂位詳情"
+                      className="tap shrink-0 px-3 text-[11px] font-bold text-chicken-brown/50 hover:text-chicken-red border-l border-chicken-brown/10">詳情</button>
+                  </div>
                 ))}
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* 散客訂位詳情：配桌 → 進本圖預配模式；在地圖標示 → 白圈 */}
+      <BookingDetailSheet
+        bookingId={detailBookingId}
+        onClose={() => setDetailBookingId(null)}
+        onAssign={(b) => { if (closed) return toast.error('此場次已關閉訂位'); startAssign(b) }}
+        onFocusTable={focusBookingTables}
+      />
     </div>
   )
 }

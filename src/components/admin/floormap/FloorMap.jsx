@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import TableShape from './TableShape'
 import { FLOOR_VIEWBOX, FIXTURES } from '../../../data/tables'
 import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
@@ -197,17 +197,31 @@ export default function FloorMap({
   fixtures = null,          // 設施來源（{ '1F':[], '2F':[] }）；未傳則 fallback 預設 FIXTURES
   zones = [],               // 分區定義 [{id,name,color}]：解析 zoneId→色，桌角畫小圓點
 }) {
-  const [, setTick] = useState(0)
-  // 每 5 秒重繪，讓桌位用餐計時即時跳動
+  // 用餐計時（分鐘）只在「今日即時圖」需要；規劃／統一佔用視圖沒有計時，不必跑 tick。
+  // 以前不分模式每 5 秒 setState 一次、52 張桌全部重繪——規劃頁排位地圖白白每 5 秒重畫一次。
+  // 現在：只有即時圖跑、15 秒一次，且 now 只傳給 dining 桌（其餘桌 props 不變 → React.memo 跳過）。
+  const liveMode = !scopedMode && !planningMode
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 5000)
+    if (!liveMode) return
+    const id = setInterval(() => setNow(Date.now()), 15000)
     return () => clearInterval(id)
-  }, [])
+  }, [liveMode])
 
   const floorTables = useMemo(
     () => tables.filter(t => t.floor === floor),
     [tables, floor]
   )
+
+  // 每張桌一個「穩定」的點擊 handler：onSelectTable 走 ref，容器每次重建 handler 也不會
+  // 讓 memo 化的 TableShape 失效（點擊時再讀最新的 onSelectTable）。
+  const onSelectRef = useRef(onSelectTable)
+  onSelectRef.current = onSelectTable
+  const clickHandlers = useMemo(() => {
+    const m = {}
+    floorTables.forEach(t => { m[t.number] = () => onSelectRef.current?.(t.number) })
+    return m
+  }, [floorTables])
 
   // 維修窗判定：規劃/統一視圖看該日期；今日即時圖看今天。
   const effectiveDate = mapDate || todayStr()
@@ -275,7 +289,7 @@ export default function FloorMap({
               focusRing={scopedFocusTables.includes(t.number)}
               outNote={outNoteFor(t)}
               zoneColor={zoneColorOf(t.zoneId)}
-              onClick={() => onSelectTable(t.number)}
+              onClick={clickHandlers[t.number]}
             />
           )
         }
@@ -295,7 +309,7 @@ export default function FloorMap({
               planState={planState}
               outNote={outNoteFor(t)}
               zoneColor={zoneColorOf(t.zoneId)}
-              onClick={() => onSelectTable(t.number)}
+              onClick={clickHandlers[t.number]}
             />
           )
         }
@@ -335,7 +349,8 @@ export default function FloorMap({
             outNote={isOccupied(t) ? '' : outNoteFor(t)}
             outClickable={!assignMode}
             zoneColor={zoneColorOf(t.zoneId)}
-            onClick={() => onSelectTable(t.number)}
+            now={t.status === 'dining' ? now : 0}
+            onClick={clickHandlers[t.number]}
           />
         )
       })}

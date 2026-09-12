@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded } from '../../src/utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus } from '../../src/utils/syncStatus'
 
 const T1 = '2026-07-26T10:00:00.000Z'
 const T2 = '2026-07-26T10:00:05.000Z'
@@ -122,5 +122,31 @@ describe('shouldAlertPersistDegraded', () => {
       prev = next
     }
     expect(alerts).toBe(2)
+  })
+})
+
+describe('shouldCommitPullStatus（拉取成功後要不要換掉 cloudStatus 物件）', () => {
+  // 拉取每 5 秒一次；若每次都換物件，所有 useBooking() 的元件每 5 秒整棵重繪（後台卡頓根因之一）。
+  const synced = (t) => ({ state: 'synced', lastSyncAt: t, error: '', rejected: null })
+
+  it('首次拉取（尚無 lastSyncAt）一定要換：新訂位通報靠它判斷資料備妥', () => {
+    expect(shouldCommitPullStatus({ state: 'syncing', lastSyncAt: null, error: '' }, synced(T1))).toBe(true)
+  })
+
+  it('狀態沒變、只是 5 秒後再拉一次 → 沿用舊物件', () => {
+    expect(shouldCommitPullStatus(synced(T1), synced(T2))).toBe(false)
+  })
+
+  it('距上次落地超過 minIntervalMs → 換（設定頁的最近同步時間仍會前進）', () => {
+    const later = '2026-07-26T10:00:35.000Z'
+    expect(shouldCommitPullStatus(synced(T1), synced(later))).toBe(true)
+    expect(shouldCommitPullStatus(synced(T1), synced(T2), { minIntervalMs: 1000 })).toBe(true)
+  })
+
+  it('state / error / rejected 任一有變 → 一定換（那是警示語意，不可被節流吃掉）', () => {
+    expect(shouldCommitPullStatus({ ...synced(T1), state: 'offline', error: 'x' }, synced(T2))).toBe(true)
+    const rej = statusFromPushResult({ ok: true, rejected: REJECTED, rejectedMessage: 'x' }, T1)
+    expect(shouldCommitPullStatus(synced(T1), statusAfterPull(rej, T2))).toBe(true)
+    expect(shouldCommitPullStatus(rej, statusAfterPull(rej, T2))).toBe(false)
   })
 })

@@ -27,21 +27,43 @@ const WALKIN_STATUS = {
   arrived: { label: '用餐中', cls: 'bg-orange-100 text-orange-700' },
 }
 
-// 場次內散客列（暖色系，對齊排位地圖「散客=暖色」的視覺語言）
-function WalkinRow({ row, onAssign }) {
+// 場次內散客列（暖色系，對齊排位地圖「散客=暖色」的視覺語言）。
+// 整列可點 → 訂位詳情（onOpen）：店主回饋「點散客資訊應該要能看到更詳細的資訊」——
+// 電話 / 備註 / 來源 / 顧客歷史 / 全部動作都在詳情表裡。列本身維持精簡，只多帶需求圖示。
+//   桌號 pill 可點 → 排位地圖標示該桌（onFocusTable）；「→ 配桌」維持一鍵進預配模式。
+function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
   const b = row.booking
   const st = WALKIN_STATUS[row.status] || WALKIN_STATUS.confirmed
+  const n = b.notes || {}
+  const extra = Array.isArray(b.extraTableIds) ? b.extraTableIds : []
+  // 併桌只顯示「主桌 +N」（完整桌號在詳情表 / 地圖標示），手機窄列才放得下姓名
+  const tableLabel = row.assignedTableId ? `${row.assignedTableId}${extra.length ? ` +${extra.length}` : ''}` : ''
+  const clickable = !!onOpen
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-orange-200/60 bg-white px-2.5 py-1.5">
-      <span className="text-xs font-bold text-chicken-brown truncate">{b.name || '（未填姓名）'}</span>
-      <span className="text-[11px] font-bold text-chicken-brown/60 tabular-nums shrink-0">{row.guests} 位 · 🕐 {row.timeSlot || '未排'}</span>
-      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${st.cls}`}>{st.label}</span>
-      <div className="flex-1" />
+    <div className={`flex items-center gap-2 rounded-lg border border-orange-200/60 bg-white pl-1 pr-2 py-1 ${clickable ? 'hover:border-orange-400' : ''}`}>
+      <button type="button" onClick={clickable ? () => onOpen(b) : undefined} disabled={!clickable}
+        title={clickable ? '點擊看訂位詳情' : undefined}
+        className={`tap flex-1 min-w-0 flex items-center gap-2 text-left rounded-md px-1.5 py-1 ${clickable ? '' : 'cursor-default'}`}>
+        <span className="text-xs font-bold text-chicken-brown truncate min-w-[3em]">{b.name || '（未填姓名）'}</span>
+        <span className="text-[11px] font-bold text-chicken-brown/60 tabular-nums shrink-0">{row.guests} 位 · 🕐 {row.timeSlot || '未排'}</span>
+        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${st.cls}`}>{st.label}</span>
+        {(n.pet || n.child || n.mobility || n.text) && (
+          <span className="text-[10px] shrink-0 leading-none" title={n.text || ''}>
+            {n.pet && '🐾'}{n.child && '👶'}{n.mobility && '♿'}{n.text && '📝'}
+          </span>
+        )}
+        {clickable && <span className="text-[11px] text-chicken-brown/35 shrink-0 ml-auto">›</span>}
+      </button>
       {row.assignedTableId ? (
-        <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0">🪑 {row.assignedTableId}</span>
+        onFocusTable ? (
+          <button type="button" onClick={() => onFocusTable(b)} title={`在排位地圖上標示這桌（${[row.assignedTableId, ...extra].join('、')}）`}
+            className="tap text-[11px] font-black px-2 py-1 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0 whitespace-nowrap">🪑 {tableLabel}</button>
+        ) : (
+          <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0">🪑 {tableLabel}</span>
+        )
       ) : onAssign ? (
-        <button onClick={() => onAssign(b)}
-          className="text-[11px] font-black px-2 py-1 rounded-lg bg-orange-600 text-white shrink-0">→ 配桌</button>
+        <button type="button" onClick={() => onAssign(b)}
+          className="tap text-[11px] font-black px-2 py-1.5 rounded-lg bg-orange-600 text-white shrink-0">→ 配桌</button>
       ) : (
         <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">未配桌</span>
       )}
@@ -94,8 +116,8 @@ function GroupBatchCard({ row, onSelect, onDuplicate }) {
   const st = STATUS_LABEL[g.status] || STATUS_LABEL.planned
   const tableCount = (row.tableNumbers || []).length
   return (
-    <div className="rounded-xl border-2 border-chicken-brown/10 bg-white hover:border-indigo-400 transition-all">
-      <button onClick={() => onSelect(g.id)} className="block w-full text-left p-3 pb-1.5">
+    <div className="rounded-xl border-2 border-chicken-brown/10 bg-white hover:border-indigo-400 transition-colors">
+      <button onClick={() => onSelect(g.id)} className="tap block w-full text-left p-3 pb-1.5">
         <div className="flex items-start justify-between gap-2">
           <div className="font-bold text-chicken-brown text-sm truncate">🚌 {g.agencyName || '（未填旅行社）'}</div>
           <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
@@ -116,7 +138,7 @@ function GroupBatchCard({ row, onSelect, onDuplicate }) {
   )
 }
 
-function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, onSelectGroup, onDuplicate, onAssignWalkin }) {
+function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, onSelectGroup, onDuplicate, onAssignWalkin, onOpenWalkin, onFocusTable }) {
   const tone = seatingTone(summary)
   const closed = tone === 'closed'
   const walkinGuests = walkinRows.reduce((s, r) => s + (r.guests || 0), 0)
@@ -145,10 +167,10 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
       {/* 本場次散客名單（有才渲染，不增加無散客日的視覺噪音） */}
       {walkinRows.length > 0 && (
         <div className="mt-2">
-          <div className="text-[11px] font-black text-orange-700/80 mb-1">🧍 散客 {walkinRows.length} 組 · {walkinGuests} 位</div>
+          <div className="text-[11px] font-black text-orange-700/80 mb-1">🧍 散客 {walkinRows.length} 組 · {walkinGuests} 位 <span className="font-bold text-chicken-brown/40">· 點列看詳情</span></div>
           <div className="space-y-1">
             {walkinRows.map(r => (
-              <WalkinRow key={r.booking.id} row={r} onAssign={closed ? null : onAssignWalkin} />
+              <WalkinRow key={r.booking.id} row={r} onAssign={closed ? null : onAssignWalkin} onOpen={onOpenWalkin} onFocusTable={onFocusTable} />
             ))}
           </div>
         </div>
@@ -157,7 +179,7 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
   )
 }
 
-export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onNewWalkin, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin, onFocusBatch }) {
+export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onNewWalkin, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin, onOpenWalkin, onFocusTable, onFocusBatch }) {
   const s = daySummary || {}
   const counts = s.prep?.counts || {}
   const hasGroups = dayGroups.length > 0
@@ -271,7 +293,7 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
               {sections.map(sec => (
                 <SessionSection key={sec.seating.id} {...sec}
                   onNewGroup={onNewGroup} onSelectGroup={onSelectGroup} onDuplicate={onDuplicate}
-                  onAssignWalkin={onAssignWalkin} />
+                  onAssignWalkin={onAssignWalkin} onOpenWalkin={onOpenWalkin} onFocusTable={onFocusTable} />
               ))}
               {hasUnscheduled && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-2.5">
@@ -288,7 +310,7 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
                       <div className="text-[11px] font-black text-orange-700/80 mb-1">🧍 散客（時段未對應場次，無法在地圖配桌）</div>
                       <div className="space-y-1">
                         {walkins.unscheduled.map(r => (
-                          <WalkinRow key={r.booking.id} row={r} onAssign={null} />
+                          <WalkinRow key={r.booking.id} row={r} onAssign={null} onOpen={onOpenWalkin} />
                         ))}
                       </div>
                     </div>
