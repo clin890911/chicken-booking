@@ -80,7 +80,8 @@ test('日曆點明天 → 收合週條 → 日期 guard → 預配導到規劃�
   // 「指派桌位（預配）」→ 跨頁導到規劃排位地圖（正確日期 + 自動進預配模式）
   await page.getByRole('button', { name: '指派桌位（預配）' }).click()
   await expect(page.getByText('場次（批次）')).toBeVisible()
-  await expect(page.getByText(new RegExp(`📅 ${dayLabelOf(TOMORROW).replace(/[()]/g, '\\$&')}`))).toBeVisible()
+  // 排位地圖頂列的日期籤（改版後無 emoji 前綴，exact 比對避免撞到月曆格）
+  await expect(page.getByText(dayLabelOf(TOMORROW), { exact: true })).toBeVisible()
   await expect(page.getByText(/預先配桌：林未來/)).toBeVisible()
 
   // 點空桌 101（6 人桌，容量足夠；102 已被陳已配佔用）完成預配
