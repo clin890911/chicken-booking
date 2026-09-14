@@ -132,13 +132,13 @@ test('規劃：散客名單出現在當日總覽，「→ 配桌」跳排位地�
   })
   await loginAndOpenPlanning(page)
 
-  // Hero 散客格 + 場次區塊內散客列可見
-  await expect(page.getByText('🧍 散客', { exact: true })).toBeVisible()
-  await expect(page.getByText(/🧍 散客 1 組 · 4 位/)).toBeVisible()
+  // 統計格「散客」+ 場次區塊內散客小標可見
+  await expect(page.getByText('散客', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText(/散客 1 組 · 4 位/)).toBeVisible()
   await expect(page.getByText('王小明')).toBeVisible()
 
-  // 點「→ 配桌」→ 跳排位地圖並自動進入預配模式
-  await page.getByRole('button', { name: /→ 配桌/ }).click()
+  // 點「配桌」→ 跳排位地圖並自動進入預配模式
+  await page.getByRole('button', { name: '配桌', exact: true }).click()
   await expect(page.getByText('場次（批次）')).toBeVisible()
   await expect(page.getByText(/預先配桌：王小明/)).toBeVisible()
 
@@ -244,8 +244,8 @@ test('規劃：當日總覽「新增散客」快速表單 → 落地當日散客
   await page.addInitScript(() => localStorage.setItem('chicken_bookings_v1', JSON.stringify([])))
   await loginAndOpenPlanning(page)
 
-  // Hero 散客格初始 0；點「新增散客」開快速表單
-  await expect(page.getByText('🧍 散客', { exact: true })).toBeVisible()
+  // 統計格「散客」初始 0；點頂列「新增散客」開快速表單
+  await expect(page.getByText('散客', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: /新增散客/ }).click()
 
   // 填姓名 + 人數 4 + 時段（11:30 → 午餐第一批）。人數 chip 與月曆日期格同字，需限縮在彈窗內

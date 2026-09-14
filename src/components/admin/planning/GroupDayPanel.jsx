@@ -1,72 +1,68 @@
 import { EmptyState } from '../../ui'
+import Icon from '../../ui/Icon'
 import { dayLabel } from '../../../utils/timeSlots'
 import GroupArrivalTimeline from './GroupArrivalTimeline'
 import GroupPrepDigest from './GroupPrepDigest'
 
-// Pane B：當日團體總覽（取代 GroupDayStage）。
-// Hero（團數/人數/保留 + 特殊需求速覽 + 新增/列印）→ 警示橫幅 → 抵達時間軸 → 備餐重點 → 依場次分組團卡。
+// Pane B：當日總覽。2026-09 改版為「群組清單」語彙（iOS 設定頁式）：
+//   標題列（日期 + 排位地圖 / 列印 / 今日→現場）→ 三格統計（團體 / 散客 / 保留）→ 警示 →
+//   抵達時間軸 → 備餐重點（可展開看哪一團）→ 依場次分組（場次容量堆疊條 + 團列 + 散客列）。
+// 主要動作「新增散客 / 新增團單」已上移到 PlanningView 頂列（與分段控制同列，iPad 一眼可見）。
 const STATUS_LABEL = {
-  planned: { label: '已預排', cls: 'bg-chicken-brown/10 text-chicken-brown' },
-  confirmed: { label: '已確認', cls: 'bg-chicken-yellow/15 text-chicken-yellow' },
-  arrived: { label: '已到店', cls: 'bg-chicken-green/15 text-chicken-green' },
+  planned: { label: '已預排', cls: 'bg-chicken-brown/[0.08] text-chicken-brown/80' },
+  confirmed: { label: '已確認', cls: 'bg-chicken-yellow/[0.14] text-[#b06600]' },
+  arrived: { label: '已到店', cls: 'bg-chicken-green/15 text-[#5b8c1f]' },
   completed: { label: '已完成', cls: 'bg-chicken-brown text-white' },
   cancelled: { label: '已取消', cls: 'bg-chicken-red/10 text-chicken-red' },
 }
 
-const QUICK_NEEDS = [
-  { key: 'vegetarian', label: '素', cls: 'bg-chicken-green/15 text-chicken-green' },
-  { key: 'child', label: '童', cls: 'bg-sky-100 text-sky-700' },
-  { key: 'mobility', label: '行動', cls: 'bg-amber-100 text-amber-700' },
-  { key: 'wheelchair', label: '輪椅', cls: 'bg-violet-100 text-violet-700' },
-]
-
 // 散客狀態（CAPACITY_EXCLUDED 已被 buildWalkinDaySummary 過濾，只會出現這三種）
 const WALKIN_STATUS = {
   pending: { label: '待確認', cls: 'bg-amber-100 text-amber-700' },
-  confirmed: { label: '待到', cls: 'bg-chicken-green/15 text-chicken-green' },
+  confirmed: { label: '待到', cls: 'bg-chicken-green/15 text-[#5b8c1f]' },
   arrived: { label: '用餐中', cls: 'bg-orange-100 text-orange-700' },
 }
 
-// 場次內散客列（暖色系，對齊排位地圖「散客=暖色」的視覺語言）。
-// 整列可點 → 訂位詳情（onOpen）：店主回饋「點散客資訊應該要能看到更詳細的資訊」——
-// 電話 / 備註 / 來源 / 顧客歷史 / 全部動作都在詳情表裡。列本身維持精簡，只多帶需求圖示。
-//   桌號 pill 可點 → 排位地圖標示該桌（onFocusTable）；「→ 配桌」維持一鍵進預配模式。
+function Pill({ cls, children }) {
+  return <span className={`inline-flex items-center h-[22px] px-2 rounded-full text-[11px] font-semibold whitespace-nowrap ${cls}`}>{children}</span>
+}
+
+// 場次內散客列。整列可點 → 訂位詳情（onOpen）；桌號可點 → 排位地圖標示該桌（onFocusTable）；「配桌」→ 一鍵進預配模式。
 function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
   const b = row.booking
   const st = WALKIN_STATUS[row.status] || WALKIN_STATUS.confirmed
   const n = b.notes || {}
   const extra = Array.isArray(b.extraTableIds) ? b.extraTableIds : []
-  // 併桌只顯示「主桌 +N」（完整桌號在詳情表 / 地圖標示），手機窄列才放得下姓名
   const tableLabel = row.assignedTableId ? `${row.assignedTableId}${extra.length ? ` +${extra.length}` : ''}` : ''
   const clickable = !!onOpen
+  const needIcons = [n.child && 'child', n.mobility && 'wheelchair'].filter(Boolean)
   return (
-    <div className={`flex items-center gap-2 rounded-lg border border-orange-200/60 bg-white pl-1 pr-2 py-1 ${clickable ? 'hover:border-orange-400' : ''}`}>
+    <div className="flex items-center gap-2 min-h-[46px] pl-3.5 pr-2.5 border-t border-chicken-brown/[0.06]">
       <button type="button" onClick={clickable ? () => onOpen(b) : undefined} disabled={!clickable}
         title={clickable ? '點擊看訂位詳情' : undefined}
-        className={`tap flex-1 min-w-0 flex items-center gap-2 text-left rounded-md px-1.5 py-1 ${clickable ? '' : 'cursor-default'}`}>
-        <span className="text-xs font-bold text-chicken-brown truncate min-w-[3em]">{b.name || '（未填姓名）'}</span>
-        <span className="text-[11px] font-bold text-chicken-brown/60 tabular-nums shrink-0">{row.guests} 位 · 🕐 {row.timeSlot || '未排'}</span>
-        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full shrink-0 ${st.cls}`}>{st.label}</span>
-        {(n.pet || n.child || n.mobility || n.text) && (
-          <span className="text-[10px] shrink-0 leading-none" title={n.text || ''}>
-            {n.pet && '🐾'}{n.child && '👶'}{n.mobility && '♿'}{n.text && '📝'}
-          </span>
-        )}
-        {clickable && <span className="text-[11px] text-chicken-brown/35 shrink-0 ml-auto">›</span>}
+        className={`tap flex-1 min-w-0 flex items-center gap-2 text-left py-1 ${clickable ? '' : 'cursor-default'}`}>
+        <Icon name="person" size={18} className="text-chicken-yellow" />
+        <span className="text-sm font-semibold text-chicken-brown truncate">{b.name || '（未填姓名）'}</span>
+        <span className="text-xs text-chicken-brown/60 tabular-nums shrink-0">{row.timeSlot || '未排'} · {row.guests} 位</span>
+        <Pill cls={st.cls}>{st.label}</Pill>
+        {needIcons.map(k => <Icon key={k} name={k} size={14} className="text-chicken-brown/50" />)}
+        {n.pet && <span className="text-[11px] text-chicken-brown/50">寵物</span>}
+        {n.text && <span className="text-[11px] text-chicken-brown/50 truncate max-w-[8em]" title={n.text}>{n.text}</span>}
       </button>
       {row.assignedTableId ? (
         onFocusTable ? (
           <button type="button" onClick={() => onFocusTable(b)} title={`在排位地圖上標示這桌（${[row.assignedTableId, ...extra].join('、')}）`}
-            className="tap text-[11px] font-black px-2 py-1 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0 whitespace-nowrap">🪑 {tableLabel}</button>
+            className="tap text-xs font-semibold text-chicken-brown/70 tabular-nums shrink-0 whitespace-nowrap h-8 px-2 rounded-lg hover:bg-chicken-brown/[0.05]">{tableLabel}</button>
         ) : (
-          <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 tabular-nums shrink-0">🪑 {tableLabel}</span>
+          <span className="text-xs font-semibold text-chicken-brown/70 tabular-nums shrink-0">{tableLabel}</span>
         )
       ) : onAssign ? (
         <button type="button" onClick={() => onAssign(b)}
-          className="tap text-[11px] font-black px-2 py-1.5 rounded-lg bg-orange-600 text-white shrink-0">→ 配桌</button>
+          className="tap text-xs font-semibold h-8 px-3 rounded-lg bg-chicken-red text-white shrink-0">配桌</button>
       ) : (
-        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">未配桌</span>
+        <Pill cls="bg-amber-100 text-amber-700">未配桌</Pill>
       )}
+      {clickable && <Icon name="chevronRight" size={14} strokeWidth={2.2} className="text-chicken-brown/30" />}
     </div>
   )
 }
@@ -78,62 +74,66 @@ function seatingTone(summary) {
   if ((summary.remainingTables ?? 0) <= 2 || (summary.totalSeats > 0 && summary.remaining < summary.totalSeats * 0.15)) return 'tight'
   return 'ok'
 }
-const TONE_PILL = {
-  ok: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  tight: 'bg-amber-50 text-amber-700 border-amber-200',
-  full: 'bg-rose-50 text-rose-600 border-rose-200',
-  closed: 'bg-chicken-brown/5 text-chicken-brown/40 border-chicken-brown/15',
-}
+const TONE_TEXT = { ok: 'text-chicken-brown/60', tight: 'text-amber-700', full: 'text-chicken-red', closed: 'text-chicken-brown/40' }
 
 function WarningBanner({ w }) {
+  const base = 'flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs font-semibold'
   if (w.type === 'overcapacity') {
     return (
-      <div className="bg-rose-50 border-2 border-rose-200 rounded-xl px-3 py-2 text-xs font-bold text-rose-700">
-        ⚠ {w.seatingName} 恐爆量：已用 {w.used} 席 / 全店 {w.totalSeats} 席（超出 {w.over} 席）— 請調整圈桌或梯次
-      </div>
+      <div className={`${base} bg-rose-50 text-rose-700`}><Icon name="warning" size={16} className="shrink-0 mt-px" />
+        <span>{w.seatingName} 恐爆量：已用 {w.used} 席 / 全店 {w.totalSeats} 席（超出 {w.over} 席），請調整圈桌或梯次</span></div>
     )
   }
   if (w.type === 'collision') {
     return (
-      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">
-        ⚠ {w.seatingName} {w.timeSlot} 同時段 {w.count} 團 / {w.guests} 位同時抵達 — 建議錯開帶位、預留接車人力
-      </div>
+      <div className={`${base} bg-amber-50 text-amber-700`}><Icon name="warning" size={16} className="shrink-0 mt-px" />
+        <span>{w.seatingName} {w.timeSlot} 同時段 {w.count} 團 / {w.guests} 位同時抵達，建議錯開帶位、預留接車人力</span></div>
     )
   }
   if (w.type === 'unscheduled') {
     return (
-      <div className="bg-amber-50 border-2 border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">
-        ⚠ 有 {w.count} 個梯次的時間未對應任何場次（{w.rows.map(r => r.timeSlot).join('、')}）— 請確認帶位時間
-      </div>
+      <div className={`${base} bg-amber-50 text-amber-700`}><Icon name="warning" size={16} className="shrink-0 mt-px" />
+        <span>有 {w.count} 個梯次的時間未對應任何場次（{w.rows.map(r => r.timeSlot).join('、')}），請確認帶位時間</span></div>
     )
   }
   return null
 }
 
-// 單張「團×梯次」卡（同團跨兩場次會在兩場次各出現一張，標第一梯/第二梯）
-function GroupBatchCard({ row, onSelect, onDuplicate }) {
+// 單列「團×梯次」（同團跨兩場次會在兩場次各出現一列，標第一梯/第二梯）。
+// 整列可點 → 團單詳情；右側獨立的「複製」圖示鈕 → 複製為新草稿。
+function GroupBatchRow({ row, onSelect, onDuplicate }) {
   const g = row.group
   const st = STATUS_LABEL[g.status] || STATUS_LABEL.planned
   const tableCount = (row.tableNumbers || []).length
   return (
-    <div className="rounded-xl border-2 border-chicken-brown/10 bg-white hover:border-indigo-400 transition-colors">
-      <button onClick={() => onSelect(g.id)} className="tap block w-full text-left p-3 pb-1.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="font-bold text-chicken-brown text-sm truncate">🚌 {g.agencyName || '（未填旅行社）'}</div>
-          <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
-        </div>
-        {g.guideName && <div className="text-xs text-chicken-brown/50 truncate mt-0.5">導遊 {g.guideName}</div>}
-        <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] font-bold">
-          <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">{row.batch?.label || '梯次'}</span>
-          <span className="px-2 py-0.5 rounded-full bg-chicken-cream text-chicken-brown tabular-nums">🕐 {row.timeSlot || '未排'}</span>
-          <span className="px-2 py-0.5 rounded-full bg-chicken-cream text-chicken-brown tabular-nums">👥 {row.guests || 0} 位</span>
-          <span className="px-2 py-0.5 rounded-full bg-chicken-cream text-chicken-brown tabular-nums">🪑 {tableCount} 桌</span>
-        </div>
+    <div className="flex items-center gap-1 min-h-[46px] pl-3.5 pr-2 border-t border-chicken-brown/[0.06]">
+      <button type="button" onClick={() => onSelect(g.id)} className="tap flex-1 min-w-0 flex items-center gap-2 text-left py-1">
+        <Icon name="bus" size={18} className="text-chicken-red" />
+        <span className="text-sm font-semibold text-chicken-brown truncate">{g.agencyName || '（未填旅行社）'}</span>
+        <span className="text-xs text-chicken-brown/60 tabular-nums shrink-0">
+          {row.timeSlot || '未排'} · {row.guests || 0} 位 · {tableCount} 桌{row.batch?.label ? ` · ${row.batch.label}` : ''}
+        </span>
+        <span className="flex-1" />
+        <Pill cls={st.cls}>{st.label}</Pill>
+        <Icon name="chevronRight" size={14} strokeWidth={2.2} className="text-chicken-brown/30" />
       </button>
-      <div className="px-3 pb-2 flex justify-end">
-        <button onClick={() => onDuplicate(g.id)} title="複製這團為新草稿"
-          className="text-[11px] font-bold text-chicken-brown/50 hover:text-chicken-red">⧉ 複製</button>
-      </div>
+      <button type="button" onClick={() => onDuplicate(g.id)} title="複製這團為新草稿" aria-label={`複製 ${g.agencyName || '團單'}`}
+        className="tap w-8 h-8 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]">
+        <Icon name="copy" size={15} />
+      </button>
+    </div>
+  )
+}
+
+function StackedBar({ summary }) {
+  const total = summary?.totalSeats || 0
+  const g = Math.min(total, summary?.groupHeldSeats || 0)
+  const w = Math.min(Math.max(0, total - g), summary?.walkinGuests || 0)
+  const pct = (n) => (total > 0 ? `${(n / total) * 100}%` : '0%')
+  return (
+    <div className="flex h-1.5 rounded-full bg-chicken-brown/[0.08] overflow-hidden gap-px" aria-hidden="true">
+      <div className="h-full bg-chicken-red" style={{ width: pct(g) }} />
+      <div className="h-full bg-chicken-yellow" style={{ width: pct(w) }} />
     </div>
   )
 }
@@ -143,45 +143,65 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
   const closed = tone === 'closed'
   const walkinGuests = walkinRows.reduce((s, r) => s + (r.guests || 0), 0)
   return (
-    <div className="rounded-xl border border-chicken-brown/10 bg-chicken-cream/30 p-2.5">
-      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden">
+      <div className="px-3.5 pt-3 pb-2.5 space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-black text-chicken-brown">{seating.name}</span>
-          <span className="text-xs font-bold text-chicken-brown/50 tabular-nums">{seating.start}–{seating.end}</span>
-          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${TONE_PILL[tone]}`}>
-            {closed ? '🚫 已關閉' : tone === 'full' ? '已客滿' : `剩 ${summary.remainingTables} 桌 / ${summary.remaining} 席`}
+          <span className="text-sm font-semibold text-chicken-brown">{seating.name}</span>
+          <span className="text-xs text-chicken-brown/50 tabular-nums">{seating.start}–{seating.end}</span>
+          <span className="flex-1" />
+          <span className={`text-xs font-semibold tabular-nums ${TONE_TEXT[tone]}`}>
+            {closed ? '已關閉' : tone === 'full' ? '已客滿' : `剩 ${summary.remainingTables} 桌 · ${summary.remaining} 席`}
           </span>
+          <button type="button" onClick={() => onNewGroup(seating.id)} disabled={closed}
+            className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red disabled:text-chicken-brown/30 disabled:cursor-not-allowed">
+            <Icon name="plus" size={12} strokeWidth={2.4} />新增團單
+          </button>
         </div>
-        <button onClick={() => onNewGroup(seating.id)} disabled={closed}
-          className="text-xs font-bold text-chicken-red disabled:text-chicken-brown/30 disabled:cursor-not-allowed">＋ 新增團單</button>
+        <StackedBar summary={summary} />
       </div>
-      {rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-chicken-brown/15 px-3 py-2 text-xs text-chicken-brown/40">本場次尚無團單</div>
+      {rows.length === 0 && walkinRows.length === 0 ? (
+        <div className="px-3.5 pb-3 text-xs text-chicken-brown/40">本場次尚無團單</div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <>
           {rows.map(r => (
-            <GroupBatchCard key={`${r.group.id}:${r.batch?.id || r.timeSlot}`} row={r} onSelect={onSelectGroup} onDuplicate={onDuplicate} />
+            <GroupBatchRow key={`${r.group.id}:${r.batch?.id || r.timeSlot}`} row={r} onSelect={onSelectGroup} onDuplicate={onDuplicate} />
           ))}
-        </div>
-      )}
-      {/* 本場次散客名單（有才渲染，不增加無散客日的視覺噪音） */}
-      {walkinRows.length > 0 && (
-        <div className="mt-2">
-          <div className="text-[11px] font-black text-orange-700/80 mb-1">🧍 散客 {walkinRows.length} 組 · {walkinGuests} 位 <span className="font-bold text-chicken-brown/40">· 點列看詳情</span></div>
-          <div className="space-y-1">
-            {walkinRows.map(r => (
-              <WalkinRow key={r.booking.id} row={r} onAssign={closed ? null : onAssignWalkin} onOpen={onOpenWalkin} onFocusTable={onFocusTable} />
-            ))}
-          </div>
-        </div>
+          {walkinRows.length > 0 && (
+            <>
+              <div className="flex items-center gap-2 px-3.5 py-1.5 border-t border-chicken-brown/[0.06] bg-[#fbfaf8] text-[11px] font-semibold text-chicken-brown/55 tabular-nums">
+                散客 {walkinRows.length} 組 · {walkinGuests} 位
+                <span className="font-medium text-chicken-brown/40">· 點列看詳情</span>
+              </div>
+              {walkinRows.map(r => (
+                <WalkinRow key={r.booking.id} row={r} onAssign={closed ? null : onAssignWalkin} onOpen={onOpenWalkin} onFocusTable={onFocusTable} />
+              ))}
+            </>
+          )}
+        </>
       )}
     </div>
   )
 }
 
-export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onNewWalkin, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin, onOpenWalkin, onFocusTable, onFocusBatch }) {
+function Stat({ label, big, small, note, noteCls = '', divider }) {
+  return (
+    <div className={`flex flex-col gap-0.5 px-3.5 py-3 min-w-0 ${divider ? 'border-l border-chicken-brown/[0.08]' : ''}`}>
+      <div className="text-xs font-semibold text-chicken-brown/55">{label}</div>
+      <div className="flex items-baseline gap-1 flex-wrap">
+        <span className="text-2xl font-semibold tracking-tight tabular-nums text-chicken-brown leading-none">{big}</span>
+        <span className="text-xs text-chicken-brown/60 tabular-nums">{small}</span>
+      </div>
+      {note && <div className={`text-[11px] font-semibold ${noteCls}`}>{note}</div>}
+    </div>
+  )
+}
+
+function SectionTitle({ children }) {
+  return <h3 className="px-1 text-xs font-semibold text-chicken-brown/55 tracking-wide">{children}</h3>
+}
+
+export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, onSelectGroup, onNewGroup, onDuplicate, onGoToday, onPrintSheet, onOpenMap, onAssignWalkin, onOpenWalkin, onFocusTable, onFocusBatch }) {
   const s = daySummary || {}
-  const counts = s.prep?.counts || {}
   const hasGroups = dayGroups.length > 0
   const noSeatings = (s.seatings || []).length === 0
 
@@ -200,83 +220,47 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
   const unscheduled = timeline.find(b => b.seating === null)
   const hasUnscheduled = (unscheduled?.rows?.length || 0) > 0 || walkins.unscheduled.length > 0
 
+  const linkCls = 'tap inline-flex items-center gap-0.5 h-8 px-1.5 rounded-lg text-[13px] font-semibold text-chicken-red hover:bg-chicken-red/[0.06]'
+  const quietCls = 'tap inline-flex items-center gap-1 h-8 px-1.5 rounded-lg text-xs font-semibold text-chicken-brown/60 hover:bg-chicken-brown/[0.05]'
+
   return (
     <div className="space-y-3">
-      {/* Hero */}
-      <div className="bg-white rounded-2xl border border-chicken-brown/10 p-3 sm:p-4 space-y-3">
-        <div className="flex items-start justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 rounded-lg bg-chicken-cream px-3 py-1.5 text-sm font-black text-chicken-brown">
-              📅 {dayLabel(date)}{s.closed ? ' · 公休' : ''}
-            </span>
-            {isToday && onGoToday && (
-              <button onClick={onGoToday} className="text-xs font-bold text-chicken-red underline">→ 現場（今日帶位）</button>
-            )}
-          </div>
-          <div className="flex gap-1.5 flex-wrap justify-end">
-            {onOpenMap && (
-              <button onClick={onOpenMap} className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">🗺️ 排位地圖</button>
-            )}
-            {hasGroups && (
-              <button onClick={onPrintSheet} className="px-3 py-2 rounded-xl text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">🖨 列印備餐單</button>
-            )}
-            {onNewWalkin && (
-              <button onClick={onNewWalkin} className="px-3 py-2 rounded-xl text-xs font-bold bg-orange-500 text-white shadow">➕ 新增散客</button>
-            )}
-            <button onClick={() => onNewGroup()} className="px-3 py-2 rounded-xl text-xs font-bold bg-chicken-red text-white shadow">➕ 新增團單</button>
-          </div>
-        </div>
-
-        {/* 三大數字（團體 / 散客 / 保留桌）— 團體合併「團數 + 人數」，與散客同格式 */}
-        <div className="grid grid-cols-3 gap-2">
-          <div className="rounded-xl bg-chicken-red/10 text-chicken-red p-2.5 text-center">
-            <div className="text-[11px] font-bold opacity-80">🚌 團體</div>
-            <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">
-              {s.groupCount || 0}<span className="text-sm">團</span> <span className="text-sm">{s.guests || 0} 位</span>
-            </div>
-          </div>
-          <div className="rounded-xl bg-orange-50 text-orange-700 p-2.5 text-center">
-            <div className="text-[11px] font-bold opacity-80">🧍 散客</div>
-            <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">
-              {walkins.count}<span className="text-sm">組</span> <span className="text-sm">{walkins.guests} 位</span>
-            </div>
-            {walkins.unassignedCount > 0 && (
-              <div className="text-[10px] font-bold text-amber-600 mt-0.5">未配桌 {walkins.unassignedCount} 組</div>
-            )}
-          </div>
-          <div className="rounded-xl bg-chicken-yellow/15 text-chicken-yellow p-2.5 text-center">
-            <div className="text-[11px] font-bold opacity-80">🪑 保留</div>
-            <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{s.heldTableCount || 0}<span className="text-sm">桌</span></div>
-          </div>
-        </div>
-
-        {/* 特殊需求速覽 */}
+      {/* 標題列 */}
+      <div className="flex items-center gap-1.5 flex-wrap px-1">
+        <h2 className="text-xl font-semibold tracking-tight text-chicken-brown">{dayLabel(date)}</h2>
+        {s.closed && <Pill cls="bg-chicken-brown/[0.08] text-chicken-brown/70">公休</Pill>}
+        {isToday && <Pill cls="bg-chicken-red/10 text-chicken-red">今天</Pill>}
+        <span className="flex-1" />
         {hasGroups && (
-          <div className="flex flex-wrap gap-1.5">
-            {QUICK_NEEDS.filter(n => (counts[n.key] || 0) > 0).map(n => (
-              <span key={n.key} className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${n.cls}`}>{n.label} {counts[n.key]}</span>
-            ))}
-            {(s.prep?.allergies || []).length > 0 && (
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-chicken-red text-white">過敏 {s.prep.allergies.length} 團</span>
-            )}
-            {QUICK_NEEDS.every(n => (counts[n.key] || 0) === 0) && (s.prep?.allergies || []).length === 0 && (
-              <span className="text-[11px] text-chicken-brown/40">無特殊需求</span>
-            )}
-          </div>
+          <button type="button" onClick={onPrintSheet} className={quietCls} title="列印備餐單" aria-label="列印備餐單"><Icon name="print" size={16} /></button>
+        )}
+        {isToday && onGoToday && (
+          <button type="button" onClick={onGoToday} className={quietCls} title="到現場頁帶位">現場<Icon name="chevronRight" size={12} strokeWidth={2.4} /></button>
+        )}
+        {onOpenMap && (
+          <button type="button" onClick={onOpenMap} className={linkCls}>排位地圖<Icon name="chevronRight" size={13} strokeWidth={2.4} /></button>
         )}
       </div>
 
-      {/* 警示橫幅 */}
+      {/* 三格統計（團體 / 散客 / 保留桌） */}
+      <div className="grid grid-cols-3 bg-white rounded-xl border border-chicken-brown/10 overflow-hidden">
+        <Stat label="團體" big={s.guests || 0} small={`位 · ${s.groupCount || 0} 團`} />
+        <Stat label="散客" big={walkins.guests} small={`位 · ${walkins.count} 組`} divider
+          note={walkins.unassignedCount > 0 ? `未配桌 ${walkins.unassignedCount} 組` : null} noteCls="text-[#b06600]" />
+        <Stat label="保留" big={s.heldTableCount || 0} small="桌" divider />
+      </div>
+
+      {/* 警示 */}
       {s.closed && (
-        <div className="bg-rose-50 border-2 border-rose-200 rounded-xl px-3 py-2.5 flex items-center gap-2">
-          <span className="text-lg">🚫</span>
-          <div className="text-xs font-bold text-rose-700">本日公休 — 停止接收新訂位；既有團單不受影響。</div>
+        <div className="flex items-start gap-2 rounded-xl bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">
+          <Icon name="ban" size={16} className="shrink-0 mt-px" /><span>本日公休，停止接收新訂位；既有團單不受影響。</span>
         </div>
       )}
       {(s.warnings || []).map((w, i) => <WarningBanner key={i} w={w} />)}
       {noSeatings && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">
-          尚未設定場次 — 依場次分組、抵達時間軸與爆量提醒需先到「設定 → 場次設定」新增午餐/晚餐場次。
+        <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-700">
+          <Icon name="warning" size={16} className="shrink-0 mt-px" />
+          <span>尚未設定場次。依場次分組、抵達時間軸與爆量提醒需先到「設定 → 場次設定」新增午餐/晚餐場次。</span>
         </div>
       )}
 
@@ -286,34 +270,28 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
           {hasGroups && <GroupArrivalTimeline timeline={s.timeline || []} onFocusBatch={onFocusBatch} />}
           {hasGroups && <GroupPrepDigest prep={s.prep} />}
 
-          {/* 依場次分組（團卡 + 散客名單） */}
+          {/* 依場次分組（團列 + 散客列） */}
           {!noSeatings && (
-            <div className="space-y-2">
-              <div className="text-xs font-black text-chicken-brown/55 px-1">依場次分組（點卡看詳情）</div>
+            <div className="space-y-1.5">
+              <SectionTitle>場次 <span className="font-medium text-chicken-brown/40">· 點列看詳情</span></SectionTitle>
               {sections.map(sec => (
                 <SessionSection key={sec.seating.id} {...sec}
                   onNewGroup={onNewGroup} onSelectGroup={onSelectGroup} onDuplicate={onDuplicate}
                   onAssignWalkin={onAssignWalkin} onOpenWalkin={onOpenWalkin} onFocusTable={onFocusTable} />
               ))}
               {hasUnscheduled && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-2.5">
-                  <div className="text-sm font-black text-amber-700 mb-2">未排場次 / 其他</div>
-                  {unscheduled && unscheduled.rows.length > 0 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {unscheduled.rows.map(r => (
-                        <GroupBatchCard key={`${r.group.id}:${r.batch?.id || r.timeSlot}`} row={r} onSelect={onSelectGroup} onDuplicate={onDuplicate} />
-                      ))}
-                    </div>
-                  )}
+                <div className="bg-white rounded-xl border border-amber-200 overflow-hidden">
+                  <div className="px-3.5 py-2.5 text-sm font-semibold text-amber-700 bg-amber-50/60">未排場次 / 其他</div>
+                  {unscheduled && unscheduled.rows.map(r => (
+                    <GroupBatchRow key={`${r.group.id}:${r.batch?.id || r.timeSlot}`} row={r} onSelect={onSelectGroup} onDuplicate={onDuplicate} />
+                  ))}
                   {walkins.unscheduled.length > 0 && (
-                    <div className={unscheduled && unscheduled.rows.length > 0 ? 'mt-2' : ''}>
-                      <div className="text-[11px] font-black text-orange-700/80 mb-1">🧍 散客（時段未對應場次，無法在地圖配桌）</div>
-                      <div className="space-y-1">
-                        {walkins.unscheduled.map(r => (
-                          <WalkinRow key={r.booking.id} row={r} onAssign={null} onOpen={onOpenWalkin} />
-                        ))}
-                      </div>
-                    </div>
+                    <>
+                      <div className="px-3.5 py-1.5 border-t border-chicken-brown/[0.06] bg-[#fbfaf8] text-[11px] font-semibold text-chicken-brown/55">散客（時段未對應場次，無法在地圖配桌）</div>
+                      {walkins.unscheduled.map(r => (
+                        <WalkinRow key={r.booking.id} row={r} onAssign={null} onOpen={onOpenWalkin} />
+                      ))}
+                    </>
                   )}
                 </div>
               )}
@@ -322,19 +300,19 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
 
           {/* 無場次設定時退回平鋪列表 */}
           {noSeatings && hasGroups && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden">
               {dayGroups.map(g => {
                 const st = STATUS_LABEL[g.status] || STATUS_LABEL.planned
                 const times = (g.batches || []).map(b => b.timeSlot).filter(Boolean).sort()
                 return (
-                  <button key={g.id} onClick={() => onSelectGroup(g.id)}
-                    className="text-left rounded-xl border-2 border-chicken-brown/10 bg-white p-3 hover:border-indigo-400 transition-all">
-                    <div className="font-bold text-chicken-brown text-sm truncate">🚌 {g.agencyName || '（未填旅行社）'}</div>
-                    <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] font-bold">
-                      <span className="px-2 py-0.5 rounded-full bg-chicken-cream text-chicken-brown tabular-nums">🕐 {times[0] || '未排'}{times.length > 1 ? ` +${times.length - 1}` : ''}</span>
-                      <span className="px-2 py-0.5 rounded-full bg-chicken-cream text-chicken-brown tabular-nums">👥 {g.counts?.total || 0} 位</span>
-                      <span className={`px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
-                    </div>
+                  <button key={g.id} type="button" onClick={() => onSelectGroup(g.id)}
+                    className="tap w-full text-left flex items-center gap-2 min-h-[46px] px-3.5 border-t border-chicken-brown/[0.06] first:border-t-0">
+                    <Icon name="bus" size={18} className="text-chicken-red" />
+                    <span className="text-sm font-semibold text-chicken-brown truncate">{g.agencyName || '（未填旅行社）'}</span>
+                    <span className="text-xs text-chicken-brown/60 tabular-nums">{times[0] || '未排'}{times.length > 1 ? ` +${times.length - 1}` : ''} · {g.counts?.total || 0} 位</span>
+                    <span className="flex-1" />
+                    <Pill cls={st.cls}>{st.label}</Pill>
+                    <Icon name="chevronRight" size={14} strokeWidth={2.2} className="text-chicken-brown/30" />
                   </button>
                 )
               })}
@@ -342,8 +320,8 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
           )}
         </>
       ) : (
-        <EmptyState icon="🚌" title="這天還沒有團單"
-          hint={s.closed ? '本日公休；如需仍可建立團單' : '點右上「新增團單」或各場次的「＋新增團單」開始預排'} />
+        <EmptyState icon={<Icon name="bus" size={28} className="text-chicken-brown/30" />} title="這天還沒有團單"
+          hint={s.closed ? '本日公休；如需仍可建立團單' : '點右上「新增團單」或各場次的「新增團單」開始預排'} />
       )}
     </div>
   )

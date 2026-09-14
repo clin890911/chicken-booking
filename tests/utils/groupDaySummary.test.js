@@ -200,8 +200,24 @@ describe('summarizeDayPrep', () => {
     expect(p.mobilityGroups).toEqual([{ agencyName: '幸福', tableNumbers: ['101', '102'] }])
   })
 
+  it('byGroup：每團的需求明細（備餐重點展開「哪一團要素食」用）— 依團列出人數、最早梯次、桌號', () => {
+    const groups = [
+      mkGroup({ id: 'g1', agencyName: '幸福', counts: { total: 20, vegetarian: 3, child: 2 },
+        batches: [mkBatch({ timeSlot: '12:30', tableNumbers: ['201'] }), mkBatch({ id: 'b2', timeSlot: '11:00', tableNumbers: ['101', '102'] })] }),
+      mkGroup({ id: 'g2', agencyName: '', counts: { total: 10 }, batches: [] }),
+    ]
+    const p = summarizeDayPrep(groups, DATE)
+    expect(p.byGroup).toEqual([
+      { id: 'g1', agencyName: '幸福', status: 'confirmed', counts: { vegetarian: 3, child: 2, mobility: 0, wheelchair: 0 },
+        firstTimeSlot: '11:00', tableNumbers: ['201', '101', '102'], allergyText: '' },
+      { id: 'g2', agencyName: '（未填旅行社）', status: 'confirmed', counts: { vegetarian: 0, child: 0, mobility: 0, wheelchair: 0 },
+        firstTimeSlot: '', tableNumbers: [], allergyText: '' },
+    ])
+  })
+
   it('零團 → 全 0、空陣列', () => {
     const p = summarizeDayPrep([], DATE)
+    expect(p.byGroup).toEqual([])
     expect(p.counts).toEqual({ total: 0, vegetarian: 0, child: 0, mobility: 0, wheelchair: 0 })
     expect(p.allergies).toEqual([])
     expect(p.mobilityGroups).toEqual([])

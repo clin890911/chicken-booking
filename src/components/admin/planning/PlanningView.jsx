@@ -16,6 +16,7 @@ import GroupRescheduleModal from './GroupRescheduleModal'
 import AddWalkinModal from './AddWalkinModal'
 import SlotMapPanel from './SlotMapPanel'
 import BookingDetailSheet from '../../booking/BookingDetailSheet'
+import Icon from '../../ui/Icon'
 
 const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 
@@ -345,30 +346,45 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
       {/* 視圖切換 +（map 態）精簡日期列。
           sticky：手機上當日總覽很長，捲到下面要切地圖／換日不必先捲回頂端。 */}
       <div className="sticky top-0 z-20 py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap">
-        <div className="inline-flex rounded-xl border-2 border-chicken-brown/15 bg-white p-1">
-          {[['day', '📋 當日總覽'], ['map', '🗺️ 排位地圖']].map(([k, label]) => (
+        {/* 分段控制（segmented control）：灰底槽 + 白色浮起的選中段，與 iPadOS 一致 */}
+        <div className="inline-flex rounded-[10px] bg-chicken-brown/[0.07] p-0.5">
+          {[['day', '當日總覽'], ['map', '排位地圖']].map(([k, label]) => (
             <button
               key={k}
+              type="button"
+              aria-pressed={pane === k}
               onClick={() => setPane(k)}
-              className={`tap px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${
-                pane === k ? 'bg-chicken-red text-white shadow' : 'text-chicken-brown/60 hover:text-chicken-brown'
+              className={`tap h-8 px-3.5 rounded-lg text-[13px] font-semibold transition-colors ${
+                pane === k ? 'bg-white text-chicken-brown shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.04)]' : 'text-chicken-brown/60 hover:text-chicken-brown'
               }`}
             >{label}</button>
           ))}
         </div>
         {pane === 'map' && (
-          <div className="flex items-center gap-1.5">
-            <button onClick={() => shiftDay(-1)} className="tap px-3 py-1.5 rounded-lg text-sm font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">‹ 前一日</button>
-            <span className="inline-flex items-center gap-1.5 rounded-lg bg-white border-2 border-chicken-brown/10 px-3 py-1.5 text-sm font-black text-chicken-brown">
-              📅 {dayLabel(selectedDate)}{settings?.closures?.closedDates?.includes(selectedDate) ? ' · 公休' : ''}
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => shiftDay(-1)} aria-label="前一日" className="tap w-8 h-8 rounded-lg bg-white border border-chicken-brown/15 text-chicken-brown flex items-center justify-center"><Icon name="chevronLeft" size={14} strokeWidth={2.2} /></button>
+            <span className="inline-flex items-center gap-1.5 h-8 rounded-lg bg-white border border-chicken-brown/10 px-3 text-[13px] font-semibold text-chicken-brown tabular-nums">
+              {dayLabel(selectedDate)}{settings?.closures?.closedDates?.includes(selectedDate) ? ' · 公休' : ''}
             </span>
-            <button onClick={() => shiftDay(1)} className="tap px-3 py-1.5 rounded-lg text-sm font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown">後一日 ›</button>
+            <button type="button" onClick={() => shiftDay(1)} aria-label="後一日" className="tap w-8 h-8 rounded-lg bg-white border border-chicken-brown/15 text-chicken-brown flex items-center justify-center"><Icon name="chevronRight" size={14} strokeWidth={2.2} /></button>
+          </div>
+        )}
+        {pane === 'day' && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <button type="button" onClick={() => setShowAddWalkin(true)}
+              className="tap inline-flex items-center gap-1 h-9 px-3 rounded-[9px] bg-white border border-chicken-brown/15 text-[13px] font-semibold text-chicken-brown">
+              <Icon name="plus" size={15} strokeWidth={2.2} /><span>新增散客</span>
+            </button>
+            <button type="button" onClick={() => openNewDraft()}
+              className="tap inline-flex items-center gap-1 h-9 px-3 rounded-[9px] bg-chicken-red text-white text-[13px] font-semibold shadow-sm">
+              <Icon name="plus" size={15} strokeWidth={2.2} /><span>新增團單</span>
+            </button>
           </div>
         )}
       </div>
 
       {pane === 'day' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] gap-3 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(340px,380px)] gap-3 items-start">
           <GroupCalendar
             value={selectedDate}
             onSelect={setSelectedDate}
@@ -394,7 +410,6 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
             onOpenWalkin={(b) => setDetailBookingId(b.id)}
             onFocusTable={focusWalkinOnMap}
             onFocusBatch={focusBatchOnMap}
-            onNewWalkin={() => setShowAddWalkin(true)}
           />
         </div>
       ) : (
