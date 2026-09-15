@@ -59,7 +59,7 @@ test('日曆點明天 → 收合週條 → 日期 guard → 預配導到規劃�
   // 明天若跨月，先翻下個月
   const today = new Date()
   if (tomorrow.getMonth() !== today.getMonth()) {
-    await page.getByRole('button', { name: '›' }).click()
+    await page.getByRole('button', { name: '下個月' }).click()
   }
   // 點明天的日期格（格內日數是獨立 span，exact 比對避免 1 對到 10/11）
   await page.getByRole('button')
@@ -114,7 +114,7 @@ test('未來日 12 人訂位 → 規劃地圖併桌預配（選兩張桌）成�
   await expect(page.getByText(/點日期看當天訂位/)).toBeVisible()
   const today = new Date()
   if (tomorrow.getMonth() !== today.getMonth()) {
-    await page.getByRole('button', { name: '›' }).click()
+    await page.getByRole('button', { name: '下個月' }).click()
   }
   await page.getByRole('button')
     .filter({ has: page.getByText(String(tomorrow.getDate()), { exact: true }) })

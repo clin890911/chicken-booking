@@ -54,7 +54,7 @@ test('管理端：登入 → 指派桌位（二步確認）→ 指派成功', as
   await expect(page.getByText(/指派桌位：王大明\s*4\s*位/)).toBeVisible()
 
   // 4) 讀出系統建議桌號（💡 建議 N）
-  const suggestChip = page.getByText(/建議\s*\d+/)
+  const suggestChip = page.getByText(/^建議\s*\d+/)
   await expect(suggestChip).toBeVisible()
   const chipText = await suggestChip.textContent()
   const tableNo = (chipText.match(/\d+/) || [])[0]

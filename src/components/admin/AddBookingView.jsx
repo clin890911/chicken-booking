@@ -209,7 +209,7 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
             <label className="label">來源</label>
             <div className="flex gap-1.5 flex-wrap">
               {SOURCE_OPTIONS.map(o => (
-                <button key={o.value} type="button" onClick={() => setSource(o.value)}
+                <button key={o.value} type="button" onClick={() => setSource(o.value)} aria-label={`來源：${o.label}`}
                   className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
                     source === o.value
                       ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'

@@ -38,7 +38,7 @@ test('日曆月格同時顯示散客與旅行社團體人數', async ({ page }) 
     if (!m) break
     const cur = Number(m[1]) * 12 + Number(m[2])
     if (cur === TARGET) break
-    await page.getByRole('button', { name: cur > TARGET ? '‹' : '›' }).first().click()
+    await page.getByRole('button', { name: cur > TARGET ? '上個月' : '下個月' }).first().click()
   }
   await expect(page.getByRole('heading', { name: /2026年 6月/ })).toBeVisible()
 

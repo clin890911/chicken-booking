@@ -47,7 +47,7 @@ test('管理端：現場頁內 取號 → 叫號 → 入座（二步確認）→
   await expect(page.getByText(/候位入座：陳先生/)).toBeVisible()
 
   // 讀建議桌號 → 點該桌 → 二步確認 → 入座成功
-  const suggestChip = page.getByText(/建議\s*\d+/)
+  const suggestChip = page.getByText(/^建議\s*\d+/)
   await expect(suggestChip).toBeVisible()
   const tableNo = ((await suggestChip.textContent()).match(/\d+/) || [])[0]
   expect(tableNo).toBeTruthy()
