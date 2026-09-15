@@ -795,6 +795,15 @@ export function executeSweepActions(actions = []) {
         bookingService.update(a.bookingId, { status: 'noshow', autoFlag: 'rollover' })
         done.push(a)
       }
+    } else if (a.type === 'leave-waitlist-auto') {
+      const w = waitlistService.getById(a.waitlistId)
+      // 重驗：可能已被別的裝置/店員叫號入座、或本來就已經棄號，此時就不重複結一次。
+      // 走 waitlistService.leave（純寫入 status:'left' + leftAt），刻意不經任何會發通知的
+      // Context wrapper——自動結號絕不能讓客人收到通知。
+      if (w && (w.status === 'waiting' || w.status === 'called')) {
+        waitlistService.leave(a.waitlistId)
+        done.push(a)
+      }
     }
   }
   return done

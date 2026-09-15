@@ -174,6 +174,7 @@ export function BookingProvider({ children }) {
     if (a.type === 'complete-booking') return `昨日訂位 ${a.bookingId} 已自動標記完成`
     if (a.type === 'complete-group') return `昨日已到店團體已自動整團結案`
     if (a.type === 'mark-noshow-auto') return `昨日未到訂位 ${a.bookingId} 已自動標記 No-show（不計罰則）`
+    if (a.type === 'leave-waitlist-auto') return `昨日未結候位 #${a.queueNumber ?? '?'} ${a.name ? a.name + ' ' : ''}已自動結為已離開`
     return a.type
   }
 
@@ -195,12 +196,14 @@ export function BookingProvider({ children }) {
       tables: tableService.listAll(),
       bookings: bookingService.listAll(),
       groupReservations: groupReservationService.listAll(),
+      waitlist: waitlistService.listAll(),
     }
     let doneCount = 0
 
     // 換日掃除：每裝置每日一次（跨午夜開著的分頁也會在 interval 中觸發）
     if (settings.dayRolloverEnabled !== false && localStorage.getItem('chicken_ops_day_sweep_v1') !== today) {
-      // complete-group 會寫 groupReservations（需 group.update）：濾掉無權的，其餘照常。
+      // complete-group 會寫 groupReservations（需 group.update）、leave-waitlist-auto 會寫
+      // waitlist（需 waitlist.update）：濾掉無權的，其餘照常。
       const wanted = computeDayRolloverActions({ ...state, settings, today })
       const allowed = filterSweepActionsByPermission(wanted, permit)
       const done = seatingService.executeSweepActions(allowed)
