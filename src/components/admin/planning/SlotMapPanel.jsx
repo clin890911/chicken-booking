@@ -7,6 +7,8 @@ import { useToast } from '../../ui/Toast'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
 import { resolveSlotOccupancy, isSeatingClosed, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
+import SegmentedControl from '../../ui/SegmentedControl'
+import Icon from '../../ui/Icon'
 
 // 排位地圖（自 SlotOverviewView 拆出、嵌入規劃主控台）：
 // 依「日期（受控 prop）+ 場次」呈現散客（暖色）×團客（冷色）佔位，
@@ -75,7 +77,7 @@ export default function SlotMapPanel({
     setAssignSelected([])
     setSelectedTable(null)
     setDetailBookingId(null)
-    setFocus(nums.length ? { tables: nums, agencyName: focusRequest.agencyName || '', batchLabel: focusRequest.batchLabel || '' } : null)
+    setFocus(nums.length ? { tables: nums, kind: focusRequest.kind || 'group', agencyName: focusRequest.agencyName || '', batchLabel: focusRequest.batchLabel || '' } : null)
     onFocusHandled?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest])
@@ -136,7 +138,7 @@ export default function SlotMapPanel({
     const first = (tables || []).find(t => nums.includes(t.number))
     if (first?.floor) setFloor(first.floor)
     setSelectedTable(null)
-    setFocus({ tables: nums, agencyName: `🧍 ${booking.name || '散客'}`, batchLabel: `${booking.guests || 0} 位 · ${booking.timeSlot || ''}` })
+    setFocus({ tables: nums, agencyName: `${booking.name || '散客'}`, batchLabel: `${booking.guests || 0} 位 · ${booking.timeSlot || ''}` })
   }
 
   const handleTableClick = (number) => {
@@ -159,7 +161,7 @@ export default function SlotMapPanel({
       // 單桌：容量足夠即點即配
       if (t.capacity < guestsNeeded) return toast.error(`${number} 容量不足（${t.capacity} < ${assignBooking.guests}）`)
       preassignBookingTable(assignBooking.id, number)
-      toast.success(`✅ ${assignBooking.name} 已預先配到 ${number}`)
+      toast.success(`${assignBooking.name} 已預先配到 ${number}`)
       setAssignBooking(null)
       setSelectedTable(number)
       return
@@ -173,7 +175,7 @@ export default function SlotMapPanel({
     if (assignSelectedSeats < guestsNeeded) return toast.error(`還差 ${guestsNeeded - assignSelectedSeats} 席，請再加桌`)
     const picked = assignSelected
     preassignBookingTables(assignBooking.id, picked)
-    toast.success(`✅ ${assignBooking.name}（${guestsNeeded} 位）已併桌預配到 ${picked.join(' + ')}`)
+    toast.success(`${assignBooking.name}（${guestsNeeded} 位）已併桌預配到 ${picked.join(' + ')}`)
     setAssignBooking(null)
     setAssignSelected([])
     setSelectedTable(picked[0])
@@ -183,8 +185,8 @@ export default function SlotMapPanel({
 
   if (!seating) {
     return (
-      <div className="rounded-2xl border border-dashed border-chicken-brown/20 bg-white p-8 text-center">
-        <div className="text-3xl mb-2">🗺️</div>
+      <div className="rounded-xl border border-dashed border-chicken-brown/20 bg-white p-8 text-center">
+        <div className="mb-2 flex justify-center text-chicken-brown/30"><Icon name="map" size={32} strokeWidth={1.5} /></div>
         <p className="font-bold text-chicken-brown">尚未設定場次</p>
         <p className="text-sm text-chicken-brown/60 mt-1">請先到「設定 → 場次設定」新增午餐/晚餐等場次，地圖才能依場次呈現。</p>
       </div>
@@ -194,7 +196,7 @@ export default function SlotMapPanel({
   return (
     <div className="space-y-3">
       {/* 場次選擇 */}
-      <div className="bg-white rounded-2xl border border-chicken-brown/10 p-3 sm:p-4">
+      <div className="bg-white rounded-xl border border-chicken-brown/10 p-3 sm:p-4">
         <div className="text-xs font-bold text-chicken-brown/55 mb-1.5">場次（批次）</div>
         <div className="flex gap-1.5 flex-wrap">
           {seatings.map(s => {
@@ -208,7 +210,7 @@ export default function SlotMapPanel({
                     : c ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
                 {s.name}
                 <span className="ml-1 text-[10px] opacity-70">{s.start}–{s.end}</span>
-                {c && <span className="ml-1 text-[10px]">🚫</span>}
+                {c && <Icon name="ban" size={11} className="ml-1 inline-block align-[-1px]" />}
               </button>
             )
           })}
@@ -217,10 +219,10 @@ export default function SlotMapPanel({
 
       {/* 關閉徽章 */}
       {closed && (
-        <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl px-4 py-3 flex items-center gap-2">
-          <span className="text-xl">🚫</span>
+        <div className="bg-rose-50 border-2 border-rose-200 rounded-xl px-4 py-3 flex items-center gap-2">
+          <Icon name="ban" size={20} className="text-rose-600 shrink-0" />
           <div>
-            <div className="font-black text-rose-700 text-sm">此場次已關閉訂位</div>
+            <div className="font-bold text-rose-700 text-sm">此場次已關閉訂位</div>
             <div className="text-xs text-rose-600/80">{dayLabel(date)} · {seating.name}（{seating.start}–{seating.end}）— 停止接收新散客 / 團體訂位，既有訂位不受影響。</div>
           </div>
         </div>
@@ -228,22 +230,22 @@ export default function SlotMapPanel({
 
       {/* 容量摘要 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <StatsCard icon="🪑" label="全店座位" value={summary.totalSeats} color="brown" />
-        <StatsCard icon="🧍" label="散客已訂(人)" value={summary.walkinGuests} color="yellow" />
-        <StatsCard icon="🚌" label="團客保留(席)" value={summary.groupHeldSeats} color="red" />
-        <StatsCard icon="✅" label="剩餘可訂(席)" value={summary.remaining} color="green" />
+        <StatsCard icon="chair" label="全店座位" value={summary.totalSeats} color="brown" />
+        <StatsCard icon="person" label="散客已訂(人)" value={summary.walkinGuests} color="yellow" />
+        <StatsCard icon="bus" label="團客保留(席)" value={summary.groupHeldSeats} color="red" />
+        <StatsCard icon="checkCircle" label="剩餘可訂(席)" value={summary.remaining} color="green" />
       </div>
       {summary.unassignedWalkinGuests > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">
-          ⚠️ 尚有 <span className="text-base">{summary.unassignedWalkinGuests}</span> 位散客已訂位但未配桌（可在右側清單點選 → 於地圖預先配桌）
+          尚有 <span className="text-base">{summary.unassignedWalkinGuests}</span> 位散客已訂位但未配桌（可在右側清單點選 → 於地圖預先配桌）
         </div>
       )}
 
       {/* 時間軸點團標示橫幅（團客冷色系，呼應地圖團客＝靛色；散客標示帶 🧍 前綴則走暖色） */}
       {focus && (
-        <div className={`${focus.agencyName?.startsWith('🧍') ? 'bg-orange-600' : 'bg-indigo-600'} text-white px-4 py-2.5 rounded-xl shadow-md flex items-center justify-between gap-3 flex-wrap`}>
-          <div className="text-sm font-bold">🎯 標示 {focus.agencyName?.startsWith('🧍') ? '' : '🚌 '}{focus.agencyName || '團體'}{focus.batchLabel ? ` · ${focus.batchLabel}` : ''} 的座位（桌 {focus.tables.join('、')}）</div>
-          <button onClick={() => setFocus(null)} className={`tap text-xs px-3 py-2 bg-white rounded-lg font-bold ${focus.agencyName?.startsWith('🧍') ? 'text-orange-700' : 'text-indigo-700'}`}>關閉標示</button>
+        <div className={`${focus.kind === 'walkin' ? 'bg-orange-600' : 'bg-indigo-600'} text-white px-4 py-2.5 rounded-xl shadow-md flex items-center justify-between gap-3 flex-wrap`}>
+          <div className="text-sm font-bold flex items-center gap-2"><Icon name={focus.kind === 'walkin' ? 'person' : 'bus'} size={16} /><span>標示 {focus.agencyName || '團體'}{focus.batchLabel ? ` · ${focus.batchLabel}` : ''} 的座位（桌 {focus.tables.join('、')}）</span></div>
+          <button onClick={() => setFocus(null)} className={`tap text-xs px-3 py-2 bg-white rounded-lg font-bold ${focus.kind === 'walkin' ? 'text-orange-700' : 'text-indigo-700'}`}>關閉標示</button>
         </div>
       )}
 
@@ -252,10 +254,10 @@ export default function SlotMapPanel({
         <div className="bg-orange-600 text-white px-4 py-2.5 rounded-xl shadow-md space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="text-sm font-bold flex items-center gap-2 flex-wrap">
-              <span className="text-base leading-none">🪑</span>
+              <Icon name="chair" size={18} />
               <span>{assignMulti ? '併桌預配' : '預先配桌'}：{assignBooking.name}（{assignBooking.guests} 位 · {assignBooking.timeSlot}）</span>
               {assignMulti ? (
-                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-black text-sm shadow-sm ${assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
+                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm ${assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
                   已選 {assignSelectedSeats}/{guestsNeeded} 席 · {assignSelected.length} 桌
                 </span>
               ) : (
@@ -273,7 +275,7 @@ export default function SlotMapPanel({
               <button
                 onClick={confirmAssignMulti}
                 disabled={assignSelectedSeats < guestsNeeded}
-                className={`text-xs px-4 py-2 rounded-lg font-black whitespace-nowrap shadow-sm ${
+                className={`text-xs px-4 py-2 rounded-lg font-bold whitespace-nowrap shadow-sm ${
                   assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
               >✓ 確認併桌預配</button>
             </div>
@@ -283,16 +285,9 @@ export default function SlotMapPanel({
 
       {/* 主區：地圖 + 側欄 */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-3">
-        <div className="bg-white rounded-2xl border border-chicken-brown/10 p-2 sm:p-3">
+        <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3">
           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-            <div className="flex gap-1.5">
-              {['1F', '2F'].map(f => (
-                <button key={f} onClick={() => setFloor(f)}
-                  className={`tap px-4 py-2 rounded-xl text-sm font-bold border-2 ${floor === f ? 'bg-chicken-red border-chicken-red text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
-                  {f === '1F' ? '1F 主用餐區' : '2F 用餐區'}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl options={[{ key: '1F', label: '1F 主用餐區' }, { key: '2F', label: '2F 用餐區' }]} value={floor} onChange={setFloor} ariaLabel="樓層" />
             <div className="flex items-center gap-3 text-[11px] font-bold text-chicken-brown/60 flex-wrap">
               <span className="inline-flex items-center gap-1"><i className="h-3 w-3 rounded" style={{ background: '#ea580c' }} />散客</span>
               <span className="inline-flex items-center gap-1"><i className="h-3 w-3 rounded" style={{ background: '#4f46e5' }} />團客</span>
@@ -325,9 +320,9 @@ export default function SlotMapPanel({
         <div className="space-y-3">
           {/* 選中桌詳情 */}
           {selectedTable && (
-            <div className="bg-white rounded-2xl border border-chicken-brown/10 p-4">
+            <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
               <div className="flex items-center justify-between mb-2">
-                <h3 className="font-black text-chicken-brown">桌 {selectedTable}</h3>
+                <h3 className="font-bold text-chicken-brown">桌 {selectedTable}</h3>
                 <button onClick={() => setSelectedTable(null)} className="text-xs text-chicken-brown/50">關閉</button>
               </div>
               {!occ && <p className="text-sm text-chicken-brown/60">此場次空桌（可預先配給未配桌散客）</p>}
@@ -345,7 +340,7 @@ export default function SlotMapPanel({
               )}
               {occ?.kind === 'group' && (
                 <div className="space-y-1">
-                  <div className="text-sm"><span className="text-chicken-brown/60">團客：</span><span className="font-bold text-chicken-brown">🚌 {occ.group?.agencyName || '團體'}</span></div>
+                  <div className="text-sm"><span className="text-chicken-brown/60">團客：</span><span className="font-bold text-chicken-brown">{occ.group?.agencyName || '團體'}</span></div>
                   <div className="text-xs text-chicken-brown/60">{occ.batch?.label} · {occ.batch?.timeSlot} · {occ.group?.guideName || ''}</div>
                 </div>
               )}
@@ -353,7 +348,7 @@ export default function SlotMapPanel({
           )}
 
           {/* 未配桌散客清單 */}
-          <div className="bg-white rounded-2xl border border-chicken-brown/10 p-4">
+          <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
             <h3 className="font-bold text-chicken-brown mb-2 text-sm">未配桌散客（{seating.name}）</h3>
             {unassignedWalkins.length === 0 ? (
               <p className="text-xs text-chicken-brown/50">此場次散客都已配桌或無散客訂位。</p>

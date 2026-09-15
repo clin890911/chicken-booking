@@ -68,13 +68,13 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
         />
         {editable && (
           <Button onClick={() => setAgencyModal({ mode: 'add', data: { name: '', phone: '', contactName: '', lineId: '', note: '' } })}>
-            ➕ 新增旅行社
+            新增旅行社
           </Button>
         )}
       </div>
 
       {visibleAgencies.length === 0 ? (
-        <EmptyState icon="🏢" title="尚無旅行社" hint={editable ? '點右上「新增旅行社」建立名冊' : ''} />
+        <EmptyState icon="building" title="尚無旅行社" hint={editable ? '點右上「新增旅行社」建立名冊' : ''} />
       ) : (
         visibleAgencies.map((a, idx) => {
           const s = statsByAgency[a.id] || { visits: 0, totalGuests: 0, totalSpend: 0, lastVisit: '', history: [] }
@@ -82,8 +82,8 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
             <div key={a.id} className="bg-white rounded-xl border border-chicken-brown/10 p-4">
               <div className="flex items-start justify-between gap-2 flex-wrap">
                 <div>
-                  <div className="font-black text-chicken-brown">
-                    {idx < 3 && <span className="mr-1">{['🥇', '🥈', '🥉'][idx]}</span>}
+                  <div className="font-bold text-chicken-brown">
+                    {idx < 3 && <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-bold mr-1.5 align-[-3px] ${idx === 0 ? 'bg-chicken-yellow text-white' : 'bg-chicken-brown/10 text-chicken-brown/70'}`}>{idx + 1}</span>}
                     {a.name}
                   </div>
                   <div className="text-xs text-chicken-brown/60 mt-0.5">
@@ -92,8 +92,8 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
                 </div>
                 {editable && (
                   <div className="flex gap-1.5">
-                    <button onClick={() => setAgencyModal({ mode: 'edit', data: { ...a } })} className="text-xs px-2.5 py-1 rounded-lg border-2 border-chicken-brown/15 text-chicken-brown font-bold">編輯</button>
-                    <button onClick={() => { if (confirm(`封存旅行社「${a.name}」？歷史保留。`)) { archiveAgency(a.id); toast.success('已封存') } }} className="text-xs px-2.5 py-1 rounded-lg border-2 border-chicken-brown/15 text-chicken-brown/60 font-bold">封存</button>
+                    <button onClick={() => setAgencyModal({ mode: 'edit', data: { ...a } })} className="text-xs px-2.5 py-1 rounded-lg border border-chicken-brown/10 text-chicken-brown font-bold">編輯</button>
+                    <button onClick={() => { if (confirm(`封存旅行社「${a.name}」？歷史保留。`)) { archiveAgency(a.id); toast.success('已封存') } }} className="text-xs px-2.5 py-1 rounded-lg border border-chicken-brown/10 text-chicken-brown/60 font-bold">封存</button>
                   </div>
                 )}
               </div>
@@ -118,7 +118,7 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
                   {guidesByAgency(a.id).map(g => (
                     <button key={g.id} onClick={() => editable && setGuideModal({ agencyId: a.id, data: { ...g } })}
                       className="text-xs px-2.5 py-1 rounded-full bg-chicken-cream border border-chicken-brown/10 text-chicken-brown font-bold">
-                      🧑‍✈️ {g.name}{g.phone ? `（${g.phone}）` : ''}
+                      ‍✈️ {g.name}{g.phone ? `（${g.phone}）` : ''}
                     </button>
                   ))}
                 </div>

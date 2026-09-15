@@ -54,7 +54,7 @@ test('管理端：登入 → 指派桌位（二步確認）→ 指派成功', as
   await expect(page.getByText(/指派桌位：王大明\s*4\s*位/)).toBeVisible()
 
   // 4) 讀出系統建議桌號（💡 建議 N）
-  const suggestChip = page.getByText(/💡\s*建議\s*\d+/)
+  const suggestChip = page.getByText(/^建議\s*\d+/)
   await expect(suggestChip).toBeVisible()
   const chipText = await suggestChip.textContent()
   const tableNo = (chipText.match(/\d+/) || [])[0]
@@ -121,6 +121,6 @@ test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、�
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
 
   // 113 顯示預配標籤（取代「✓ 可入座」），其他空桌不受影響
-  await expect(page.getByText('📌 18:00 預配')).toBeVisible()
+  await expect(page.getByText('18:00 預配')).toBeVisible()
   await expect(page.locator('svg g:has(:text-is("112"))').getByText('✓ 可入座')).toBeVisible()
 })

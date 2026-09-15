@@ -58,13 +58,13 @@ export default function SearchBookingsView({ onAssignTable }) {
 
       {!trimmed ? (
         <EmptyState
-          icon="🔍"
+          icon="search"
           title="用訂位編號查詢"
           hint="輸入客人的訂位編號（例 BMQ60M3900491），或姓名 / 電話。跨所有日期、含已取消都查得到。"
         />
       ) : results.length === 0 ? (
         <div className="space-y-3">
-          <EmptyState icon="🔍" title="查無此訂位" hint="請確認編號是否正確；若是剛建立的訂位，可重新整理後再查一次。" />
+          <EmptyState icon="search" title="查無此訂位" hint="請確認編號是否正確；若是剛建立的訂位，可重新整理後再查一次。" />
           {looksLikeCode && (
             <div className="text-center">
               <button
@@ -72,18 +72,18 @@ export default function SearchBookingsView({ onAssignTable }) {
                 disabled={refreshing}
                 className="text-sm px-4 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown rounded-lg font-bold hover:border-chicken-red/40 disabled:opacity-50"
               >
-                {refreshing ? '重新整理中…' : '🔄 重新整理並再查'}
+                {refreshing ? '重新整理中…' : '重新整理並再查'}
               </button>
             </div>
           )}
         </div>
       ) : (
         <>
-          <div className="px-1 text-sm font-black text-chicken-brown">找到 {results.length} 筆訂位</div>
+          <div className="px-1 text-sm font-bold text-chicken-brown">找到 {results.length} 筆訂位</div>
           {grouped.map(([date, list]) => (
             <div key={date}>
               <div className="flex items-center gap-2 mb-2 px-1">
-                <span className="text-base font-black text-chicken-red">
+                <span className="text-base font-bold text-chicken-red">
                   {date === '—' ? '未排日期' : dayLabel(date)}
                 </span>
                 <div className="flex-1 h-px bg-chicken-brown/10" />

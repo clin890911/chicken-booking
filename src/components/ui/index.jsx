@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import Icon from './Icon'
 
 // 預設 type="button"：避免包進 <form> 時被當成隱式 submit 誤觸送出；呼叫端仍可傳 type="submit" 覆寫。
 export function Button({ variant = 'primary', type = 'button', className = '', children, ...rest }) {
@@ -80,7 +81,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
           <motion.div
             initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
             transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-            className={`bg-white w-full ${width} rounded-t-3xl sm:rounded-3xl shadow-xl max-h-[90vh] overflow-y-auto overscroll-contain safe-bottom`}
+            className={`bg-white w-full ${width} rounded-t-3xl sm:rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto overscroll-contain safe-bottom`}
             onClick={e => e.stopPropagation()}
           >
             {title && <div className="px-5 pt-5 pb-2 text-lg font-bold text-chicken-brown">{title}</div>}
@@ -96,7 +97,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
 export function LoadingScreen({ label = '載入中...' }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-chicken-cream">
-      <div className="text-6xl animate-bounce">🐔</div>
+      <div className="w-16 h-16 rounded-xl bg-chicken-red text-white text-3xl font-bold flex items-center justify-center animate-bounce">王</div>
       <p className="mt-4 text-chicken-brown/60 font-bold">{label}</p>
     </div>
   )
@@ -111,7 +112,7 @@ export function SlotSkeleton({ rows = 2, cols = 3 }) {
           <div className="mb-2 h-3 w-12 rounded bg-chicken-brown/10" />
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {Array.from({ length: cols }).map((_, c) => (
-              <div key={c} className="min-h-[58px] animate-pulse rounded-xl border-2 border-chicken-brown/10 bg-chicken-brown/[0.06]" />
+              <div key={c} className="min-h-[58px] animate-pulse rounded-xl border border-chicken-brown/10 bg-chicken-brown/[0.06]" />
             ))}
           </div>
         </div>
@@ -120,10 +121,11 @@ export function SlotSkeleton({ rows = 2, cols = 3 }) {
   )
 }
 
-export function EmptyState({ icon = '🍽️', title, hint, action }) {
+// icon：Icon 名稱字串（如 'search'）或自訂節點；預設餐具圖示。
+export function EmptyState({ icon = 'utensils', title, hint, action }) {
   return (
     <div className="empty-panel">
-      <div className="text-4xl mb-3">{icon}</div>
+      <div className="mb-3 flex justify-center text-chicken-brown/30">{typeof icon === 'string' ? <Icon name={icon} size={32} strokeWidth={1.5} /> : icon}</div>
       <p className="text-chicken-brown font-bold">{title}</p>
       {hint && <p className="text-sm text-chicken-brown/60 mt-1">{hint}</p>}
       {action && <div className="mt-4">{action}</div>}

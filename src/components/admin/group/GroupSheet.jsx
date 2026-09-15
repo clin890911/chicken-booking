@@ -204,9 +204,9 @@ export default function GroupSheet({ group, tables = [], store = {}, fixtureSour
       `}</style>
       <div className="min-h-full flex flex-col items-center py-6 px-3" onClick={e => e.stopPropagation()}>
         <div id="group-sheet-actions" className="mb-3 flex gap-2">
-          <button onClick={() => window.print()} className="px-4 py-2 rounded-xl bg-chicken-red text-white font-bold text-sm shadow">🖨 列印 / 存 PDF</button>
-          <button onClick={exportPng} className="px-4 py-2 rounded-xl bg-chicken-brown text-white font-bold text-sm shadow">📷 存成圖片（傳 LINE）</button>
-          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white border-2 border-chicken-brown/15 text-chicken-brown font-bold text-sm">關閉</button>
+          <button onClick={() => window.print()} className="px-4 py-2 rounded-xl bg-chicken-red text-white font-bold text-sm shadow">列印 / 存 PDF</button>
+          <button onClick={exportPng} className="px-4 py-2 rounded-xl bg-chicken-brown text-white font-bold text-sm shadow">存成圖片（傳 LINE）</button>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white border border-chicken-brown/10 text-chicken-brown font-bold text-sm">關閉</button>
         </div>
 
         <div id="group-sheet-print" className="bg-white shadow-2xl rounded-sm overflow-hidden">

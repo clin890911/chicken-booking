@@ -52,11 +52,11 @@ function BookingCard({ booking, onAssign }) {
           <button type="button" onClick={() => setDetail(true)} title="點擊看完整詳情"
             className="tap block w-full text-left rounded-lg -m-1 p-1">
             <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-lg font-black text-chicken-brown tabular-nums">{booking.timeSlot}</span>
+              <span className="text-lg font-bold text-chicken-brown tabular-nums">{booking.timeSlot}</span>
               <span className="text-base font-bold text-chicken-brown">{booking.name}</span>
               <span className="text-sm text-chicken-brown/60">{booking.guests} 位</span>
               {booking.assignedTableId && (
-                <span className={`text-xs font-black px-2.5 py-0.5 rounded-full
+                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full
                   ${booking.status === 'arrived'
                     ? 'bg-orange-600 text-white'
                     : 'bg-emerald-600 text-white'}`}>
@@ -72,7 +72,7 @@ function BookingCard({ booking, onAssign }) {
                     : stage === 'late'
                     ? 'bg-chicken-yellow text-white'
                     : 'bg-chicken-brown/10 text-chicken-brown'}`}>
-                  ⏱ {minutes} 分{stage === 'buffer-overtime' ? ' · 超緩衝' : stage === 'overtime' ? ' · 時間到' : stage === 'late' ? ' · 即將結束' : ''}
+                  {minutes} 分{stage === 'buffer-overtime' ? ' · 超緩衝' : stage === 'overtime' ? ' · 時間到' : stage === 'late' ? ' · 即將結束' : ''}
                 </span>
               )}
             </div>
@@ -81,20 +81,20 @@ function BookingCard({ booking, onAssign }) {
             <div className="text-xs text-chicken-brown/70 mt-1 flex items-center gap-2 flex-wrap">
               {/* 1. 警示（紅）優先 */}
               {noshowCount > 0 && (
-                <span className="text-chicken-red font-bold">⚠️ no-show ×{noshowCount}</span>
+                <span className="text-chicken-red font-bold">no-show ×{noshowCount}</span>
               )}
               {booking.cancellationReason?.reason && (
-                <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-black text-chicken-red">
+                <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-bold text-chicken-red">
                   取消原因：{booking.cancellationReason.reason}
                 </span>
               )}
               {/* LINE 綁定/送達狀態：被拒（封鎖/非好友）紅、已綁定綠（附最近通知結果）*/}
               {booking.linePushBlocked || booking.lineLastNotify?.status === 'failed' ? (
-                <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-black text-chicken-red" title="LINE 推播被拒或重試用盡，客人需重新加入官方帳號好友">
+                <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-bold text-chicken-red" title="LINE 推播被拒或重試用盡，客人需重新加入官方帳號好友">
                   LINE 無法送達
                 </span>
               ) : booking.lineUserId ? (
-                <span className="rounded-full bg-[#06C755]/10 px-2 py-0.5 font-black text-[#06A848]" title={booking.lineDisplayName ? `LINE：${booking.lineDisplayName}` : 'LINE 已綁定'}>
+                <span className="rounded-full bg-[#06C755]/10 px-2 py-0.5 font-bold text-[#06A848]" title={booking.lineDisplayName ? `LINE：${booking.lineDisplayName}` : 'LINE 已綁定'}>
                   LINE ✓{booking.lineLastNotify?.status === 'sent'
                     ? ` 已送達 ${fmtTime(booking.lineLastNotify.at)}`
                     : booking.lineLastNotify?.status === 'pending'
@@ -104,12 +104,12 @@ function BookingCard({ booking, onAssign }) {
               ) : null}
               {/* 2. 操作線索（綠/黃）居中 */}
               {suggestion && (
-                <span className="rounded-full border border-chicken-green/40 bg-chicken-green/10 px-2 py-0.5 font-black text-chicken-green">
+                <span className="rounded-full border border-chicken-green/40 bg-chicken-green/10 px-2 py-0.5 font-bold text-chicken-green">
                   建議桌 {suggestion.number}
                 </span>
               )}
               {booking.lastGuestEditAt && (
-                <span className="rounded-full bg-[#06C755]/10 px-2 py-0.5 font-black text-[#06A848]">
+                <span className="rounded-full bg-[#06C755]/10 px-2 py-0.5 font-bold text-[#06A848]">
                   客人自行修改 {fmtTime(booking.lastGuestEditAt)}
                 </span>
               )}
@@ -132,9 +132,9 @@ function BookingCard({ booking, onAssign }) {
             {/* 標籤 + 備註 */}
             {(booking.notes?.pet || booking.notes?.child || booking.notes?.mobility || booking.notes?.text) && (
               <div className="mt-1.5 flex items-center gap-1 flex-wrap">
-                {booking.notes?.pet && <Badge color="yellow">🐾 寵物</Badge>}
-                {booking.notes?.child && <Badge color="green">👶 兒童</Badge>}
-                {booking.notes?.mobility && <Badge color="brown">♿ 行動不便</Badge>}
+                {booking.notes?.pet && <Badge color="yellow">寵物</Badge>}
+                {booking.notes?.child && <Badge color="green">兒童</Badge>}
+                {booking.notes?.mobility && <Badge color="brown">行動不便</Badge>}
                 {booking.notes?.text && (
                   <span className="text-[11px] text-chicken-brown/60 italic truncate max-w-[200px]">
                     「{booking.notes.text}」
@@ -168,7 +168,7 @@ function BookingCard({ booking, onAssign }) {
                 <button
                   onClick={(e) => { e.stopPropagation(); act.checkout() }}
                   className="tap text-sm px-4 min-h-[44px] bg-orange-500 text-white rounded-lg font-bold hover:opacity-90"
-                >🚪 客人已離席</button>
+                >客人已離席</button>
                 <button
                   onClick={(e) => { e.stopPropagation(); act.finalize() }}
                   className="tap text-xs px-3 min-h-[44px] bg-white border border-chicken-green/40 text-chicken-green rounded-lg font-bold hover:bg-chicken-green/5"
@@ -182,7 +182,7 @@ function BookingCard({ booking, onAssign }) {
                 <button
                   onClick={(e) => { e.stopPropagation(); setEditing(true) }}
                   className="tap inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/20 text-chicken-brown rounded-lg font-bold hover:border-chicken-brown/40"
-                >✏️ 編輯</button>
+                >編輯</button>
                 <button
                   onClick={(e) => { e.stopPropagation(); setShowMore(s => !s) }}
                   className="tap sm:hidden text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown/70 rounded-lg font-bold hover:border-chicken-brown/30"

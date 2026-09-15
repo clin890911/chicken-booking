@@ -82,7 +82,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
       <div className="flex items-center px-0.5 mb-1">
         {/* 總筆數：永遠是真實總數，不管畫面上看得到幾顆——店員看到「等報到 6」但只數到
             3 顆，就知道要往右滑，不會被「看起來已經滿版」的錯覺騙走。 */}
-        <span className="text-[11px] font-black text-chicken-brown/60">等報到 {targets.length}</span>
+        <span className="text-[11px] font-bold text-chicken-brown/60">等報到 {targets.length}</span>
       </div>
       <div className="relative">
         {edge.left && (
@@ -112,7 +112,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                 className={`flex items-center gap-2 shrink-0 cursor-pointer rounded-full border-2 pl-3 pr-1.5 py-1 transition-colors
                   ${late ? 'bg-chicken-red/5 border-chicken-red/40' : 'bg-white border-chicken-brown/15 hover:border-chicken-brown/30'}`}
               >
-                <span className={`tabular-nums text-xs font-black ${late ? 'text-chicken-red' : 'text-chicken-brown'}`}>
+                <span className={`tabular-nums text-xs font-bold ${late ? 'text-chicken-red' : 'text-chicken-brown'}`}>
                   {booking.timeSlot}
                 </span>
                 <span className="text-sm font-bold text-chicken-brown truncate max-w-[7rem]">{booking.name}</span>
@@ -123,7 +123,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                   {crossFloor ? `${table.floor} ${table.number}` : table.number}
                 </span>
                 {late && (
-                  <span className="text-[10px] font-black text-white bg-chicken-red px-1.5 py-0.5 rounded-full shrink-0">
+                  <span className="text-[10px] font-bold text-white bg-chicken-red px-1.5 py-0.5 rounded-full shrink-0">
                     遲到
                   </span>
                 )}
@@ -131,7 +131,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onArrive(table, booking) }}
                   aria-label={`${booking.name} 到了，入座 ${table.number}`}
-                  className="rounded-full bg-chicken-green text-white text-xs font-black shrink-0
+                  className="rounded-full bg-chicken-green text-white text-xs font-bold shrink-0
                              hover:opacity-90 focus-visible:outline focus-visible:outline-2
                              focus-visible:outline-offset-2 focus-visible:outline-chicken-red
                              motion-safe:transition-transform motion-safe:active:scale-95"

@@ -154,7 +154,7 @@ export default function ExportCenter() {
       <div>
         <span className="label">資料類型</span>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          {[{ key: 'bookings', label: '🧑 散客訂位' }, { key: 'groups', label: '🚌 團體預排（含導遊）' }].map(t => (
+          {[{ key: 'bookings', label: '散客訂位' }, { key: 'groups', label: '團體預排（含導遊）' }].map(t => (
             <button
               key={t.key}
               onClick={() => setType(t.key)}
@@ -228,11 +228,11 @@ export default function ExportCenter() {
 
       {/* 預覽 + 匯出 */}
       <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-sm text-chicken-brown/70">
-        符合條件：<span className="font-black text-chicken-brown">{count}</span>
+        符合條件：<span className="font-bold text-chicken-brown">{count}</span>
         {type === 'bookings' ? ' 筆散客訂位' : ` 張團單（合計 ${groupGuestTotal} 人）`}
       </div>
       <Button onClick={handleExport} className="w-full min-h-[44px]">
-        ⬇️ 匯出 CSV{count ? `（${count} 筆）` : ''}
+        匯出 CSV{count ? `（${count} 筆）` : ''}
       </Button>
       <p className="text-xs leading-5 text-chicken-brown/55">
         CSV 為 UTF-8（含 BOM），Excel 直接開啟不會亂碼。團體匯出一梯次一列，欄含旅行社/導遊/素食/兒童餐/輪椅等備餐資訊。

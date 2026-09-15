@@ -63,7 +63,7 @@ describe('AddBookingView：prefill 欄位級守門', () => {
     expect(phoneInput().value).toBe('0933111222')
     expect(nameInput().value).toBe('陳先生')
     // 來源 chip 選中態：walkin 對應「🚶 現場」
-    const walkinChip = [...container.querySelectorAll('button')].find(b => b.textContent.includes('🚶 現場'))
+    const walkinChip = [...container.querySelectorAll('button')].find(b => b.textContent.trim() === '現場')
     expect(walkinChip.className).toContain('border-chicken-red')
   })
 

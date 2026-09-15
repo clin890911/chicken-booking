@@ -119,7 +119,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     if (!r1.ok) return toast.error('入座失敗：' + r1.error)
     const r2 = seatBooking(preassign.id)
     if (!r2.ok) { toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return }
-    toast.success(`✅ ${preassign.name}（${preassign.guests} 位）入座 ${table.number}`)
+    toast.success(`${preassign.name}（${preassign.guests} 位）入座 ${table.number}`)
     onClose?.()
   }
 
@@ -169,7 +169,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     const r = finalizeBooking(releasedBooking.id)
     if (!r.ok) return toast.error(r.error)
     // 復原窗口：把整組桌（含併桌額外桌）還原為釋出前（重新入座 → dining）
-    toast.action(`✨ ${releasedBooking.name} 已離席且 ${releasedTables.join('、')} 已釋出（用餐 ${min} 分）`,
+    toast.action(`${releasedBooking.name} 已離席且 ${releasedTables.join('、')} 已釋出（用餐 ${min} 分）`,
       { label: '↩ 復原', onClick: () => {
         const back = reseatBookingTables(releasedBooking.id)
         if (back.ok) toast.success(`已復原 ${releasedBooking.name} 至 ${releasedTables.join('、')}`)
@@ -239,7 +239,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     const to = outageForm.days < 0 ? '' : addDaysStr(today, outageForm.days)
     const r = setTableOutage(table.number, { from: today, to, reason: outageForm.reason })
     if (!r?.ok) return toast.error(r?.error || '無法設定維修')
-    toast.success(`🛠 ${table.number} 已維修停用${to ? `（至 ${to}）` : '（直到手動結束）'}`)
+    toast.success(`${table.number} 已維修停用${to ? `（至 ${to}）` : '（直到手動結束）'}`)
     setShowOutage(false)
   }
 
@@ -249,7 +249,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     if (!ok) return
     const r = clearTableOutage(table.number)
     if (!r?.ok) return toast.error(r?.error || '無法結束維修')
-    toast.success(`✅ ${table.number} 維修結束，已恢復可用`)
+    toast.success(`${table.number} 維修結束，已恢復可用`)
   }
 
   const handleUnblock = () => {
@@ -258,12 +258,12 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-chicken-brown/10 overflow-hidden flex flex-col h-full">
+    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden flex flex-col h-full">
       {/* Header */}
       <div className="px-5 pt-5 pb-3 border-b border-chicken-brown/10 bg-gradient-to-b from-white to-chicken-cream/30">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="text-3xl font-black text-chicken-red leading-none">{table.number}</div>
+            <div className="text-3xl font-bold text-chicken-red leading-none">{table.number}</div>
             <div className="text-xs text-chicken-brown/60 mt-1.5">
               {table.capacity} 人桌 · {table.capacity === 6 ? '180×100' : '120×100'} cm
             </div>
@@ -279,7 +279,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
         </span>
         {outToday && (
           <span className="inline-block mt-3 ml-2 px-3 py-1 rounded-full text-xs font-bold text-white bg-amber-700">
-            🛠 {outageLabel(table, today)}
+            {outageLabel(table, today)}
           </span>
         )}
       </div>
@@ -294,7 +294,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
             <div className="flex justify-between"><span className="text-chicken-brown/60">人數</span><span>{booking.guests} 位</span></div>
             {isCombo && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs font-bold text-amber-800">
-                🪑 併桌（{bookingTables.length} 桌）：{bookingTables.join(' + ')}
+                併桌（{bookingTables.length} 桌）：{bookingTables.join(' + ')}
                 <div className="text-[11px] font-normal text-amber-700/80 mt-0.5">離席/清桌會一起釋出這幾張桌。</div>
               </div>
             )}
@@ -316,7 +316,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
                       : stage === 'late' ? 'bg-orange-100 text-orange-700'
                       : 'bg-chicken-cream text-chicken-brown'}`}>
                     <span className="text-xs font-bold">已用餐</span>
-                    <span className="text-2xl font-black tabular-nums">
+                    <span className="text-2xl font-bold tabular-nums">
                       {m} <span className="text-sm">分</span>
                     </span>
                   </div>
@@ -327,12 +327,12 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
                   )}
                   {stage === 'overtime' && (
                     <div className="text-[11px] text-chicken-red font-bold mt-1 text-center">
-                      ⚠️ 已達 {diningDuration} 分鐘用餐時間，可禮貌提醒
+                      已達 {diningDuration} 分鐘用餐時間，可禮貌提醒
                     </div>
                   )}
                   {stage === 'buffer-overtime' && (
                     <div className="text-[11px] text-chicken-red font-bold mt-1 text-center">
-                      ⚠️ 已超過 {bufferLimit} 分鐘（含清桌緩衝），請安排結帳或翻桌
+                      已超過 {bufferLimit} 分鐘（含清桌緩衝），請安排結帳或翻桌
                     </div>
                   )}
                 </>
@@ -344,9 +344,9 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
               </div>
             )}
             <div className="flex flex-wrap gap-1.5 mt-2">
-              {booking.notes?.pet && <span className="text-[11px] bg-chicken-yellow/15 text-chicken-yellow px-2 py-0.5 rounded-full">🐾 寵物</span>}
-              {booking.notes?.child && <span className="text-[11px] bg-chicken-green/15 text-chicken-green px-2 py-0.5 rounded-full">👶 兒童</span>}
-              {booking.notes?.mobility && <span className="text-[11px] bg-chicken-brown/15 text-chicken-brown px-2 py-0.5 rounded-full">♿ 行動不便</span>}
+              {booking.notes?.pet && <span className="text-[11px] bg-chicken-yellow/15 text-chicken-yellow px-2 py-0.5 rounded-full">寵物</span>}
+              {booking.notes?.child && <span className="text-[11px] bg-chicken-green/15 text-chicken-green px-2 py-0.5 rounded-full">兒童</span>}
+              {booking.notes?.mobility && <span className="text-[11px] bg-chicken-brown/15 text-chicken-brown px-2 py-0.5 rounded-full">行動不便</span>}
             </div>
           </div>
         )}
@@ -369,7 +369,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
         {/* 孤兒桌警示：桌況說有人、卻查無訂位。講清楚原因，並在下方動作區給「強制釋出」。 */}
         {orphan && (
           <div className="px-3 py-2.5 bg-chicken-red/5 border border-chicken-red/30 rounded-lg text-xs space-y-1">
-            <div className="font-bold text-chicken-red">⚠️ 找不到這張桌對應的訂位</div>
+            <div className="font-bold text-chicken-red">找不到這張桌對應的訂位</div>
             <div className="text-chicken-brown/70">
               桌況顯示「{STATUS_LABELS[table.status]}」，但
               {table.currentBookingId ? `訂位 #${table.currentBookingId} 已不存在` : '桌上沒有訂位編號'}
@@ -395,7 +395,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           // 配色跟著地圖走：預配桌 2026-08 起在桌況圖上是藍色虛線（PREASSIGN_COLOR），
           // 抽屜再用橘色會變成同一件事兩種顏色，店員得各記一套。
           <div className="px-3 py-2 bg-blue-50 border border-dashed border-blue-300 rounded-lg text-xs">
-            <span className="font-bold text-blue-800">📌 已預配：</span>
+            <span className="font-bold text-blue-800">已預配：</span>
             <span className="text-blue-800/90">排位規劃已預先配給 {preassign.name}（{preassign.guests} 位{preassign.timeSlot ? ` · ${preassign.timeSlot}` : ''}）</span>
             <p className="text-[11px] text-blue-800/70 mt-0.5">桌況仍是空桌：直接入座或指派他人會覆蓋此預留。</p>
             {canEdit && (
@@ -403,7 +403,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
                 onClick={handleSeatPreassigned}
                 className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
               >
-                ✅ {preassign.name} 到了，入座 {table.number}
+                {preassign.name} 到了，入座 {table.number}
               </button>
             )}
           </div>
@@ -411,17 +411,17 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
         {/* 維修中：接管空桌的預設引導，明確顯示原因與期間 */}
         {outToday && (
           <div className="px-3 py-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs space-y-1">
-            <div className="font-bold text-amber-800">🛠 此桌維修停用中（{outageLabel(table, today)}）</div>
+            <div className="font-bold text-amber-800">此桌維修停用中（{outageLabel(table, today)}）</div>
             {table.outage?.reason && <div className="text-amber-800/80">原因：{table.outage.reason}</div>}
             <div className="text-amber-700/70">維修期間此桌不計入可訂容量、不出現在配桌建議；結束維修後立即恢復。</div>
             {outHoldConflict && (
               <div className="mt-1 rounded bg-amber-100 px-2 py-1.5 font-bold text-amber-900">
-                ⚠️ 此桌已被今日團體（{outHoldConflict.agencyName || '團體'}）圈桌：請先結束維修，或到該團「梯次入座」時走改派桌位換桌。
+                此桌已被今日團體（{outHoldConflict.agencyName || '團體'}）圈桌：請先結束維修，或到該團「梯次入座」時走改派桌位換桌。
               </div>
             )}
             {preassign && (
               <div className="mt-1 rounded bg-amber-100 px-2 py-1.5 font-bold text-amber-900">
-                ⚠️ 此桌已預先配給 {preassign.name}（{preassign.guests} 位）：請到規劃頁重新配桌。
+                此桌已預先配給 {preassign.name}（{preassign.guests} 位）：請到規劃頁重新配桌。
               </div>
             )}
           </div>
@@ -436,7 +436,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
         {/* 排定中的未來維修：提示 + 可取消 */}
         {upcomingOutage && (
           <div className="px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-xs flex items-center justify-between gap-2">
-            <span className="text-orange-700"><span className="font-bold">🛠 已排定維修：</span>{outageLabel(table, today)}{upcomingOutage.reason ? `（${upcomingOutage.reason}）` : ''}</span>
+            <span className="text-orange-700"><span className="font-bold">已排定維修：</span>{outageLabel(table, today)}{upcomingOutage.reason ? `（${upcomingOutage.reason}）` : ''}</span>
             {canBlock && <button onClick={handleClearOutage} className="shrink-0 text-orange-700 font-bold underline underline-offset-2">取消排定</button>}
           </div>
         )}
@@ -453,15 +453,15 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
       {canEdit && (
         <div className="px-5 pb-5 border-t border-chicken-brown/10 pt-3 space-y-2">
           {outToday && canBlock && (
-            <button onClick={handleClearOutage} className="btn-primary w-full">✅ 結束維修，恢復可用</button>
+            <button onClick={handleClearOutage} className="btn-primary w-full">結束維修，恢復可用</button>
           )}
           {table.status === 'vacant' && !activeHold && !outToday && (
             <>
-              <button onClick={() => setShowWalkIn(true)} className="btn-primary w-full">✅ 散客直接入座</button>
+              <button onClick={() => setShowWalkIn(true)} className="btn-primary w-full">散客直接入座</button>
               {canBlock && (
                 <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setShowBlock(true)} className="btn-secondary text-sm">🚫 設不可用</button>
-                  <button onClick={() => setShowOutage(true)} className="btn-secondary text-sm">🛠 維修停用</button>
+                  <button onClick={() => setShowBlock(true)} className="btn-secondary text-sm">設不可用</button>
+                  <button onClick={() => setShowOutage(true)} className="btn-secondary text-sm">維修停用</button>
                 </div>
               )}
             </>
@@ -469,16 +469,16 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
 
           {table.status === 'reserved' && booking && (
             <>
-              <button onClick={handleSeat} className="btn-primary w-full">✅ 客人到了 — 入座</button>
-              <button onClick={handleCancel} className="w-full text-sm rounded-2xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
+              <button onClick={handleSeat} className="btn-primary w-full">客人到了 — 入座</button>
+              <button onClick={handleCancel} className="w-full text-sm rounded-xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
             </>
           )}
 
           {table.status === 'dining' && booking && (
             <>
               {/* 主要操作：漸進式 — 先進「等待清桌」，避免連點直接釋出髒桌 */}
-              <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-2xl w-full">
-                🚪 客人已離席
+              <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-xl w-full">
+                客人已離席
               </button>
               {/* 次要：直接釋出（已清桌完成），降權重、較小較淡、保留 confirm */}
               <button
@@ -489,14 +489,14 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
               </button>
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={onStartMove} className="btn-secondary text-sm">↔ 換桌</button>
-                <button onClick={() => toast.info('（v1 預留）訂單明細整合中')} className="btn-secondary text-sm">📝 訂單明細</button>
+                <button onClick={() => toast.info('（v1 預留）訂單明細整合中')} className="btn-secondary text-sm">訂單明細</button>
               </div>
             </>
           )}
 
           {/* 團體桌的清桌（含接下一梯）在 GroupTableSection 內處理 */}
           {table.status === 'cleaning' && !groupRef && (
-            <button onClick={handleClear} className="btn-primary w-full">✨ 清桌完成</button>
+            <button onClick={handleClear} className="btn-primary w-full">清桌完成</button>
           )}
 
           {table.status === 'blocked' && canBlock && (
@@ -507,8 +507,8 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           {orphan && (
             <button
               onClick={handleForceRelease}
-              className="w-full text-sm rounded-2xl font-bold py-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5"
-            >✨ 強制釋出為空桌</button>
+              className="w-full text-sm rounded-xl font-bold py-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5"
+            >強制釋出為空桌</button>
           )}
         </div>
       )}
@@ -542,7 +542,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
       }>
         <div className="space-y-2">
           <Input label="原因" value={blockReason} onChange={e => setBlockReason(e.target.value)} placeholder="例：保留給常客、暫不開放" />
-          <p className="text-xs text-chicken-brown/55">「不可用」是現場臨時保留，<span className="font-bold">不會</span>扣線上可訂容量；要修桌子請改用「🛠 維修停用」。</p>
+          <p className="text-xs text-chicken-brown/55">「不可用」是現場臨時保留，<span className="font-bold">不會</span>扣線上可訂容量；要修桌子請改用「維修停用」。</p>
         </div>
       </Modal>
 

@@ -26,15 +26,15 @@ function GroupBatchCard({ group, batch, onOpen }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-baseline gap-2 flex-wrap min-w-0">
-          <span className="text-lg font-black text-indigo-700 tabular-nums">{batch?.timeSlot || '未排'}</span>
-          <span className="text-base font-bold text-chicken-brown truncate">🚌 {group.agencyName || '團體'}</span>
+          <span className="text-lg font-bold text-indigo-700 tabular-nums">{batch?.timeSlot || '未排'}</span>
+          <span className="text-base font-bold text-chicken-brown truncate">{group.agencyName || '團體'}</span>
           <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">{batch?.label || '梯次'}</span>
         </div>
         <span className={`shrink-0 text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${st.cls}`}>{st.label}</span>
       </div>
       <div className="mt-1 text-xs text-chicken-brown/70 flex items-center gap-2 flex-wrap">
         <span className="font-bold tabular-nums">{guests} 位</span>
-        <span className="tabular-nums">🪑 {nums.length > 0 ? `桌 ${nums.join('、')}` : '未圈桌'}</span>
+        <span className="tabular-nums">{nums.length > 0 ? `桌 ${nums.join('、')}` : '未圈桌'}</span>
         {group.guideName && <span className="text-chicken-brown/50">導遊 {group.guideName}</span>}
         <span className="text-indigo-600/70 font-bold ml-auto">點擊開團單 ›</span>
       </div>

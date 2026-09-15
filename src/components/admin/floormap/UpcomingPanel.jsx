@@ -10,6 +10,7 @@ import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
 import { findPreassignedBooking } from '../../../utils/capacity'
 import { assignmentKind } from '../../../utils/tableStatus'
 import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
+import Icon from '../../ui/Icon'
 
 function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNoshow, onComplete, perms }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
@@ -40,7 +41,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNo
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-base font-black text-chicken-brown tabular-nums">{b.timeSlot}</span>
+            <span className="text-base font-bold text-chicken-brown tabular-nums">{b.timeSlot}</span>
             <span className="text-sm font-bold truncate">{b.name}</span>
           </div>
           <div className="text-xs text-chicken-brown/60 mt-0.5 truncate">
@@ -71,7 +72,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNo
                 preassigned ? 'bg-blue-100 text-blue-800' : 'bg-chicken-green/15 text-chicken-green'
               }`}
             >
-              {preassigned ? `📌 已預配 ${b.assignedTableId}` : `✓ 已指派 ${b.assignedTableId}`}
+              {preassigned ? `已預配 ${b.assignedTableId}` : `✓ 已指派 ${b.assignedTableId}`}
             </span>
           )}
           {/* 客人到了（含遲到後才到）：直接入座，免再點桌位 → 抽屜 */}
@@ -80,7 +81,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNo
               onClick={(e) => { e.stopPropagation(); onSeat?.(b) }}
               className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-[11px] font-bold hover:opacity-90"
             >
-              ✅ 客人到了
+              客人到了
             </button>
           )}
           {showAssign && (
@@ -114,9 +115,9 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNo
 
       {(b.notes?.pet || b.notes?.child || b.notes?.mobility) && (
         <div className="flex gap-1 mt-1.5">
-          {b.notes.pet && <span className="text-[10px] bg-chicken-yellow/15 text-chicken-yellow px-1.5 py-0.5 rounded-full">🐾</span>}
-          {b.notes.child && <span className="text-[10px] bg-chicken-green/15 text-chicken-green px-1.5 py-0.5 rounded-full">👶</span>}
-          {b.notes.mobility && <span className="text-[10px] bg-chicken-brown/15 text-chicken-brown px-1.5 py-0.5 rounded-full">♿</span>}
+          {b.notes.pet && <span className="inline-flex items-center gap-0.5 text-[10px] bg-chicken-yellow/15 text-chicken-yellow px-1.5 py-0.5 rounded-full"><Icon name="paw" size={11} />寵物</span>}
+          {b.notes.child && <span className="inline-flex items-center gap-0.5 text-[10px] bg-chicken-green/15 text-chicken-green px-1.5 py-0.5 rounded-full"><Icon name="child" size={11} />兒童</span>}
+          {b.notes.mobility && <span className="inline-flex items-center gap-0.5 text-[10px] bg-chicken-brown/15 text-chicken-brown px-1.5 py-0.5 rounded-full"><Icon name="wheelchair" size={11} />行動</span>}
         </div>
       )}
     </div>
@@ -215,13 +216,13 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
     }
     const r = seatBooking(b.id)
     if (!r?.ok) return toast.error('入座失敗：' + (r?.error || '未知錯誤'))
-    toast.success(`✅ ${b.name} 已入座 ${tableNo}`)
+    toast.success(`${b.name} 已入座 ${tableNo}`)
   }
 
   if (overdue.length + soon.length + later.length === 0) {
     return (
       <div className="text-center py-6 text-xs text-chicken-brown/40">
-        ✅ 今日已無待到訂位
+        今日已無待到訂位
       </div>
     )
   }
@@ -230,7 +231,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
     <div className="space-y-3">
       {overdue.length > 0 && (
         <div className="space-y-2">
-          <div className="text-[11px] font-black text-chicken-red">⚠ 過時未到（{overdue.length} 組）— 請聯絡或標記</div>
+          <div className="text-[11px] font-bold text-chicken-red">過時未到（{overdue.length} 組）— 請聯絡或標記</div>
           {overdue.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
               onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
@@ -241,7 +242,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
 
       {soon.length > 0 && (
         <div className="space-y-2">
-          <div className="text-[11px] font-black text-chicken-brown/65">🔜 90 分內將到（{soon.length} 組）</div>
+          <div className="text-[11px] font-bold text-chicken-brown/65">90 分內將到（{soon.length} 組）</div>
           {soon.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
               onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}

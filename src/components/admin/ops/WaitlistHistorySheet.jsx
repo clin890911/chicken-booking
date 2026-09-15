@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Modal, Card, EmptyState } from '../../ui'
 import { useBooking } from '../../../contexts/BookingContext'
+import SegmentedControl from '../../ui/SegmentedControl'
 
 // 候位歷史與統計（低頻查閱）：今日四格統計 + 活躍/全部列表（唯讀）。
 // 活躍候位的操作（入座/叫號/棄號）都在現場右側欄的候位籤，這裡只看不動。
@@ -47,40 +48,28 @@ export default function WaitlistHistorySheet({ open, onClose }) {
   }, [sorted])
 
   return (
-    <Modal open={open} onClose={onClose} title="🚦 候位歷史與統計">
+    <Modal open={open} onClose={onClose} title="候位歷史與統計">
       <div className="space-y-3">
         {/* 今日統計（順序：等待中→已叫號→已入座→已離開） */}
         <div className="grid grid-cols-4 gap-2">
-          <Card className="!p-3 text-center"><div className="text-2xl font-black text-amber-700">{stats.waiting}</div><div className="text-[11px] text-chicken-brown/60">等待中</div></Card>
-          <Card className={`!p-3 text-center ${stats.called > 0 ? 'border-amber-400 !border-2 bg-amber-50' : ''}`}><div className="text-2xl font-black text-amber-700">{stats.called}</div><div className="text-[11px] text-chicken-brown/60">已叫號</div></Card>
-          <Card className="!p-3 text-center"><div className="text-2xl font-black text-emerald-600">{stats.seated}</div><div className="text-[11px] text-chicken-brown/60">已入座</div></Card>
-          <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-brown/40">{stats.left}</div><div className="text-[11px] text-chicken-brown/60">已離開</div></Card>
+          <Card className="!p-3 text-center"><div className="text-2xl font-bold text-amber-700">{stats.waiting}</div><div className="text-[11px] text-chicken-brown/60">等待中</div></Card>
+          <Card className={`!p-3 text-center ${stats.called > 0 ? 'border-amber-400 !border-2 bg-amber-50' : ''}`}><div className="text-2xl font-bold text-amber-700">{stats.called}</div><div className="text-[11px] text-chicken-brown/60">已叫號</div></Card>
+          <Card className="!p-3 text-center"><div className="text-2xl font-bold text-emerald-600">{stats.seated}</div><div className="text-[11px] text-chicken-brown/60">已入座</div></Card>
+          <Card className="!p-3 text-center"><div className="text-2xl font-bold text-chicken-brown/40">{stats.left}</div><div className="text-[11px] text-chicken-brown/60">已離開</div></Card>
         </div>
 
-        <div className="flex gap-1.5">
-          <button
-            onClick={() => setFilter('all')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
-              filter === 'all' ? 'bg-chicken-red text-white' : 'bg-white border border-chicken-brown/15 text-chicken-brown'
-            }`}
-          >全部</button>
-          <button
-            onClick={() => setFilter('active')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
-              filter === 'active' ? 'bg-chicken-red text-white' : 'bg-white border border-chicken-brown/15 text-chicken-brown'
-            }`}
-          >活躍中</button>
-        </div>
+        <SegmentedControl size="sm" ariaLabel="候位篩選" value={filter} onChange={setFilter}
+          options={[{ key: 'all', label: '全部' }, { key: 'active', label: '活躍中' }]} />
 
         {list.length === 0 ? (
-          <EmptyState icon="🚦" title={filter === 'active' ? '目前無人候位' : '尚無候位記錄'} />
+          <EmptyState icon="traffic" title={filter === 'active' ? '目前無人候位' : '尚無候位記錄'} />
         ) : (
           <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
             {list.map(w => (
               <div key={w.id} className="rounded-xl border border-chicken-brown/10 bg-white px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-baseline gap-2 min-w-0 flex-1 flex-wrap">
-                    <span className="text-base font-black text-chicken-red">#{w.queueNumber}</span>
+                    <span className="text-base font-bold text-chicken-red">#{w.queueNumber}</span>
                     <span className="text-sm font-bold truncate">{w.name}</span>
                     <span className="text-xs text-chicken-brown/60">{w.partySize} 位</span>
                   </div>

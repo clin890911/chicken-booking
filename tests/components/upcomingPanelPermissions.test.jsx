@@ -122,15 +122,15 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
       expect(container.textContent).not.toContain('已預配')
     })
 
-    it('規劃頁預配（桌況仍是空桌）→「📌 已預配 101」', () => {
+    it('規劃頁預配（桌況仍是空桌）→「已預配 101」', () => {
       render(roleCan('manager'), [OVERDUE_ASSIGNED], [table()])
-      expect(container.textContent).toContain('📌 已預配 101')
+      expect(container.textContent).toContain('已預配 101')
       expect(container.textContent).not.toContain('✓ 已指派')
     })
 
     it('預配的桌被別筆訂位鎖走 →仍是「已預配」（桌並不屬於這筆）', () => {
       render(roleCan('manager'), [OVERDUE_ASSIGNED], [table({ status: 'reserved', currentBookingId: 'b9' })])
-      expect(container.textContent).toContain('📌 已預配 101')
+      expect(container.textContent).toContain('已預配 101')
     })
 
     it('未指派的訂位不出現任何桌號徽章', () => {

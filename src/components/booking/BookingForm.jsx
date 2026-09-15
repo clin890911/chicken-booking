@@ -2,9 +2,9 @@ import { useState } from 'react'
 import { Input, Select, Textarea, Button } from '../ui'
 
 const NOTE_OPTIONS = [
-  { key: 'pet', label: '🐾 攜帶寵物' },
-  { key: 'child', label: '👶 有兒童' },
-  { key: 'mobility', label: '♿ 行動不便' }
+  { key: 'pet', label: '攜帶寵物' },
+  { key: 'child', label: '有兒童' },
+  { key: 'mobility', label: '行動不便' }
 ]
 
 export default function BookingForm({
@@ -76,11 +76,11 @@ export default function BookingForm({
           value={form.source}
           onChange={e => set('source', e.target.value)}
           options={[
-            { value: 'phone', label: '📞 電話' },
-            { value: 'walkin', label: '🚶 現場' },
-            { value: 'group', label: '👥 團體' },
-            { value: 'line', label: '💚 LINE' },
-            { value: 'online', label: '🌐 線上' }
+            { value: 'phone', label: '電話' },
+            { value: 'walkin', label: '現場' },
+            { value: 'group', label: '團體' },
+            { value: 'line', label: 'LINE' },
+            { value: 'online', label: '線上' }
           ]}
         />
       )}

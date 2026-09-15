@@ -43,12 +43,12 @@ export default function MonthCalendar({ value, onChange, minDate, maxDate, rende
   })
 
   return (
-    <div className="rounded-xl border-2 border-chicken-brown/15 bg-white p-3">
+    <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
       <div className="mb-2 flex items-center justify-between">
         <button type="button" onClick={() => shift(-1)} disabled={!canPrev}
           className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-chicken-brown hover:bg-chicken-brown/5 disabled:opacity-25"
           aria-label="上個月">‹</button>
-        <div className="font-black text-chicken-brown tabular-nums">{cursor.year} 年 {cursor.month + 1} 月</div>
+        <div className="font-bold text-chicken-brown tabular-nums">{cursor.year} 年 {cursor.month + 1} 月</div>
         <button type="button" onClick={() => shift(1)} disabled={!canNext}
           className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-chicken-brown hover:bg-chicken-brown/5 disabled:opacity-25"
           aria-label="下個月">›</button>
@@ -56,7 +56,7 @@ export default function MonthCalendar({ value, onChange, minDate, maxDate, rende
 
       <div className="mb-1 grid grid-cols-7">
         {WEEKDAYS.map(w => (
-          <div key={w} className={`py-1 text-center text-[11px] font-black ${w === '日' || w === '六' ? 'text-chicken-red/70' : 'text-chicken-brown/45'}`}>{w}</div>
+          <div key={w} className={`py-1 text-center text-[11px] font-bold ${w === '日' || w === '六' ? 'text-chicken-red/70' : 'text-chicken-brown/45'}`}>{w}</div>
         ))}
       </div>
 
@@ -72,7 +72,7 @@ export default function MonthCalendar({ value, onChange, minDate, maxDate, rende
               onClick={() => onChange(c.date)}
               aria-pressed={active}
               aria-label={c.date}
-              className={`relative flex min-h-[42px] items-center justify-center rounded-lg text-sm font-black tabular-nums transition-all ${
+              className={`relative flex min-h-[42px] items-center justify-center rounded-lg text-sm font-bold tabular-nums transition-all ${
                 active ? 'bg-chicken-red text-white shadow-sm'
                 : c.disabled ? 'cursor-not-allowed text-chicken-brown/20'
                 : c.isToday ? 'bg-chicken-yellow/15 text-chicken-brown hover:bg-chicken-red/10'

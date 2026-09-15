@@ -40,10 +40,10 @@ export default function CustomerDetailModal({ customer, onClose, onAddBooking, o
       footer={<button onClick={onClose} className="btn-secondary px-4 py-2">關閉</button>}
     >
       <div className="space-y-3">
-        <div className="text-sm text-chicken-brown/70">📱 {c.phone}</div>
+        <div className="text-sm text-chicken-brown/70">{c.phone}</div>
         <div className="flex flex-wrap gap-1.5">
           <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-chicken-yellow/20 text-chicken-yellow">{VIP_LABEL[c.vipTier || 'none']}</span>
-          {c.allergies && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-chicken-red/10 text-chicken-red">⚠️ {c.allergies}</span>}
+          {c.allergies && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-chicken-red/10 text-chicken-red">{c.allergies}</span>}
           {c.blacklisted && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-chicken-red text-white">黑名單</span>}
         </div>
         {c.notes && <p className="text-xs text-chicken-brown/70 italic">「{c.notes}」</p>}
@@ -51,15 +51,15 @@ export default function CustomerDetailModal({ customer, onClose, onAddBooking, o
         <div className="grid grid-cols-4 gap-2">
           {metrics.map(m => (
             <div key={m.l} className="bg-chicken-cream rounded-xl p-2 text-center">
-              <div className={`text-xl font-black ${m.danger ? 'text-chicken-red' : 'text-chicken-brown'}`}>{m.v}</div>
+              <div className={`text-xl font-bold ${m.danger ? 'text-chicken-red' : 'text-chicken-brown'}`}>{m.v}</div>
               <div className="text-[10px] text-chicken-brown/60">{m.l}</div>
             </div>
           ))}
         </div>
 
         <div className="flex gap-2">
-          <button onClick={() => onAddBooking?.(c)} className="btn-primary flex-1 !py-2 text-sm">➕ 新增訂位</button>
-          <button onClick={() => onEdit?.(c)} className="btn-secondary flex-1 !py-2 text-sm">✏️ 編輯備註</button>
+          <button onClick={() => onAddBooking?.(c)} className="btn-primary flex-1 !py-2 text-sm">新增訂位</button>
+          <button onClick={() => onEdit?.(c)} className="btn-secondary flex-1 !py-2 text-sm">編輯備註</button>
         </div>
 
         <div>

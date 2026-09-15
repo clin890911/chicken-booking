@@ -11,11 +11,11 @@ export const STATUS_MAP = {
 }
 
 export const SOURCE_MAP = {
-  online: '🌐 線上',
-  phone:  '📞 電話',
-  walkin: '🚶 現場',
-  group:  '👥 團體',
-  line:   '💚 LINE',
+  online: '線上',
+  phone:  '電話',
+  walkin: '現場',
+  group:  '團體',
+  line:   'LINE',
 }
 
 export function fmtTime(iso) {

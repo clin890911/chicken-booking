@@ -12,6 +12,7 @@ import LayoutEditor from './LayoutEditor'
 import TelegramSettings from './TelegramSettings'
 import StaffAdminSection from './StaffAdminSection'
 import ExportCenter from './ExportCenter'
+import Icon from '../ui/Icon'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -45,11 +46,11 @@ const FIELD_LABELS = {
 // 二級分類導覽：把 16 個設定區塊按工作情境分成 5 類。sections 內為各區塊的 sectionKey，
 // 只作「屬於哪一類」的成員判定；實際顯示順序仍由 JSX（DOM）順序決定。
 const SETTINGS_CATEGORIES = [
-  { key: 'ops-rules', label: '營運規則',   icon: '🕒', sections: ['hours', 'seatings', 'closures'] },
-  { key: 'online',    label: '線上訂位',   icon: '🌐', sections: ['online-guard', 'hero', 'contact'] },
-  { key: 'floor',     label: '現場與桌位', icon: '🪑', sections: ['automation', 'layout', 'table-enable'] },
-  { key: 'line',      label: '通知與 LINE', icon: '💚', sections: ['line', 'telegram'] },
-  { key: 'data',      label: '資料與權限', icon: '🔐', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
+  { key: 'ops-rules', label: '營運規則',   icon: 'clock', sections: ['hours', 'seatings', 'closures'] },
+  { key: 'online',    label: '線上訂位',   icon: 'globe', sections: ['online-guard', 'hero', 'contact'] },
+  { key: 'floor',     label: '現場與桌位', icon: 'chair', sections: ['automation', 'layout', 'table-enable'] },
+  { key: 'line',      label: '通知與 LINE', icon: 'bell', sections: ['line', 'telegram'] },
+  { key: 'data',      label: '資料與權限', icon: 'lock', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
 ]
 const DEFAULT_CATEGORY = 'ops-rules'
 // 由父層提供「目前分類包含的 sectionKey 清單」；SettingsSection 據此自我隱藏（不屬當前分類則 return null）。
@@ -166,11 +167,11 @@ export default function SettingsView({ onOpenCustomer }) {
       // 關鍵：以「雲端是否真的寫入成功」為準宣告成功，而非只憑本機 localStorage。
       // 本機模式（未設 Firebase）沒有雲端可寫，本機存好即算完成。
       if (!usingFirebase) {
-        toast.success('✅ 已儲存（本機模式）')
+        toast.success('已儲存（本機模式）')
         return
       }
       const r = await flushCloudNow()
-      if (r.ok) toast.success('✅ 已儲存並同步雲端')
+      if (r.ok) toast.success('已儲存並同步雲端')
       else if (r.rejected) toast.error(`本機已存，但雲端拒絕了這筆變更：${r.error}。請改用有權限的帳號，或到下方同步狀態列選擇以雲端為準`)
       else toast.error(`本機已存，但雲端同步失敗：${r.error}。請按「重試同步」或檢查網路後再試`)
     } finally {
@@ -182,7 +183,7 @@ export default function SettingsView({ onOpenCustomer }) {
     setSaving(true)
     try {
       const r = await flushCloudNow()
-      if (r.ok) toast.success('✅ 已同步雲端')
+      if (r.ok) toast.success('已同步雲端')
       else toast.error(`雲端同步仍失敗：${r.error}`)
     } finally {
       setSaving(false)
@@ -206,7 +207,7 @@ export default function SettingsView({ onOpenCustomer }) {
     setSaving(true)
     try {
       await discardRejectedChanges(rejected)
-      toast.success('✅ 已改以雲端資料為準')
+      toast.success('已改以雲端資料為準')
     } finally {
       setSaving(false)
     }
@@ -257,9 +258,9 @@ export default function SettingsView({ onOpenCustomer }) {
     try {
       if (type === 'push') await migrateLocalToCloud()
       else await pullCloud()
-      toast.success(type === 'push' ? '✅ 已上傳 Firestore' : '✅ 已從 Firestore 更新')
+      toast.success(type === 'push' ? '已上傳 Firestore' : '已從 Firestore 更新')
     } catch (err) {
-      toast.error(`⚠️ ${err.message || '同步失敗'}`)
+      toast.error(`${err.message || '同步失敗'}`)
     } finally {
       setCloudBusy(false)
     }
@@ -276,11 +277,11 @@ export default function SettingsView({ onOpenCustomer }) {
             type="button"
             onClick={() => setActiveKey(c.key)}
             aria-current={activeKey === c.key ? 'page' : undefined}
-            className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-bold transition ${
-              activeKey === c.key ? 'bg-chicken-red text-white shadow-sm' : 'text-chicken-brown/70 hover:bg-chicken-brown/5'
+            className={`tap flex items-center gap-2.5 rounded-[10px] px-3 py-2.5 text-left text-sm font-semibold transition-colors ${
+              activeKey === c.key ? 'bg-chicken-red/[0.08] text-chicken-red' : 'text-chicken-brown/70 hover:bg-chicken-brown/[0.05]'
             }`}
           >
-            <span aria-hidden>{c.icon}</span><span>{c.label}</span>
+            <Icon name={c.icon} size={18} /><span>{c.label}</span>
           </button>
         ))}
       </nav>
@@ -295,8 +296,8 @@ export default function SettingsView({ onOpenCustomer }) {
             type="button"
             onClick={() => setActiveKey(c.key)}
             aria-current={activeKey === c.key ? 'page' : undefined}
-            className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-full px-4 text-sm font-bold transition ${
-              activeKey === c.key ? 'bg-chicken-red text-white' : 'bg-chicken-brown/5 text-chicken-brown/70'
+            className={`tap min-h-[40px] shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-semibold transition-colors ${
+              activeKey === c.key ? 'bg-chicken-red/[0.08] text-chicken-red' : 'bg-white border border-chicken-brown/10 text-chicken-brown/70'
             }`}
           >
             <span aria-hidden>{c.icon}</span> {c.label}
@@ -319,10 +320,10 @@ export default function SettingsView({ onOpenCustomer }) {
                   : 'border-chicken-brown/15 bg-chicken-brown/5 text-chicken-brown/50'
         }`}>
           <span>
-            {cloudStatus?.state === 'offline' && `⚠️ 雲端未同步：${cloudStatus.error}（本機已存，尚未寫入 Firebase）`}
-            {cloudStatus?.state === 'rejected' && `⚠️ 部分變更未能上雲：${cloudStatus.error}。其餘資料已同步；被擋下的變更目前只存在這台裝置，畫面顯示的內容與雲端不一致。`}
-            {cloudStatus?.state === 'syncing' && '☁️ 正在同步到雲端…'}
-            {cloudStatus?.state === 'synced' && `✅ 已同步雲端${cloudStatus.lastSyncAt ? ` · ${new Date(cloudStatus.lastSyncAt).toLocaleTimeString('zh-TW')}` : ''}`}
+            {cloudStatus?.state === 'offline' && `雲端未同步：${cloudStatus.error}（本機已存，尚未寫入 Firebase）`}
+            {cloudStatus?.state === 'rejected' && `部分變更未能上雲：${cloudStatus.error}。其餘資料已同步；被擋下的變更目前只存在這台裝置，畫面顯示的內容與雲端不一致。`}
+            {cloudStatus?.state === 'syncing' && '正在同步到雲端…'}
+            {cloudStatus?.state === 'synced' && `已同步雲端${cloudStatus.lastSyncAt ? ` · ${new Date(cloudStatus.lastSyncAt).toLocaleTimeString('zh-TW')}` : ''}`}
             {(!cloudStatus?.state || cloudStatus?.state === 'idle') && '尚未同步'}
           </span>
           {cloudStatus?.state === 'offline' && (
@@ -351,14 +352,14 @@ export default function SettingsView({ onOpenCustomer }) {
           不掛在 usingFirebase 底下：這是純 localStorage 問題，本機模式一樣會中。 */}
       {localPersistDegraded && (
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-bold text-chicken-red">
-          <span>⚠️ 本機儲存空間不足或瀏覽器處於無痕/私密瀏覽模式，佈局變更可能在重新整理後遺失。建議清出裝置空間，或關閉無痕/私密瀏覽模式後重新整理頁面。</span>
+          <span>本機儲存空間不足或瀏覽器處於無痕/私密瀏覽模式，佈局變更可能在重新整理後遺失。建議清出裝置空間，或關閉無痕/私密瀏覽模式後重新整理頁面。</span>
         </div>
       )}
 
       {/* 非店長：整頁唯讀提示。改了也存不了，先講清楚，免得白填。 */}
       {!canEditSettings && (
         <div className="-mx-1 rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">
-          🔒 唯讀：你的角色無法變更店家設定。下方仍可查看內容與同步狀態，變更不會被儲存。
+          唯讀：你的角色無法變更店家設定。下方仍可查看內容與同步狀態，變更不會被儲存。
         </div>
       )}
 
@@ -366,10 +367,10 @@ export default function SettingsView({ onOpenCustomer }) {
       {isDirty && (
         <div className="sticky top-0 z-30 -mx-1 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
           <div className="text-sm font-bold text-amber-800">
-            {canEditSettings ? `⚠️ 有未儲存變更（${dirtyKeys.length} 項）` : `🔒 這些變更不會被儲存（${dirtyKeys.length} 項）`}
+            {canEditSettings ? `有未儲存變更（${dirtyKeys.length} 項）` : `這些變更不會被儲存（${dirtyKeys.length} 項）`}
             {capacityDirty && affectedBookingCount > 0 && (
               <span className="ml-2 inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">
-                ⚠️ 影響現有訂位
+                影響現有訂位
               </span>
             )}
           </div>
@@ -457,12 +458,12 @@ export default function SettingsView({ onOpenCustomer }) {
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
             可訂位容量會以「用餐時間 + 清桌緩衝」計算；目前每筆訂位佔用 {(Number(form.diningDurationMin) || 90) + (Number(form.cleanupBufferMin) || 10)} 分鐘。
             <span className="mt-1 block">
-              依目前營業時間與間隔，每天可訂 <span className="font-black text-chicken-brown">{slotCount}</span> 個時段。
+              依目前營業時間與間隔，每天可訂 <span className="font-bold text-chicken-brown">{slotCount}</span> 個時段。
             </span>
           </div>
           {capacityDirty && (
             <div className="flex items-center gap-2 rounded-xl border border-chicken-red/20 bg-chicken-red/5 px-3 py-2">
-              <span className="inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">⚠️ 影響現有訂位</span>
+              <span className="inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">影響現有訂位</span>
               <span className="text-xs leading-5 text-chicken-brown/70">
                 此區設定會改變可訂容量／時段；儲存前會提示有 {affectedBookingCount} 筆未來已確認訂位可能受影響。
               </span>
@@ -563,7 +564,7 @@ export default function SettingsView({ onOpenCustomer }) {
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
               <div className="text-sm font-bold text-chicken-brown">換日自動標記未到（No-show）</div>
-              <div className="text-xs text-chicken-red/80 mt-0.5">⚠️ 建議保持關閉：昨日未處理的訂位自動標 No-show 會影響報表口徑（不計入顧客罰則）。當天請改用現場「今日訂位 → 過時未到」處理。</div>
+              <div className="text-xs text-chicken-red/80 mt-0.5">建議保持關閉：昨日未處理的訂位自動標 No-show 會影響報表口徑（不計入顧客罰則）。當天請改用現場「今日訂位 → 過時未到」處理。</div>
             </div>
             <input type="checkbox" className="w-5 h-5 accent-chicken-red"
               checked={form.autoNoshowOnRollover === true}
@@ -579,7 +580,7 @@ export default function SettingsView({ onOpenCustomer }) {
       <SettingsSection sectionKey="hero" title="首頁廣告輪播" description="新增橫式照片，會顯示在客人首頁第一屏。" defaultOpen>
         <div className="space-y-4">
           <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-chicken-brown/15 bg-white px-4 py-8 text-center transition hover:border-chicken-red/40">
-            <span className="text-sm font-black text-chicken-brown">上傳橫式照片</span>
+            <span className="text-sm font-bold text-chicken-brown">上傳橫式照片</span>
             <span className="mt-1 text-xs text-chicken-brown/55">建議 16:9 或 2:1、單張小於 2MB（越小越快，建議壓到 500KB 內）、支援多選</span>
             <input
               type="file"
@@ -774,7 +775,7 @@ export default function SettingsView({ onOpenCustomer }) {
 
           {/* 安裝檢查表：逐項顯示必填/建議欄位是否已填，快速定位缺漏 */}
           <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
-            <h3 className="mb-2 text-sm font-black text-chicken-brown">安裝檢查表</h3>
+            <h3 className="mb-2 text-sm font-bold text-chicken-brown">安裝檢查表</h3>
             <ul className="space-y-1.5">
               {[
                 { label: '官方帳號加入連結', ok: !!form.lineOfficialUrl?.trim(), required: true },
@@ -877,7 +878,7 @@ export default function SettingsView({ onOpenCustomer }) {
             </div>
           )}
           <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
-            狀態：<span className="font-black text-chicken-brown">{cloudStatus?.state || 'idle'}</span>
+            狀態：<span className="font-bold text-chicken-brown">{cloudStatus?.state || 'idle'}</span>
             {cloudStatus?.lastSyncAt && <span> · 最近同步 {new Date(cloudStatus.lastSyncAt).toLocaleString('zh-TW')}</span>}
             {cloudStatus?.error && <div className="mt-1 font-bold text-chicken-red">錯誤：{cloudStatus.error}</div>}
           </div>
@@ -932,7 +933,7 @@ export default function SettingsView({ onOpenCustomer }) {
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono font-bold text-chicken-brown">{r.phone}</span>
                       <div className="flex items-center gap-2">
-                        <span className="badge bg-chicken-red text-white">⚠️ {r.count} 次</span>
+                        <span className="badge bg-chicken-red text-white">{r.count} 次</span>
                         {onOpenCustomer && (
                           <button
                             type="button"
@@ -1018,12 +1019,12 @@ function HeroBannerItem({ banner, index, total, setForm, removeBanner }) {
         {/* 前台預覽：標題/副標疊在圖上（近似客人首頁 hero 呈現） */}
         {(banner.title || banner.subtitle) && (
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3">
-            {banner.title && <div className="text-sm font-black text-white drop-shadow">{banner.title}</div>}
+            {banner.title && <div className="text-sm font-bold text-white drop-shadow">{banner.title}</div>}
             {banner.subtitle && <div className="text-xs text-white/90 drop-shadow">{banner.subtitle}</div>}
           </div>
         )}
         {ratioWarn && (
-          <span className="absolute left-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[11px] font-bold text-white">⚠ 非 16:9，首頁可能被裁切</span>
+          <span className="absolute left-2 top-2 rounded bg-amber-500/90 px-2 py-0.5 text-[11px] font-bold text-white">非 16:9，首頁可能被裁切</span>
         )}
         <button
           type="button"
@@ -1141,7 +1142,7 @@ function ClosuresEditor({ form, setForm, bookings }) {
       <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
         <div className="mb-2 flex items-center justify-between">
           <button type="button" onClick={() => shiftMonth(-1)} className="rounded-lg px-3 py-1 text-lg font-bold text-chicken-brown/60 hover:bg-chicken-brown/5">‹</button>
-          <span className="text-sm font-black text-chicken-brown">{yy} 年 {mm} 月</span>
+          <span className="text-sm font-bold text-chicken-brown">{yy} 年 {mm} 月</span>
           <button type="button" onClick={() => shiftMonth(1)} className="rounded-lg px-3 py-1 text-lg font-bold text-chicken-brown/60 hover:bg-chicken-brown/5">›</button>
         </div>
         <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-chicken-brown/40">
@@ -1179,12 +1180,12 @@ function ClosuresEditor({ form, setForm, bookings }) {
         <div>
           <span className="label !mb-1 block">選擇日期</span>
           <input type="date" value={date} min={todayStr()} onChange={e => { setDate(e.target.value); setMonthAnchor(e.target.value.slice(0, 7)) }}
-            className="rounded-xl border-2 border-chicken-brown/15 px-3 py-2 text-sm font-bold text-chicken-brown" />
+            className="rounded-xl border border-chicken-brown/10 px-3 py-2 text-sm font-bold text-chicken-brown" />
         </div>
         <label className="flex items-center gap-2 min-h-[44px] rounded-xl border-2 px-3 font-bold text-sm cursor-pointer"
           style={{ borderColor: dayClosed ? '#e11d48' : 'rgba(58,46,38,0.15)', color: dayClosed ? '#be123c' : '#3a2e26', background: dayClosed ? '#fff1f2' : '#fff' }}>
           <input type="checkbox" checked={dayClosed} onChange={toggleDay} />
-          🚫 整天公休
+          整天公休
         </label>
         {(dayClosed || closedSeatingIds.length > 0 || closedSlotList.length > 0) && (
           <button type="button" onClick={copyToNextWeek} className="btn-secondary min-h-[44px] whitespace-nowrap text-sm">
@@ -1196,7 +1197,7 @@ function ClosuresEditor({ form, setForm, bookings }) {
       {affected.length > 0 && (
         <details className="rounded-xl border border-chicken-red/20 bg-chicken-red/5 px-3 py-2 text-xs leading-5 text-chicken-brown/70">
           <summary className="cursor-pointer list-none font-bold">
-            ⚠️ 此日期已有 <span className="text-chicken-red">{affected.length}</span> 筆已確認訂位（點擊展開名單）
+            此日期已有 <span className="text-chicken-red">{affected.length}</span> 筆已確認訂位（點擊展開名單）
           </summary>
           <ul className="mt-2 space-y-1">
             {affected.map(b => (
@@ -1233,7 +1234,7 @@ function ClosuresEditor({ form, setForm, bookings }) {
                       return (
                         <button key={t} onClick={() => toggleSlot(t)}
                           className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 ${on ? 'border-rose-400 bg-rose-50 text-rose-600 line-through' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-                          {t}{on ? ' 🚫' : ''}
+                          {t}{on ? ' ✕' : ''}
                         </button>
                       )
                     })}
@@ -1252,7 +1253,7 @@ function ClosuresEditor({ form, setForm, bookings }) {
                   return (
                     <button key={t} onClick={() => toggleSlot(t)}
                       className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 ${on ? 'border-rose-400 bg-rose-50 text-rose-600 line-through' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-                      {t}{on ? ' 🚫' : ''}
+                      {t}{on ? ' ✕' : ''}
                     </button>
                   )
                 })}
@@ -1271,9 +1272,9 @@ function FieldGroup({ title, hint, children, collapsible = false }) {
     return (
       <details className="group rounded-xl border border-chicken-brown/10 bg-white p-3">
         <summary className="flex cursor-pointer list-none items-baseline gap-2">
-          <h3 className="text-sm font-black text-chicken-brown">{title}</h3>
+          <h3 className="text-sm font-bold text-chicken-brown">{title}</h3>
           {hint && <span className="text-xs leading-5 text-chicken-brown/50">{hint}</span>}
-          <span className="ml-auto text-xs font-black text-chicken-brown/40 group-open:rotate-180">⌄</span>
+          <span className="ml-auto text-xs font-bold text-chicken-brown/40 group-open:rotate-180">⌄</span>
         </summary>
         <div className="mt-2 space-y-3">{children}</div>
       </details>
@@ -1282,7 +1283,7 @@ function FieldGroup({ title, hint, children, collapsible = false }) {
   return (
     <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
       <div className="mb-2 flex items-baseline gap-2">
-        <h3 className="text-sm font-black text-chicken-brown">{title}</h3>
+        <h3 className="text-sm font-bold text-chicken-brown">{title}</h3>
         {hint && <span className="text-xs leading-5 text-chicken-brown/50">{hint}</span>}
       </div>
       <div className="space-y-3">{children}</div>
@@ -1322,14 +1323,14 @@ function SettingsSection({ title, description, children, defaultOpen = false, da
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className={`font-black ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
+            <h2 className={`font-bold ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
             {badge && <span className="badge bg-chicken-brown/10 text-chicken-brown/70">{badge}</span>}
           </div>
           {description && <p className="mt-0.5 text-xs text-chicken-brown/55">{description}</p>}
           {/* 收合時顯示現況摘要，展開後隱藏（避免與內容重複） */}
           {summary && <p className="mt-1 text-xs font-bold text-chicken-brown/70 group-open:hidden">{summary}</p>}
         </div>
-        <span className="rounded-full bg-chicken-brown/5 px-2 py-1 text-xs font-black text-chicken-brown/45 group-open:rotate-180">⌄</span>
+        <span className="rounded-full bg-chicken-brown/5 px-2 py-1 text-xs font-bold text-chicken-brown/45 group-open:rotate-180">⌄</span>
       </summary>
       <div className="mt-4">
         {children}

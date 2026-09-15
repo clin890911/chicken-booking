@@ -3,6 +3,7 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { Badge } from '../../ui'
 import { batchSeated, sortedBatches } from '../../../utils/groupLive'
+import Icon from '../../ui/Icon'
 
 const STATUS_LABEL = {
   planned: { label: '已預排', color: 'gray' },
@@ -41,7 +42,7 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
       if (r.blocked?.length && onReseatBatch) onReseatBatch(g, b, r.blocked)
       return
     }
-    toast.success(`✅ ${g.agencyName} ${b.label} 已入座（${tablesTxt}）`)
+    toast.success(`${g.agencyName} ${b.label} 已入座（${tablesTxt}）`)
   }
 
   const onCheckout = async (b) => {
@@ -64,7 +65,7 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
     if (!ok) return
     const r = releaseGroupBatch(g.id, b.id)
     if (!r.ok) return toast.error('清桌失敗：' + r.error)
-    toast.success(`✨ ${g.agencyName} ${b.label} 已清桌釋出（${(r.cleared || []).length} 桌）`)
+    toast.success(`${g.agencyName} ${b.label} 已清桌釋出（${(r.cleared || []).length} 桌）`)
   }
 
   const onFinalize = async () => {
@@ -85,22 +86,22 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
     <div className={`rounded-xl border p-3 ${isDone ? 'bg-gray-50 border-chicken-brown/10 opacity-80' : 'bg-white border-chicken-brown/10'}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className={`font-black text-sm ${isDone ? 'text-chicken-brown/60' : 'text-chicken-brown'}`}>
-            {isDone ? '✅' : '🚌'} {g.agencyName || '（未填旅行社）'}
+          <div className={`font-bold text-sm ${isDone ? 'text-chicken-brown/60' : 'text-chicken-brown'}`}>
+            <Icon name={isDone ? 'checkCircle' : 'bus'} size={15} className={`inline-block align-[-2px] mr-1 ${isDone ? 'text-chicken-green' : 'text-chicken-red'}`} />{g.agencyName || '（未填旅行社）'}
             <Badge color={st.color} className="ml-1.5">{st.label}</Badge>
           </div>
           <div className="text-[11px] text-chicken-brown/60 mt-0.5">
             導遊 {g.guideName || '—'}{g.guidePhone ? `（${g.guidePhone}）` : ''}
           </div>
         </div>
-        <button onClick={() => onOpenSheet?.(g)} className="flex-shrink-0 px-2 py-1 rounded-lg text-[11px] font-bold bg-white border border-chicken-brown/15 text-chicken-brown" title="回傳單">🖨</button>
+        <button onClick={() => onOpenSheet?.(g)} className="flex-shrink-0 px-2 py-1 rounded-lg text-[11px] font-bold bg-white border border-chicken-brown/15 text-chicken-brown" title="回傳單" aria-label="回傳單"><Icon name="print" size={14} /></button>
       </div>
 
       <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] font-bold">
         <span className="px-1.5 py-0.5 rounded-full bg-chicken-red/10 text-chicken-red">總 {c.total || 0}</span>
         {c.vegetarian > 0 && <span className="px-1.5 py-0.5 rounded-full bg-chicken-green/15 text-chicken-green">素 {c.vegetarian}</span>}
         {c.child > 0 && <span className="px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700">兒童 {c.child}</span>}
-        {c.mobility > 0 && <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">♿ {c.mobility}</span>}
+        {c.mobility > 0 && <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">行動 {c.mobility}</span>}
         {c.wheelchair > 0 && <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">輪椅 {c.wheelchair}</span>}
         {g.allergyText && <span className="px-1.5 py-0.5 rounded-full bg-chicken-red text-white">過敏：{g.allergyText}</span>}
       </div>
@@ -119,8 +120,8 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
           return (
             <div key={b.id} className={`rounded-lg px-2.5 py-2 ${b.isEscort ? 'bg-indigo-50 border border-indigo-200' : 'bg-chicken-cream/60'}`}>
               <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
-                <span className="text-sm font-black text-chicken-brown tabular-nums">{b.timeSlot}</span>
-                <span className={`font-bold ${b.isEscort ? 'text-indigo-700' : 'text-chicken-brown'}`}>{b.isEscort ? '🚗 司領桌' : b.label}</span>
+                <span className="text-sm font-bold text-chicken-brown tabular-nums">{b.timeSlot}</span>
+                <span className={`font-bold ${b.isEscort ? 'text-indigo-700' : 'text-chicken-brown'}`}>{b.isEscort ? '司領桌' : b.label}</span>
                 <span className="text-chicken-brown/60">{b.guests} 人</span>
               </div>
               <div className="mt-1 flex items-center justify-between gap-1.5 flex-wrap">
@@ -145,10 +146,10 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
                 ) : seated ? (
                   <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
                 ) : cleaning ? (
-                  <button onClick={() => onRelease(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-sky-600 text-white">✨ 整梯清桌釋出</button>
+                  <button onClick={() => onRelease(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-sky-600 text-white">整梯清桌釋出</button>
                 ) : (
                   <button onClick={() => onSeat(b)} disabled={!(b.tableNumbers || []).length}
-                    className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-chicken-green text-white disabled:opacity-40">✅ 梯次入座</button>
+                    className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-chicken-green text-white disabled:opacity-40">梯次入座</button>
                 )}
               </div>
             </div>

@@ -65,7 +65,7 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
         status: 'confirmed',
         createdBy: user?.email || 'staff',
       })
-      toast.success(`✅ ${name.trim()} ${guests} 位 · ${dayLabel(date)} ${timeSlot} 已新增`)
+      toast.success(`${name.trim()} ${guests} 位 · ${dayLabel(date)} ${timeSlot} 已新增`)
       onCreated?.(b)
       reset()
       onClose?.()
@@ -75,11 +75,11 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title={`➕ 新增散客 · ${dayLabel(date)}`} footer={
+    <Modal open={open} onClose={handleClose} title={`新增散客 · ${dayLabel(date)}`} footer={
       <>
         <button onClick={handleClose} className="btn-secondary px-4 py-2">取消</button>
         <button onClick={handleSubmit} disabled={!valid || busy} className="btn-primary px-4 py-2 disabled:opacity-50">
-          {busy ? '建立中…' : valid ? '✅ 確認新增' : '請填姓名與時段'}
+          {busy ? '建立中…' : valid ? '確認新增' : '請填姓名與時段'}
         </button>
       </>
     }>
@@ -97,17 +97,17 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
             <div className="mt-2 flex flex-wrap gap-2 text-xs">
               {matchedCustomer && (
                 <span className="px-2.5 py-1 bg-chicken-green/15 text-chicken-green rounded-full font-bold">
-                  🔄 第 {(matchedCustomer.visits || 0) + 1} 次
+                  第 {(matchedCustomer.visits || 0) + 1} 次
                 </span>
               )}
               {matchedCustomer?.vipTier && matchedCustomer.vipTier !== 'none' && (
-                <span className="px-2.5 py-1 bg-chicken-yellow/20 text-chicken-yellow rounded-full font-bold">⭐ {matchedCustomer.vipTier.toUpperCase()}</span>
+                <span className="px-2.5 py-1 bg-chicken-yellow/20 text-chicken-yellow rounded-full font-bold">{matchedCustomer.vipTier.toUpperCase()}</span>
               )}
               {matchedCustomer?.allergies && (
-                <span className="px-2.5 py-1 bg-chicken-red/10 text-chicken-red rounded-full font-bold">⚠️ 過敏：{matchedCustomer.allergies}</span>
+                <span className="px-2.5 py-1 bg-chicken-red/10 text-chicken-red rounded-full font-bold">過敏：{matchedCustomer.allergies}</span>
               )}
               {noshowCount > 0 && (
-                <span className="px-2.5 py-1 bg-chicken-red text-white rounded-full font-bold">⚠️ no-show ×{noshowCount}</span>
+                <span className="px-2.5 py-1 bg-chicken-red text-white rounded-full font-bold">no-show ×{noshowCount}</span>
               )}
             </div>
           )}

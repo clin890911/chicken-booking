@@ -18,6 +18,7 @@ import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../..
 import { buildTableTurns } from '../../utils/tableTurns'
 import { todayStr } from '../../utils/timeSlots'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
+import SegmentedControl from '../ui/SegmentedControl'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
@@ -284,7 +285,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     if (mode.type === 'assign') {
       const r = assignBookingToTable(mode.booking.id, number)
       if (!r.ok) return toast.error('指派失敗：' + r.error)
-      toast.success(`✅ ${mode.booking.name}（${mode.booking.guests} 位）指派至 ${number} · 可指派下一組`)
+      toast.success(`${mode.booking.name}（${mode.booking.guests} 位）指派至 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
@@ -294,7 +295,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     if (mode.type === 'seat-waitlist') {
       const r = seatWaitlist(mode.wait.id, number)
       if (!r.ok) return toast.error('入座失敗：' + r.error)
-      toast.success(`✅ ${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`)
+      toast.success(`${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
@@ -303,7 +304,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     if (mode.type === 'move') {
       const r = moveTable(mode.booking.id, number)
       if (!r.ok) return toast.error('換桌失敗：' + r.error)
-      toast.success(`✅ ${mode.booking.name} 已換到 ${number} · 可指派下一組`)
+      toast.success(`${mode.booking.name} 已換到 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
@@ -314,7 +315,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
       const r = reseatGroupBatchTable(group.id, batch.id, current, number)
       if (!r.ok) { setPendingConfirm(null); return toast.error('改派失敗：' + r.error) }
       if (r.seated) {
-        toast.success(`✅ 已改派 ${current} → ${number}，${group.agencyName || '團體'} ${batch.label || ''} 整梯入座`)
+        toast.success(`已改派 ${current} → ${number}，${group.agencyName || '團體'} ${batch.label || ''} 整梯入座`)
         flashAssigned(number)
         cancelMode()
         setSelectedTable(number)
@@ -360,7 +361,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     if (mode.kind === 'waitlist') {
       const r = seatWaitlistMulti(mode.wait.id, mode.selected)
       if (!r.ok) return toast.error('入座失敗：' + r.error)
-      toast.success(`✅ ${mode.wait.name}（候位 #${mode.wait.queueNumber}・${mode.need} 位）併桌入座 ${tablesText} · 可指派下一組`)
+      toast.success(`${mode.wait.name}（候位 #${mode.wait.queueNumber}・${mode.need} 位）併桌入座 ${tablesText} · 可指派下一組`)
       flashAssigned(mode.selected[0])
       cancelMode()
       setSelectedTable(mode.selected[0])
@@ -368,7 +369,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     }
     const r = assignBookingTablesMulti(mode.booking.id, mode.selected)
     if (!r.ok) return toast.error('指派失敗：' + r.error)
-    toast.success(`✅ ${mode.booking.name}（${mode.need} 位）併桌指派至 ${tablesText} · 可指派下一組`)
+    toast.success(`${mode.booking.name}（${mode.need} 位）併桌指派至 ${tablesText} · 可指派下一組`)
     flashAssigned(mode.selected[0])
     cancelMode()
     setSelectedTable(mode.selected[0])
@@ -470,7 +471,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     // 不 setSelectedTable：留在帶位面板才能直接帶下一組（舊版會被 TableDrawer 蓋掉）
     // M2b：成功 toast 直接帶「復原」，8 秒內可反悔（拿掉二次確認換來的安全網）
     toast.action(
-      `✅ ${name}（${guests} 位）入座 ${label} · 可帶下一組`,
+      `${name}（${guests} 位）入座 ${label} · 可帶下一組`,
       { label: '復原', onClick: () => undoLastSeat(snap) },
       { duration: 8000 },
     )
@@ -570,45 +571,24 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
 
         <div className="hidden lg:block flex-1 min-w-0" />
 
-        <div className="flex-none flex gap-1.5">
-          {['1F', '2F'].map(f => (
-            <button
-              key={f}
-              onClick={() => setFloor(f)}
-              title={f === '1F' ? '1F 主用餐區' : '2F 用餐區'}
-              className={`whitespace-nowrap px-4 py-2 rounded-xl text-sm lg:px-3 lg:py-1.5 lg:rounded-lg lg:text-xs font-bold transition-all border-2 ${
-                floor === f
-                  ? 'bg-chicken-red border-chicken-red text-white shadow'
-                  : 'bg-white border-chicken-brown/15 text-chicken-brown'
-              }`}
-            >
-              {/* 窄螢幕有空間就寫全名；lg 的單列只放得下代號（全名在 title） */}
-              <span className="lg:hidden">{f === '1F' ? '1F 主用餐區' : '2F 用餐區'}</span>
-              <span className="hidden lg:inline">{f}</span>
-              <span className="ml-1.5 lg:ml-1 text-[10px] opacity-75">({tables.filter(t => t.floor === f).length})</span>
-            </button>
-          ))}
-        </div>
+        {/* 樓層：分段控制（全名在 title；桌數附在代號後） */}
+        <SegmentedControl
+          className="flex-none"
+          options={['1F', '2F'].map(f => ({ key: f, label: `${f} · ${tables.filter(t => t.floor === f).length}`, title: f === '1F' ? '1F 主用餐區' : '2F 用餐區' }))}
+          value={floor} onChange={setFloor} ariaLabel="樓層" />
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
         {!mode && (
-          <div className="flex-none flex gap-1 rounded-xl lg:rounded-lg bg-chicken-cream p-1 lg:p-0.5 border-2 border-chicken-brown/10">
-            {[['map', '地圖'], ['summary', '摘要'], ['schedule', '排程']].map(([k, label]) => (
-              <button
-                key={k}
-                onClick={() => setView(k)}
-                className={`px-3 py-1.5 rounded-lg lg:px-2.5 lg:py-1 lg:rounded-md text-xs font-bold transition-all ${
-                  view === k ? 'bg-chicken-red text-white shadow' : 'text-chicken-brown/70 hover:text-chicken-brown'
-                }`}
-              >{label}</button>
-            ))}
-          </div>
+          <SegmentedControl
+            className="flex-none"
+            options={[{ key: 'map', label: '地圖' }, { key: 'summary', label: '摘要' }, { key: 'schedule', label: '排程' }]}
+            value={view} onChange={setView} ariaLabel="現場視圖" />
         )}
 
         {!mode && can('table.config') && (
           <button
             onClick={() => setShowLayoutEditor(true)}
-            className="flex-none px-3 py-2 rounded-xl text-xs lg:px-2.5 lg:py-1.5 lg:rounded-lg lg:text-[11px] font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown hover:border-chicken-red"
+            className="tap flex-none h-8 px-3 rounded-[9px] text-xs font-semibold bg-white border border-chicken-brown/15 text-chicken-brown"
           >編輯佈局</button>
         )}
 

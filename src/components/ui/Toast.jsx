@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import Icon from './Icon'
 
 // 輕量 Toast 系統：取代 alert/confirm，支援 Undo
 // 使用：
@@ -18,10 +19,10 @@ const TYPE_STYLES = {
   warning: 'bg-chicken-yellow text-white',
 }
 const TYPE_ICONS = {
-  success: '✅',
-  error:   '⚠️',
-  info:    'ℹ️',
-  warning: '⚠️',
+  success: 'checkCircle',
+  error:   'warning',
+  info:    'info',
+  warning: 'warning',
 }
 
 let _id = 0
@@ -86,14 +87,14 @@ function ToastContainer({ toasts, onDismiss }) {
             animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, x: 20, scale: 0.95 }}
             transition={{ duration: 0.18 }}
-            className={`pointer-events-auto rounded-2xl shadow-lg px-4 py-3 flex items-center gap-3 max-w-md min-w-[260px] ${TYPE_STYLES[t.type]}`}
+            className={`pointer-events-auto rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 max-w-md min-w-[260px] ${TYPE_STYLES[t.type]}`}
           >
-            <span className="text-lg leading-none flex-shrink-0">{TYPE_ICONS[t.type]}</span>
+            <Icon name={TYPE_ICONS[t.type]} size={20} className="flex-shrink-0" />
             <span className="flex-1 text-sm font-bold leading-snug">{t.message}</span>
             {t.action && (
               <button
                 onClick={() => { t.action.onClick?.(); onDismiss(t.id) }}
-                className="text-xs font-black underline opacity-90 hover:opacity-100 flex-shrink-0"
+                className="text-xs font-bold underline opacity-90 hover:opacity-100 flex-shrink-0"
               >
                 {t.action.label || '復原'}
               </button>
@@ -147,13 +148,13 @@ export function ConfirmProvider({ children }) {
           onClick={() => handle(false)}
         >
           <div
-            className={`animate-soft-enter bg-white rounded-3xl shadow-xl w-full max-w-sm p-6
+            className={`animate-soft-enter bg-white rounded-2xl shadow-xl w-full max-w-sm p-6
               ${state.options.danger ? 'border-l-4 border-chicken-red' : ''}`}
             onClick={e => e.stopPropagation()}
           >
               {state.options.title && (
-                <h3 className={`text-lg font-black mb-2 ${state.options.danger ? 'text-chicken-red' : 'text-chicken-brown'}`}>
-                  {state.options.danger && '⚠️ '}{state.options.title}
+                <h3 className={`text-lg font-bold mb-2 ${state.options.danger ? 'text-chicken-red' : 'text-chicken-brown'}`}>
+                  {state.options.danger && <Icon name="warning" size={18} className="inline-block align-[-3px] mr-1" />}{state.options.title}
                 </h3>
               )}
               <p className="text-sm text-chicken-brown leading-relaxed">{state.message}</p>
@@ -162,7 +163,7 @@ export function ConfirmProvider({ children }) {
                   {state.options.cancelLabel || '取消'}
                 </button>
                 <button onClick={() => handle(true)}
-                        className={`px-5 py-2 text-sm rounded-2xl font-bold text-white shadow-md
+                        className={`px-5 py-2 text-sm rounded-xl font-bold text-white shadow-md
                           ${state.options.danger ? 'bg-chicken-red' : 'bg-chicken-brown'}`}>
                   {state.options.confirmLabel || '確認'}
                 </button>

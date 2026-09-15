@@ -3,6 +3,8 @@ import BookingCard from '../booking/BookingCard'
 import GroupBatchCard from '../booking/GroupBatchCard'
 import { Card, EmptyState, Button } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
+import { totalActiveSeats } from '../../utils/capacity'
+import Icon from '../ui/Icon'
 import { todayStr, formatDate, addDays, dayLabel } from '../../utils/timeSlots'
 import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
 
@@ -12,7 +14,8 @@ import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
 // 解決「點日期後清單在月曆下方、使用者以為沒反應」：收合後清單直接在視口內。
 // 視圖切換用純條件渲染 + animate-soft-enter（動畫不變量：內容可見性不依賴 JS 回呼）。
 export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking }) {
-  const { bookings, groupReservations } = useBooking()
+  const { bookings, groupReservations, tables } = useBooking()
+  const totalSeats = useMemo(() => totalActiveSeats(tables || []), [tables]) // 熱圖分母；測試的 mock context 可能不帶 tables
   const [cursor, setCursor] = useState(() => {
     const d = new Date()
     return { year: d.getFullYear(), month: d.getMonth() }
@@ -131,38 +134,25 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking 
       {view === 'month' ? (
         <div key="month" className="animate-soft-enter">
           <Card>
-            <div className="flex items-center justify-between mb-3">
-              <button onClick={goPrev} className="px-3 py-1 rounded-lg hover:bg-chicken-brown/5 text-chicken-brown">‹</button>
-              <h3 className="font-black text-lg text-chicken-brown">{cursor.year}年 {cursor.month + 1}月</h3>
-              <button onClick={goNext} className="px-3 py-1 rounded-lg hover:bg-chicken-brown/5 text-chicken-brown">›</button>
-            </div>
-
-            {/* 當月摘要列 */}
-            <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
-              <span className="rounded-full bg-chicken-red/10 px-2.5 py-1 font-bold text-chicken-red tabular-nums">
-                本月 {monthSummary.groups} 組
-              </span>
-              <span className="rounded-full bg-chicken-brown/10 px-2.5 py-1 font-bold text-chicken-brown tabular-nums">
-                {monthSummary.guests} 位
-              </span>
-              {monthSummary.groupCount > 0 && (
-                <span className="rounded-full bg-indigo-100 px-2.5 py-1 font-bold text-indigo-700 tabular-nums">
-                  🚌 {monthSummary.groupCount} 團 · {monthSummary.groupGuests} 位
-                </span>
-              )}
+            <div className="flex items-center gap-2.5 mb-3 flex-wrap">
+              <h3 className="font-semibold text-lg sm:text-xl text-chicken-brown tracking-tight">{cursor.year}年 {cursor.month + 1}月</h3>
+              <div className="text-xs text-chicken-brown/60 tabular-nums">
+                {monthSummary.groups} 組 · {monthSummary.guests} 位{monthSummary.groupCount > 0 ? ` · ${monthSummary.groupCount} 團 · ${monthSummary.groupGuests} 位` : ''}
+              </div>
               {monthSummary.unassigned > 0 && (
-                <span className="rounded-full bg-chicken-red px-2.5 py-1 font-bold text-white tabular-nums">
-                  ⚠ 待指派 {monthSummary.unassigned}
-                </span>
+                <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 text-[11px] font-semibold text-chicken-red tabular-nums">待指派 {monthSummary.unassigned}</span>
               )}
-              <span className="text-chicken-brown/45 font-bold ml-auto">點日期看當天訂位 ›</span>
+              <div className="flex-1" />
+              <span className="hidden sm:inline text-[11px] text-chicken-brown/45">點日期看當天訂位</span>
+              <button type="button" onClick={goPrev} aria-label="上個月" className="tap w-8 h-8 rounded-lg border border-chicken-brown/15 text-chicken-brown flex items-center justify-center hover:bg-chicken-brown/[0.04]"><Icon name="chevronLeft" size={14} strokeWidth={2.2} /></button>
+              <button type="button" onClick={goNext} aria-label="下個月" className="tap w-8 h-8 rounded-lg border border-chicken-brown/15 text-chicken-brown flex items-center justify-center hover:bg-chicken-brown/[0.04]"><Icon name="chevronRight" size={14} strokeWidth={2.2} /></button>
             </div>
 
-            <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-chicken-brown/50 mb-1">
+            <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-[11px] font-semibold text-chicken-brown/50 mb-1">
               {['日', '一', '二', '三', '四', '五', '六'].map(w => <div key={w} className="py-1">{w}</div>)}
             </div>
 
-            <div className="grid grid-cols-7 gap-1">
+            <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
               {days.map((dateStr, i) => {
                 if (!dateStr) return <div key={i} />
 
@@ -176,82 +166,43 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking 
                 const hasAny = s.groups > 0 || !!gs
                 const hasRisk = s.unassigned > 0 || s.noshow > 0
 
-                // 時段熱力柱（取人數最多的前 4 個時段，依時間排序）
-                const slotKeys = Object.keys(s.slots).sort()
-                const maxSlot = Math.max(...Object.values(s.slots), 1)
-
-                // 背景/邊框優先序：選中 > 今天 > 風險 > 有訂位 > 空
-                const bg = isSelected ? 'bg-chicken-red'
-                  : isToday ? 'bg-chicken-yellow/15'
-                  : hasRisk ? 'bg-chicken-red/5'
-                  : hasAny ? 'bg-white' : 'bg-transparent'
-                const border = isSelected ? 'border-chicken-red'
-                  : isToday ? 'border-chicken-yellow'
-                  : hasRisk ? 'border-chicken-red/60'
-                  : hasAny ? 'border-chicken-brown/10' : 'border-transparent'
-                const txt = isSelected ? 'text-white' : isPast && !hasAny ? 'text-chicken-brown/30' : 'text-chicken-brown'
+                // 熱圖格（與規劃頁月曆同款）：底色 = 當日總人數 / 全店可用席，大數字 = 總人數，小字 = 幾組 · 幾團。
+                const total = (s.guests || 0) + (gs?.guests || 0)
+                const ratio = totalSeats > 0 ? Math.min(1, total / totalSeats) : 0
+                const level = ratio <= 0 ? 0 : ratio < 0.1 ? 1 : ratio < 0.25 ? 2 : ratio < 0.4 ? 3 : ratio < 0.7 ? 4 : 5
+                const HEAT = ['#ffffff', '#fff3e2', '#fde7c9', '#fbd6a6', '#f39a5e', '#e6552e']
+                const caption = [s.groups > 0 && `${s.groups} 組`, gs && `${gs.count} 團`].filter(Boolean).join(' · ')
+                const ring = isSelected ? 'ring-2 ring-chicken-red ring-offset-2 ring-offset-white'
+                  : isToday ? 'ring-[1.5px] ring-inset ring-chicken-red'
+                  : level === 0 ? 'ring-1 ring-inset ring-chicken-brown/[0.08]' : ''
+                const numColor = isPast ? 'text-chicken-brown/40' : level >= 4 ? 'text-white' : 'text-chicken-brown'
+                const dayColor = isToday ? 'text-chicken-red' : level >= 4 ? 'text-white/85' : isPast ? 'text-chicken-brown/35' : 'text-chicken-brown/60'
+                const capColor = level >= 4 ? 'text-white/85' : 'text-chicken-brown/55'
 
                 return (
                   <button
                     key={dateStr}
+                    type="button"
                     onClick={() => pickDate(dateStr)}
-                    className={`relative rounded-xl border-2 transition-all hover:shadow-sm overflow-hidden
-                      aspect-square sm:aspect-auto sm:min-h-[112px] p-1 sm:p-1.5 flex flex-col items-stretch
-                      ${bg} ${border} ${txt}`}
+                    aria-pressed={isSelected}
+                    style={{ backgroundColor: HEAT[level] }}
+                    className={`tap relative rounded-[10px] transition-shadow overflow-hidden
+                      aspect-square sm:aspect-auto sm:min-h-[76px] flex flex-col items-center justify-center gap-px ${ring}`}
                   >
-                    <div className="flex items-center justify-between leading-none">
-                      <span className="text-sm font-black">{dayNum}</span>
-                      {isToday && !isSelected && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-chicken-yellow" />
-                      )}
-                    </div>
-
-                    {hasAny ? (
-                      <div className="flex-1 flex flex-col justify-end gap-1 mt-1 min-w-0">
-                        {/* 寬螢幕：時段熱力柱 */}
-                        <div className="hidden sm:flex gap-0.5 items-end h-5">
-                          {slotKeys.slice(0, 5).map(slot => (
-                            <div
-                              key={slot}
-                              className="flex-1 rounded-t-sm min-h-[3px]"
-                              style={{
-                                height: `${Math.max(3, (s.slots[slot] / maxSlot) * 20)}px`,
-                                backgroundColor: isSelected
-                                  ? 'rgba(255,255,255,0.85)'
-                                  : s.slots[slot] >= maxSlot * 0.7 ? '#e60012' : '#f29100',
-                              }}
-                              title={`${slot}：${s.slots[slot]} 位`}
-                            />
-                          ))}
-                        </div>
-
-                        {/* 散客（暖色）+ 團體（冷色）各一行，口徑分開不混算（與當日清單一致） */}
-                        {s.groups > 0 && (
-                          <div className={`text-[10px] sm:text-[11px] font-bold tabular-nums leading-tight
-                            ${isSelected ? 'text-white' : 'text-orange-700'}`}>
-                            <span className="sm:hidden">🧍{s.groups}·{s.guests}</span>
-                            <span className="hidden sm:inline">🧍 {s.groups} 組 · {s.guests} 位</span>
-                          </div>
-                        )}
-                        {gs && (
-                          <div className={`text-[10px] sm:text-[11px] font-black tabular-nums leading-tight
-                            ${isSelected ? 'text-white' : 'text-indigo-700'}`}>
-                            <span className="sm:hidden">🚌{gs.count}·{gs.guests}</span>
-                            <span className="hidden sm:inline">🚌 {gs.count} 團 · {gs.guests} 位</span>
-                          </div>
-                        )}
-
-                        {/* 風險標籤（符號 + 文字，不只靠顏色） */}
-                        {hasRisk && (
-                          <div className={`text-[9px] font-black rounded px-1 py-0.5 leading-tight w-fit max-w-full truncate
-                            ${isSelected ? 'bg-white/25 text-white' : 'bg-chicken-red text-white'}`}>
-                            {s.unassigned > 0 ? `⚠待指派${s.unassigned}` : `⏭No-show${s.noshow}`}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex-1" />
+                    <span className={`absolute top-1.5 left-2 text-[11px] font-bold leading-none ${dayColor}`}>{dayNum}</span>
+                    {/* 風險（待指派 / no-show）：右上紅點 + 展開時的小標，不只靠顏色 */}
+                    {hasRisk && (
+                      <span className={`absolute top-1.5 right-1.5 hidden sm:inline-flex items-center h-4 px-1.5 rounded-full text-[9px] font-bold leading-none ${isSelected || level >= 4 ? 'bg-white text-chicken-red' : 'bg-chicken-red text-white'}`}>
+                        {s.unassigned > 0 ? `待指派 ${s.unassigned}` : `No-show ${s.noshow}`}
+                      </span>
                     )}
+                    {hasRisk && <span className="absolute top-1.5 right-1.5 sm:hidden w-2 h-2 rounded-full bg-chicken-red ring-2 ring-white" />}
+                    {hasAny ? (
+                      <>
+                        <span className={`text-lg sm:text-[22px] font-bold leading-tight tracking-tight tabular-nums ${numColor}`}>{total}</span>
+                        {caption && <span className={`hidden sm:block text-[10px] leading-3 whitespace-nowrap tabular-nums ${capColor}`}>{caption}</span>}
+                      </>
+                    ) : null}
                   </button>
                 )
               })}
@@ -263,13 +214,13 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking 
           {/* 週條（收合後的月曆）：前後週 + 7 日快切 + 展開月曆 */}
           <Card>
             <div className="flex items-center justify-between gap-2 mb-2">
-              <button onClick={() => shiftWeek(-1)} className="px-3 py-1 rounded-lg hover:bg-chicken-brown/5 text-chicken-brown font-bold">‹</button>
-              <h3 className="font-black text-chicken-brown text-sm">{weekTitle}</h3>
+              <button type="button" onClick={() => shiftWeek(-1)} aria-label="上一週" className="tap w-8 h-8 rounded-lg border border-chicken-brown/15 text-chicken-brown flex items-center justify-center"><Icon name="chevronLeft" size={14} strokeWidth={2.2} /></button>
+              <h3 className="font-semibold text-chicken-brown text-sm">{weekTitle}</h3>
               <div className="flex items-center gap-1">
-                <button onClick={() => shiftWeek(1)} className="px-3 py-1 rounded-lg hover:bg-chicken-brown/5 text-chicken-brown font-bold">›</button>
+                <button type="button" onClick={() => shiftWeek(1)} aria-label="下一週" className="tap w-8 h-8 rounded-lg border border-chicken-brown/15 text-chicken-brown flex items-center justify-center"><Icon name="chevronRight" size={14} strokeWidth={2.2} /></button>
                 <button onClick={expandMonth}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border-2 border-chicken-brown/15 text-chicken-brown whitespace-nowrap">
-                  ⛶ 展開月曆
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-chicken-brown/10 text-chicken-brown whitespace-nowrap">
+                  展開月曆
                 </button>
               </div>
             </div>
@@ -285,15 +236,17 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking 
                   <button
                     key={dateStr}
                     onClick={() => setSelected(dateStr)}
-                    className={`rounded-xl border-2 px-0.5 py-1.5 min-h-[56px] flex flex-col items-center justify-start gap-0.5 transition-all
-                      ${isSelected ? 'bg-chicken-red border-chicken-red text-white'
-                        : isToday ? 'bg-chicken-yellow/15 border-chicken-yellow text-chicken-brown'
-                        : 'bg-white border-chicken-brown/10 text-chicken-brown'}`}
+                    type="button"
+                    aria-pressed={isSelected}
+                    className={`tap rounded-[10px] px-0.5 py-1.5 min-h-[56px] flex flex-col items-center justify-start gap-0.5 transition-shadow bg-white
+                      ${isSelected ? 'ring-2 ring-chicken-red text-chicken-red'
+                        : isToday ? 'ring-[1.5px] ring-inset ring-chicken-red text-chicken-brown'
+                        : 'ring-1 ring-inset ring-chicken-brown/[0.08] text-chicken-brown'}`}
                   >
-                    <span className={`text-[10px] font-bold leading-none ${isSelected ? 'text-white/80' : 'text-chicken-brown/50'}`}>{w}</span>
-                    <span className="text-sm font-black leading-none tabular-nums">{d.getDate()}</span>
-                    <span className={`text-[9px] font-bold leading-none tabular-nums ${isSelected ? 'text-white/85' : 'text-chicken-brown/55'}`}>
-                      {s?.groups ? `🧍${s.groups}` : ''}{gs ? `${s?.groups ? ' ' : ''}🚌${gs.count}` : ''}{!s?.groups && !gs ? '·' : ''}
+                    <span className={`text-[10px] font-semibold leading-none ${isSelected ? 'text-chicken-red/70' : 'text-chicken-brown/50'}`}>{w}</span>
+                    <span className="text-sm font-bold leading-none tabular-nums">{d.getDate()}</span>
+                    <span className={`text-[9px] font-semibold leading-none tabular-nums ${isSelected ? 'text-chicken-red/80' : 'text-chicken-brown/55'}`}>
+                      {s?.groups ? `${s.groups}` : ''}{gs ? `${s?.groups ? ' ' : ''}${gs.count}` : ''}{!s?.groups && !gs ? '·' : ''}
                     </span>
                   </button>
                 )
@@ -304,18 +257,18 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking 
           {/* 當日清單（主體） */}
           <div>
             <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
-              <h3 className="font-black text-chicken-brown">📋 {dayLabel(selected)}</h3>
+              <h3 className="font-bold text-chicken-brown">{dayLabel(selected)}</h3>
               <span className="rounded-full bg-chicken-brown/10 px-2.5 py-0.5 text-xs font-bold text-chicken-brown tabular-nums">
                 {daySummary.groups} 組 · {daySummary.guests} 位
               </span>
               {daySummary.groupCount > 0 && (
                 <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-bold text-indigo-700 tabular-nums">
-                  🚌 {daySummary.groupCount} 團 · {daySummary.groupGuests} 位
+                  {daySummary.groupCount} 團 · {daySummary.groupGuests} 位
                 </span>
               )}
               {daySummary.unassigned > 0 && (
                 <span className="rounded-full bg-chicken-red px-2.5 py-0.5 text-xs font-bold text-white tabular-nums">
-                  ⚠ 待指派 {daySummary.unassigned}
+                  待指派 {daySummary.unassigned}
                 </span>
               )}
               {/* 過去的日期不該新增訂位；空狀態時另有 EmptyState 內建的入口 */}
@@ -331,7 +284,7 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking 
             </div>
             {dayEntries.length === 0 ? (
               <EmptyState
-                icon="📭"
+                icon="inbox"
                 title="這天沒有訂位"
                 action={onAddBooking && !isPastSelected ? (
                   <Button onClick={() => onAddBooking(selected)}>＋ 新增訂位</Button>

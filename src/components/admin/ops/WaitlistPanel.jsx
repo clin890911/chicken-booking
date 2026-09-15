@@ -90,7 +90,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-baseline gap-1.5 min-w-0 flex-1">
-                  <span className="text-sm font-black text-chicken-red flex-shrink-0">#{w.queueNumber}</span>
+                  <span className="text-sm font-bold text-chicken-red flex-shrink-0">#{w.queueNumber}</span>
                   <span className="text-sm font-bold truncate">{w.name}</span>
                   <span className="text-[10px] text-chicken-brown/60">{w.partySize} 位</span>
                   <span className="text-[10px] text-chicken-brown/45">建議{w.partySize > 4 ? '六人桌' : '四人桌'}</span>
@@ -101,7 +101,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                 已等 {diffMin(w.takenAt)} 分
                 {aheadOf[w.id] > 0
                   ? <span className="font-bold text-chicken-brown"> · 前面還有 {aheadOf[w.id]} 組</span>
-                  : <span className="font-bold text-chicken-green"> · 🔔 輪到了</span>}
+                  : <span className="font-bold text-chicken-green"> · 輪到了</span>}
                 {w.notes && <span className="italic"> · 「{w.notes}」</span>}
               </div>
               <div className="flex gap-1 mt-2">
@@ -134,7 +134,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
       )}
 
       {/* 取號 Modal */}
-      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title="🚦 候位取號" footer={
+      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title="候位取號" footer={
         <>
           <button onClick={() => { setShowAdd(false); resetForm() }} className="btn-secondary px-4 py-2">取消</button>
           <button onClick={handleAdd} className="btn-primary px-4 py-2">取號</button>

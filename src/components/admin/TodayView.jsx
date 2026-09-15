@@ -6,6 +6,7 @@ import { EmptyState } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { todayStr } from '../../utils/timeSlots'
 import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
+import SegmentedControl from '../ui/SegmentedControl'
 
 const SOURCE_FILTERS = [
   { key: 'all',    label: '全部' },
@@ -110,8 +111,8 @@ export default function TodayView({ onAssignTable, onOpenGroup }) {
 
       {/* 今日團體一覽（與散客分開計，避免口徑混淆） */}
       {groupSummary.groupCount > 0 && (
-        <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/60 px-3 py-2 text-xs font-bold text-indigo-700">
-          🚌 今日團體 {groupSummary.groupCount} 團 · {groupSummary.guests} 位 — 梯次卡列在各時段，點卡開團單
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2 text-xs font-semibold text-indigo-700">
+          今日團體 {groupSummary.groupCount} 團 · {groupSummary.guests} 位 — 梯次卡列在各時段，點卡開團單
         </div>
       )}
 
@@ -130,28 +131,17 @@ export default function TodayView({ onAssignTable, onOpenGroup }) {
             <span>隱藏已離</span>
           </label>
         </div>
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
-          {SOURCE_FILTERS.map(f => (
-            <button
-              key={f.key}
-              onClick={() => setSource(f.key)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all
-                ${source === f.key
-                  ? 'bg-chicken-red text-white shadow'
-                  : 'bg-white border border-chicken-brown/15 text-chicken-brown/70 hover:border-chicken-red/40'}`}
-            >
-              {f.label}
-            </button>
-          ))}
+        <div className="overflow-x-auto no-scrollbar -mx-1 px-1">
+          <SegmentedControl size="sm" options={SOURCE_FILTERS} value={source} onChange={setSource} ariaLabel="來源篩選" />
         </div>
       </div>
 
       {/* 列表（散客卡 + 團體梯次卡同時段同框） */}
       {entries.length === 0 ? (
         filtered.length === 0 && (query || source !== 'all') ? (
-          <EmptyState icon="🔍" title="找不到符合的訂位" hint="試試其他關鍵字或清除過濾條件" />
+          <EmptyState icon="search" title="找不到符合的訂位" hint="試試其他關鍵字或清除過濾條件" />
         ) : (
-          <EmptyState icon="🍽️" title="今日尚無訂位" hint="客人線上訂位後會出現在這裡" />
+          <EmptyState icon="utensils" title="今日尚無訂位" hint="客人線上訂位後會出現在這裡" />
         )
       ) : (
         entries.map(({ slot, bookings: list, groupBatches }) => {
@@ -162,16 +152,16 @@ export default function TodayView({ onAssignTable, onOpenGroup }) {
           return (
           <div key={slot || 'unscheduled'}>
             <div className="flex items-center gap-2 mb-2 px-1">
-              <span className="text-base font-black text-chicken-red tabular-nums">{slot || '未排時段'}</span>
+              <span className="text-base font-bold text-chicken-red tabular-nums">{slot || '未排時段'}</span>
               <div className="flex-1 h-px bg-chicken-brown/10" />
               {nearFull && (
                 <span className="text-xs font-bold px-2 py-1 rounded-full bg-chicken-red/10 text-chicken-red whitespace-nowrap">
-                  🔴 接近滿
+                  接近滿
                 </span>
               )}
               {groupBatches.length > 0 && (
                 <span className="text-xs font-bold px-2 py-1 rounded-full bg-indigo-100 text-indigo-700 tabular-nums whitespace-nowrap">
-                  🚌 {groupBatches.length} 梯 / {groupGuests} 位
+                  {groupBatches.length} 梯 / {groupGuests} 位
                 </span>
               )}
               {list.length > 0 && (

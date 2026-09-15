@@ -101,17 +101,17 @@ test('規劃：點團卡進詳情頁（回傳單可見）→ 編輯往返 → �
   // 注意：抵達時間軸的梯次列也是含旅行社名的按鈕（點它是跳地圖標示），故鎖定不含「看地圖」的團卡。
   await page.getByRole('button', { name: /快樂旅行社/ }).filter({ hasNotText: '看地圖' }).first().click()
   await expect(page.getByRole('button', { name: /回傳單/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /✏️ 編輯/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /編輯/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /下一步：圈選座位/ })).toHaveCount(0)
   // 領位/備餐重點有呈現
   await expect(page.getByText(/兩位海鮮過敏/)).toBeVisible()
   await expect(page.getByText('梯次與桌位')).toBeVisible()
 
   // 進編輯精靈 → 返回落回詳情頁
-  await page.getByRole('button', { name: /✏️ 編輯/ }).click()
+  await page.getByRole('button', { name: /編輯/ }).click()
   await expect(page.getByRole('button', { name: /下一步：圈選座位/ })).toBeVisible()
   await page.getByRole('button', { name: /返回當日總覽/ }).click()
-  await expect(page.getByRole('button', { name: /✏️ 編輯/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /編輯/ })).toBeVisible()
 
   // 詳情頁返回 → 回當日總覽
   await page.getByRole('button', { name: /返回當日總覽/ }).click()
@@ -169,12 +169,12 @@ test('規劃：抵達時間軸點團 → 跳排位地圖、白圈標示這團座
 
   // 跳到排位地圖，且出現白圈標示橫幅（含旅行社 + 桌號）
   await expect(page.getByText('場次（批次）')).toBeVisible()
-  await expect(page.getByText(/🎯/)).toBeVisible()
+  await expect(page.getByText(/標示 .* 的座位/)).toBeVisible()
   await expect(page.getByText(/桌 101、102/)).toBeVisible()
 
   // 關閉標示後橫幅消失
   await page.getByRole('button', { name: /關閉標示/ }).click()
-  await expect(page.getByText(/🎯/)).toHaveCount(0)
+  await expect(page.getByText(/標示 .* 的座位/)).toHaveCount(0)
 })
 
 test('規劃：團體改期 → 選新日期 → 編輯器重新圈桌 → 儲存落地', async ({ page }) => {
@@ -195,8 +195,8 @@ test('規劃：團體改期 → 選新日期 → 編輯器重新圈桌 → 儲�
 
   // 進團單詳情 → 「📅 改期」可見（confirmed 團可改期）
   await page.getByRole('button', { name: /大發改期團/ }).filter({ hasNotText: '看地圖' }).first().click()
-  await expect(page.getByRole('button', { name: /📅 改期/ })).toBeVisible()
-  await page.getByRole('button', { name: /📅 改期/ }).click()
+  await expect(page.getByRole('button', { name: /改期/ })).toBeVisible()
+  await page.getByRole('button', { name: /改期/ }).click()
 
   // 改期 modal：選 3 天後（月曆格 aria-label = ISO 日期）
   await expect(page.getByText(/團體改期 ·/)).toBeVisible()
@@ -236,7 +236,7 @@ test('規劃：已到店（arrived）團單不顯示改期按鈕', async ({ page
   await page.getByRole('button', { name: /已到店團/ }).filter({ hasNotText: '看地圖' }).first().click()
   // 詳情頁開啟（回傳單可見），但無「改期」按鈕
   await expect(page.getByRole('button', { name: /回傳單/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /📅 改期/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /改期/ })).toHaveCount(0)
 })
 
 test('規劃：當日總覽「新增散客」快速表單 → 落地當日散客名單', async ({ page }) => {

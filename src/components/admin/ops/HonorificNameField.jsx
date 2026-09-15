@@ -92,7 +92,7 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
           className={`col-span-2 h-16 rounded-xl border-2 border-chicken-brown bg-chicken-brown text-white flex flex-col items-center justify-center gap-0.5 transition-all ${
             applies ? '' : 'opacity-40'}`}
         >
-          <span className="text-[22px] font-black leading-none">{activeTitle}</span>
+          <span className="text-[22px] font-bold leading-none">{activeTitle}</span>
           <span className="text-[10px] font-bold opacity-70 leading-none">
             {applies ? `⇄ 點一下換${upcoming}` : '全名不接稱謂'}
           </span>

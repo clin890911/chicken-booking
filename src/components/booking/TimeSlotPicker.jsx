@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { generateTimeSlots } from '../../utils/timeSlots'
 import { calcSlotCapacity, isSlotClosed } from '../../utils/capacity'
+import Icon from '../ui/Icon'
 
 export default function TimeSlotPicker({ date, value, onChange, settings, tables, bookings, groupReservations = [], guests = 1, hideFull = true }) {
   const slots = useMemo(() => {
@@ -18,7 +19,7 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
   if (visible.length === 0) {
     return (
       <div className="empty-panel">
-        <div className="text-3xl mb-2">⏳</div>
+        <div className="mb-2 flex justify-center text-chicken-brown/30"><Icon name="hourglass" size={30} strokeWidth={1.5} /></div>
         <p className="font-bold text-chicken-brown">該日所有時段已滿</p>
         <p className="text-sm text-chicken-brown/60 mt-1">請返回選擇其他日期，或來電詢問現場座位。</p>
       </div>
@@ -48,7 +49,7 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
           >
             <div className="text-base font-bold leading-tight">{s.time}</div>
             <div className={`mt-1 text-[11px] font-bold ${active ? 'text-white/90' : s.closed ? 'text-slate-400' : s.remaining <= Math.max(guests * 2, 12) ? 'text-chicken-yellow' : 'text-chicken-green'}`}>
-              {s.closed ? '🚫 已關閉' : tone}
+              {s.closed ? '已關閉' : tone}
             </div>
             <div className={`mt-0.5 text-[10px] ${active ? 'text-white/70' : 'text-chicken-brown/45'}`}>
               {s.closed ? '店家暫停此時段訂位' : s.full ? '請改選其他時段' : `符合 ${guests} 位用餐`}

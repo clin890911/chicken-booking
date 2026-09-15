@@ -92,7 +92,7 @@ function TableShape({
           <text x={cx} y={cy - (outNote ? 4 : -4)} fontSize={16} fontWeight={800} fill="#8a7e72" textAnchor="middle" pointerEvents="none">{number}</text>
           {outNote && (
             <text x={cx} y={cy + 12} fontSize={9} fontWeight={700} fill="#b45309" textAnchor="middle" pointerEvents="none">
-              🛠 {outNote.length > 7 ? '維修中' : outNote}
+              {outNote.length > 7 ? '維修中' : outNote}
             </text>
           )}
         </g>
@@ -290,7 +290,7 @@ function TableShape({
               <text x={cx} y={y + h - 8}
                     fontSize={stage === 'overtime' || stage === 'buffer-overtime' ? 11 : 10}
                     fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
-                {(stage === 'overtime' || stage === 'buffer-overtime') && '⚠ '}{minutes} 分
+                {(stage === 'overtime' || stage === 'buffer-overtime') ? '! ' : ''}{minutes} 分
               </text>
             )}
             {status === 'cleaning' && (

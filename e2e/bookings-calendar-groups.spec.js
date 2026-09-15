@@ -38,13 +38,13 @@ test('日曆月格同時顯示散客與旅行社團體人數', async ({ page }) 
     if (!m) break
     const cur = Number(m[1]) * 12 + Number(m[2])
     if (cur === TARGET) break
-    await page.getByRole('button', { name: cur > TARGET ? '‹' : '›' }).first().click()
+    await page.getByRole('button', { name: cur > TARGET ? '上個月' : '下個月' }).first().click()
   }
   await expect(page.getByRole('heading', { name: /2026年 6月/ })).toBeVisible()
 
-  // 17 號月格：散客（🧍 1 組 · 2 位）與旅行社團體（🚌 2 團 · 30 位）都要顯示。
+  // 17 號月格（熱圖格）：大數字 = 散客 2 位 + 團體 30 位 = 32，小字 = 「1 組 · 2 團」。
   // 用 button + hasText 定位日格（頂部月摘要的同字串是 span，不是 button，故不衝突）
-  const cell17 = page.locator('button').filter({ hasText: '🚌 2 團 · 30 位' }).filter({ hasText: '🧍 1 組 · 2 位' })
+  const cell17 = page.locator('button').filter({ hasText: '1 組 · 2 團' }).filter({ hasText: '32' })
   await expect(cell17).toBeVisible()
   await expect(cell17).toContainText('17')
 

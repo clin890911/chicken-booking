@@ -24,7 +24,7 @@ function NowLabel() {
   const hh = String(now.getHours()).padStart(2, '0')
   const mm = String(now.getMinutes()).padStart(2, '0')
   return (
-    <div className="flex-none text-sm font-black text-chicken-brown whitespace-nowrap">
+    <div className="flex-none text-sm font-bold text-chicken-brown whitespace-nowrap">
       現場
       <span className="ml-1.5 text-[11px] font-bold text-chicken-brown/55 tabular-nums">
         {now.getMonth() + 1}/{now.getDate()} ({WEEKDAYS[now.getDay()]}) {hh}:{mm}
@@ -92,7 +92,7 @@ export default function StatusBar({ tables, waitlist, bookings = [], variant = '
               key={p.label}
               className={`flex-none flex items-baseline gap-1 px-2 py-1 rounded-lg border ${p.className}`}
             >
-              <span className={`text-base font-black tabular-nums leading-none ${p.color}`}>{p.value}</span>
+              <span className={`text-base font-bold tabular-nums leading-none ${p.color}`}>{p.value}</span>
               <span className="text-[11px] font-bold opacity-60 leading-none whitespace-nowrap">{p.label}</span>
             </div>
           ))}
@@ -107,9 +107,9 @@ export default function StatusBar({ tables, waitlist, bookings = [], variant = '
         <div key={it.label}
              className={`border rounded-xl px-3 py-2 flex flex-col items-center ${it.className}
                          ${it.accent && it.value > 0 ? 'ring-2 ring-red-100' : ''}`}>
-          <div className={`text-2xl font-black tabular-nums leading-none ${it.color}`}>{it.value}</div>
+          <div className={`text-2xl font-bold tabular-nums leading-none ${it.color}`}>{it.value}</div>
           <div className="text-[11px] font-bold opacity-70 mt-1">{it.label}</div>
-          {it.sub && <div className="text-[10px] font-black text-chicken-red mt-0.5">{it.sub}</div>}
+          {it.sub && <div className="text-[10px] font-bold text-chicken-red mt-0.5">{it.sub}</div>}
         </div>
       ))}
     </div>

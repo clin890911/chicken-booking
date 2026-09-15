@@ -25,13 +25,13 @@ export default function NumericKeypad({ value = '', onChange, maxLen = 10, tone 
           onClick={() => press(k)}
           aria-label={k === '⌫' ? '退格' : k}
           className={dark
-            ? `h-[66px] rounded-xl font-black active:scale-95 transition-transform ${
+            ? `h-[66px] rounded-xl font-bold active:scale-95 transition-transform ${
               k === 'OK'
                 ? 'bg-chicken-yellow text-white text-xl'
                 : k === '⌫'
                   ? 'bg-white/10 text-white text-xl'
                   : 'bg-white/10 text-white text-[27px]'}`
-            : `h-12 rounded-xl border-2 border-chicken-brown/15 bg-white font-bold text-chicken-brown active:scale-95 transition-transform ${
+            : `h-12 rounded-xl border border-chicken-brown/10 bg-white font-bold text-chicken-brown active:scale-95 transition-transform ${
               k === '清除' ? 'text-sm text-chicken-brown/60' : 'text-lg'}`}
         >
           {k}

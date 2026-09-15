@@ -35,7 +35,7 @@ describe('CalendarView：日曆選定日期後的「＋ 新增訂位」入口', 
 
   const dayButton = (dayNum) =>
     [...container.querySelectorAll('button')].find(
-      b => b.querySelector('span.font-black')?.textContent === String(dayNum)
+      b => b.querySelector('span.font-bold')?.textContent === String(dayNum)
     )
 
   const render = (bookings = [], groupReservations = [], onAddBooking = vi.fn()) => {

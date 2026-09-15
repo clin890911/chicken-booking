@@ -8,6 +8,7 @@ import NumericKeypad from './NumericKeypad'
 import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadges'
 import SlideToSeat from './SlideToSeat'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
+import Icon from '../../ui/Icon'
 
 const KEYPAD_WIDTH = 392
 const KEYPAD_GAP = 12
@@ -85,18 +86,18 @@ export default function FastWalkInPanel({
   if (tables.length > 0) {
     const label = tables.map(t => t.number).join(' + ')
     verdict = g <= 0
-      ? { tone: 'idle', icon: '🪑', text: `已選 ${label}（${seats} 席）· 再選人數` }
+      ? { tone: 'idle', icon: 'chair', text: `已選 ${label}（${seats} 席）· 再選人數` }
       : enough
-        ? { tone: 'ok', icon: '✅', text: `${g} 位 → ${label}（${seats} 席）` }
-        : { tone: 'none', icon: '⚠️', text: `${g} 位坐不下 ${seats} 席 → 再加一桌或換桌` }
+        ? { tone: 'ok', icon: 'checkCircle', text: `${g} 位 → ${label}（${seats} 席）` }
+        : { tone: 'none', icon: 'warning', text: `${g} 位坐不下 ${seats} 席 → 再加一桌或換桌` }
   } else if (g > 0) {
     const single = suggestTable(g)
-    if (single) verdict = { tone: 'ok', icon: '👉', text: `${g} 位 · 點桌況圖選位，建議 ${single.number}` }
+    if (single) verdict = { tone: 'ok', icon: 'pointer', text: `${g} 位 · 點桌況圖選位，建議 ${single.number}` }
     else {
       const combo = suggestTableCombo(g)
       verdict = combo.enough
-        ? { tone: 'multi', icon: '🪑', text: `無單桌可容 → 點桌況圖選 ${combo.tableNumbers?.length || 2} 張同層空桌併桌` }
-        : { tone: 'none', icon: '⏳', text: '目前座位不足 → 建議改候位取號' }
+        ? { tone: 'multi', icon: 'chair', text: `無單桌可容 → 點桌況圖選 ${combo.tableNumbers?.length || 2} 張同層空桌併桌` }
+        : { tone: 'none', icon: 'hourglass', text: '目前座位不足 → 建議改候位取號' }
     }
   }
   const V = {
@@ -153,7 +154,7 @@ export default function FastWalkInPanel({
             {tables.map(t => (
               <div key={t.number} className="flex items-center gap-3 rounded-xl border-2 border-chicken-green/60 bg-chicken-green/10 px-3 py-1.5">
                 <div className="min-w-0">
-                  <div className="text-xl font-black leading-none text-chicken-brown tabular-nums">{t.number}</div>
+                  <div className="text-xl font-bold leading-none text-chicken-brown tabular-nums">{t.number}</div>
                   <div className="text-[11px] font-bold text-chicken-brown/60">
                     {[`${t.capacity} 人桌`, [displayName, g > 0 ? `${g} 位` : ''].filter(Boolean).join(' ')]
                       .filter(Boolean).join(' · ')}
@@ -190,7 +191,7 @@ export default function FastWalkInPanel({
           </div>
         ) : (
           <div className="rounded-xl border border-dashed border-chicken-brown/25 bg-chicken-brown/5 px-3 py-2.5 text-sm font-bold text-chicken-brown/60 text-center">
-            👉 點右邊桌況圖選一張桌
+            點右邊桌況圖選一張桌
           </div>
         )}
 
@@ -253,7 +254,7 @@ export default function FastWalkInPanel({
           <div className="rounded-xl border border-chicken-red/40 bg-chicken-red/10 px-3 py-2">
             {/* 併桌時可能不只一張桌有問題 → 逐條列，勾同意前看得到全部 */}
             {(warning.lines || [warning.text]).map((line, i) => (
-              <div key={i} className="text-sm font-bold text-chicken-red">⚠️ {line}</div>
+              <div key={i} className="text-sm font-bold text-chicken-red">{line}</div>
             ))}
             <label className="mt-1.5 flex items-center gap-2 text-xs font-bold text-chicken-red cursor-pointer">
               <input
@@ -268,7 +269,7 @@ export default function FastWalkInPanel({
         )}
         {verdict && (
           <div className={`rounded-xl border px-3 py-1.5 text-sm font-bold ${V[verdict.tone]}`}>
-            {verdict.icon} {verdict.text}
+            <Icon name={verdict.icon} size={16} className="inline-block align-[-3px] mr-1" />{verdict.text}
           </div>
         )}
         <SlideToSeat onConfirm={seat} disabled={!ready} label="滑動帶位 →" disabledLabel={slideLabel} />
@@ -287,22 +288,22 @@ export default function FastWalkInPanel({
           <div
             role="dialog"
             aria-label="電話數字鍵盤"
-            className="fixed z-[71] rounded-2xl bg-[#2b2320] p-3 shadow-2xl"
+            className="fixed z-[71] rounded-xl bg-[#2b2320] p-3 shadow-2xl"
             style={keypadPos
               ? { left: keypadPos.left, bottom: keypadPos.bottom, width: keypadPos.width }
               : { left: KEYPAD_GAP, bottom: KEYPAD_GAP, width: KEYPAD_WIDTH, visibility: 'hidden' }}
           >
             <div className="flex items-start gap-2.5 px-1.5 pb-3 pt-1">
               <div className="min-w-0">
-                <div className="text-3xl font-black tracking-widest tabular-nums text-white">
+                <div className="text-3xl font-bold tracking-widest tabular-nums text-white">
                   {phone || <span className="text-white/30">輸入電話</span>}
                 </div>
                 <div className="mt-1 text-[11px] font-bold text-white/60">
                   {matched ? (
                     <>
-                      🔁 常客・{matched.name || '（未留名）'}
+                      常客・{matched.name || '（未留名）'}
                       {matched.lastVisit ? `・上次 ${new Date(matched.lastVisit).toLocaleDateString('zh-TW')}` : ''}
-                      {matched.allergies && <b className="text-red-300">・⚠ 忌{matched.allergies}</b>}
+                      {matched.allergies && <b className="text-red-300">・忌{matched.allergies}</b>}
                     </>
                   ) : phone.length >= 4 ? '查無顧客檔（新客）' : '輸入 4 碼以上自動比對常客'}
                 </div>
@@ -311,7 +312,7 @@ export default function FastWalkInPanel({
                 type="button"
                 aria-label="收起鍵盤"
                 onClick={() => setKeypadOpen(false)}
-                className="ml-auto flex-none h-8 w-8 rounded-full bg-white/15 text-sm font-black text-white"
+                className="ml-auto flex-none h-8 w-8 rounded-full bg-white/15 text-sm font-bold text-white"
               >
                 ✕
               </button>
