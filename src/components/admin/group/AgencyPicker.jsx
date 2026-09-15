@@ -2,8 +2,11 @@ import { useMemo, useState } from 'react'
 import { frequentAgencies } from '../../../utils/groupDaySummary'
 import { todayStr, addDays, formatDate } from '../../../utils/timeSlots'
 
-// AgencyPicker：旅行社「打字即篩 + 常用快選 + 快速新增」，取代長下拉。
+// AgencyPicker：旅行社「打字即篩 + 常客快選 + 快速新增」，取代長下拉。
 // 純受控：value=agencyId、agencyName=目前名稱快照；onPick(agency) 由父層落 draft；onQuickAdd 開新增表單。
+//
+// 常客 chip 一律在輸入框下方直接可見（不是打字才出現）——櫃檯八成的團來自同幾家旅行社，
+// 一眼點得到才省得打字；chip 上的「上次 M/D · N 人」是認人的線索（近 90 天內來過幾團的分辨點）。
 export default function AgencyPicker({ agencies = [], groupReservations = [], value, agencyName = '', onPick, onQuickAdd }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -29,6 +32,27 @@ export default function AgencyPicker({ agencies = [], groupReservations = [], va
       .filter(a => a.id !== value)
   }, [groupReservations, agencies, value])
 
+  // 各旅行社「最近一張團單」的日期與人數（用 agencyId 關聯，不用名稱字串 join）
+  const lastVisit = useMemo(() => {
+    const m = {}
+    ;(groupReservations || []).forEach(g => {
+      if (!g.agencyId || g.status === 'cancelled') return
+      const prev = m[g.agencyId]
+      if (!prev || String(g.date || '') > prev.date) {
+        m[g.agencyId] = { date: String(g.date || ''), guests: Number(g.counts?.total) || 0 }
+      }
+    })
+    return m
+  }, [groupReservations])
+
+  const metaLabel = (id) => {
+    const v = lastVisit[id]
+    if (!v || !v.date) return ''
+    const [, mm, dd] = v.date.split('-')
+    const md = mm && dd ? `${Number(mm)}/${Number(dd)}` : ''
+    return [md ? `上次 ${md}` : '', v.guests > 0 ? `${v.guests} 人` : ''].filter(Boolean).join(' · ')
+  }
+
   const pick = (a) => { onPick?.(a); setOpen(false); setQuery('') }
 
   return (
@@ -43,14 +67,14 @@ export default function AgencyPicker({ agencies = [], groupReservations = [], va
       ) : (
         <input
           className="input"
-          placeholder="輸入名稱或電話搜尋…"
+          placeholder="輸入名稱或電話，或直接點下面的常客"
           value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true) }}
           onFocus={() => setOpen(true)}
         />
       )}
 
-      {open && (!selectedName || query !== '' || true) && (
+      {open && (
         <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-chicken-brown/15 bg-white shadow-lg">
           {results.length === 0 ? (
             <div className="px-3 py-2 text-xs text-chicken-brown/50">查無符合，請用下方「快速新增旅行社」</div>
@@ -59,7 +83,7 @@ export default function AgencyPicker({ agencies = [], groupReservations = [], va
               key={a.id}
               type="button"
               onClick={() => pick(a)}
-              className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-chicken-cream/60 ${a.id === value ? 'bg-indigo-50' : ''}`}
+              className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-chicken-cream/60 ${a.id === value ? 'bg-chicken-red/[0.06]' : ''}`}
             >
               <span className="font-bold text-chicken-brown truncate">{a.name}</span>
               {(a.phone || a.contactName) && (
@@ -71,18 +95,22 @@ export default function AgencyPicker({ agencies = [], groupReservations = [], va
       )}
 
       {frequent.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          <span className="text-[11px] font-bold text-chicken-brown/45">常用</span>
-          {frequent.map(a => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => pick(a)}
-              className="rounded-full border border-chicken-brown/15 bg-white px-2.5 py-1 text-[11px] font-bold text-chicken-brown hover:border-chicken-red/40 hover:text-chicken-red"
-            >
-              {a.name}
-            </button>
-          ))}
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-chicken-brown/45">常客</span>
+          {frequent.map(a => {
+            const meta = metaLabel(a.id)
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => pick(a)}
+                className="tap rounded-full border border-chicken-brown/15 bg-white px-2.5 py-1 text-left text-[11px] font-bold text-chicken-brown hover:border-chicken-red/40 hover:text-chicken-red"
+              >
+                {a.name}
+                {meta && <span className="ml-1 font-semibold text-chicken-brown/45">{meta}</span>}
+              </button>
+            )
+          })}
         </div>
       )}
 
