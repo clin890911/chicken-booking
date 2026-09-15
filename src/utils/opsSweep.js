@@ -57,6 +57,17 @@ export function filterSweepActionsByPermission(actions = [], permit) {
   })
 }
 
+// 需要「本 session 已成功從雲端拉過一次」才可以執行的 action。
+// leave-waitlist-auto：離線開機（20 秒 fallback）時本機候位快照可能停在昨天——另一台早已把該號入座，
+// 這台仍看到 waiting；結成 left 後整份文件推上雲，會把 seated／seatedAt／桌號蓋掉（同步是整份覆寫、無時間戳仲裁）。
+// 被延後的 action 讓呼叫端不寫「今日已掃」marker，等拉雲成功後的下一輪再補做。
+export const CLOUD_FRESH_REQUIRED_ACTIONS = new Set(['leave-waitlist-auto'])
+
+export function deferUntilCloudPulled(actions = [], cloudPulled) {
+  if (cloudPulled) return actions
+  return actions.filter(a => !CLOUD_FRESH_REQUIRED_ACTIONS.has(a?.type))
+}
+
 export function computeOvertimeActions({ tables = [], settings = {}, now = Date.now() }) {
   if (settings.autoReleaseEnabled === false) return []
   const limit = Number(settings.autoReleaseAfterMin) || 300

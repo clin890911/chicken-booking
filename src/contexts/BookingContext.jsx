@@ -13,7 +13,7 @@ import * as cloudData from '../services/cloudDataService'
 import * as opsLogService from '../services/opsLogService'
 import {
   computeOvertimeActions, computeDayRolloverActions,
-  canRunSweeps, filterSweepActionsByPermission,
+  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled,
 } from '../utils/opsSweep'
 import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus } from '../utils/syncStatus'
 import { reconcileList, reconcileValue } from '../utils/stableState'
@@ -178,6 +178,8 @@ export function BookingProvider({ children }) {
     return a.type
   }
 
+  // 本 session 是否已成功從雲端拉過一次（本機模式視為已拉）。由下方 cloudStatus effect 設定。
+  const cloudPulledRef = useRef(false)
   const runSweeps = useCallback((opts = {}) => {
     if (!isStaffRef.current) return
     // 🔴 掃除是**自動**跑的（首拉後 force 一次、之後每 60 秒），會改寫本機 tables/bookings。
@@ -205,10 +207,12 @@ export function BookingProvider({ children }) {
       // complete-group 會寫 groupReservations（需 group.update）、leave-waitlist-auto 會寫
       // waitlist（需 waitlist.update）：濾掉無權的，其餘照常。
       const wanted = computeDayRolloverActions({ ...state, settings, today })
-      const allowed = filterSweepActionsByPermission(wanted, permit)
+      // 候位結號要等本 session 首拉雲端成功才做（離線快照可能把別台已入座的號結掉），被延後也不記 marker。
+      const allowed = filterSweepActionsByPermission(deferUntilCloudPulled(wanted, cloudPulledRef.current), permit)
       const done = seatingService.executeSweepActions(allowed)
       // 只有「這台把該做的都做完了」才記今日已掃。若因權限濾掉了東西就不記，
       // 留給之後在這台登入、且有權限的帳號補做——與 PlanningView 的 PURGE_FLAG 同一套語義。
+      // 因尚未拉雲而延後的 action 同理：不記，拉雲成功後下一輪（≤60 秒）補做。
       if (allowed.length === wanted.length) localStorage.setItem('chicken_ops_day_sweep_v1', today)
       if (done.length) {
         done.forEach(a => opsLogService.append({ kind: 'day-rollover', ...a, message: sweepActionMsg(a) }))
@@ -238,6 +242,9 @@ export function BookingProvider({ children }) {
   // 觸發點：(a) 首拉雲端成功後（避免用過期本機快照誤殺另一台裝置今天的桌）；
   // 本機模式（未設 Firebase）無此風險、20 秒 fallback 給離線情境；(b) 每 60 秒（先換日再超時）。
   const bootSweepDoneRef = useRef(false)
+  useEffect(() => {
+    if (cloudStatus.state === 'synced' || !usingFirebase) cloudPulledRef.current = true
+  }, [cloudStatus.state, usingFirebase])
   useEffect(() => {
     if (!isStaff) return
     if (!bootSweepDoneRef.current && (cloudStatus.state === 'synced' || !usingFirebase)) {

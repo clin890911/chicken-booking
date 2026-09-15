@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeOvertimeActions, computeDayRolloverActions,
-  canRunSweeps, filterSweepActionsByPermission,
+  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled,
   KNOWN_SWEEP_ACTIONS, SWEEP_ACTION_PERMISSION,
 } from '../../src/utils/opsSweep'
 
@@ -213,6 +213,18 @@ describe('掃除權限政策', () => {
 
     const withWaitlistPerm = filterSweepActionsByPermission(actions, permitOf([...FLOOR, 'waitlist.update']))
     expect(withWaitlistPerm).toHaveLength(2)
+  })
+
+  // 離線開機（20 秒 fallback）時本機候位快照可能停在昨天：別台早已入座的號在這台仍是 waiting，
+  // 結成 left 整份推上雲會把 seated 蓋掉。尚未拉雲前只延後候位結號，其餘換日動作照做。
+  it('尚未從雲端拉過：延後 leave-waitlist-auto，其餘 action 照常；拉過後全部放行', () => {
+    const actions = [
+      { type: 'clear-table', tableNumber: 101 },
+      { type: 'leave-waitlist-auto', waitlistId: 'W1' },
+      { type: 'complete-booking', bookingId: 'b1' },
+    ]
+    expect(deferUntilCloudPulled(actions, false).map(a => a.type)).toEqual(['clear-table', 'complete-booking'])
+    expect(deferUntilCloudPulled(actions, true)).toEqual(actions)
   })
 })
 
