@@ -785,9 +785,11 @@ export default function GroupEditorStage({
                 </div>
               </div>
 
-              {/* DOM 順序＝側欄在前（md 以下自然落在圖上方）；md 以上用 order 換回「左圖右側欄」 */}
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_18rem] md:items-start">
-                <aside className="md:order-2">
+              {/* DOM 順序＝側欄在前（lg 以下自然落在圖上方）；lg 以上用 order 換回「左圖右側欄」。
+                  🔴 斷點是 lg 不是 md：md（768）＝直向 iPad，扣掉 18rem 側欄後左圖只剩約 430px，
+                  比整寬單欄還難點桌；1024 以上才分欄。 */}
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
+                <aside className="lg:order-2">
                   <BatchSeatPanel
                     batchLabel={activeBatch?.label || ''}
                     seatingLabel={activeSeatingLabel}
@@ -808,7 +810,7 @@ export default function GroupEditorStage({
                     heldSeats={heldSeats}
                   />
                 </aside>
-                <div className="min-h-[360px] overflow-hidden rounded-lg border border-chicken-brown/5 md:order-1" style={{ background: '#faf8f5' }}>
+                <div className="min-h-[360px] overflow-hidden rounded-lg border border-chicken-brown/5 lg:order-1" style={{ background: '#faf8f5' }}>
                   <FloorMap
                     floor={floor}
                     tables={tables}
