@@ -94,10 +94,16 @@ export function BookingProvider({ children }) {
     setSettings(prev => reconcileValue(prev, settingsService.getSettings()))
   }, [])
 
+  // 本 session 是否已成功從雲端拉過一次（候位換日結號的前提，見 runSweeps）。
+  // 🔴 必須在拉取成功處直接設，不可由 cloudStatus.state === 'synced' 推導：
+  // 部分推送被拒後狀態會黏在 'rejected'（拉取不得清除），推導會讓該裝置永遠不結號。
+  const cloudPulledRef = useRef(false)
+
   const pullCloud = useCallback(async () => {
     try {
       const data = await cloudData.pullCloudData()
       cloudData.applyCloudSnapshot(data)
+      cloudPulledRef.current = true
       refresh()
       // 狀態轉移規則見 utils/syncStatus——拉取成功**不得**清掉 'rejected'。
       // 狀態沒變時不每 5 秒換一次物件（shouldCommitPullStatus）：避免整個後台跟著重繪。
@@ -178,8 +184,6 @@ export function BookingProvider({ children }) {
     return a.type
   }
 
-  // 本 session 是否已成功從雲端拉過一次（本機模式視為已拉）。由下方 cloudStatus effect 設定。
-  const cloudPulledRef = useRef(false)
   const runSweeps = useCallback((opts = {}) => {
     if (!isStaffRef.current) return
     // 🔴 掃除是**自動**跑的（首拉後 force 一次、之後每 60 秒），會改寫本機 tables/bookings。
@@ -243,8 +247,8 @@ export function BookingProvider({ children }) {
   // 本機模式（未設 Firebase）無此風險、20 秒 fallback 給離線情境；(b) 每 60 秒（先換日再超時）。
   const bootSweepDoneRef = useRef(false)
   useEffect(() => {
-    if (cloudStatus.state === 'synced' || !usingFirebase) cloudPulledRef.current = true
-  }, [cloudStatus.state, usingFirebase])
+    if (!usingFirebase) cloudPulledRef.current = true // 本機模式沒有雲端可拉，視為已拉
+  }, [usingFirebase])
   useEffect(() => {
     if (!isStaff) return
     if (!bootSweepDoneRef.current && (cloudStatus.state === 'synced' || !usingFirebase)) {
