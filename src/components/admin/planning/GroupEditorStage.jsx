@@ -11,6 +11,7 @@ import SegmentedControl from '../../ui/SegmentedControl'
 import AgencyPicker from '../group/AgencyPicker'
 import NumberStepper from './NumberStepper'
 import GroupEditorSummary from './GroupEditorSummary'
+import BatchSeatPanel from './BatchSeatPanel'
 import {
   SPECIAL_FIELDS, TOTAL_PRESETS, composeBusInfo, parseBusInfo, overSpecialCounts, specialOverMessage,
 } from './groupEditorFields'
@@ -105,7 +106,8 @@ export default function GroupEditorStage({
   const [sheetOpen, setSheetOpen] = useState(false)
   const [quickAgency, setQuickAgency] = useState(null)
   const [quickGuide, setQuickGuide] = useState(null)
-  const [addingBatch, setAddingBatch] = useState(false)
+  // 拆梯的場次選擇器有兩個入口（梯次列、圈桌側欄）：存來源字串，一次只開一個
+  const [addingBatch, setAddingBatch] = useState(false)  // false | 'list' | 'panel'
   const [guideHint, setGuideHint] = useState(false)
   // 特殊需求「有才加」：預設只展開已有數字的項目
   const [openSpecials, setOpenSpecials] = useState(
@@ -154,13 +156,39 @@ export default function GroupEditorStage({
   const singleGuest = gBatches.length === 1
   const escortBatch = (draft.batches || []).find(isEscortBatch) || null
 
-  const blockedTables = useMemo(() => {
+  // 別團／已訂（同日同場次已被佔走）
+  const conflictTables = useMemo(() => {
     if (!activeBatch) return []
     const conflictMap = groupReservationService.tableConflictsForBatch({
       date, timeSlot: activeBatch.timeSlot, settings, excludeGroupId: draft.id || null, bookings,
     })
-    return Object.keys(conflictMap).filter(n => !selectedTables.includes(n))
-  }, [activeBatch, date, settings, draft.id, selectedTables, bookings])
+    return Object.keys(conflictMap)
+  }, [activeBatch, date, settings, draft.id, bookings])
+
+  // 本團「其他梯」已圈的桌 → { 桌號: 該梯 label }。同一張桌排兩梯＝同一輪有兩組客人要坐，
+  // tableConflictsForBatch 以 excludeGroupId 排除本團、看不見這件事，所以在這裡自己算並一起擋。
+  // ⚠️ FloorMap 規劃模式只有 selected|blocked|available 三態：別梯與別團在圖上同為灰色，
+  //    差別靠側欄的桌號清單與點擊時的錯誤訊息講清楚（不為此改 FloorMap）。
+  const otherBatchTables = useMemo(() => {
+    const m = {}
+    ;(draft.batches || []).forEach(b => {
+      if (b.id === activeBatchId) return
+      ;(b.tableNumbers || []).forEach(n => { m[String(n)] = b.label })
+    })
+    return m
+  }, [draft.batches, activeBatchId])
+
+  // 地圖與一鍵推薦共用的不可選集合（已在本梯選到的不算 blocked，否則取消不掉）
+  const blockedTables = useMemo(
+    () => [...new Set([...conflictTables, ...Object.keys(otherBatchTables)])].filter(n => !selectedTables.includes(n)),
+    [conflictTables, otherBatchTables, selectedTables],
+  )
+
+  // 本梯已圈、但同時也被別梯圈走的桌（載入既有資料才會出現）：側欄要紅字點名
+  const dupTables = useMemo(
+    () => selectedTables.map(String).filter(n => Object.prototype.hasOwnProperty.call(otherBatchTables, n)),
+    [selectedTables, otherBatchTables],
+  )
 
   // 旅客保留席（不含司領桌）— 摘要卡席位量表與總人數對比用
   const heldSeats = useMemo(() => guestTableNumbers(draft).reduce((s, n) => s + (capByNum[n] || 0), 0), [draft, capByNum])
@@ -175,7 +203,8 @@ export default function GroupEditorStage({
     }))
     return out
   }, [draft.batches, tables, date])
-  // 本梯圈到的壞桌：地圖上已置灰不可點，提供橫幅一鍵移除，否則會卡死在「無法取消圈選」。
+  // 本梯圈到的壞桌：地圖上已置灰不可點 → 移除路徑由圈桌側欄的桌號 chip 提供（點一下即移除），
+  // 否則會卡死在「無法取消圈選」。
   const outCircledTables = useMemo(
     () => selectedTables.filter(n => badTables.includes(String(n))),
     [selectedTables, badTables],
@@ -246,7 +275,12 @@ export default function GroupEditorStage({
   })
   const toggleTable = (number) => {
     if (!activeBatch) return toast.error('請先選一個梯次再圈桌')
-    if (blockedTables.includes(number)) return toast.error(`${number} 已被其他團/訂位佔用`)
+    // 已在本梯的桌一律讓它取消得掉——事後才變成衝突／重複的桌否則會卡死在「無法取消圈選」
+    if (!selectedTables.includes(number)) {
+      const owner = otherBatchTables[String(number)]
+      if (owner) return toast.error(`${number} 已由「${owner}」圈走，同一張桌不能排兩梯`)
+      if (blockedTables.includes(number)) return toast.error(`${number} 已被其他團/訂位佔用`)
+    }
     setDraft(d => ({
       ...d,
       batches: d.batches.map(b => {
@@ -446,6 +480,35 @@ export default function GroupEditorStage({
     toast.info('已刪除團單')
     onDeleted()
   }
+
+  // 圈桌側欄用的衍生值
+  const activeSeatingObj = activeBatch ? seatingForSlot(settings, activeBatch.timeSlot) : null
+  const activeSeatingLabel = activeBatch
+    ? [activeSeatingObj?.name, activeBatch.timeSlot].filter(Boolean).join(' ')
+    : ''
+  const batchChips = [...gBatches, ...(escortBatch ? [escortBatch] : [])]
+    .map(b => ({ id: b.id, label: b.label, timeSlot: b.timeSlot, isEscort: !!b.isEscort }))
+
+  // 「拆梯」的場次選擇器：梯次列與圈桌側欄兩個入口共用同一段 UI 與同一條 addBatchForSeating。
+  const renderNewBatchPicker = () => (
+    <div className="w-full space-y-1.5 rounded-xl border border-dashed border-chicken-brown/20 bg-[#fbfaf8] p-2.5">
+      <div className="text-xs font-semibold text-chicken-brown/70">選新梯次的場次：</div>
+      <div className="flex flex-wrap gap-1.5">
+        {(hasSeatings ? seatings : []).map(s => {
+          const r = seatingRemaining[s.id]
+          const disabled = r?.closed || (r?.remainingSeats ?? 0) <= 0
+          return (
+            <button key={s.id} type="button" disabled={disabled} onClick={() => { addBatchForSeating(s); setAddingBatch(false) }}
+              className="tap h-8 rounded-lg border border-chicken-brown/15 bg-white px-2.5 text-xs font-semibold text-chicken-brown disabled:cursor-not-allowed disabled:opacity-40">
+              {s.name} {s.start}（剩 {r?.remainingSeats ?? '—'} 席）
+            </button>
+          )
+        })}
+        {!hasSeatings && <span className="text-xs text-chicken-brown/50">尚未設定場次</span>}
+      </div>
+      <button type="button" onClick={() => setAddingBatch(false)} className="tap text-xs font-semibold text-chicken-brown/60">取消</button>
+    </div>
+  )
 
   // 梯次列（旅客梯次與司領桌共用）。
   // 🔴 刻意寫成「回傳 JSX 的函式」而不是內嵌元件：內嵌元件每次 render 都是新的 type，
@@ -699,27 +762,9 @@ export default function GroupEditorStage({
             </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              {addingBatch ? (
-                <div className="w-full space-y-1.5 rounded-xl border border-dashed border-chicken-brown/20 bg-[#fbfaf8] p-2.5">
-                  <div className="text-xs font-semibold text-chicken-brown/70">選第二梯的場次：</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(hasSeatings ? seatings : []).map(s => {
-                      const r = seatingRemaining[s.id]
-                      const disabled = r?.closed || (r?.remainingSeats ?? 0) <= 0
-                      return (
-                        <button key={s.id} disabled={disabled} onClick={() => { addBatchForSeating(s); setAddingBatch(false) }}
-                          className="tap h-8 rounded-lg border border-chicken-brown/15 bg-white px-2.5 text-xs font-semibold text-chicken-brown disabled:cursor-not-allowed disabled:opacity-40">
-                          {s.name} {s.start}（剩 {r?.remainingSeats ?? '—'} 席）
-                        </button>
-                      )
-                    })}
-                    {!hasSeatings && <span className="text-xs text-chicken-brown/50">尚未設定場次</span>}
-                  </div>
-                  <button type="button" onClick={() => setAddingBatch(false)} className="tap text-xs font-semibold text-chicken-brown/60">取消</button>
-                </div>
-              ) : (
+              {addingBatch === 'list' ? renderNewBatchPicker() : (
                 <>
-                  <button type="button" onClick={() => setAddingBatch(true)} className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red"><Icon name="plus" size={12} strokeWidth={2.4} />拆第二梯（兩段用餐輪替）</button>
+                  <button type="button" onClick={() => setAddingBatch('list')} className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red"><Icon name="plus" size={12} strokeWidth={2.4} />拆第二梯（兩段用餐輪替）</button>
                   {!escortBatch && (
                     <button type="button" onClick={addEscort} className="tap inline-flex items-center gap-1 text-xs font-semibold text-chicken-brown/70 hover:text-chicken-red"><Icon name="bus" size={13} />加司領桌（司機 / 領隊，不計入總人數）</button>
                   )}
@@ -727,14 +772,12 @@ export default function GroupEditorStage({
               )}
             </div>
 
-            {/* 圈桌地圖：就在本段展開，不再翻頁 */}
+            {/* 圈桌地圖：就在本段展開，不再翻頁。md 以上左圖右側欄；md 以下側欄在圖**上方**——
+                店員先看「夠不夠坐」的數字，再決定點哪張桌，不要先點完才捲下去看結果。 */}
             <div className="mt-3 border-t border-chicken-brown/10 pt-3">
               <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-[200px]">
-                  <div className="text-sm font-semibold text-chicken-brown">圈選座位 <span className="text-xs font-medium text-chicken-brown/50">· {dayLabel(date)} 規劃，非今日即時</span></div>
-                  <div className={`text-xs ${activeBatch ? 'font-semibold text-chicken-red' : 'text-chicken-brown/55'}`}>
-                    {activeBatch ? `圈桌中：${activeBatch.label}${seatingForSlot(settings, activeBatch.timeSlot) ? ' · ' + seatingForSlot(settings, activeBatch.timeSlot).name : ' ' + activeBatch.timeSlot}` : '請於上方選一個梯次'}
-                  </div>
+                <div className="min-w-[200px] text-sm font-semibold text-chicken-brown">
+                  圈選座位 <span className="text-xs font-medium text-chicken-brown/50">· {dayLabel(date)} 規劃，非今日即時</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={autoSuggest} className="tap inline-flex h-8 items-center gap-1 rounded-[9px] border border-chicken-brown/15 bg-white px-3 text-xs font-semibold text-chicken-brown"><Icon name="target" size={14} />一鍵推薦桌位</button>
@@ -742,47 +785,45 @@ export default function GroupEditorStage({
                 </div>
               </div>
 
-              {activeBatch && (
-                <div className="mb-2.5 rounded-lg border border-chicken-brown/[0.08] bg-[#fbfaf8] px-3 py-2">
-                  <SeatGauge circled={seatsOf(selectedTables)} needed={batchGuests(activeBatch)} />
-                  <div className="mt-1 text-[11px] text-chicken-brown/55">旅客保留 {heldSeats} 席（不含司領桌）</div>
+              {/* DOM 順序＝側欄在前（lg 以下自然落在圖上方）；lg 以上用 order 換回「左圖右側欄」。
+                  🔴 斷點是 lg 不是 md：md（768）＝直向 iPad，扣掉 18rem 側欄後左圖只剩約 430px，
+                  比整寬單欄還難點桌；1024 以上才分欄。 */}
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
+                <aside className="lg:order-2">
+                  <BatchSeatPanel
+                    batchLabel={activeBatch?.label || ''}
+                    seatingLabel={activeSeatingLabel}
+                    circled={seatsOf(selectedTables)}
+                    tableCount={selectedTables.length}
+                    needed={activeBatch ? batchGuests(activeBatch) : 0}
+                    tableNumbers={selectedTables}
+                    onRemoveTable={removeCircledTable}
+                    chips={batchChips}
+                    activeBatchId={activeBatchId}
+                    onSelectBatch={setActiveBatchId}
+                    onAddBatch={() => setAddingBatch('panel')}
+                    addPicker={addingBatch === 'panel' ? renderNewBatchPicker() : null}
+                    hasEscort={!!escortBatch}
+                    onToggleEscort={() => (escortBatch ? removeEscort(escortBatch.id) : addEscort())}
+                    badTables={outCircledTables}
+                    dupTables={dupTables}
+                    heldSeats={heldSeats}
+                  />
+                </aside>
+                <div className="min-h-[360px] overflow-hidden rounded-lg border border-chicken-brown/5 lg:order-1" style={{ background: '#faf8f5' }}>
+                  <FloorMap
+                    floor={floor}
+                    tables={tables}
+                    settings={settings}
+                    planningMode
+                    selectedTables={selectedTables}
+                    blockedTables={blockedTables}
+                    mapDate={date}
+                    fixtures={fixtures}
+                    zones={zones}
+                    onSelectTable={toggleTable}
+                  />
                 </div>
-              )}
-
-              {/* 圈到的桌事後被設停用/維修：地圖已置灰不可點，這裡提供一鍵移除（否則無法取消圈選） */}
-              {outCircledTables.length > 0 && (
-                <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
-                  <span className="font-bold text-amber-800">本梯圈到的桌在此日期停用/維修中（不會供餐、儲存會被擋）：</span>
-                  <span className="ml-1 inline-flex flex-wrap gap-1.5 align-middle">
-                    {outCircledTables.map(n => (
-                      <button key={n} onClick={() => removeCircledTable(n)}
-                        className="inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 font-bold text-amber-900 hover:bg-amber-300">
-                        {n} ✕
-                      </button>
-                    ))}
-                  </span>
-                  <span className="ml-1 text-amber-700/70">點桌號即移除。</span>
-                </div>
-              )}
-
-              <div className="min-h-[360px] overflow-hidden rounded-lg border border-chicken-brown/5" style={{ background: '#faf8f5' }}>
-                <FloorMap
-                  floor={floor}
-                  tables={tables}
-                  settings={settings}
-                  planningMode
-                  selectedTables={selectedTables}
-                  blockedTables={blockedTables}
-                  mapDate={date}
-                  fixtures={fixtures}
-                  zones={zones}
-                  onSelectTable={toggleTable}
-                />
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] font-semibold text-chicken-brown/55">
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-600" />已選</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-400" />已被佔</span>
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm border border-slate-300 bg-slate-200" />可選</span>
               </div>
             </div>
           </div>
