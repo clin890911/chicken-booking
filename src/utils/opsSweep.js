@@ -7,6 +7,12 @@
 // 規則 2（換日掃除）：昨日殘留的 dining/cleaning/reserved 桌清為空桌；
 //   昨日已到店（arrived）團體自動結案；planned/confirmed 的過期團不動（留給人判斷）。
 //   過期 confirmed 訂位預設不自動標 noshow（會污染顧客罰則與報表口徑），開關另計。
+// 規則 3（換日結候位）：取號日（本地日，非 UTC）早於今天、狀態仍是 waiting/called 的候位，
+//   自動結為 left——店主反映沒結掉的候位籤會一直顯示「已等 4502 分」。絕不發任何通知
+//   （走 waitlistService.leave 純寫入，不經會發通知的 Context wrapper）；缺 takenAt 或無法
+//   解析的候位無從判斷年齡，不動。
+
+import { formatDate } from './timeSlots'
 
 // === 掃除的權限政策（純函式，供 BookingContext.runSweeps 使用）===
 // 掃除是**自動**跑的，使用者毫無所覺。而後端 adminPushData 採「任一集合越權即整包 403」，
@@ -28,11 +34,13 @@ export const KNOWN_SWEEP_ACTIONS = [
   'complete-booking',     // bookings
   'complete-group',       // tables + groupReservations
   'mark-noshow-auto',     // bookings（刻意繞過 recordNoshow，不寫 noshow store）
+  'leave-waitlist-auto',  // waitlist
 ]
 
 // 個別 action 額外需要的權限（會寫到 tables/bookings 以外的集合）。
 export const SWEEP_ACTION_PERMISSION = {
-  'complete-group': 'group.update', // → groupReservations
+  'complete-group': 'group.update',       // → groupReservations
+  'leave-waitlist-auto': 'waitlist.update', // → waitlist
 }
 
 // permit 不是函式時（無 AuthProvider 的測試/本機模式）一律放行，維持既有行為。
@@ -47,6 +55,17 @@ export function filterSweepActionsByPermission(actions = [], permit) {
     const need = SWEEP_ACTION_PERMISSION[a?.type]
     return !need || permit(need)
   })
+}
+
+// 需要「本 session 已成功從雲端拉過一次」才可以執行的 action。
+// leave-waitlist-auto：離線開機（20 秒 fallback）時本機候位快照可能停在昨天——另一台早已把該號入座，
+// 這台仍看到 waiting；結成 left 後整份文件推上雲，會把 seated／seatedAt／桌號蓋掉（同步是整份覆寫、無時間戳仲裁）。
+// 被延後的 action 讓呼叫端不寫「今日已掃」marker，等拉雲成功後的下一輪再補做。
+export const CLOUD_FRESH_REQUIRED_ACTIONS = new Set(['leave-waitlist-auto'])
+
+export function deferUntilCloudPulled(actions = [], cloudPulled) {
+  if (cloudPulled) return actions
+  return actions.filter(a => !CLOUD_FRESH_REQUIRED_ACTIONS.has(a?.type))
 }
 
 export function computeOvertimeActions({ tables = [], settings = {}, now = Date.now() }) {
@@ -73,7 +92,17 @@ export function computeOvertimeActions({ tables = [], settings = {}, now = Date.
   return actions
 }
 
-export function computeDayRolloverActions({ tables = [], bookings = [], groupReservations = [], settings = {}, today }) {
+// takenAt 是 UTC ISO 字串，必須換成本地日期再比對——直接 slice(0, 10) 取到的是 UTC 日，
+// 本地早上 8 點前會誤判成前一天。無法解析（缺 takenAt／格式壞掉）回傳空字串，呼叫端視為「不動」。
+function localDateOf(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : formatDate(d)
+}
+
+export function computeDayRolloverActions({
+  tables = [], bookings = [], groupReservations = [], waitlist = [], settings = {}, today,
+}) {
   if (settings.dayRolloverEnabled === false) return []
   const actions = []
   const bookingById = {}
@@ -111,5 +140,15 @@ export function computeDayRolloverActions({ tables = [], bookings = [], groupRes
       }
     }
   }
+
+  for (const w of waitlist) {
+    if (w.status !== 'waiting' && w.status !== 'called') continue
+    const localDate = localDateOf(w.takenAt)
+    if (!localDate) continue // 缺 takenAt 或無法解析：無從判斷年齡，不動
+    if (localDate < today) {
+      actions.push({ type: 'leave-waitlist-auto', waitlistId: w.id, queueNumber: w.queueNumber, name: w.name })
+    }
+  }
+
   return actions
 }

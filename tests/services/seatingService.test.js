@@ -1574,6 +1574,25 @@ describe('executeSweepActions（自動清檯執行層：前置重驗、冪等）
     expect(done.map(a => a.tableNumber)).toEqual(['103'])
     expect(tableService.getByNumber('103').status).toBe('vacant')
   })
+
+  it('leave-waitlist-auto：waiting/called → 結為 left；已入座（別台剛搶先處理）→ 跳過不重複結', () => {
+    const w1 = waitlistService.create({ name: '候A', phone: '0911', partySize: 2 })
+    const w2 = waitlistService.create({ name: '候B', phone: '0922', partySize: 2 })
+    waitlistService.call(w2.id) // called 也要能被結
+    const w3 = waitlistService.create({ name: '候C', phone: '0933', partySize: 2 })
+    waitlistService.seat(w3.id, '101') // 已被別台搶先入座 → 重驗時跳過
+
+    const done = seating.executeSweepActions([
+      { type: 'leave-waitlist-auto', waitlistId: w1.id, queueNumber: w1.queueNumber, name: w1.name },
+      { type: 'leave-waitlist-auto', waitlistId: w2.id, queueNumber: w2.queueNumber, name: w2.name },
+      { type: 'leave-waitlist-auto', waitlistId: w3.id, queueNumber: w3.queueNumber, name: w3.name },
+    ])
+    expect(done.map(a => a.waitlistId)).toEqual([w1.id, w2.id])
+    expect(waitlistService.getById(w1.id).status).toBe('left')
+    expect(typeof waitlistService.getById(w1.id).leftAt).toBe('string')
+    expect(waitlistService.getById(w2.id).status).toBe('left')
+    expect(waitlistService.getById(w3.id).status).toBe('seated') // 未被改動
+  })
 })
 
 // ============================================================

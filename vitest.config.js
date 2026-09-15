@@ -1,5 +1,9 @@
 import { defineConfig } from 'vitest/config'
 
+// 測試一律跑在店家所在時區。CI（GitHub Actions）預設 UTC，而 UTC 下「本地日 vs UTC 日」永遠相同，
+// 台灣 00:00–08:00 的換日邊界測試會形同虛設（有人把本地日期換算改回 slice(0, 10) 也照樣綠）。
+process.env.TZ = 'Asia/Taipei'
+
 // 回歸測試設定。測試聚焦「領域邏輯層」（src/services、src/utils）——
 // 這是用戶端訂位與管理端營運共用的引擎，bug 最常藏在這裡。
 // jsdom 提供 localStorage / window.crypto，貼近瀏覽器執行環境。

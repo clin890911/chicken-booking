@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeOvertimeActions, computeDayRolloverActions,
-  canRunSweeps, filterSweepActionsByPermission,
+  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled,
   KNOWN_SWEEP_ACTIONS, SWEEP_ACTION_PERMISSION,
 } from '../../src/utils/opsSweep'
 
@@ -122,6 +122,39 @@ describe('computeDayRolloverActions（換日掃除）', () => {
   })
 })
 
+describe('computeDayRolloverActions — 換日結候位（leave-waitlist-auto）', () => {
+  const settings = { dayRolloverEnabled: true }
+  const ROLLOVER_TODAY = '2026-09-15'
+  const mkW = (id, overrides = {}) => ({ id, queueNumber: 1, name: '測試客', status: 'waiting', ...overrides })
+
+  it('本地取號日早於 today 且 waiting/called → 挑出；今日/seated/left/缺 takenAt → 不挑', () => {
+    const waitlist = [
+      mkW('W1', { takenAt: new Date(2026, 8, 14, 23, 30).toISOString(), status: 'waiting', queueNumber: 3, name: '林小姐' }), // 昨日 23:30 本地
+      mkW('W2', { takenAt: new Date(2026, 8, 15, 7, 30).toISOString(), status: 'waiting' }),  // 今日 07:30 本地 → 不挑
+      mkW('W3', { takenAt: new Date(2026, 8, 14, 10, 0).toISOString(), status: 'seated' }),   // 昨日但已入座 → 不挑
+      mkW('W4', { takenAt: new Date(2026, 8, 14, 10, 0).toISOString(), status: 'left' }),     // 昨日但已離開 → 不挑
+      mkW('W5', { takenAt: new Date(2026, 8, 14, 10, 0).toISOString(), status: 'called' }),   // 昨日、called → 挑
+      mkW('W6', { status: 'waiting', takenAt: undefined }),                                    // 缺 takenAt → 不挑
+    ]
+    const acts = computeDayRolloverActions({
+      tables: [], bookings: [], groupReservations: [], waitlist, settings, today: ROLLOVER_TODAY,
+    })
+    expect(acts).toEqual([
+      { type: 'leave-waitlist-auto', waitlistId: 'W1', queueNumber: 3, name: '林小姐' },
+      { type: 'leave-waitlist-auto', waitlistId: 'W5', queueNumber: 1, name: '測試客' },
+    ])
+  })
+
+  it('dayRolloverEnabled 關 → 空（含候位）', () => {
+    const waitlist = [mkW('W1', { takenAt: new Date(2026, 8, 14, 10, 0).toISOString() })]
+    const acts = computeDayRolloverActions({
+      tables: [], bookings: [], groupReservations: [], waitlist,
+      settings: { dayRolloverEnabled: false }, today: ROLLOVER_TODAY,
+    })
+    expect(acts).toEqual([])
+  })
+})
+
 // === 掃除的權限政策 ===
 // 這組測試守的是一個「使用者零操作就會壞掉」的災難：掃除是自動跑的，
 // 若讓無寫入權的角色改到本機資料，後端「任一集合越權即整包 403」會讓該裝置
@@ -169,6 +202,30 @@ describe('掃除權限政策', () => {
     const actions = [{ type: 'complete-group', groupId: 'g1' }]
     expect(filterSweepActionsByPermission(actions, undefined)).toEqual(actions)
   })
+
+  it('leave-waitlist-auto 需要 waitlist.update：無權時濾掉，其餘 action 不受影響', () => {
+    const actions = [
+      { type: 'clear-table', tableNumber: 101 },
+      { type: 'leave-waitlist-auto', waitlistId: 'W1' },
+    ]
+    const noWaitlistPerm = filterSweepActionsByPermission(actions, permitOf(['booking.update', 'table.update']))
+    expect(noWaitlistPerm.map(a => a.type)).toEqual(['clear-table'])
+
+    const withWaitlistPerm = filterSweepActionsByPermission(actions, permitOf([...FLOOR, 'waitlist.update']))
+    expect(withWaitlistPerm).toHaveLength(2)
+  })
+
+  // 離線開機（20 秒 fallback）時本機候位快照可能停在昨天：別台早已入座的號在這台仍是 waiting，
+  // 結成 left 整份推上雲會把 seated 蓋掉。尚未拉雲前只延後候位結號，其餘換日動作照做。
+  it('尚未從雲端拉過：延後 leave-waitlist-auto，其餘 action 照常；拉過後全部放行', () => {
+    const actions = [
+      { type: 'clear-table', tableNumber: 101 },
+      { type: 'leave-waitlist-auto', waitlistId: 'W1' },
+      { type: 'complete-booking', bookingId: 'b1' },
+    ]
+    expect(deferUntilCloudPulled(actions, false).map(a => a.type)).toEqual(['clear-table', 'complete-booking'])
+    expect(deferUntilCloudPulled(actions, true)).toEqual(actions)
+  })
 })
 
 // 註冊表完整性：擋「新增了 action 種類卻忘了登記它要寫哪個集合」。
@@ -189,7 +246,7 @@ describe('掃除 action 註冊表完整性', () => {
       now: NOW,
     }).forEach(a => produced.add(a.type))
 
-    // 涵蓋 computeDayRolloverActions 的全部分支（含 autoNoshowOnRollover 開啟）
+    // 涵蓋 computeDayRolloverActions 的全部分支（含 autoNoshowOnRollover 開啟、換日結候位）
     computeDayRolloverActions({
       tables: [mkT('101', { status: 'dining', currentBookingId: 'B-old', seatedAt: '2026-06-09T19:00:00.000Z' })],
       bookings: [
@@ -197,6 +254,7 @@ describe('掃除 action 註冊表完整性', () => {
         { id: 'B-conf', date: '2026-06-09', status: 'confirmed' },
       ],
       groupReservations: [{ id: 'G-arr', date: '2026-06-09', status: 'arrived' }],
+      waitlist: [{ id: 'W1', queueNumber: 1, name: '測試', status: 'waiting', takenAt: '2026-06-09T10:00:00.000Z' }],
       settings: { dayRolloverEnabled: true, autoNoshowOnRollover: true },
       today: TODAY,
     }).forEach(a => produced.add(a.type))
