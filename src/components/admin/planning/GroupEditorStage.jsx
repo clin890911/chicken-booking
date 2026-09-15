@@ -6,6 +6,8 @@ import { Button, Input, Select, Textarea } from '../../ui'
 import SeatGauge from '../../ui/SeatGauge'
 import FloorMap from '../floormap/FloorMap'
 import GroupSheet from '../group/GroupSheet'
+import Icon from '../../ui/Icon'
+import SegmentedControl from '../../ui/SegmentedControl'
 import AgencyPicker from '../group/AgencyPicker'
 import { dayLabel, seatingForSlot, arrivalSlotsForSeating } from '../../../utils/timeSlots'
 import { groupTableNumbers, guestTableNumbers, guestBatches, isEscortBatch, remainingTablesForSeating } from '../../../utils/capacity'
@@ -350,38 +352,48 @@ export default function GroupEditorStage({
   return (
     <div className="space-y-3">
       {/* 頂部：返回 + 標題 + 頁籤 */}
-      <div className="bg-white rounded-xl border border-chicken-brown/10 p-3 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <button onClick={onBack} className="text-sm font-bold text-chicken-brown/70 hover:text-chicken-brown">← 返回當日總覽</button>
-          <div className="text-sm font-bold text-chicken-brown">
-            {isNew ? '新增團單' : `編輯：${draft.agencyName || '（未填旅行社）'}`} · {dayLabel(date)}
-          </div>
+      <div className="flex items-center gap-2 flex-wrap px-1">
+        <button type="button" onClick={onBack} className="tap inline-flex items-center gap-0.5 h-8 pr-2 rounded-lg text-[13px] font-semibold text-chicken-brown/60 hover:text-chicken-brown">
+          <Icon name="chevronLeft" size={14} strokeWidth={2.4} />返回當日總覽
+        </button>
+        <span className="flex-1" />
+        <div className="text-sm font-semibold text-chicken-brown tabular-nums">
+          {isNew ? '新增團單' : `編輯：${draft.agencyName || '（未填旅行社）'}`} <span className="text-chicken-brown/50">· {dayLabel(date)}</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          {PAGES.map((s, i) => (
-            <div key={s.n} className="flex items-center gap-1.5 flex-1">
+      </div>
+      {/* 兩步驟指示：完成的步驟打勾、目前步驟紅底白字、未到的步驟灰字 */}
+      <div className="flex items-center gap-2 px-1">
+        {PAGES.map((s, i) => {
+          const done = step > s.n, active = step === s.n
+          return (
+            <div key={s.n} className="flex items-center gap-2 flex-1 min-w-0">
               <button
+                type="button"
                 onClick={() => { if (s.n === 1 || !pageError(1)) setStep(s.n); else toast.error(pageError(1)) }}
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold border-2 transition-all w-full justify-center ${
-                  step === s.n ? 'bg-indigo-600 border-indigo-600 text-white'
-                    : step > s.n ? 'bg-indigo-50 border-indigo-300 text-indigo-700'
-                      : 'bg-white border-chicken-brown/15 text-chicken-brown/60'
+                aria-current={active ? 'step' : undefined}
+                className={`tap w-full inline-flex items-center justify-center gap-2 h-9 rounded-[10px] text-[13px] font-semibold transition-colors ${
+                  active ? 'bg-chicken-red/[0.08] text-chicken-red' : done ? 'bg-white border border-chicken-brown/10 text-chicken-brown' : 'bg-white border border-chicken-brown/10 text-chicken-brown/45'
                 }`}
               >
-                <span className="text-[10px] opacity-70">{s.n}.</span>
+                <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-bold ${active ? 'bg-chicken-red text-white' : done ? 'bg-[#5b8c1f] text-white' : 'bg-chicken-brown/10 text-chicken-brown/60'}`}>
+                  {done ? <Icon name="check" size={12} strokeWidth={3} /> : s.n}
+                </span>
                 {s.label}
               </button>
-              {i < PAGES.length - 1 && <span className="text-chicken-brown/20">›</span>}
+              {i < PAGES.length - 1 && <Icon name="chevronRight" size={14} strokeWidth={2.2} className="text-chicken-brown/30 shrink-0" />}
             </div>
-          ))}
-        </div>
+          )
+        })}
       </div>
 
       {/* 改期橫幅：由「📅 改期」進入時顯示原日期→新日期，提示須重新圈桌 */}
       {rescheduleFrom && rescheduleFrom !== date && (
-        <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 px-4 py-3 text-sm">
-          <div className="font-bold text-indigo-700">改期中：{dayLabel(rescheduleFrom)} → {dayLabel(date)}</div>
-          <div className="mt-0.5 text-xs font-bold text-indigo-600/80">原圈桌位已清空，請於下方為新日期重新圈桌後儲存；未儲存前團單仍留在原日期。</div>
+        <div className="flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-sm">
+          <Icon name="calendar" size={18} className="text-indigo-600 shrink-0 mt-px" />
+          <div>
+            <div className="font-semibold text-indigo-700">改期中：{dayLabel(rescheduleFrom)} → {dayLabel(date)}</div>
+            <div className="mt-0.5 text-xs text-indigo-600/80">原圈桌位已清空，請於下方為新日期重新圈桌後儲存；未儲存前團單仍留在原日期。</div>
+          </div>
         </div>
       )}
 
@@ -390,7 +402,7 @@ export default function GroupEditorStage({
         <div className="space-y-3">
           {/* 旅行社 / 導遊 */}
           <div className="bg-white rounded-xl border border-chicken-brown/10 p-4 space-y-3">
-            <h3 className="font-bold text-chicken-brown text-sm">① 旅行社 / 導遊</h3>
+            <h3 className="text-sm font-semibold text-chicken-brown flex items-center gap-2"><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-chicken-brown/[0.08] text-[11px] font-bold text-chicken-brown/70">1</span>旅行社 / 導遊</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <AgencyPicker
                 agencies={agencies}
@@ -403,7 +415,7 @@ export default function GroupEditorStage({
               <div>
                 <Select label="導遊" value={draft.guideId || ''} onChange={e => onSelectGuide(e.target.value)}
                   options={[{ value: '', label: '— 選擇導遊 —' }, ...draftGuides.map(g => ({ value: g.id, label: `${g.name}${g.phone ? `（${g.phone}）` : ''}` }))]} />
-                <button onClick={() => draft.agencyId ? setQuickGuide({ name: '', phone: '' }) : toast.error('請先選旅行社')} className="text-xs text-chicken-red font-bold mt-1">＋ 快速新增導遊</button>
+                <button onClick={() => draft.agencyId ? setQuickGuide({ name: '', phone: '' }) : toast.error('請先選旅行社')} className="tap inline-flex items-center gap-0.5 text-xs text-chicken-red font-semibold mt-1.5"><Icon name="plus" size={12} strokeWidth={2.4} />快速新增導遊</button>
               </div>
             </div>
             {quickAgency && (
@@ -424,7 +436,7 @@ export default function GroupEditorStage({
 
           {/* 人數結構 + 特殊需求 */}
           <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
-            <h3 className="font-bold text-chicken-brown mb-2 text-sm">② 人數結構</h3>
+            <h3 className="text-sm font-semibold text-chicken-brown flex items-center gap-2 mb-2.5"><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-chicken-brown/[0.08] text-[11px] font-bold text-chicken-brown/70">2</span>人數結構</h3>
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               {COUNT_FIELDS.map(f => (
                 <Input key={f.key} label={f.label} type="number" inputMode="numeric" min={0}
@@ -440,7 +452,7 @@ export default function GroupEditorStage({
 
           {/* 預選場次（剩餘桌/席提示） */}
           <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
-            <h3 className="font-bold text-chicken-brown mb-1 text-sm">③ 預選場次</h3>
+            <h3 className="text-sm font-semibold text-chicken-brown flex items-center gap-2 mb-1"><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-chicken-brown/[0.08] text-[11px] font-bold text-chicken-brown/70">3</span>預選場次</h3>
             <p className="text-xs text-chicken-brown/55 mb-3">選好主場次後，下一頁再圈座位。兩段用餐可於圈座位頁加第二梯。</p>
             {hasSeatings ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -449,26 +461,29 @@ export default function GroupEditorStage({
                   const tone = seatingTone(r)
                   const selected = primarySeating?.id === s.id
                   const disabled = tone === 'closed' || tone === 'full'
-                  const toneCls = selected
-                    ? 'border-indigo-600 bg-indigo-600 text-white'
-                    : tone === 'closed' ? 'border-chicken-brown/15 bg-chicken-brown/5 text-chicken-brown/40'
-                      : tone === 'full' ? 'border-rose-200 bg-rose-50 text-rose-400'
-                        : tone === 'tight' ? 'border-amber-300 bg-amber-50 text-amber-800'
-                          : 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  const boxCls = selected
+                    ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04] text-chicken-brown'
+                    : disabled ? 'ring-1 ring-inset ring-chicken-brown/[0.08] bg-chicken-brown/[0.03] text-chicken-brown/40'
+                      : 'ring-1 ring-inset ring-chicken-brown/[0.1] bg-white text-chicken-brown hover:ring-chicken-brown/25'
+                  const remainCls = tone === 'closed' || tone === 'full' ? 'text-chicken-brown/40' : tone === 'tight' ? 'text-amber-700' : 'text-[#5b8c1f]'
                   return (
                     <button
                       key={s.id}
                       type="button"
                       disabled={disabled}
+                      aria-pressed={selected}
                       onClick={() => selectSession(s)}
-                      className={`rounded-xl border-2 p-3 text-left transition-all disabled:cursor-not-allowed ${toneCls}`}
+                      className={`tap rounded-xl p-3 text-left transition-shadow disabled:cursor-not-allowed ${boxCls}`}
                     >
-                      <div className="text-sm font-bold">{s.name}</div>
-                      <div className={`text-xs ${selected ? 'text-white/80' : 'opacity-70'}`}>{s.start}–{s.end}</div>
-                      <div className="mt-1.5 text-xs font-bold">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold">{s.name}</span>
+                        <span className="text-xs text-chicken-brown/50 tabular-nums">{s.start}–{s.end}</span>
+                        {selected && <Icon name="checkCircle" size={16} className="ml-auto text-chicken-red" />}
+                      </div>
+                      <div className={`mt-1.5 text-xs font-semibold tabular-nums ${remainCls}`}>
                         {tone === 'closed' ? '已關閉'
                           : tone === 'full' ? '已客滿'
-                            : `剩 ${r?.remainingTables ?? '—'} 桌 / ${r?.remainingSeats ?? '—'} 席`}
+                            : `剩 ${r?.remainingTables ?? '—'} 桌 · ${r?.remainingSeats ?? '—'} 席`}
                       </div>
                     </button>
                   )
@@ -509,7 +524,7 @@ export default function GroupEditorStage({
           {/* 梯次列 */}
           <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="font-bold text-chicken-brown text-sm">梯次（兩段用餐可加第二梯）</h3>
+              <h3 className="text-sm font-semibold text-chicken-brown">梯次 <span className="text-xs font-medium text-chicken-brown/50">· 兩段用餐可加第二梯</span></h3>
             </div>
             {/* 多梯拆批提示：各旅客梯次人數總和應等於總人數（司領桌不計） */}
             {gBatches.length > 1 && (() => {
@@ -528,9 +543,9 @@ export default function GroupEditorStage({
                 const active = activeBatchId === b.id
                 const single = singleGuest
                 return (
-                  <div key={b.id} className={`rounded-lg border-2 p-2 ${active ? 'border-indigo-500 bg-indigo-50' : 'border-chicken-brown/10'}`}>
+                  <div key={b.id} className={`rounded-xl p-2.5 ${active ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04]' : 'ring-1 ring-inset ring-chicken-brown/10 bg-white'}`}>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-bold text-chicken-brown">{b.label}</span>
+                      <span className="text-sm font-semibold text-chicken-brown">{b.label}</span>
                       {sea && (
                         <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>
                       )}
@@ -548,11 +563,11 @@ export default function GroupEditorStage({
                       )}
                       <span className="text-xs text-chicken-brown/60">桌 {(b.tableNumbers || []).join('、') || '未圈'}</span>
                       <div className="flex-1" />
-                      <button onClick={() => setActiveBatchId(b.id)} className={`text-xs px-2.5 py-1 rounded-lg font-bold ${active ? 'bg-indigo-600 text-white' : 'bg-white border border-chicken-brown/10 text-chicken-brown'}`}>
+                      <button type="button" onClick={() => setActiveBatchId(b.id)} className={`tap text-xs px-2.5 h-7 rounded-lg font-semibold ${active ? 'bg-chicken-red text-white' : 'bg-white border border-chicken-brown/15 text-chicken-brown'}`}>
                         {active ? '圈桌中' : '圈此梯桌'}
                       </button>
                       {gBatches.length > 1 && (
-                        <button onClick={() => removeBatch(b.id)} className="text-xs text-chicken-red font-bold">刪</button>
+                        <button type="button" onClick={() => removeBatch(b.id)} aria-label="刪除此梯" className="tap w-7 h-7 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]"><Icon name="trash" size={14} /></button>
                       )}
                     </div>
                     <SeatGauge size="xs" circled={seatsOf(b.tableNumbers)} needed={batchGuests(b)} className="mt-1.5" />
@@ -564,35 +579,35 @@ export default function GroupEditorStage({
             {/* 新增梯次（綁場次） */}
             <div className="mt-2">
               {addingBatch ? (
-                <div className="rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50/50 p-2 space-y-1.5">
-                  <div className="text-xs font-bold text-indigo-700">選第二梯的場次：</div>
+                <div className="rounded-xl border border-dashed border-chicken-brown/20 bg-[#fbfaf8] p-2.5 space-y-1.5">
+                  <div className="text-xs font-semibold text-chicken-brown/70">選第二梯的場次：</div>
                   <div className="flex flex-wrap gap-1.5">
                     {(hasSeatings ? seatings : []).map(s => {
                       const r = seatingRemaining[s.id]
                       const disabled = r?.closed || (r?.remainingSeats ?? 0) <= 0
                       return (
                         <button key={s.id} disabled={disabled} onClick={() => { addBatchForSeating(s); setAddingBatch(false) }}
-                          className="rounded-lg border-2 border-indigo-200 bg-white px-2.5 py-1 text-xs font-bold text-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                          className="tap rounded-lg border border-chicken-brown/15 bg-white px-2.5 h-8 text-xs font-semibold text-chicken-brown disabled:opacity-40 disabled:cursor-not-allowed">
                           {s.name} {s.start}（剩 {r?.remainingSeats ?? '—'} 席）
                         </button>
                       )
                     })}
                     {!hasSeatings && <span className="text-xs text-chicken-brown/50">尚未設定場次</span>}
                   </div>
-                  <button onClick={() => setAddingBatch(false)} className="text-xs text-chicken-brown/60 font-bold">取消</button>
+                  <button type="button" onClick={() => setAddingBatch(false)} className="tap text-xs text-chicken-brown/60 font-semibold">取消</button>
                 </div>
               ) : (
-                <button onClick={() => setAddingBatch(true)} className="text-xs text-chicken-red font-bold">＋ 新增梯次（兩段用餐輪替）</button>
+                <button type="button" onClick={() => setAddingBatch(true)} className="tap inline-flex items-center gap-0.5 text-xs text-chicken-red font-semibold"><Icon name="plus" size={12} strokeWidth={2.4} />新增梯次（兩段用餐輪替）</button>
               )}
             </div>
 
             {/* 司領桌（司機 + 領隊）：獨立小桌，可圈多張、人數獨立不計入總人數 */}
             <div className="mt-3 pt-3 border-t border-chicken-brown/10">
               {escortBatch ? (
-                <div className={`rounded-lg border-2 p-2 ${activeBatchId === escortBatch.id ? 'border-indigo-500 bg-indigo-50' : 'border-indigo-200 bg-indigo-50/40'}`}>
+                <div className={`rounded-xl p-2.5 ${activeBatchId === escortBatch.id ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04]' : 'ring-1 ring-inset ring-indigo-200 bg-indigo-50/40'}`}>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-bold text-indigo-700">司領桌</span>
-                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">司機+領隊</span>
+                    <span className="text-sm font-semibold text-indigo-700">司領桌</span>
+                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">司機+領隊</span>
                     {(() => {
                       const sea = seatingForSlot(settings, escortBatch.timeSlot)
                       return (
@@ -613,43 +628,39 @@ export default function GroupEditorStage({
                     </label>
                     <span className="text-xs text-chicken-brown/60">桌 {(escortBatch.tableNumbers || []).join('、') || '未圈'}</span>
                     <div className="flex-1" />
-                    <button onClick={() => setActiveBatchId(escortBatch.id)}
-                      className={`text-xs px-2.5 py-1 rounded-lg font-bold ${activeBatchId === escortBatch.id ? 'bg-indigo-600 text-white' : 'bg-white border-2 border-indigo-200 text-indigo-700'}`}>
+                    <button type="button" onClick={() => setActiveBatchId(escortBatch.id)}
+                      className={`tap text-xs px-2.5 h-7 rounded-lg font-semibold ${activeBatchId === escortBatch.id ? 'bg-chicken-red text-white' : 'bg-white border border-indigo-200 text-indigo-700'}`}>
                       {activeBatchId === escortBatch.id ? '圈桌中' : '圈司領桌'}
                     </button>
-                    <button onClick={() => removeEscort(escortBatch.id)} className="text-xs text-chicken-red font-bold">刪</button>
+                    <button type="button" onClick={() => removeEscort(escortBatch.id)} aria-label="移除司領桌" className="tap w-7 h-7 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]"><Icon name="trash" size={14} /></button>
                   </div>
                   <div className="mt-1 text-[11px] text-indigo-600/70">司領桌人數不計入團體總人數與旅客保留席；可圈多張（多輛長途車）。</div>
                 </div>
               ) : (
-                <button onClick={addEscort} className="text-xs text-indigo-700 font-bold">＋ 加司領桌（司機 / 領隊）</button>
+                <button type="button" onClick={addEscort} className="tap inline-flex items-center gap-0.5 text-xs text-indigo-700 font-semibold"><Icon name="plus" size={12} strokeWidth={2.4} />加司領桌（司機 / 領隊）</button>
               )}
             </div>
           </div>
 
           {/* 規劃地圖 */}
-          <div className="bg-indigo-50 rounded-xl border-2 border-indigo-300 p-3"
-            style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 12px, rgba(99,102,241,0.05) 12px, rgba(99,102,241,0.05) 24px)' }}>
-            <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+          <div className="bg-white rounded-xl border border-chicken-brown/10 p-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
               <div className="min-w-[200px]">
-                <div className="text-sm font-bold text-indigo-700">規劃模式 · {dayLabel(date)}（非今日即時）</div>
-                <div className="text-xs text-indigo-600/80">
+                <div className="text-sm font-semibold text-chicken-brown">圈選座位 <span className="text-xs font-medium text-chicken-brown/50">· {dayLabel(date)} 規劃，非今日即時</span></div>
+                <div className={`text-xs ${activeBatch ? 'text-chicken-red font-semibold' : 'text-chicken-brown/55'}`}>
                   {activeBatch ? `圈桌中：${activeBatch.label}${seatingForSlot(settings, activeBatch.timeSlot) ? ' · ' + seatingForSlot(settings, activeBatch.timeSlot).name : ' ' + activeBatch.timeSlot}` : '請於上方選一個梯次'}
                 </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                <button onClick={autoSuggest} className="rounded-lg bg-chicken-green px-3 py-1.5 text-xs font-bold text-white hover:opacity-90">一鍵推薦桌位</button>
-                {['1F', '2F'].map(f => (
-                  <button key={f} onClick={() => setFloor(f)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${floor === f ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-indigo-200 text-indigo-700'}`}>{f}</button>
-                ))}
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={autoSuggest} className="tap inline-flex items-center gap-1 h-8 px-3 rounded-[9px] bg-white border border-chicken-brown/15 text-xs font-semibold text-chicken-brown"><Icon name="target" size={14} />一鍵推薦桌位</button>
+                <SegmentedControl size="sm" ariaLabel="樓層" value={floor} onChange={setFloor} options={[{ key: '1F', label: '1F' }, { key: '2F', label: '2F' }]} />
               </div>
             </div>
 
             {activeBatch && (
-              <div className="mb-2 rounded-lg bg-white/70 px-3 py-2">
+              <div className="mb-2.5 rounded-lg bg-[#fbfaf8] border border-chicken-brown/[0.08] px-3 py-2">
                 <SeatGauge circled={seatsOf(selectedTables)} needed={batchGuests(activeBatch)} />
-                <div className="mt-1 text-[11px] font-bold text-indigo-600/70">旅客保留 {heldSeats} 席（不含司領桌）</div>
+                <div className="mt-1 text-[11px] text-chicken-brown/55">旅客保留 {heldSeats} 席（不含司領桌）</div>
               </div>
             )}
 
@@ -669,7 +680,7 @@ export default function GroupEditorStage({
               </div>
             )}
 
-            <div className="bg-white rounded-lg p-2 min-h-[360px]">
+            <div className="rounded-lg overflow-hidden border border-chicken-brown/5 min-h-[360px]" style={{ background: '#faf8f5' }}>
               <FloorMap
                 floor={floor}
                 tables={tables}
@@ -683,16 +694,16 @@ export default function GroupEditorStage({
                 onSelectTable={toggleTable}
               />
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-bold text-indigo-700/80">
-              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded bg-indigo-600" />已選</span>
-              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded bg-slate-400" />已被佔</span>
-              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded bg-slate-200" />可選</span>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] font-semibold text-chicken-brown/55">
+              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-600" />已選</span>
+              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-400" />已被佔</span>
+              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-200 border border-slate-300" />可選</span>
             </div>
           </div>
 
           {/* 摘要 + 存檔 */}
           <div className="bg-white rounded-xl border border-chicken-brown/10 p-4 space-y-3">
-            <h3 className="font-bold text-chicken-brown text-sm">確認與儲存</h3>
+            <h3 className="text-sm font-semibold text-chicken-brown">確認與儲存</h3>
             <dl className="text-sm divide-y divide-chicken-brown/10">
               <div className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">旅行社 / 導遊</dt>
                 <dd className="font-bold text-chicken-brown text-right">{draft.agencyName || '（未填）'}{draft.guideName ? ` · ${draft.guideName}` : ''}</dd></div>
@@ -720,7 +731,7 @@ export default function GroupEditorStage({
               <Button onClick={save} disabled={busy} className="flex-1 min-w-[160px]">{busy ? '儲存中…' : '儲存團單（含衝突檢查）'}</Button>
               <Button variant="secondary" onClick={() => setSheetOpen(true)}>回傳單</Button>
               {!isNew && (
-                <button onClick={doDelete} className="px-3 py-2 rounded-xl text-sm font-bold text-chicken-red border-2 border-chicken-red/30">刪除</button>
+                <button type="button" onClick={doDelete} className="tap inline-flex items-center gap-1 min-h-[44px] px-3.5 rounded-[10px] text-sm font-semibold text-chicken-red hover:bg-chicken-red/[0.06]"><Icon name="trash" size={14} />刪除</button>
               )}
             </div>
           </div>
@@ -728,9 +739,9 @@ export default function GroupEditorStage({
       )}
 
       {/* 頁面導覽列 */}
-      <div className="bg-white rounded-xl border border-chicken-brown/10 p-3 flex items-center gap-2">
-        <button onClick={goPrev} disabled={step === 1}
-          className="px-4 py-2 rounded-xl text-sm font-bold border border-chicken-brown/10 text-chicken-brown disabled:opacity-40">← 上一頁</button>
+      <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-6 px-3 sm:px-6 py-2.5 bg-chicken-cream/95 backdrop-blur border-t border-chicken-brown/10 flex items-center gap-2">
+        <button type="button" onClick={goPrev} disabled={step === 1}
+          className="tap inline-flex items-center gap-1 h-10 px-4 rounded-[10px] text-sm font-semibold bg-white border border-chicken-brown/15 text-chicken-brown disabled:opacity-40"><Icon name="chevronLeft" size={14} strokeWidth={2.4} />上一頁</button>
         <div className="flex-1" />
         {step < 2
           ? <Button onClick={goNext}>下一步：圈選座位 →</Button>

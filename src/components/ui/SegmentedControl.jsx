@@ -1,7 +1,8 @@
 // 分段控制（segmented control）：灰底槽 + 白色浮起的選中段，與 iPadOS 一致。
 // 後台各分頁的子籤（訂位：今日/日曆/查詢/新增；名冊：顧客/旅行社；規劃：當日總覽/排位地圖；
 // 現場：桌況圖/排程/總覽、1F/2F）統一用這一顆，不再各自畫實心紅底的 pill。
-// options: [{ key, label, icon?, badge? }]；size='md'（32px）| 'sm'（28px）；fill=true 時撐滿寬度均分。
+// options: [{ key, label, icon?, badge?, sub?, muted?, title? }]；size='md'（32px）| 'sm'（28px）；fill=true 時撐滿寬度均分。
+// sub：標籤右側的小字（如場次時間）；muted：該段不可用（關閉的場次）——仍可點，但淡化並劃線。
 import Icon from './Icon'
 
 export default function SegmentedControl({ options, value, onChange, size = 'md', fill = false, className = '', ariaLabel }) {
@@ -18,11 +19,12 @@ export default function SegmentedControl({ options, value, onChange, size = 'md'
             onClick={() => onChange(o.key)}
             title={o.title}
             className={`tap inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold whitespace-nowrap transition-colors ${h} ${fill ? 'flex-1 min-w-0' : ''} ${
-              active ? 'bg-white text-chicken-brown shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.04)]' : 'text-chicken-brown/60 hover:text-chicken-brown'
+              active ? 'bg-white text-chicken-brown shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.04)]' : o.muted ? 'text-chicken-brown/35 line-through' : 'text-chicken-brown/60 hover:text-chicken-brown'
             }`}
           >
             {o.icon && <Icon name={o.icon} size={size === 'sm' ? 14 : 16} />}
             <span className={o.hideLabelOnNarrow ? 'hidden sm:inline' : ''}>{o.label}</span>
+            {o.sub && <span className={`text-[11px] font-medium tabular-nums ${active ? 'text-chicken-brown/55' : 'text-chicken-brown/40'}`}>{o.sub}</span>}
             {o.badge > 0 && (
               <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-chicken-red text-white text-[11px] font-bold inline-flex items-center justify-center">{o.badge > 99 ? '99+' : o.badge}</span>
             )}
