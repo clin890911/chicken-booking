@@ -395,7 +395,7 @@ export default function SettingsView({ onOpenCustomer }) {
         </div>
       )}
 
-      <SettingsSection sectionKey="hours" title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" summary={hoursSummary} defaultOpen>
+      <SettingsSection sectionKey="hours" title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" summary={hoursSummary}>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <Input label="開始時間" type="time" value={form.openTime} onChange={e => setForm(f => ({ ...f, openTime: e.target.value }))} />
@@ -472,7 +472,7 @@ export default function SettingsView({ onOpenCustomer }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection sectionKey="seatings" title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" summary={`${seatingsCount} 場次`} defaultOpen>
+      <SettingsSection sectionKey="seatings" title="場次設定" description="定義固定場次（午餐第一批、晚餐第一批…）。排位規劃地圖與「關閉整場次」皆依此。" summary={`${seatingsCount} 場次`}>
         <SeatingsEditor form={form} setForm={setForm} />
       </SettingsSection>
 
