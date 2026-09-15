@@ -138,9 +138,24 @@ export function summarizeDayPrep(groupReservations = [], date) {
   const tableSideNeeds = []
   const buses = []
   const mobilityGroups = []
+  const byGroup = [] // 每團的需求明細（給備餐重點「點素食看哪一團」展開用）
 
   groups.forEach(g => {
     const c = g.counts || {}
+    byGroup.push({
+      id: g.id,
+      agencyName: g.agencyName || '（未填旅行社）',
+      status: g.status,
+      counts: {
+        vegetarian: Number(c.vegetarian) || 0,
+        child: Number(c.child) || 0,
+        mobility: Number(c.mobility) || 0,
+        wheelchair: Number(c.wheelchair) || 0,
+      },
+      firstTimeSlot: (g.batches || []).map(b => b.timeSlot).filter(Boolean).sort()[0] || '',
+      tableNumbers: groupTableNumbers(g),
+      allergyText: (g.allergyText || '').trim(),
+    })
     counts.total += Number(c.total) || 0
     counts.vegetarian += Number(c.vegetarian) || 0
     counts.child += Number(c.child) || 0
@@ -156,7 +171,7 @@ export function summarizeDayPrep(groupReservations = [], date) {
     }
   })
 
-  return { counts, allergies, tableSideNeeds, buses, mobilityGroups, groupCount: groups.length }
+  return { counts, allergies, tableSideNeeds, buses, mobilityGroups, byGroup, groupCount: groups.length }
 }
 
 // === (c) 遊覽車抵達時間軸 ===

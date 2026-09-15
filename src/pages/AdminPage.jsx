@@ -15,11 +15,11 @@ import { todayStr } from '../utils/timeSlots'
 import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts } from '../utils/newBookingAlerts'
 
 const TABS = [
-  { key: 'ops',       label: '現場',  icon: '🪑', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
-  { key: 'planning',  label: '規劃',  icon: '🗺️', subtitle: '月曆 · 當日總覽 · 排位地圖 · 團體預排' },
-  { key: 'bookings',  label: '訂位',  icon: '📋', subtitle: '散客 · 今日 · 日曆 · 新增',   badgeKey: 'bookings' },
-  { key: 'roster',    label: '名冊',  icon: '👥', subtitle: '顧客檔 · VIP · 旅行社 · 導遊' },
-  { key: 'settings',  label: '設定',  icon: '⚙️', subtitle: '營業時段 · 桌位 · 帳號' },
+  { key: 'ops',       label: '現場',  icon: 'ops', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
+  { key: 'planning',  label: '規劃',  icon: 'planning', subtitle: '月曆 · 當日總覽 · 排位地圖 · 團體預排' },
+  { key: 'bookings',  label: '訂位',  icon: 'bookings', subtitle: '散客 · 今日 · 日曆 · 新增',   badgeKey: 'bookings' },
+  { key: 'roster',    label: '名冊',  icon: 'roster', subtitle: '顧客檔 · VIP · 旅行社 · 導遊' },
+  { key: 'settings',  label: '設定',  icon: 'settings', subtitle: '營業時段 · 桌位 · 帳號' },
 ]
 
 const VALID_TABS = TABS.map(t => t.key)
@@ -148,9 +148,9 @@ export default function AdminPage() {
             title="雞王管理後台"
             subtitle={tabInfo.label}
             right={
-              <div className="text-right text-xs opacity-90">
-                <div className="font-bold">{user?.displayName}</div>
-                <div className="opacity-80">{user?.roleLabel}</div>
+              <div className="text-right text-xs">
+                <div className="font-semibold text-chicken-brown">{user?.displayName}</div>
+                <div className="text-chicken-brown/55">{user?.roleLabel}</div>
               </div>
             }
           />

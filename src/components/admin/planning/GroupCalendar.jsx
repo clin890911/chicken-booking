@@ -1,10 +1,24 @@
 import { useMemo } from 'react'
 import { todayStr, formatDate } from '../../../utils/timeSlots'
+import Icon from '../../ui/Icon'
 
-// Pane A：團體預排月曆。仿 CalendarView 月格，吃 monthSummary（團體彙總）視覺化整月忙閒。
-// 受控元件：value(選中日) / cursor(年月) 由容器持有；點日 onSelect、換月 onCursorChange。
-// 每格：🚌N團 · N位 + 依「保留席/全店座位」的忙碌條；公休 🚫、今天標記、純團爆量 ⚠。
-// walkinByDate（可選）：{ [date]: { count, guests } } 散客量小字（≥sm 顯示）；缺省時行為與舊版一致。
+// Pane A：規劃月曆（熱圖版）。受控元件：value(選中日) / cursor(年月) 由容器持有；點日 onSelect、換月 onCursorChange。
+// 每格三件事，由遠到近一眼可讀：
+//   1. 底色 = 當日載客率（團客人數 + 散客人數）/ 全店可用席，0 → 100% 六階暖色；
+//   2. 大數字 = 當日總人數（店主要的是「今天幾位」，不是「幾團幾筆」）；
+//   3. 小字 = 幾團 · 幾筆（明細）。
+// 純團爆量（heldSeats > 可用席）在格右上角以紅點提示；公休格灰底斜線圖示。
+// monthSummary 只吃 groups+tables（O(groups)），walkinByDate 由容器另算，兩者在此合併。
+const HEAT = ['#ffffff', '#fff3e2', '#fde7c9', '#fbd6a6', '#f39a5e', '#e6552e']
+function heatLevel(ratio) {
+  if (ratio <= 0) return 0
+  if (ratio < 0.1) return 1
+  if (ratio < 0.25) return 2
+  if (ratio < 0.4) return 3
+  if (ratio < 0.7) return 4
+  return 5
+}
+
 export default function GroupCalendar({ value, onSelect, cursor, onCursorChange, monthSummary, settings, totalSeats = 0, walkinByDate }) {
   const byDate = monthSummary?.byDate || {}
   const month = monthSummary?.month || { groupCount: 0, guests: 0 }
@@ -21,28 +35,44 @@ export default function GroupCalendar({ value, onSelect, cursor, onCursorChange,
     return cells
   }, [cursor])
 
+  // 本月散客彙總（小字，與團體並列）
+  const walkinMonth = useMemo(() => {
+    const prefix = `${cursor.year}-${String(cursor.month + 1).padStart(2, '0')}-`
+    let count = 0, guests = 0
+    Object.entries(walkinByDate || {}).forEach(([d, w]) => {
+      if (!d.startsWith(prefix)) return
+      count += w.count || 0
+      guests += w.guests || 0
+    })
+    return { count, guests }
+  }, [walkinByDate, cursor])
+
   const goPrev = () => onCursorChange(cursor.month === 0 ? { year: cursor.year - 1, month: 11 } : { year: cursor.year, month: cursor.month - 1 })
   const goNext = () => onCursorChange(cursor.month === 11 ? { year: cursor.year + 1, month: 0 } : { year: cursor.year, month: cursor.month + 1 })
+  const goToday = () => {
+    const d = new Date(today + 'T00:00:00')
+    onCursorChange({ year: d.getFullYear(), month: d.getMonth() })
+    onSelect(today)
+  }
 
   return (
-    <div className="bg-white rounded-2xl border border-chicken-brown/10 p-3 sm:p-4">
-      <div className="flex items-center justify-between mb-3">
-        <button onClick={goPrev} aria-label="上個月" className="px-3 py-1 rounded-lg hover:bg-chicken-brown/5 text-chicken-brown text-lg">‹</button>
-        <h3 className="font-black text-lg text-chicken-brown">{cursor.year}年 {cursor.month + 1}月</h3>
-        <button onClick={goNext} aria-label="下個月" className="px-3 py-1 rounded-lg hover:bg-chicken-brown/5 text-chicken-brown text-lg">›</button>
+    <div className="bg-white rounded-2xl border border-chicken-brown/10 p-3 sm:p-4 shadow-[0_1px_2px_rgba(58,46,38,0.04)]">
+      <div className="flex items-center gap-2.5 mb-3 flex-wrap">
+        <h3 className="font-semibold text-lg sm:text-xl text-chicken-brown tracking-tight">{cursor.year}年 {cursor.month + 1}月</h3>
+        <div className="text-xs text-chicken-brown/60 tabular-nums">
+          {month.groupCount} 團 · {month.guests} 位 · 散客 {walkinMonth.count} 筆 · {walkinMonth.guests} 位
+        </div>
+        <div className="flex-1" />
+        <button type="button" onClick={goToday} className="tap h-8 px-2.5 rounded-lg border border-chicken-brown/15 text-xs font-semibold text-chicken-brown hover:bg-chicken-brown/[0.04]">今天</button>
+        <button type="button" onClick={goPrev} aria-label="上個月" className="tap w-8 h-8 rounded-lg border border-chicken-brown/15 text-chicken-brown flex items-center justify-center hover:bg-chicken-brown/[0.04]"><Icon name="chevronLeft" size={14} strokeWidth={2.2} /></button>
+        <button type="button" onClick={goNext} aria-label="下個月" className="tap w-8 h-8 rounded-lg border border-chicken-brown/15 text-chicken-brown flex items-center justify-center hover:bg-chicken-brown/[0.04]"><Icon name="chevronRight" size={14} strokeWidth={2.2} /></button>
       </div>
 
-      {/* 當月摘要 */}
-      <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
-        <span className="rounded-full bg-chicken-red/10 px-2.5 py-1 font-bold text-chicken-red tabular-nums">🚌 本月 {month.groupCount} 團</span>
-        <span className="rounded-full bg-chicken-brown/10 px-2.5 py-1 font-bold text-chicken-brown tabular-nums">👥 {month.guests} 位</span>
-      </div>
-
-      <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-chicken-brown/50 mb-1">
+      <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-[11px] font-semibold text-chicken-brown/50 mb-1">
         {['日', '一', '二', '三', '四', '五', '六'].map(w => <div key={w} className="py-1">{w}</div>)}
       </div>
 
-      <div className="grid grid-cols-7 gap-1">
+      <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
         {days.map((dateStr, i) => {
           if (!dateStr) return <div key={`e${i}`} />
 
@@ -52,72 +82,62 @@ export default function GroupCalendar({ value, onSelect, cursor, onCursorChange,
           const isPast = dateStr < today
           const isClosed = closedDates.includes(dateStr)
           const s = byDate[dateStr]
-          const hasGroups = !!s && s.groupCount > 0
           const w = walkinByDate?.[dateStr]
-          const hasWalkins = !!w && w.count > 0
-          // 分母優先用該日的可用席（summarizeGroupDay 已扣維修/停用桌）；退回全店概略值
+          const groupCount = s?.groupCount || 0
+          const groupGuests = s?.guests || 0
+          const walkinCount = w?.count || 0
+          const walkinGuests = w?.guests || 0
+          const total = groupGuests + walkinGuests
           const denom = s?.totalSeats ?? totalSeats
-          const ratio = denom > 0 && s ? Math.min(1, s.heldSeats / denom) : 0
-          const barColor = s?.overCapacityGroupOnly || ratio >= 0.75 ? '#e60012' : ratio >= 0.4 ? '#f29100' : '#9eb63a'
+          const ratio = denom > 0 ? Math.min(1, total / denom) : 0
+          const level = heatLevel(ratio)
+          const over = !!s?.overCapacityGroupOnly
 
-          const bg = isSelected ? 'bg-chicken-red'
-            : isClosed ? 'bg-chicken-brown/[0.04]'
-            : isToday ? 'bg-chicken-yellow/15'
-            : hasGroups ? 'bg-white' : 'bg-transparent'
-          const border = isSelected ? 'border-chicken-red'
-            : isToday ? 'border-chicken-yellow'
-            : hasGroups ? 'border-chicken-brown/10' : 'border-transparent'
-          const txt = isSelected ? 'text-white' : isPast && !hasGroups ? 'text-chicken-brown/30' : 'text-chicken-brown'
+          const caption = [groupCount > 0 && `${groupCount} 團`, walkinCount > 0 && `${walkinCount} 筆`].filter(Boolean).join(' · ')
+
+          // 選中：紅框雙圈；今天：紅內框；一般：熱圖底色（0 級白底 + 髮絲框）
+          const ring = isSelected
+            ? 'ring-2 ring-chicken-red ring-offset-2 ring-offset-white'
+            : isToday ? 'ring-[1.5px] ring-inset ring-chicken-red'
+            : level === 0 && !isClosed ? 'ring-1 ring-inset ring-chicken-brown/[0.08]' : ''
+          const bg = isClosed ? '#f3f1ed' : HEAT[level]
+          const numColor = isPast ? 'text-chicken-brown/40' : level >= 4 ? 'text-white' : 'text-chicken-brown'
+          const dayColor = isToday ? 'text-chicken-red' : level >= 4 ? 'text-white/85' : isPast ? 'text-chicken-brown/35' : 'text-chicken-brown/60'
+          const capColor = level >= 4 ? 'text-white/85' : 'text-chicken-brown/55'
 
           return (
             <button
               key={dateStr}
+              type="button"
               onClick={() => onSelect(dateStr)}
               aria-pressed={isSelected}
-              className={`relative rounded-xl border-2 transition-all hover:shadow-sm overflow-hidden
-                aspect-square sm:aspect-auto sm:min-h-[92px] p-1 sm:p-1.5 flex flex-col items-stretch ${bg} ${border} ${txt}`}
+              aria-label={`${cursor.month + 1}月${dayNum}日${total ? `，${total} 位` : ''}${isClosed ? '，公休' : ''}`}
+              style={{ backgroundColor: bg }}
+              className={`tap relative rounded-[10px] transition-shadow aspect-square sm:aspect-auto sm:min-h-[76px] flex flex-col items-center justify-center gap-px overflow-hidden ${ring}`}
             >
-              <div className="flex items-center justify-between leading-none">
-                <span className="text-sm font-black">{dayNum}</span>
-                {isClosed ? <span className="text-[10px]" title="公休">🚫</span>
-                  : isToday && !isSelected ? <span className="w-1.5 h-1.5 rounded-full bg-chicken-yellow" /> : null}
-              </div>
-
-              {(hasGroups || hasWalkins) ? (
-                <div className="flex-1 flex flex-col justify-end gap-1 mt-1 min-w-0">
-                  {hasGroups && (
-                    <div className={`text-[10px] sm:text-[11px] font-black tabular-nums leading-tight ${isSelected ? 'text-white' : 'text-chicken-brown/85'}`}>
-                      <span className="sm:hidden">🚌{s.groupCount}·{s.guests}</span>
-                      <span className="hidden sm:inline">🚌 {s.groupCount} 團 · {s.guests} 位</span>
-                    </div>
-                  )}
-                  {/* 散客量小字（≥sm；手機格太窄不顯示） */}
-                  {hasWalkins && (
-                    <div className={`hidden sm:block text-[10px] font-bold tabular-nums leading-tight ${isSelected ? 'text-white/85' : 'text-chicken-brown/55'}`}>
-                      🧍 散客 {w.count} 筆 · {w.guests} 位
-                    </div>
-                  )}
-                  {hasGroups && (
-                    <>
-                      {/* 忙碌條：保留席 / 全店座位（維持只看團體保留席；散客人數≠精確佔席，混入會誤導） */}
-                      <div className={`h-1.5 rounded-full overflow-hidden ${isSelected ? 'bg-white/30' : 'bg-chicken-brown/10'}`}>
-                        <div className="h-full rounded-full" style={{ width: `${Math.max(8, ratio * 100)}%`, backgroundColor: isSelected ? '#ffffff' : barColor }} />
-                      </div>
-                      {s.overCapacityGroupOnly && (
-                        <div className={`text-[9px] font-black rounded px-1 py-0.5 leading-tight w-fit ${isSelected ? 'bg-white/25 text-white' : 'bg-chicken-red text-white'}`}>⚠ 超量</div>
-                      )}
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="flex-1" />
-              )}
+              <span className={`absolute top-1.5 left-2 text-[11px] font-semibold leading-none ${dayColor}`}>{dayNum}</span>
+              {isClosed && <span className="absolute top-1.5 right-1.5 text-chicken-brown/35"><Icon name="ban" size={11} /></span>}
+              {over && !isClosed && <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-chicken-red ring-2 ring-white" title="團體保留席已超過全店座位" />}
+              {total > 0 ? (
+                <>
+                  <span className={`text-lg sm:text-[22px] font-semibold leading-tight tracking-tight tabular-nums ${numColor}`}>{total}</span>
+                  {caption && <span className={`hidden sm:block text-[10px] leading-3 whitespace-nowrap tabular-nums ${capColor}`}>{caption}</span>}
+                </>
+              ) : null}
             </button>
           )
         })}
       </div>
 
-      <div className="mt-3 text-center text-[11px] text-chicken-brown/45">點任一天 → 右側顯示當日團體總覽</div>
+      <div className="mt-3 flex items-center gap-2 text-[11px] text-chicken-brown/50 flex-wrap">
+        <span>數字 = 當日總人數（團體 + 散客）</span>
+        <div className="flex-1" />
+        <span>載客率</span>
+        <div className="flex gap-0.5">
+          {HEAT.map((c, i) => <span key={i} className={`inline-block w-3.5 h-2 rounded-sm ${i === 0 ? 'ring-1 ring-inset ring-chicken-brown/15' : ''}`} style={{ backgroundColor: c }} />)}
+        </div>
+        <span className="tabular-nums">0 → {totalSeats} 席</span>
+      </div>
     </div>
   )
 }
