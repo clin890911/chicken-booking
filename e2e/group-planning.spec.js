@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
 
-// 規劃分頁主線：同仁登入 → 規劃（月曆+當日總覽一頁式，預設選今日）→ 編輯精靈（2 頁式）。
+// 規劃分頁主線：同仁登入 → 規劃（月曆+當日總覽一頁式，預設選今日）→ 團單編輯器（一頁三段 + 右側摘要/檢查清單）。
 // 後台在「本機開發模式」(無 Firebase) 以 localStorage 為後端；攔截 admin* 雲端端點避免碰正式後端。
 // 覆蓋五個重點：
 //   1) 反覆「新增團單→返回」不會留下任何空白團單（草稿不落地）
-//   2) 空白團單過不了驗證（第一頁就擋：請選擇或新增旅行社）
+//   2) 空白團單過不了驗證（檢查清單擋下、儲存鈕 disabled）＋ 人數快速鍵 / 特殊需求超過總人數
 //   3) 當日總覽 ⇄ 排位地圖 三態切換（規劃分頁合併後的新動線）
 //   4) 點團卡 → 詳情頁（唯讀確認 + 回傳單）→ 編輯往返
 //   5) 散客名單出現在當日總覽，「→ 配桌」一鍵跳排位地圖預配模式
@@ -54,13 +54,50 @@ test('規劃：反覆「新增團單→返回」不留任何空白團單', async
   await expect(page.getByText('（未填旅行社）')).toHaveCount(0)
 })
 
-test('規劃：空白團單過不了驗證（第一頁就擋）', async ({ page }) => {
+test('規劃：空白團單存不了（檢查清單擋下、儲存鈕 disabled）', async ({ page }) => {
   await loginAndOpenPlanning(page)
   await page.getByRole("button", { name: /新增團單/ }).first().click()
-  // 2 頁式精靈：未選旅行社就點「下一步：圈選座位」→ 驗證擋下、停在第一頁
-  await page.getByRole('button', { name: /下一步：圈選座位/ }).click()
+
+  // 一頁三段：沒有步驟條、沒有「下一步」
+  await expect(page.getByRole('button', { name: /下一步：圈選座位/ })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '場次與梯次' })).toBeVisible()
+
+  // 空白團單：檢查清單列出未過的項目、儲存鈕 disabled
+  const save = page.getByRole('button', { name: /儲存並保留/ }).first()
+  await expect(save).toBeDisabled()
+  await expect(page.getByText('已選旅行社')).toBeVisible()
   await expect(page.getByText(/請選擇或新增旅行社/)).toBeVisible()
   await expect(page.getByText(/團單已儲存/)).toHaveCount(0)
+
+  // 新增團單不該出現「消費金額」輸入（建單時還沒結帳）
+  await expect(page.getByLabel(/消費金額/)).toHaveCount(0)
+})
+
+test('規劃：人數快速鍵一鍵設總人數，特殊需求超過總人數擋存檔', async ({ page }) => {
+  await loginAndOpenPlanning(page)
+  await page.getByRole("button", { name: /新增團單/ }).first().click()
+
+  // 「大巴」chip → 總人數 43（步進器是 type=text + inputMode=numeric）
+  const totalBox = page.getByLabel('總人數', { exact: true })
+  await expect(totalBox).toHaveAttribute('type', 'text')
+  await expect(totalBox).toHaveAttribute('inputmode', 'numeric')
+  await page.getByRole('button', { name: /^大巴/ }).click()
+  await expect(totalBox).toHaveValue('43')
+
+  // 特殊需求「有才加」：點素食才展開小步進器
+  await expect(page.getByLabel('素食人數', { exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: /素食/ }).click()
+  const vegBox = page.getByLabel('素食人數', { exact: true })
+  await expect(vegBox).toBeVisible()
+
+  // 素食 44 > 總人數 43 → inline 紅字 + 檢查清單紅點 + 儲存鈕 disabled
+  await vegBox.fill('44')
+  await expect(page.getByText(/素食 44 人超過總人數 43/).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: /儲存並保留/ }).first()).toBeDisabled()
+
+  // 改回 <= 總人數 → 紅字消失
+  await vegBox.fill('10')
+  await expect(page.getByText(/超過總人數/)).toHaveCount(0)
 })
 
 test('規劃：當日總覽 ⇄ 排位地圖 切換共享同一天', async ({ page }) => {
@@ -102,14 +139,14 @@ test('規劃：點團卡進詳情頁（回傳單可見）→ 編輯往返 → �
   await page.getByRole('button', { name: /快樂旅行社/ }).filter({ hasNotText: '看地圖' }).first().click()
   await expect(page.getByRole('button', { name: /回傳單/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /編輯/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: /下一步：圈選座位/ })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '場次與梯次' })).toHaveCount(0)
   // 領位/備餐重點有呈現
   await expect(page.getByText(/兩位海鮮過敏/)).toBeVisible()
   await expect(page.getByText('梯次與桌位')).toBeVisible()
 
-  // 進編輯精靈 → 返回落回詳情頁
+  // 進編輯器（一頁三段）→ 返回落回詳情頁
   await page.getByRole('button', { name: /編輯/ }).click()
-  await expect(page.getByRole('button', { name: /下一步：圈選座位/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '場次與梯次' })).toBeVisible()
   await page.getByRole('button', { name: /返回當日總覽/ }).click()
   await expect(page.getByRole('button', { name: /編輯/ })).toBeVisible()
 
@@ -205,15 +242,16 @@ test('規劃：團體改期 → 選新日期 → 編輯器重新圈桌 → 儲�
   await page.getByRole('button', { name: target, exact: true }).click()
   await page.getByRole('button', { name: /下一步：重新圈桌/ }).click()
 
-  // 編輯器（第 2 頁）：改期橫幅可見、原桌已清空（第一梯顯示「未圈」）
+  // 編輯器（一頁三段）：改期橫幅可見、原桌已清空（第一梯顯示「未圈」）
   await expect(page.getByText(/改期中：/)).toBeVisible()
   await expect(page.getByText(/桌 未圈/).first()).toBeVisible()
 
   // 為新日期重新圈桌：點地圖上的 101
   await page.locator('svg g:has(:text-is("101"))').first().click()
 
-  // 儲存（groupReserveTables 已被 mock 成 ok）→ 成功並落回詳情頁
-  await page.getByRole('button', { name: /儲存團單/ }).click()
+  // 儲存（groupReserveTables 已被 mock 成 ok）→ 成功並落回詳情頁。
+  // 儲存鈕只在檢查清單全綠時亮，所以這一步同時驗證「圈完桌就可以存」。
+  await page.getByRole('button', { name: /儲存並保留/ }).first().click()
   await expect(page.getByText(/團單已儲存/)).toBeVisible()
   await expect(page.getByRole('button', { name: /回傳單/ })).toBeVisible()
 })

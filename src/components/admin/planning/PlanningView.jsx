@@ -300,7 +300,6 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
         isNew={editorIsNew}
         date={editorGroup.date}
         rescheduleFrom={rescheduleFrom}
-        initialStep={rescheduleFrom ? 2 : 1}
         slots={slots}
         tables={tables}
         settings={settings}

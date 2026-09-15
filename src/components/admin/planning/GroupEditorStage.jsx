@@ -9,24 +9,16 @@ import GroupSheet from '../group/GroupSheet'
 import Icon from '../../ui/Icon'
 import SegmentedControl from '../../ui/SegmentedControl'
 import AgencyPicker from '../group/AgencyPicker'
+import NumberStepper from './NumberStepper'
+import GroupEditorSummary from './GroupEditorSummary'
+import {
+  SPECIAL_FIELDS, TOTAL_PRESETS, composeBusInfo, parseBusInfo, overSpecialCounts, specialOverMessage,
+} from './groupEditorFields'
 import { dayLabel, seatingForSlot, arrivalSlotsForSeating } from '../../../utils/timeSlots'
-import { groupTableNumbers, guestTableNumbers, guestBatches, isEscortBatch, remainingTablesForSeating } from '../../../utils/capacity'
+import { guestTableNumbers, guestBatches, isEscortBatch, remainingTablesForSeating } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import { suggestTablesForBatch } from '../../../utils/suggestTables'
 import * as groupReservationService from '../../../services/groupReservationService'
-
-const COUNT_FIELDS = [
-  { key: 'total', label: '總人數' },
-  { key: 'vegetarian', label: '素食' },
-  { key: 'child', label: '兒童' },
-  { key: 'mobility', label: '行動不便' },
-  { key: 'wheelchair', label: '輪椅' },
-]
-
-const PAGES = [
-  { n: 1, label: '團體資訊' },
-  { n: 2, label: '圈選座位' },
-]
 
 const BATCH_LABELS = ['一', '二', '三', '四', '五', '六']
 
@@ -56,14 +48,47 @@ function seatingTone(r) {
   return 'ok'
 }
 
-// 階段三：單一團單編輯器（2 頁式）。Page1 團體資訊（旅行社+人數+預選場次/剩餘提示）→ Page2 圈座位（席次量表+一鍵推薦+加梯次+直接存檔）。
+// 區段標題（右側「待填 / ✓ 完成」）
+function SectionHead({ n, title, hint, done }) {
+  return (
+    <div className="mb-2.5 flex items-center gap-2">
+      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-chicken-brown/[0.08] text-[11px] font-bold text-chicken-brown/70">{n}</span>
+      <h3 className="text-sm font-semibold text-chicken-brown">{title}</h3>
+      {hint && <span className="hidden text-xs font-medium text-chicken-brown/50 sm:inline">· {hint}</span>}
+      <span className="flex-1" />
+      <span className={`inline-flex items-center gap-1 text-xs font-bold ${done ? 'text-[#5b8c1f]' : 'text-chicken-brown/40'}`}>
+        {done && <Icon name="check" size={12} strokeWidth={3} />}{done ? '完成' : '待填'}
+      </span>
+    </div>
+  )
+}
+
+// 可摺疊區塊（自建，不用 <details>：受控開合才能「有資料就預設展開」）
+function Disclosure({ title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="rounded-xl border border-chicken-brown/10 bg-[#fbfaf8]">
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
+        className="tap flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-semibold text-chicken-brown">
+        <Icon name="chevronDown" size={14} strokeWidth={2.4} className={`transition-transform ${open ? '' : '-rotate-90'}`} />
+        {title}
+      </button>
+      {open && <div className="px-3 pb-3">{children}</div>}
+    </div>
+  )
+}
+
+// 階段三：單一團單編輯器（一頁三段 + 右側即時摘要與檢查清單）。
+// 2026-09 由「2 頁精靈」攤平：填到哪摘要與檢查清單就跟到哪，儲存鈕只在全綠時亮，
+// 不再有「翻到第二頁才知道第一頁填錯」。存檔鏈（validateGroupForSave → createAndReserveGroup /
+// reserveGroupTables → 雲端交易，409 回滾）完全沒動。
 export default function GroupEditorStage({
   initialGroup, isNew, date, slots,
   tables, settings, bookings, agencies, guides, groupReservations = [],
   onBack, onSaved, onDeleted,
   reserveExisting, createGroup, removeGroup,
   addAgency, addGuide,
-  rescheduleFrom = null, initialStep = 1,
+  rescheduleFrom = null,
 }) {
   const toast = useToast()
   // 權限門的用意不只是「不給做」，更是防止越權寫入毒化整台裝置的同步：
@@ -74,8 +99,6 @@ export default function GroupEditorStage({
   const { fixtures, zones } = useBooking()
 
   const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(initialGroup)))
-  // 改期進入時直接落在「圈選座位」頁（日期已由改期 modal 選定，缺的只有重新圈桌）
-  const [step, setStep] = useState(initialStep)
   const [activeBatchId, setActiveBatchId] = useState(draft.batches?.[0]?.id || null)
   const [floor, setFloor] = useState('1F')
   const [busy, setBusy] = useState(false)
@@ -83,6 +106,13 @@ export default function GroupEditorStage({
   const [quickAgency, setQuickAgency] = useState(null)
   const [quickGuide, setQuickGuide] = useState(null)
   const [addingBatch, setAddingBatch] = useState(false)
+  const [guideHint, setGuideHint] = useState(false)
+  // 特殊需求「有才加」：預設只展開已有數字的項目
+  const [openSpecials, setOpenSpecials] = useState(
+    () => SPECIAL_FIELDS.filter(f => (Number(initialGroup?.counts?.[f.key]) || 0) > 0).map(f => f.key),
+  )
+  // 遊覽車三格：本地狀態 ⇄ draft.busInfo 單一字串（見 groupEditorFields 的註解）
+  const [bus, setBus] = useState(() => parseBusInfo(initialGroup?.busInfo))
   const savingRef = useRef(false)
 
   const seatings = Array.isArray(settings?.seatings) ? settings.seatings : []
@@ -98,10 +128,12 @@ export default function GroupEditorStage({
     const m = {}; tables.forEach(t => { m[t.number] = isTableUsableOnDate(t, date) ? t.capacity : 0 }); return m
   }, [tables, date])
   const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (capByNum[n] || 0), 0)
-  // 梯次人數單一來源：單一「旅客梯次」= 第一頁總人數（不重複填）；多梯/司領桌 = 各自 guests。
+  // 梯次人數單一來源：單一「旅客梯次」= 總人數（不重複填）；多梯/司領桌 = 各自 guests。
   const batchGuests = (b) => (b && !b.isEscort && guestBatches(draft).length === 1)
     ? (Number(draft.counts?.total) || 0)
     : (Number(b?.guests) || 0)
+
+  const total = Number(draft.counts?.total) || 0
 
   // 各場次剩餘（排除本團自己的保留，避免改舊團時把自己算成滿）
   const otherGroups = useMemo(() => groupReservations.filter(g => g.id !== draft.id), [groupReservations, draft.id])
@@ -130,18 +162,24 @@ export default function GroupEditorStage({
     return Object.keys(conflictMap).filter(n => !selectedTables.includes(n))
   }, [activeBatch, date, settings, draft.id, selectedTables, bookings])
 
-  // 旅客保留席（不含司領桌）— SeatGauge 與總人數對比用
+  // 旅客保留席（不含司領桌）— 摘要卡席位量表與總人數對比用
   const heldSeats = useMemo(() => guestTableNumbers(draft).reduce((s, n) => s + (capByNum[n] || 0), 0), [draft, capByNum])
 
-  // 本梯圈到、但在此日期停用/維修中的桌（圈完才被設維修的情況）：
-  // 地圖上這些桌已置灰不可點，提供橫幅一鍵移除，否則會卡死在「無法取消圈選」。
-  const outCircledTables = useMemo(() => {
+  // 全團（含司領桌）圈到、但在此日期停用/維修中的桌：validateGroupForSave 會擋，檢查清單要先講。
+  const badTables = useMemo(() => {
     const byNum = new Map((tables || []).map(t => [String(t.number), t]))
-    return selectedTables.filter(n => {
+    const out = []
+    ;(draft.batches || []).forEach(b => (b.tableNumbers || []).forEach(n => {
       const t = byNum.get(String(n))
-      return t && !isTableUsableOnDate(t, date)
-    })
-  }, [selectedTables, tables, date])
+      if (t && !isTableUsableOnDate(t, date) && !out.includes(String(n))) out.push(String(n))
+    }))
+    return out
+  }, [draft.batches, tables, date])
+  // 本梯圈到的壞桌：地圖上已置灰不可點，提供橫幅一鍵移除，否則會卡死在「無法取消圈選」。
+  const outCircledTables = useMemo(
+    () => selectedTables.filter(n => badTables.includes(String(n))),
+    [selectedTables, badTables],
+  )
   const removeCircledTable = (number) => setDraft(d => ({
     ...d,
     batches: d.batches.map(b => b.id !== activeBatchId
@@ -151,7 +189,7 @@ export default function GroupEditorStage({
 
   // === draft 編輯 helpers ===
   const patchDraft = (patch) => setDraft(d => ({ ...d, ...patch }))
-  // 總人數：單梯次時直接同步主梯 guests（圈位頁不再重複填人數）
+  // 總人數：單梯次時直接同步主梯 guests（梯次列不再重複填）
   const patchCount = (key, val) => setDraft(d => {
     const counts = { ...d.counts, [key]: Number(val) || 0 }
     // 只有「單一旅客梯次」時把總人數同步進該旅客梯次（司領桌不同步）
@@ -161,6 +199,11 @@ export default function GroupEditorStage({
     return { ...d, counts, batches }
   })
   const patchBatch = (batchId, patch) => setDraft(d => ({ ...d, batches: d.batches.map(b => b.id === batchId ? { ...b, ...patch } : b) }))
+  const patchBus = (patch) => {
+    const next = { ...bus, ...patch }
+    setBus(next)
+    patchDraft({ busInfo: composeBusInfo(next) })
+  }
   // 只重編旅客梯次序號（第N梯）；司領桌保留 label
   const relabel = (batches) => {
     let n = 0
@@ -174,9 +217,9 @@ export default function GroupEditorStage({
     const gb = d.batches.filter(b => !b.isEscort)
     const n = gb.length + 1
     // 新梯人數預設 = 總人數扣掉已分配（兩段輪替常見「先坐滿、剩的進第二梯」）；司領桌不計
-    const total = Number(d.counts?.total) || 0
+    const t = Number(d.counts?.total) || 0
     const assigned = gb.reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
-    const nb = { id: 'BT' + Date.now().toString(36) + n, label: `第${BATCH_LABELS[n - 1] || n}梯`, timeSlot: s.start, tableNumbers: [], guests: Math.max(0, total - assigned), note: '' }
+    const nb = { id: 'BT' + Date.now().toString(36) + n, label: `第${BATCH_LABELS[n - 1] || n}梯`, timeSlot: s.start, tableNumbers: [], guests: Math.max(0, t - assigned), note: '' }
     setActiveBatchId(nb.id)
     return { ...d, batches: [...d.batches, nb] }
   })
@@ -224,7 +267,7 @@ export default function GroupEditorStage({
   // 一鍵推薦桌位（依本梯人數 + 場次，避開 blocked，取最少桌）
   const autoSuggest = () => {
     if (!activeBatch) return toast.error('請先選一個梯次')
-    const need = batchGuests(activeBatch) || Number(draft.counts?.total) || 0
+    const need = batchGuests(activeBatch) || total
     if (need <= 0) return toast.error('請先填本梯用餐人數')
     const { tableNumbers, enough } = suggestTablesForBatch({ tables, headcount: need, blockedTables, capByNum, date })
     patchBatch(activeBatch.id, { tableNumbers })
@@ -233,11 +276,25 @@ export default function GroupEditorStage({
   }
 
   // === 旅行社/導遊 ===
-  const onPickAgency = (a) => patchDraft({ agencyId: a.id, agencyName: a.name, guideId: null, guideName: '', guidePhone: '' })
-  const onSelectGuide = (guideId) => {
-    const g = draftGuides.find(x => x.id === guideId)
-    patchDraft({ guideId: guideId || null, guideName: g?.name || '', guidePhone: g?.phone || '' })
+  // 該旅行社「最近一張團單」的導遊快照（依日期排序；排除正在編輯的這張）
+  const lastGuideFor = (agencyId) => {
+    if (!agencyId) return null
+    const g = (groupReservations || [])
+      .filter(x => x.agencyId === agencyId && x.id !== draft.id && x.status !== 'cancelled' && (x.guideName || x.guidePhone))
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0]
+    return g ? { guideName: g.guideName || '', guidePhone: g.guidePhone || '' } : null
   }
+  const onPickAgency = (a) => {
+    // guideId 是「名冊導遊」的關聯鍵；換旅行社後舊 id 必然不屬於新旅行社，一律清掉。
+    // 姓名/電話是自由欄位，**已有內容就不覆蓋**（店員可能先問到導遊才選旅行社）。
+    const hasGuide = !!((draft.guideName || '').trim() || (draft.guidePhone || '').trim())
+    const last = hasGuide ? null : lastGuideFor(a.id)
+    patchDraft({ agencyId: a.id, agencyName: a.name, guideId: null, ...(last || {}) })
+    setGuideHint(!!last)
+  }
+  const setGuideName = (v) => { patchDraft({ guideName: v, guideId: null }); setGuideHint(false) }
+  const setGuidePhone = (v) => { patchDraft({ guidePhone: v }); setGuideHint(false) }
+  const pickRosterGuide = (g) => { patchDraft({ guideId: g.id, guideName: g.name || '', guidePhone: g.phone || '' }); setGuideHint(false) }
   const createQuickAgency = () => {
     // 寫 agencies 需 agency.manage（外場沒有）。名冊頁的同一操作早已用 can() 擋，
     // 這條 inline 快速新增是漏網的：外場按下去會整包 403，且重整後新增的旅行社會
@@ -245,7 +302,7 @@ export default function GroupEditorStage({
     if (!can('agency.manage')) return toast.error('你的角色沒有新增旅行社的權限，請聯絡店長')
     if (!quickAgency?.name?.trim()) return toast.error('請填旅行社名稱')
     const a = addAgency(quickAgency)
-    patchDraft({ agencyId: a.id, agencyName: a.name, guideId: null, guideName: '', guidePhone: '' })
+    patchDraft({ agencyId: a.id, agencyName: a.name, guideId: null })
     setQuickAgency(null)
     toast.success('已新增旅行社')
   }
@@ -256,38 +313,80 @@ export default function GroupEditorStage({
     const g = addGuide({ ...quickGuide, agencyId: draft.agencyId })
     patchDraft({ guideId: g.id, guideName: g.name, guidePhone: g.phone || '' })
     setQuickGuide(null)
+    setGuideHint(false)
     toast.success('已新增導遊')
   }
 
-  // === 頁面驗證 / 導覽 ===
-  const pageError = (p) => {
-    if (p === 1) {
-      if (!(draft.agencyId || (draft.agencyName || '').trim())) return '請選擇或新增旅行社'
-      if ((Number(draft.counts?.total) || 0) <= 0) return '請填寫總人數（需大於 0）'
-      if (hasSeatings) {
-        if (!primarySeating) return '請選擇一個場次'
-        const r = seatingRemaining[primarySeating.id]
-        if (r?.closed) return `「${primarySeating.name}」已關閉，請改選其他場次`
-        if ((r?.remainingSeats ?? 0) <= 0) return `「${primarySeating.name}」已客滿，請改選其他場次或日期`
-      } else if (!primaryBatch?.timeSlot) {
-        return '請選擇用餐時段'
-      }
-    }
-    return null
+  // === 場次可選性 ===
+  // 剩餘席位 < 總人數 → 灰掉標「不夠這團」。
+  // ⚠️ 安全閥：若「每個場次都不夠」就解除鎖定——那正是兩段用餐輪替（86 人兩台大巴）的情境，
+  //    全部鎖死會讓這種團完全建不了單。
+  const seatingShort = (s) => {
+    const r = seatingRemaining[s.id]
+    return total > 0 && (r?.remainingSeats ?? 0) > 0 && (r.remainingSeats < total)
   }
-  const goNext = () => {
-    const err = pageError(step)
-    if (err) return toast.error(err)
-    if (step === 1 && primarySeating) {
-      const r = seatingRemaining[primarySeating.id]
-      const total = Number(draft.counts?.total) || 0
-      if (r && total > r.remainingSeats) {
-        toast.info(`本場次剩 ${r.remainingSeats} 席、團體 ${total} 人——可在下一頁「新增梯次」分兩批輪替`)
-      }
-    }
-    setStep(s => Math.min(2, s + 1))
-  }
-  const goPrev = () => setStep(s => Math.max(1, s - 1))
+  const allSeatingsShort = hasSeatings && total > 0 && seatings.every(s => {
+    const r = seatingRemaining[s.id]
+    return r?.closed || (r?.remainingSeats ?? 0) <= 0 || r.remainingSeats < total
+  })
+
+  // === 檢查清單（逐條對應 validateGroupForSave，不通過就不給存）===
+  const specialOver = overSpecialCounts(draft.counts)
+  const specialErr = specialOverMessage(draft.counts)
+  const checks = useMemo(() => {
+    const hasAgency = !!(draft.agencyId || (draft.agencyName || '').trim())
+    const allBatches = draft.batches || []
+    const seatingPicked = hasSeatings ? !!primarySeating : !!primaryBatch?.timeSlot
+    const r = primarySeating ? seatingRemaining[primarySeating.id] : null
+    const seatingBlocked = !!(primarySeating && (r?.closed || (r?.remainingSeats ?? 0) <= 0))
+    const batchesReady = gBatches.length > 0 && allBatches.every(
+      b => (b.tableNumbers || []).length > 0 && (b.isEscort || batchGuests(b) > 0),
+    )
+    const perBatchEnough = allBatches.every(b => seatsOf(b.tableNumbers) >= batchGuests(b))
+    const seatsOk = total > 0 && heldSeats > 0 && perBatchEnough && (singleGuest ? heldSeats >= total : true)
+    return [
+      { key: 'agency', label: '已選旅行社', ok: hasAgency, bad: false, reason: '請選擇或新增旅行社' },
+      { key: 'total', label: '總人數大於 0', ok: total > 0 && !specialErr, bad: !!specialErr, reason: specialErr || '請填總人數' },
+      {
+        key: 'seating',
+        label: hasSeatings ? '已選場次' : '已選用餐時段',
+        ok: seatingPicked && !seatingBlocked,
+        bad: seatingBlocked,
+        reason: seatingBlocked ? `「${primarySeating.name}」已關閉或客滿，請改選` : '請選擇場次',
+      },
+      { key: 'batches', label: '每梯都已圈桌且有人數', ok: batchesReady, bad: false, reason: '還有梯次沒圈桌或沒填人數' },
+      {
+        key: 'seats',
+        label: `席位夠坐（已圈 ${heldSeats} / 需 ${total} 席）`,
+        ok: seatsOk,
+        bad: heldSeats > 0 && total > 0 && !seatsOk,
+        reason: '保留席不足，請再多圈幾桌',
+      },
+      { key: 'tables', label: '沒有停用/維修中的桌', ok: badTables.length === 0, bad: badTables.length > 0, reason: `${badTables.join('、')} 當日停用/維修中` },
+    ]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, total, heldSeats, badTables, specialErr, primarySeating, primaryBatch, hasSeatings, seatingRemaining, singleGuest, gBatches.length, capByNum])
+
+  const canSave = checks.every(c => c.ok && !c.bad)
+  const allTableNumbers = useMemo(
+    () => [...new Set(gBatches.flatMap(b => b.tableNumbers || []))],
+    [gBatches],
+  )
+  // 儲存鈕的桌數含司領桌——那幾張桌一樣會被這張團單保留走
+  const reservedTableCount = useMemo(
+    () => new Set((draft.batches || []).flatMap(b => b.tableNumbers || [])).size,
+    [draft.batches],
+  )
+  const saveLabel = reservedTableCount ? `儲存並保留 ${reservedTableCount} 桌` : '儲存並保留桌位'
+
+  const sec1Done = !!(draft.agencyId || (draft.agencyName || '').trim())
+  const sec2Done = total > 0 && !specialErr
+  const sec3Done = checks.find(c => c.key === 'seating').ok && checks.find(c => c.key === 'batches').ok
+
+  const specialsText = SPECIAL_FIELDS
+    .filter(f => (Number(draft.counts?.[f.key]) || 0) > 0)
+    .map(f => `${f.label} ${draft.counts[f.key]}`)
+    .join('、')
 
   // === 儲存 / 刪除 ===
   const save = async () => {
@@ -296,13 +395,12 @@ export default function GroupEditorStage({
     // （帶團入座本來就會改團狀態）。這道門讓「外場不建新團單」這個不變量真的成立——
     // 後端集合層權限分不出 create/update，只能在這裡把關。
     if (isNew && !can('group.create')) return toast.error('你的角色沒有建立團單的權限，請聯絡店長或訂位專員')
-    // 單一旅客梯次以第一頁總人數為準（圈位頁不重複填，存檔時強制同步；司領桌不同步）
+    // 單一旅客梯次以總人數為準（梯次列不重複填，存檔時強制同步；司領桌不同步）
     const batchesToSave = guestBatches(draft).length === 1
-      ? draft.batches.map(b => (b.isEscort ? b : { ...b, guests: Number(draft.counts?.total) || 0 }))
+      ? draft.batches.map(b => (b.isEscort ? b : { ...b, guests: total }))
       : draft.batches
     const err0 = groupReservationService.validateGroupForSave({ ...draft, date, batches: batchesToSave }, capByNum, tables)
     if (err0) return toast.error(err0)
-    const total = Number(draft.counts?.total) || 0
     if ((draft.batches || []).length > 1 && total > heldSeats) {
       toast.info(`提醒：總人數 ${total} 大於保留席數 ${heldSeats}，將以多梯次輪替（請確認梯次安排）`)
     }
@@ -349,84 +447,124 @@ export default function GroupEditorStage({
     onDeleted()
   }
 
+  // 梯次列（旅客梯次與司領桌共用）。
+  // 🔴 刻意寫成「回傳 JSX 的函式」而不是內嵌元件：內嵌元件每次 render 都是新的 type，
+  //    React 會整段 unmount/remount，裡面的 NumberStepper 打字打到一半就失焦。
+  const renderBatchRow = (b, escort) => {
+    const sea = seatingForSlot(settings, b.timeSlot)
+    const active = activeBatchId === b.id
+    const seats = seatsOf(b.tableNumbers)
+    const nums = b.tableNumbers || []
+    return (
+      <div key={b.id} className={`rounded-xl p-2.5 ${active ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04]' : escort ? 'ring-1 ring-inset ring-chicken-brown/15 bg-chicken-cream/40' : 'ring-1 ring-inset ring-chicken-brown/10 bg-white'}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold text-chicken-brown">{b.label}</span>
+          {escort && <span className="rounded-full bg-chicken-brown/10 px-2 py-0.5 text-[10px] font-semibold text-chicken-brown/70">司機+領隊</span>}
+          {sea && <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>}
+          <label className="flex items-center gap-1 text-xs text-chicken-brown/60">抵達
+            <ArrivalTimeSelect seating={sea} slots={slots} value={b.timeSlot}
+              onChange={v => patchBatch(b.id, { timeSlot: v })} className="w-28 !py-1" />
+          </label>
+          {!escort && singleGuest ? (
+            <span className="text-xs font-bold text-chicken-brown/70">{total} 人（同總人數）</span>
+          ) : (
+            <label className="flex items-center gap-1.5 text-xs text-chicken-brown/60">人數
+              <NumberStepper size="sm" ariaLabel={`${b.label}人數`} value={b.guests}
+                onChange={v => patchBatch(b.id, { guests: v })} />
+            </label>
+          )}
+          <div className="flex-1" />
+          <button type="button" onClick={() => setActiveBatchId(b.id)}
+            className={`tap h-8 rounded-lg px-2.5 text-xs font-semibold ${active ? 'bg-chicken-red text-white' : 'border border-chicken-brown/15 bg-white text-chicken-brown'}`}>
+            {active ? '圈桌中' : escort ? '圈司領桌' : '圈此梯桌'}
+          </button>
+          {(escort || gBatches.length > 1) && (
+            <button type="button" onClick={() => (escort ? removeEscort(b.id) : removeBatch(b.id))}
+              aria-label={escort ? '移除司領桌' : '刪除此梯'}
+              className="tap flex h-8 w-8 items-center justify-center rounded-lg text-chicken-brown/40 hover:bg-chicken-brown/[0.05] hover:text-chicken-red"><Icon name="trash" size={14} /></button>
+          )}
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-chicken-brown/60">桌 {nums.length ? '' : '未圈'}</span>
+          {nums.map(n => (
+            <span key={n} className="rounded-md bg-chicken-brown/[0.07] px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-chicken-brown">{n}</span>
+          ))}
+          {nums.length > 0 && <span className="text-[11px] font-semibold tabular-nums text-chicken-brown/50">{nums.length} 桌 {seats} 席</span>}
+        </div>
+        {!escort && <SeatGauge size="xs" circled={seats} needed={batchGuests(b)} className="mt-1.5" />}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3">
-      {/* 頂部：返回 + 標題 + 頁籤 */}
-      <div className="flex items-center gap-2 flex-wrap px-1">
-        <button type="button" onClick={onBack} className="tap inline-flex items-center gap-0.5 h-8 pr-2 rounded-lg text-[13px] font-semibold text-chicken-brown/60 hover:text-chicken-brown">
+      {/* 頂部：返回 + 標題 */}
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        <button type="button" onClick={onBack} className="tap inline-flex h-8 items-center gap-0.5 rounded-lg pr-2 text-[13px] font-semibold text-chicken-brown/60 hover:text-chicken-brown">
           <Icon name="chevronLeft" size={14} strokeWidth={2.4} />返回當日總覽
         </button>
         <span className="flex-1" />
-        <div className="text-sm font-semibold text-chicken-brown tabular-nums">
+        <div className="text-sm font-semibold tabular-nums text-chicken-brown">
           {isNew ? '新增團單' : `編輯：${draft.agencyName || '（未填旅行社）'}`} <span className="text-chicken-brown/50">· {dayLabel(date)}</span>
         </div>
-      </div>
-      {/* 兩步驟指示：完成的步驟打勾、目前步驟紅底白字、未到的步驟灰字 */}
-      <div className="flex items-center gap-2 px-1">
-        {PAGES.map((s, i) => {
-          const done = step > s.n, active = step === s.n
-          return (
-            <div key={s.n} className="flex items-center gap-2 flex-1 min-w-0">
-              <button
-                type="button"
-                onClick={() => { if (s.n === 1 || !pageError(1)) setStep(s.n); else toast.error(pageError(1)) }}
-                aria-current={active ? 'step' : undefined}
-                className={`tap w-full inline-flex items-center justify-center gap-2 h-9 rounded-[10px] text-[13px] font-semibold transition-colors ${
-                  active ? 'bg-chicken-red/[0.08] text-chicken-red' : done ? 'bg-white border border-chicken-brown/10 text-chicken-brown' : 'bg-white border border-chicken-brown/10 text-chicken-brown/45'
-                }`}
-              >
-                <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-bold ${active ? 'bg-chicken-red text-white' : done ? 'bg-[#5b8c1f] text-white' : 'bg-chicken-brown/10 text-chicken-brown/60'}`}>
-                  {done ? <Icon name="check" size={12} strokeWidth={3} /> : s.n}
-                </span>
-                {s.label}
-              </button>
-              {i < PAGES.length - 1 && <Icon name="chevronRight" size={14} strokeWidth={2.2} className="text-chicken-brown/30 shrink-0" />}
-            </div>
-          )
-        })}
       </div>
 
       {/* 改期橫幅：由「📅 改期」進入時顯示原日期→新日期，提示須重新圈桌 */}
       {rescheduleFrom && rescheduleFrom !== date && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2.5 text-sm">
-          <Icon name="calendar" size={18} className="text-indigo-600 shrink-0 mt-px" />
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm">
+          <Icon name="calendar" size={18} className="mt-px shrink-0 text-amber-700" />
           <div>
-            <div className="font-semibold text-indigo-700">改期中：{dayLabel(rescheduleFrom)} → {dayLabel(date)}</div>
-            <div className="mt-0.5 text-xs text-indigo-600/80">原圈桌位已清空，請於下方為新日期重新圈桌後儲存；未儲存前團單仍留在原日期。</div>
+            <div className="font-semibold text-amber-800">改期中：{dayLabel(rescheduleFrom)} → {dayLabel(date)}</div>
+            <div className="mt-0.5 text-xs text-amber-700/80">原圈桌位已清空，請於下方為新日期重新圈桌後儲存；未儲存前團單仍留在原日期。</div>
           </div>
         </div>
       )}
 
-      {/* Page 1：團體資訊（旅行社 + 人數 + 場次） */}
-      {step === 1 && (
+      <div className="md:grid md:grid-cols-[minmax(0,1fr)_20rem] md:items-start md:gap-4">
+        {/* ===== 左：一頁三段 ===== */}
         <div className="space-y-3">
-          {/* 旅行社 / 導遊 */}
-          <div className="bg-white rounded-xl border border-chicken-brown/10 p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-chicken-brown flex items-center gap-2"><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-chicken-brown/[0.08] text-[11px] font-bold text-chicken-brown/70">1</span>旅行社 / 導遊</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <AgencyPicker
-                agencies={agencies}
-                groupReservations={groupReservations}
-                value={draft.agencyId}
-                agencyName={draft.agencyName}
-                onPick={onPickAgency}
-                onQuickAdd={() => setQuickAgency({ name: '', phone: '' })}
-              />
-              <div>
-                <Select label="導遊" value={draft.guideId || ''} onChange={e => onSelectGuide(e.target.value)}
-                  options={[{ value: '', label: '— 選擇導遊 —' }, ...draftGuides.map(g => ({ value: g.id, label: `${g.name}${g.phone ? `（${g.phone}）` : ''}` }))]} />
-                <button onClick={() => draft.agencyId ? setQuickGuide({ name: '', phone: '' }) : toast.error('請先選旅行社')} className="tap inline-flex items-center gap-0.5 text-xs text-chicken-red font-semibold mt-1.5"><Icon name="plus" size={12} strokeWidth={2.4} />快速新增導遊</button>
-              </div>
-            </div>
+
+          {/* ① 旅行社與導遊 */}
+          <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">
+            <SectionHead n={1} title="旅行社與導遊" done={sec1Done} />
+            <AgencyPicker
+              agencies={agencies}
+              groupReservations={groupReservations}
+              value={draft.agencyId}
+              agencyName={draft.agencyName}
+              onPick={onPickAgency}
+              onQuickAdd={() => setQuickAgency({ name: '', phone: '' })}
+            />
             {quickAgency && (
-              <div className="flex gap-2 items-end bg-chicken-cream/50 p-2 rounded-lg">
+              <div className="mt-2 flex items-end gap-2 rounded-lg bg-chicken-cream/50 p-2">
                 <Input label="旅行社名稱" value={quickAgency.name} onChange={e => setQuickAgency(q => ({ ...q, name: e.target.value }))} className="flex-1" />
                 <Input label="電話" value={quickAgency.phone} onChange={e => setQuickAgency(q => ({ ...q, phone: e.target.value }))} className="w-32" />
                 <Button onClick={createQuickAgency}>建立</Button>
               </div>
             )}
+
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Input label="導遊／領隊" placeholder="姓名" value={draft.guideName || ''} onChange={e => setGuideName(e.target.value)} />
+              <Input label="導遊電話" inputMode="tel" placeholder="09xx-xxx-xxx" value={draft.guidePhone || ''} onChange={e => setGuidePhone(e.target.value)} />
+            </div>
+            {guideHint && (
+              <p className="mt-1.5 text-xs font-semibold text-[#5b8c1f]">已帶入上次的導遊，可改</p>
+            )}
+            {draftGuides.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-bold text-chicken-brown/45">名冊導遊</span>
+                {draftGuides.map(g => (
+                  <button key={g.id} type="button" onClick={() => pickRosterGuide(g)}
+                    className={`tap rounded-full border px-2.5 py-1 text-[11px] font-bold ${draft.guideId === g.id ? 'border-chicken-red bg-chicken-red/[0.06] text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'}`}>
+                    {g.name}{g.phone ? `（${g.phone}）` : ''}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button type="button" onClick={() => draft.agencyId ? setQuickGuide({ name: '', phone: '' }) : toast.error('請先選旅行社')}
+              className="tap mt-1.5 inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red"><Icon name="plus" size={12} strokeWidth={2.4} />快速新增導遊到名冊</button>
             {quickGuide && (
-              <div className="flex gap-2 items-end bg-chicken-cream/50 p-2 rounded-lg">
+              <div className="mt-2 flex items-end gap-2 rounded-lg bg-chicken-cream/50 p-2">
                 <Input label="導遊姓名" value={quickGuide.name} onChange={e => setQuickGuide(q => ({ ...q, name: e.target.value }))} className="flex-1" />
                 <Input label="電話" value={quickGuide.phone} onChange={e => setQuickGuide(q => ({ ...q, phone: e.target.value }))} className="w-32" />
                 <Button onClick={createQuickGuide}>建立</Button>
@@ -434,152 +572,135 @@ export default function GroupEditorStage({
             )}
           </div>
 
-          {/* 人數結構 + 特殊需求 */}
-          <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
-            <h3 className="text-sm font-semibold text-chicken-brown flex items-center gap-2 mb-2.5"><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-chicken-brown/[0.08] text-[11px] font-bold text-chicken-brown/70">2</span>人數結構</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {COUNT_FIELDS.map(f => (
-                <Input key={f.key} label={f.label} type="number" inputMode="numeric" min={0}
-                  value={draft.counts?.[f.key] ?? 0} onChange={e => patchCount(f.key, e.target.value)} />
-              ))}
+          {/* ② 人數 */}
+          <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">
+            <SectionHead n={2} title="人數" hint="特殊需求有才加" done={sec2Done} />
+            <div className="flex flex-wrap items-center gap-2">
+              <NumberStepper ariaLabel="總人數" max={500} value={total} onChange={v => patchCount('total', v)} />
+              <div className="flex flex-wrap gap-1.5">
+                {TOTAL_PRESETS.map(p => (
+                  <button key={p.key} type="button" onClick={() => patchCount('total', p.total)}
+                    aria-pressed={total === p.total}
+                    className={`tap rounded-full border px-3 py-1.5 text-xs font-bold ${total === p.total ? 'border-chicken-red bg-chicken-red/[0.06] text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'}`}>
+                    {p.label}<span className="ml-1 tabular-nums text-chicken-brown/45">{p.total}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-              <Input label="遊覽車 / 司機抵達" value={draft.busInfo || ''} onChange={e => patchDraft({ busInfo: e.target.value })} placeholder="車號 / 司機電話 / 抵達時間" />
-              <Input label="消費金額（結帳後回填）" type="number" inputMode="numeric" min={0} value={draft.spend ?? 0} onChange={e => patchDraft({ spend: Number(e.target.value) || 0 })} />
+
+            <div className="mt-3">
+              <div className="label">特殊需求（有才加）</div>
+              <div className="flex flex-wrap gap-1.5">
+                {SPECIAL_FIELDS.filter(f => !openSpecials.includes(f.key)).map(f => (
+                  <button key={f.key} type="button" onClick={() => setOpenSpecials(s => [...s, f.key])}
+                    className="tap inline-flex items-center gap-1 rounded-full border border-dashed border-chicken-brown/25 bg-white px-3 py-1.5 text-xs font-bold text-chicken-brown/65 hover:border-chicken-red/50 hover:text-chicken-red">
+                    <Icon name={f.icon} size={13} />＋ {f.label}
+                  </button>
+                ))}
+                {openSpecials.length === SPECIAL_FIELDS.length && (
+                  <span className="text-xs font-medium text-chicken-brown/40">四項都已加入</span>
+                )}
+              </div>
+              {openSpecials.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {SPECIAL_FIELDS.filter(f => openSpecials.includes(f.key)).map(f => {
+                    const over = specialOver.some(o => o.key === f.key)
+                    return (
+                      <div key={f.key} className={`flex items-center gap-1.5 rounded-xl px-2 py-1.5 ${over ? 'bg-chicken-red/[0.06] ring-1 ring-inset ring-chicken-red/40' : 'bg-chicken-cream/50'}`}>
+                        <Icon name={f.icon} size={14} className="text-chicken-brown/60" />
+                        <span className="text-xs font-bold text-chicken-brown">{f.label}</span>
+                        <NumberStepper size="sm" ariaLabel={`${f.label}人數`} max={500}
+                          value={draft.counts?.[f.key] ?? 0} onChange={v => patchCount(f.key, v)} />
+                        <button type="button" aria-label={`移除${f.label}`}
+                          onClick={() => { setOpenSpecials(s => s.filter(k => k !== f.key)); patchCount(f.key, 0) }}
+                          className="tap flex h-6 w-6 items-center justify-center rounded-md text-chicken-brown/40 hover:bg-chicken-brown/10 hover:text-chicken-red">✕</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {specialErr && (
+                <p role="alert" className="mt-2 text-xs font-bold text-chicken-red">{specialErr}</p>
+              )}
             </div>
-            <Textarea label="備註" value={draft.notes || ''} onChange={e => patchDraft({ notes: e.target.value })} className="mt-2" />
           </div>
 
-          {/* 預選場次（剩餘桌/席提示） */}
-          <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
-            <h3 className="text-sm font-semibold text-chicken-brown flex items-center gap-2 mb-1"><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-chicken-brown/[0.08] text-[11px] font-bold text-chicken-brown/70">3</span>預選場次</h3>
-            <p className="text-xs text-chicken-brown/55 mb-3">選好主場次後，下一頁再圈座位。兩段用餐可於圈座位頁加第二梯。</p>
+          {/* ③ 場次與梯次（含圈桌地圖） */}
+          <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">
+            <SectionHead n={3} title="場次與梯次" hint="兩段用餐可拆第二梯" done={sec3Done} />
+
             {hasSeatings ? (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {seatings.map(s => {
-                  const r = seatingRemaining[s.id]
-                  const tone = seatingTone(r)
-                  const selected = primarySeating?.id === s.id
-                  const disabled = tone === 'closed' || tone === 'full'
-                  const boxCls = selected
-                    ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04] text-chicken-brown'
-                    : disabled ? 'ring-1 ring-inset ring-chicken-brown/[0.08] bg-chicken-brown/[0.03] text-chicken-brown/40'
-                      : 'ring-1 ring-inset ring-chicken-brown/[0.1] bg-white text-chicken-brown hover:ring-chicken-brown/25'
-                  const remainCls = tone === 'closed' || tone === 'full' ? 'text-chicken-brown/40' : tone === 'tight' ? 'text-amber-700' : 'text-[#5b8c1f]'
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      disabled={disabled}
-                      aria-pressed={selected}
-                      onClick={() => selectSession(s)}
-                      className={`tap rounded-xl p-3 text-left transition-shadow disabled:cursor-not-allowed ${boxCls}`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold">{s.name}</span>
-                        <span className="text-xs text-chicken-brown/50 tabular-nums">{s.start}–{s.end}</span>
-                        {selected && <Icon name="checkCircle" size={16} className="ml-auto text-chicken-red" />}
-                      </div>
-                      <div className={`mt-1.5 text-xs font-semibold tabular-nums ${remainCls}`}>
-                        {tone === 'closed' ? '已關閉'
-                          : tone === 'full' ? '已客滿'
-                            : `剩 ${r?.remainingTables ?? '—'} 桌 · ${r?.remainingSeats ?? '—'} 席`}
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
+              <>
+                {allSeatingsShort && (
+                  <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                    本日各場次剩餘席位都少於 {total} 人：先選一個場次，再用下方「拆第二梯」分批輪替。
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {seatings.map(s => {
+                    const r = seatingRemaining[s.id]
+                    const tone = seatingTone(r)
+                    const selected = primarySeating?.id === s.id
+                    const short = seatingShort(s)
+                    const disabled = !selected && (tone === 'closed' || tone === 'full' || (short && !allSeatingsShort))
+                    const boxCls = selected
+                      ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04] text-chicken-brown'
+                      : disabled ? 'ring-1 ring-inset ring-chicken-brown/[0.08] bg-chicken-brown/[0.03] text-chicken-brown/40'
+                        : 'ring-1 ring-inset ring-chicken-brown/[0.1] bg-white text-chicken-brown hover:ring-chicken-brown/25'
+                    const remainCls = tone === 'closed' || tone === 'full' || short ? 'text-chicken-brown/45' : tone === 'tight' ? 'text-amber-700' : 'text-[#5b8c1f]'
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        disabled={disabled}
+                        aria-pressed={selected}
+                        onClick={() => selectSession(s)}
+                        className={`tap rounded-xl p-3 text-left transition-shadow disabled:cursor-not-allowed ${boxCls}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold">{s.name}</span>
+                          <span className="text-xs tabular-nums text-chicken-brown/50">{s.start}–{s.end}</span>
+                          {selected && <Icon name="checkCircle" size={16} className="ml-auto text-chicken-red" />}
+                        </div>
+                        <div className={`mt-1.5 text-xs font-semibold tabular-nums ${remainCls}`}>
+                          {tone === 'closed' ? '已關閉'
+                            : tone === 'full' ? '已客滿'
+                              : short ? `不夠這團 · 剩 ${r?.remainingSeats ?? '—'} 席`
+                                : `剩 ${r?.remainingTables ?? '—'} 桌 · ${r?.remainingSeats ?? '—'} 席`}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
             ) : (
               <div className="space-y-2">
-                <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs font-bold text-amber-800">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
                   尚未設定場次，建議到「設定 → 場次設定」新增；此處先用時段。
                 </div>
                 <Select label="用餐時段" value={primaryBatch?.timeSlot || ''} onChange={e => primaryBatch && patchBatch(primaryBatch.id, { timeSlot: e.target.value })} options={slots} className="w-40" />
               </div>
             )}
-            {/* 預計抵達時間：場次窗內的下拉選項（預設＝場次開始，可改成遊覽車實際抵達時間） */}
-            {hasSeatings && primarySeating && primaryBatch && (
-              <div className="mt-3">
-                <label className="label">預計抵達時間（選填）</label>
-                <div className="flex items-center gap-2.5 flex-wrap">
-                  <ArrivalTimeSelect
-                    seating={primarySeating}
-                    value={primaryBatch.timeSlot}
-                    onChange={v => patchBatch(primaryBatch.id, { timeSlot: v })}
-                    className="w-32"
-                  />
-                  <span className="text-xs text-chicken-brown/55">
-                    預設＝場次開始（{primarySeating.start}）；可改成遊覽車實際抵達時間，備餐與抵達時間軸都會用這個時間
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
-      {/* Page 2：圈選座位 */}
-      {step === 2 && (
-        <div className="space-y-3">
-          {/* 梯次列 */}
-          <div className="bg-white rounded-xl border border-chicken-brown/10 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-chicken-brown">梯次 <span className="text-xs font-medium text-chicken-brown/50">· 兩段用餐可加第二梯</span></h3>
-            </div>
             {/* 多梯拆批提示：各旅客梯次人數總和應等於總人數（司領桌不計） */}
             {gBatches.length > 1 && (() => {
-              const total = Number(draft.counts?.total) || 0
               const assigned = gBatches.reduce((s, b) => s + (Number(b.guests) || 0), 0)
               if (assigned === total) return null
               return (
-                <div className="mb-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-1.5 text-xs font-bold text-amber-800">
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">
                   各梯人數合計 {assigned} 人，與總人數 {total} 人不符（{assigned < total ? `還有 ${total - assigned} 人未分配` : `多出 ${assigned - total} 人`}）
                 </div>
               )
             })()}
-            <div className="space-y-2">
-              {gBatches.map(b => {
-                const sea = seatingForSlot(settings, b.timeSlot)
-                const active = activeBatchId === b.id
-                const single = singleGuest
-                return (
-                  <div key={b.id} className={`rounded-xl p-2.5 ${active ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04]' : 'ring-1 ring-inset ring-chicken-brown/10 bg-white'}`}>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold text-chicken-brown">{b.label}</span>
-                      {sea && (
-                        <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>
-                      )}
-                      <label className="flex items-center gap-1 text-xs text-chicken-brown/60">抵達
-                        <ArrivalTimeSelect seating={sea} slots={slots} value={b.timeSlot}
-                          onChange={v => patchBatch(b.id, { timeSlot: v })} className="w-28 !py-1" />
-                      </label>
-                      {single ? (
-                        // 單梯人數 = 第一頁總人數，不重複填
-                        <span className="text-xs font-bold text-chicken-brown/70">{Number(draft.counts?.total) || 0} 人（同總人數）</span>
-                      ) : (
-                        <label className="flex items-center gap-1 text-xs text-chicken-brown/60">人數
-                          <Input className="w-16 !py-1" type="number" inputMode="numeric" min={0} value={b.guests} onChange={e => patchBatch(b.id, { guests: Number(e.target.value) || 0 })} />
-                        </label>
-                      )}
-                      <span className="text-xs text-chicken-brown/60">桌 {(b.tableNumbers || []).join('、') || '未圈'}</span>
-                      <div className="flex-1" />
-                      <button type="button" onClick={() => setActiveBatchId(b.id)} className={`tap text-xs px-2.5 h-7 rounded-lg font-semibold ${active ? 'bg-chicken-red text-white' : 'bg-white border border-chicken-brown/15 text-chicken-brown'}`}>
-                        {active ? '圈桌中' : '圈此梯桌'}
-                      </button>
-                      {gBatches.length > 1 && (
-                        <button type="button" onClick={() => removeBatch(b.id)} aria-label="刪除此梯" className="tap w-7 h-7 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]"><Icon name="trash" size={14} /></button>
-                      )}
-                    </div>
-                    <SeatGauge size="xs" circled={seatsOf(b.tableNumbers)} needed={batchGuests(b)} className="mt-1.5" />
-                  </div>
-                )
-              })}
+
+            <div className="mt-3 space-y-2">
+              {gBatches.map(b => renderBatchRow(b, false))}
+              {escortBatch && renderBatchRow(escortBatch, true)}
             </div>
 
-            {/* 新增梯次（綁場次） */}
-            <div className="mt-2">
+            <div className="mt-2 flex flex-wrap items-center gap-3">
               {addingBatch ? (
-                <div className="rounded-xl border border-dashed border-chicken-brown/20 bg-[#fbfaf8] p-2.5 space-y-1.5">
+                <div className="w-full space-y-1.5 rounded-xl border border-dashed border-chicken-brown/20 bg-[#fbfaf8] p-2.5">
                   <div className="text-xs font-semibold text-chicken-brown/70">選第二梯的場次：</div>
                   <div className="flex flex-wrap gap-1.5">
                     {(hasSeatings ? seatings : []).map(s => {
@@ -587,167 +708,148 @@ export default function GroupEditorStage({
                       const disabled = r?.closed || (r?.remainingSeats ?? 0) <= 0
                       return (
                         <button key={s.id} disabled={disabled} onClick={() => { addBatchForSeating(s); setAddingBatch(false) }}
-                          className="tap rounded-lg border border-chicken-brown/15 bg-white px-2.5 h-8 text-xs font-semibold text-chicken-brown disabled:opacity-40 disabled:cursor-not-allowed">
+                          className="tap h-8 rounded-lg border border-chicken-brown/15 bg-white px-2.5 text-xs font-semibold text-chicken-brown disabled:cursor-not-allowed disabled:opacity-40">
                           {s.name} {s.start}（剩 {r?.remainingSeats ?? '—'} 席）
                         </button>
                       )
                     })}
                     {!hasSeatings && <span className="text-xs text-chicken-brown/50">尚未設定場次</span>}
                   </div>
-                  <button type="button" onClick={() => setAddingBatch(false)} className="tap text-xs text-chicken-brown/60 font-semibold">取消</button>
+                  <button type="button" onClick={() => setAddingBatch(false)} className="tap text-xs font-semibold text-chicken-brown/60">取消</button>
                 </div>
               ) : (
-                <button type="button" onClick={() => setAddingBatch(true)} className="tap inline-flex items-center gap-0.5 text-xs text-chicken-red font-semibold"><Icon name="plus" size={12} strokeWidth={2.4} />新增梯次（兩段用餐輪替）</button>
+                <>
+                  <button type="button" onClick={() => setAddingBatch(true)} className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red"><Icon name="plus" size={12} strokeWidth={2.4} />拆第二梯（兩段用餐輪替）</button>
+                  {!escortBatch && (
+                    <button type="button" onClick={addEscort} className="tap inline-flex items-center gap-1 text-xs font-semibold text-chicken-brown/70 hover:text-chicken-red"><Icon name="bus" size={13} />加司領桌（司機 / 領隊，不計入總人數）</button>
+                  )}
+                </>
               )}
             </div>
 
-            {/* 司領桌（司機 + 領隊）：獨立小桌，可圈多張、人數獨立不計入總人數 */}
-            <div className="mt-3 pt-3 border-t border-chicken-brown/10">
-              {escortBatch ? (
-                <div className={`rounded-xl p-2.5 ${activeBatchId === escortBatch.id ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04]' : 'ring-1 ring-inset ring-indigo-200 bg-indigo-50/40'}`}>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-indigo-700">司領桌</span>
-                    <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">司機+領隊</span>
-                    {(() => {
-                      const sea = seatingForSlot(settings, escortBatch.timeSlot)
-                      return (
-                        <>
-                          {sea && (
-                            <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>
-                          )}
-                          <label className="flex items-center gap-1 text-xs text-chicken-brown/60">抵達
-                            <ArrivalTimeSelect seating={sea} slots={slots} value={escortBatch.timeSlot}
-                              onChange={v => patchBatch(escortBatch.id, { timeSlot: v })} className="w-28 !py-1" />
-                          </label>
-                        </>
-                      )
-                    })()}
-                    <label className="flex items-center gap-1 text-xs text-chicken-brown/60">人數
-                      <Input className="w-16 !py-1" type="number" inputMode="numeric" min={0} value={escortBatch.guests}
-                        onChange={e => patchBatch(escortBatch.id, { guests: Number(e.target.value) || 0 })} />
-                    </label>
-                    <span className="text-xs text-chicken-brown/60">桌 {(escortBatch.tableNumbers || []).join('、') || '未圈'}</span>
-                    <div className="flex-1" />
-                    <button type="button" onClick={() => setActiveBatchId(escortBatch.id)}
-                      className={`tap text-xs px-2.5 h-7 rounded-lg font-semibold ${activeBatchId === escortBatch.id ? 'bg-chicken-red text-white' : 'bg-white border border-indigo-200 text-indigo-700'}`}>
-                      {activeBatchId === escortBatch.id ? '圈桌中' : '圈司領桌'}
-                    </button>
-                    <button type="button" onClick={() => removeEscort(escortBatch.id)} aria-label="移除司領桌" className="tap w-7 h-7 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]"><Icon name="trash" size={14} /></button>
+            {/* 圈桌地圖：就在本段展開，不再翻頁 */}
+            <div className="mt-3 border-t border-chicken-brown/10 pt-3">
+              <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-[200px]">
+                  <div className="text-sm font-semibold text-chicken-brown">圈選座位 <span className="text-xs font-medium text-chicken-brown/50">· {dayLabel(date)} 規劃，非今日即時</span></div>
+                  <div className={`text-xs ${activeBatch ? 'font-semibold text-chicken-red' : 'text-chicken-brown/55'}`}>
+                    {activeBatch ? `圈桌中：${activeBatch.label}${seatingForSlot(settings, activeBatch.timeSlot) ? ' · ' + seatingForSlot(settings, activeBatch.timeSlot).name : ' ' + activeBatch.timeSlot}` : '請於上方選一個梯次'}
                   </div>
-                  <div className="mt-1 text-[11px] text-indigo-600/70">司領桌人數不計入團體總人數與旅客保留席；可圈多張（多輛長途車）。</div>
                 </div>
-              ) : (
-                <button type="button" onClick={addEscort} className="tap inline-flex items-center gap-0.5 text-xs text-indigo-700 font-semibold"><Icon name="plus" size={12} strokeWidth={2.4} />加司領桌（司機 / 領隊）</button>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={autoSuggest} className="tap inline-flex h-8 items-center gap-1 rounded-[9px] border border-chicken-brown/15 bg-white px-3 text-xs font-semibold text-chicken-brown"><Icon name="target" size={14} />一鍵推薦桌位</button>
+                  <SegmentedControl size="sm" ariaLabel="樓層" value={floor} onChange={setFloor} options={[{ key: '1F', label: '1F' }, { key: '2F', label: '2F' }]} />
+                </div>
+              </div>
+
+              {activeBatch && (
+                <div className="mb-2.5 rounded-lg border border-chicken-brown/[0.08] bg-[#fbfaf8] px-3 py-2">
+                  <SeatGauge circled={seatsOf(selectedTables)} needed={batchGuests(activeBatch)} />
+                  <div className="mt-1 text-[11px] text-chicken-brown/55">旅客保留 {heldSeats} 席（不含司領桌）</div>
+                </div>
               )}
+
+              {/* 圈到的桌事後被設停用/維修：地圖已置灰不可點，這裡提供一鍵移除（否則無法取消圈選） */}
+              {outCircledTables.length > 0 && (
+                <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
+                  <span className="font-bold text-amber-800">本梯圈到的桌在此日期停用/維修中（不會供餐、儲存會被擋）：</span>
+                  <span className="ml-1 inline-flex flex-wrap gap-1.5 align-middle">
+                    {outCircledTables.map(n => (
+                      <button key={n} onClick={() => removeCircledTable(n)}
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 font-bold text-amber-900 hover:bg-amber-300">
+                        {n} ✕
+                      </button>
+                    ))}
+                  </span>
+                  <span className="ml-1 text-amber-700/70">點桌號即移除。</span>
+                </div>
+              )}
+
+              <div className="min-h-[360px] overflow-hidden rounded-lg border border-chicken-brown/5" style={{ background: '#faf8f5' }}>
+                <FloorMap
+                  floor={floor}
+                  tables={tables}
+                  settings={settings}
+                  planningMode
+                  selectedTables={selectedTables}
+                  blockedTables={blockedTables}
+                  mapDate={date}
+                  fixtures={fixtures}
+                  zones={zones}
+                  onSelectTable={toggleTable}
+                />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] font-semibold text-chicken-brown/55">
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-600" />已選</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-400" />已被佔</span>
+                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm border border-slate-300 bg-slate-200" />可選</span>
+              </div>
             </div>
           </div>
 
-          {/* 規劃地圖 */}
-          <div className="bg-white rounded-xl border border-chicken-brown/10 p-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
-              <div className="min-w-[200px]">
-                <div className="text-sm font-semibold text-chicken-brown">圈選座位 <span className="text-xs font-medium text-chicken-brown/50">· {dayLabel(date)} 規劃，非今日即時</span></div>
-                <div className={`text-xs ${activeBatch ? 'text-chicken-red font-semibold' : 'text-chicken-brown/55'}`}>
-                  {activeBatch ? `圈桌中：${activeBatch.label}${seatingForSlot(settings, activeBatch.timeSlot) ? ' · ' + seatingForSlot(settings, activeBatch.timeSlot).name : ' ' + activeBatch.timeSlot}` : '請於上方選一個梯次'}
+          {/* 其他（不同時機才用得到的事，收起來） */}
+          <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">
+            <h3 className="mb-2.5 text-sm font-semibold text-chicken-brown">其他</h3>
+            <div className="space-y-2">
+              <Disclosure title="🚌 遊覽車資訊" defaultOpen={!!(bus.plate || bus.phone || bus.eta)}>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <Input label="車號" placeholder="例：KAA-1234" value={bus.plate} onChange={e => patchBus({ plate: e.target.value })} />
+                  <Input label="司機電話" inputMode="tel" placeholder="09xx-xxx-xxx" value={bus.phone} onChange={e => patchBus({ phone: e.target.value })} />
+                  <Input label="預計抵達" type="time" value={bus.eta} onChange={e => patchBus({ eta: e.target.value })} />
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={autoSuggest} className="tap inline-flex items-center gap-1 h-8 px-3 rounded-[9px] bg-white border border-chicken-brown/15 text-xs font-semibold text-chicken-brown"><Icon name="target" size={14} />一鍵推薦桌位</button>
-                <SegmentedControl size="sm" ariaLabel="樓層" value={floor} onChange={setFloor} options={[{ key: '1F', label: '1F' }, { key: '2F', label: '2F' }]} />
-              </div>
-            </div>
-
-            {activeBatch && (
-              <div className="mb-2.5 rounded-lg bg-[#fbfaf8] border border-chicken-brown/[0.08] px-3 py-2">
-                <SeatGauge circled={seatsOf(selectedTables)} needed={batchGuests(activeBatch)} />
-                <div className="mt-1 text-[11px] text-chicken-brown/55">旅客保留 {heldSeats} 席（不含司領桌）</div>
-              </div>
-            )}
-
-            {/* 圈到的桌事後被設停用/維修：地圖已置灰不可點，這裡提供一鍵移除（否則無法取消圈選） */}
-            {outCircledTables.length > 0 && (
-              <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
-                <span className="font-bold text-amber-800">本梯圈到的桌在此日期停用/維修中（不會供餐、儲存會被擋）：</span>
-                <span className="ml-1 inline-flex flex-wrap gap-1.5 align-middle">
-                  {outCircledTables.map(n => (
-                    <button key={n} onClick={() => removeCircledTable(n)}
-                      className="inline-flex items-center gap-1 rounded-full bg-amber-200 px-2 py-0.5 font-bold text-amber-900 hover:bg-amber-300">
-                      {n} ✕
-                    </button>
-                  ))}
-                </span>
-                <span className="ml-1 text-amber-700/70">點桌號即移除。</span>
-              </div>
-            )}
-
-            <div className="rounded-lg overflow-hidden border border-chicken-brown/5 min-h-[360px]" style={{ background: '#faf8f5' }}>
-              <FloorMap
-                floor={floor}
-                tables={tables}
-                settings={settings}
-                planningMode
-                selectedTables={selectedTables}
-                blockedTables={blockedTables}
-                mapDate={date}
-                fixtures={fixtures}
-                zones={zones}
-                onSelectTable={toggleTable}
-              />
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] font-semibold text-chicken-brown/55">
-              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-indigo-600" />已選</span>
-              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-400" />已被佔</span>
-              <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-slate-200 border border-slate-300" />可選</span>
-            </div>
-          </div>
-
-          {/* 摘要 + 存檔 */}
-          <div className="bg-white rounded-xl border border-chicken-brown/10 p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-chicken-brown">確認與儲存</h3>
-            <dl className="text-sm divide-y divide-chicken-brown/10">
-              <div className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">旅行社 / 導遊</dt>
-                <dd className="font-bold text-chicken-brown text-right">{draft.agencyName || '（未填）'}{draft.guideName ? ` · ${draft.guideName}` : ''}</dd></div>
-              <div className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">人數</dt>
-                <dd className="font-bold text-chicken-brown text-right">
-                  共 {draft.counts?.total || 0} 人
-                  {[['素', draft.counts?.vegetarian], ['童', draft.counts?.child], ['行', draft.counts?.mobility], ['輪', draft.counts?.wheelchair]]
-                    .filter(([, v]) => v > 0).map(([k, v]) => ` · ${k}${v}`).join('')}
-                </dd></div>
-              {draft.batches.map(b => {
-                const sea = seatingForSlot(settings, b.timeSlot)
-                return (
-                  <div key={b.id} className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">{b.label} {sea ? `${sea.name} ` : ''}{b.timeSlot}</dt>
-                    <dd className="font-bold text-chicken-brown text-right">{batchGuests(b)} 人 · 桌 {(b.tableNumbers || []).join('、') || '未圈'}</dd></div>
-                )
-              })}
-              <div className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">保留席數</dt>
-                <dd className="font-bold text-chicken-brown text-right">{heldSeats} 席</dd></div>
-              {(draft.allergyText || draft.tableSideNeeds) && (
-                <div className="flex justify-between py-1.5"><dt className="text-chicken-brown/60">特殊需求</dt>
-                  <dd className="font-bold text-chicken-brown text-right">{[draft.allergyText, draft.tableSideNeeds].filter(Boolean).join('；')}</dd></div>
-              )}
-            </dl>
-            <div className="flex flex-wrap gap-2 items-center pt-1">
-              <Button onClick={save} disabled={busy} className="flex-1 min-w-[160px]">{busy ? '儲存中…' : '儲存團單（含衝突檢查）'}</Button>
-              <Button variant="secondary" onClick={() => setSheetOpen(true)}>回傳單</Button>
-              {!isNew && (
-                <button type="button" onClick={doDelete} className="tap inline-flex items-center gap-1 min-h-[44px] px-3.5 rounded-[10px] text-sm font-semibold text-chicken-red hover:bg-chicken-red/[0.06]"><Icon name="trash" size={14} />刪除</button>
+              </Disclosure>
+              <Disclosure title="📝 備註（過敏、包場、加菜…）" defaultOpen={!!(draft.notes || '').trim()}>
+                <Textarea value={draft.notes || ''} onChange={e => patchDraft({ notes: e.target.value })} placeholder="會印在當日總表上" />
+              </Disclosure>
+              {/* 消費金額：建單時還沒結帳，只有「編輯既有已落地團單」才出現 */}
+              {!isNew && draft.id && (
+                <Disclosure title="💰 消費金額（結帳後回填）" defaultOpen={(Number(draft.spend) || 0) > 0}>
+                  <NumberStepper ariaLabel="消費金額" max={99999} step={100}
+                    value={draft.spend ?? 0} onChange={v => patchDraft({ spend: v })} />
+                </Disclosure>
               )}
             </div>
+            {isNew && <p className="mt-2 text-xs text-chicken-brown/50">消費金額在結帳後到團單詳情回填，建單時不出現。</p>}
           </div>
         </div>
-      )}
 
-      {/* 頁面導覽列 */}
-      <div className="sticky bottom-0 z-10 -mx-3 sm:-mx-6 px-3 sm:px-6 py-2.5 bg-chicken-cream/95 backdrop-blur border-t border-chicken-brown/10 flex items-center gap-2">
-        <button type="button" onClick={goPrev} disabled={step === 1}
-          className="tap inline-flex items-center gap-1 h-10 px-4 rounded-[10px] text-sm font-semibold bg-white border border-chicken-brown/15 text-chicken-brown disabled:opacity-40"><Icon name="chevronLeft" size={14} strokeWidth={2.4} />上一頁</button>
-        <div className="flex-1" />
-        {step < 2
-          ? <Button onClick={goNext}>下一步：圈選座位 →</Button>
-          : <Button onClick={save} disabled={busy}>{busy ? '儲存中…' : '儲存'}</Button>}
+        {/* ===== 右：即時摘要 + 檢查清單（md 以上 sticky）===== */}
+        <aside className="mt-3 md:sticky md:top-2 md:mt-0">
+          <GroupEditorSummary
+            agencyName={draft.agencyName}
+            guideName={draft.guideName}
+            guidePhone={draft.guidePhone}
+            dateLabel={dayLabel(date)}
+            seatingLabel={primarySeating ? primarySeating.name : (primaryBatch?.timeSlot || '')}
+            batchCount={gBatches.length}
+            total={total}
+            specialsText={specialsText}
+            tableNumbers={allTableNumbers}
+            escortTables={escortBatch?.tableNumbers || []}
+            heldSeats={heldSeats}
+            checks={checks}
+          >
+            <div className="space-y-2">
+              <Button onClick={save} disabled={!canSave || busy} className="w-full justify-center">{busy ? '儲存中…' : saveLabel}</Button>
+              <Button variant="secondary" onClick={() => setSheetOpen(true)} className="w-full justify-center">回傳單</Button>
+              <button type="button" onClick={onBack} className="tap w-full rounded-[10px] py-2 text-sm font-semibold text-chicken-brown/60 hover:text-chicken-brown">先不存，回總覽</button>
+              {!isNew && (
+                <button type="button" onClick={doDelete} className="tap inline-flex w-full items-center justify-center gap-1 rounded-[10px] py-2 text-sm font-semibold text-chicken-red hover:bg-chicken-red/[0.06]"><Icon name="trash" size={14} />刪除團單</button>
+              )}
+            </div>
+          </GroupEditorSummary>
+        </aside>
       </div>
 
+      {/* md 以下：底部 sticky 條（席位 + 儲存）。檢查清單在上方摘要卡裡已完整呈現。 */}
+      <div className="sticky bottom-0 z-10 -mx-3 flex items-center gap-3 border-t border-chicken-brown/10 bg-chicken-cream/95 px-3 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 md:hidden">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold text-chicken-brown/55">席位（總人數 / 已圈席位）</div>
+          <div className={`text-sm font-bold tabular-nums ${total > 0 && heldSeats < total ? 'text-chicken-red' : 'text-chicken-brown'}`}>{total} / {heldSeats}</div>
+        </div>
+        <div className="flex-1" />
+        <Button onClick={save} disabled={!canSave || busy}>{busy ? '儲存中…' : saveLabel}</Button>
+      </div>
       {sheetOpen && (
         <GroupSheet group={draft} tables={tables} store={settings} fixtureSource={fixtures} onClose={() => setSheetOpen(false)} />
       )}
