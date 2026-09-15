@@ -45,7 +45,7 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
   if (!group) return null
 
   return (
-    <Modal open={open} onClose={handleClose} title={`📅 團體改期 · ${group.agencyName || '（未填旅行社）'}`} footer={
+    <Modal open={open} onClose={handleClose} title={`團體改期 · ${group.agencyName || '（未填旅行社）'}`} footer={
       <>
         <button onClick={handleClose} className="btn-secondary px-4 py-2">取消</button>
         <button onClick={handleConfirm} disabled={!canConfirm}
@@ -56,7 +56,7 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
     }>
       <div className="space-y-3">
         <div className="rounded-lg bg-chicken-cream/60 px-3 py-2 text-sm font-bold text-chicken-brown">
-          目前日期：📅 {dayLabel(group.date)}　·　共 {total} 人
+          目前日期：{dayLabel(group.date)}　·　共 {total} 人
         </div>
 
         <div>
@@ -66,13 +66,13 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
 
         {newDate && (
           <div className="rounded-xl border-2 border-indigo-200 bg-indigo-50/50 p-3 space-y-2">
-            <div className="text-sm font-black text-indigo-700">
+            <div className="text-sm font-bold text-indigo-700">
               新日期：{dayLabel(newDate)}{sameDay ? '（同一天，等同重新圈桌）' : ''}
             </div>
 
             {closedDate ? (
               <div className="rounded-lg bg-chicken-red/10 px-3 py-2 text-xs font-bold text-chicken-red">
-                🚫 該日為公休日，無法改期，請改選其他日期。
+                該日為公休日，無法改期，請改選其他日期。
               </div>
             ) : seatings.length ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -86,10 +86,10 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
                         : 'border-emerald-300 bg-emerald-50 text-emerald-800'
                   return (
                     <div key={seating.id} className={`rounded-lg border-2 p-2 ${cls}`}>
-                      <div className="text-xs font-black">{seating.name}</div>
+                      <div className="text-xs font-bold">{seating.name}</div>
                       <div className="text-[11px] opacity-70">{seating.start}–{seating.end}</div>
                       <div className="mt-1 text-xs font-bold">
-                        {closed ? '🚫 已關閉'
+                        {closed ? '已關閉'
                           : full ? '已客滿'
                             : `剩 ${r.remainingTables ?? '—'} 桌 / ${r.remainingSeats ?? '—'} 席`}
                         {tight && <span className="ml-1">· 需分梯</span>}
@@ -105,7 +105,7 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
             )}
 
             <div className="rounded-lg bg-white/70 px-3 py-2 text-[11px] font-bold text-indigo-600/80">
-              ⚠️ 改期後原圈桌位將清空，下一步請為新日期重新圈桌。未儲存前團單仍留在原日期（{dayLabel(group.date)}）。
+              改期後原圈桌位將清空，下一步請為新日期重新圈桌。未儲存前團單仍留在原日期（{dayLabel(group.date)}）。
             </div>
           </div>
         )}

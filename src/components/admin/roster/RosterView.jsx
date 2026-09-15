@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import CustomersView from './CustomersView'
 import AgencyDirectoryView from './AgencyDirectoryView'
+import SegmentedControl from '../../ui/SegmentedControl'
 
 const SUB = [
-  { key: 'customers', label: '👤 顧客', },
-  { key: 'agencies', label: '🚌 旅行社 / 導遊' },
+  { key: 'customers', label: '顧客', icon: 'users' },
+  { key: 'agencies', label: '旅行社 / 導遊', icon: 'bus' },
 ]
 
 // 名冊：顧客檔（VIP/黑名單）＋ 旅行社/導遊（含歷史團體與業績排名）。
@@ -24,20 +25,8 @@ export default function RosterView({ pendingPhone, onPendingConsumed, onAddBooki
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
-        {SUB.map(s => (
-          <button
-            key={s.key}
-            onClick={() => setSub(s.key)}
-            className={`whitespace-nowrap px-4 py-2 rounded-xl text-sm font-bold border-2 transition-all ${
-              sub === s.key
-                ? 'bg-chicken-red border-chicken-red text-white shadow'
-                : 'bg-white border-chicken-brown/15 text-chicken-brown'
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
+      <div className="sticky top-0 z-20 py-1 bg-chicken-cream">
+        <SegmentedControl options={SUB} value={sub} onChange={setSub} ariaLabel="名冊子分頁" />
       </div>
       {sub === 'customers' && <CustomersView initialQuery={seedQuery} onAddBooking={onAddBooking} />}
       {sub === 'agencies' && <AgencyDirectoryView onGoPlanning={onGoPlanning} />}

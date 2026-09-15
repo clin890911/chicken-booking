@@ -69,7 +69,7 @@ test('日曆點明天 → 收合週條 → 日期 guard → 預配導到規劃�
 
   // 月曆收合成週條、當日清單成為主體
   await expect(page.getByRole('button', { name: /展開月曆/ })).toBeVisible()
-  await expect(page.getByText(`📋 ${dayLabelOf(TOMORROW)}`)).toBeVisible()
+  await expect(page.getByText(dayLabelOf(TOMORROW), { exact: true }).first()).toBeVisible()
   await expect(page.getByText('林未來')).toBeVisible()
 
   // 日期 guard：未來日不可報到/標 No-show；已配桌的顯示「當天才可報到」

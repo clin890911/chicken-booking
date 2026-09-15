@@ -20,7 +20,7 @@ export default function GroupTodayPanel({ onFocusTable, onReseatBatch }) {
   )
 
   if (active.length + completed.length === 0) {
-    return <EmptyState icon="🚌" title="今日沒有團體" hint="可到「團體 → 預排規劃」建立預排單" />
+    return <EmptyState icon="bus" title="今日沒有團體" hint="可到「團體 → 預排規劃」建立預排單" />
   }
 
   return (
@@ -30,7 +30,7 @@ export default function GroupTodayPanel({ onFocusTable, onReseatBatch }) {
       ))}
       {active.length === 0 && (
         <div className="text-center text-xs text-chicken-brown/55 font-bold py-3">
-          🎉 今日團體皆已完成
+          今日團體皆已完成
         </div>
       )}
       {completed.length > 0 && (

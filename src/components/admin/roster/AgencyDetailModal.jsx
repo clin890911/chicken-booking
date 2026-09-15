@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Modal } from '../../ui'
+import SegmentedControl from '../../ui/SegmentedControl'
 
 const GSTATUS = {
   planned: '預排', confirmed: '已確認', arrived: '已到', completed: '已完成', cancelled: '已取消',
@@ -59,19 +60,19 @@ export default function AgencyDetailModal({ agency, rank, stats, guides = [], on
     <Modal
       open={!!a}
       onClose={onClose}
-      title={`${rank != null && rank < 3 ? ['🥇', '🥈', '🥉'][rank] + ' ' : ''}${a.name} · 旅行社`}
+      title={`${rank != null && rank < 3 ? ['', '', ''][rank] + ' ' : ''}${a.name} · 旅行社`}
       footer={<button onClick={onClose} className="btn-secondary px-4 py-2">關閉</button>}
     >
       <div className="space-y-3">
         <div className="text-sm text-chicken-brown/70">
-          📞 {a.phone || '—'}{a.contactName ? ` · 窗口 ${a.contactName}` : ''}{a.lineId ? ` · LINE ${a.lineId}` : ''}
+          {a.phone || '—'}{a.contactName ? ` · 窗口 ${a.contactName}` : ''}{a.lineId ? ` · LINE ${a.lineId}` : ''}
         </div>
         {a.note && <p className="text-xs text-chicken-brown/70 italic">「{a.note}」</p>}
 
         <div className="grid grid-cols-4 gap-2">
           {metrics.map(m => (
             <div key={m.l} className="bg-chicken-cream rounded-xl p-2 text-center">
-              <div className="text-base font-black text-chicken-brown tabular-nums">{m.v}</div>
+              <div className="text-base font-bold text-chicken-brown tabular-nums">{m.v}</div>
               <div className="text-[10px] text-chicken-brown/60">{m.l}</div>
             </div>
           ))}
@@ -83,15 +84,15 @@ export default function AgencyDetailModal({ agency, rank, stats, guides = [], on
             {guides.length === 0 && <span className="text-xs text-chicken-brown/40">尚無導遊</span>}
             {guides.map(g => (
               <span key={g.id} className="text-xs px-2.5 py-1 rounded-full bg-chicken-cream border border-chicken-brown/10 text-chicken-brown font-bold">
-                🧑‍✈️ {g.name}{g.phone ? `（${g.phone}）` : ''}
+                ‍✈️ {g.name}{g.phone ? `（${g.phone}）` : ''}
               </span>
             ))}
           </div>
         </div>
 
         <div className="flex gap-2">
-          <button onClick={() => onGoPlanning?.()} className="btn-primary flex-1 !py-2 text-sm">🗺️ 新增團體預排</button>
-          {onEdit && <button onClick={() => onEdit(a)} className="btn-secondary flex-1 !py-2 text-sm">✏️ 編輯旅行社</button>}
+          <button onClick={() => onGoPlanning?.()} className="btn-primary flex-1 !py-2 text-sm">新增團體預排</button>
+          {onEdit && <button onClick={() => onEdit(a)} className="btn-secondary flex-1 !py-2 text-sm">編輯旅行社</button>}
         </div>
 
         <div>
@@ -101,16 +102,12 @@ export default function AgencyDetailModal({ agency, rank, stats, guides = [], on
             </div>
             <button onClick={() => exportCsv(a, rows)} disabled={rows.length === 0}
               className="text-xs font-bold text-chicken-brown border border-chicken-brown/15 rounded-lg px-2.5 py-1 disabled:opacity-40">
-              ⬇ 匯出 CSV
+              匯出 CSV
             </button>
           </div>
-          <div className="flex gap-1.5 mb-2">
-            {[{ v: 'all', l: '全部' }, { v: 'completed', l: '已完成' }, { v: 'active', l: '未完成' }].map(f => (
-              <button key={f.v} onClick={() => setFilter(f.v)}
-                className={`px-3 py-1 rounded-lg text-xs font-bold ${filter === f.v ? 'bg-chicken-red text-white' : 'bg-white border border-chicken-brown/15 text-chicken-brown'}`}>
-                {f.l}
-              </button>
-            ))}
+          <div className="mb-2">
+            <SegmentedControl size="sm" ariaLabel="團體記錄篩選" value={filter} onChange={setFilter}
+              options={[{ key: 'all', label: '全部' }, { key: 'completed', label: '已完成' }, { key: 'active', label: '未完成' }]} />
           </div>
           {rows.length === 0 ? (
             <p className="text-xs text-chicken-brown/50 py-3 text-center">無符合條件的記錄</p>

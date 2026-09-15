@@ -58,33 +58,33 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <button onClick={onBack} className="text-sm font-bold text-chicken-brown/70 hover:text-chicken-brown">← 返回當日總覽</button>
           <div className="flex gap-1.5">
-            <Button variant="secondary" onClick={() => setSheetOpen(true)}>🖨 回傳單</Button>
+            <Button variant="secondary" onClick={() => setSheetOpen(true)}>回傳單</Button>
             {canReschedule && onReschedule && (
-              <Button variant="secondary" onClick={onReschedule}>📅 改期</Button>
+              <Button variant="secondary" onClick={onReschedule}>改期</Button>
             )}
-            <Button onClick={onEdit}>✏️ 編輯</Button>
+            <Button onClick={onEdit}>編輯</Button>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-base font-black text-chicken-brown">🚌 {group.agencyName || '（未填旅行社）'}</span>
-          <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
-          <span className="inline-flex items-center gap-1.5 rounded-lg bg-chicken-cream px-2.5 py-1 text-xs font-black text-chicken-brown">📅 {dayLabel(group.date)}</span>
+          <span className="text-base font-bold text-chicken-brown">{group.agencyName || '（未填旅行社）'}</span>
+          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-chicken-cream px-2.5 py-1 text-xs font-bold text-chicken-brown">{dayLabel(group.date)}</span>
         </div>
       </div>
 
       {/* 三大數字 */}
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-xl bg-chicken-brown/10 text-chicken-brown p-2.5 text-center">
-          <div className="text-[11px] font-bold opacity-80">👥 總人數</div>
-          <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{counts.total || 0}</div>
+          <div className="text-[11px] font-bold opacity-80">總人數</div>
+          <div className="text-2xl font-bold tabular-nums leading-tight mt-0.5">{counts.total || 0}</div>
         </div>
         <div className="rounded-xl bg-indigo-50 text-indigo-700 p-2.5 text-center">
-          <div className="text-[11px] font-bold opacity-80">🚌 梯次</div>
-          <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">{gBatches.length}</div>
+          <div className="text-[11px] font-bold opacity-80">梯次</div>
+          <div className="text-2xl font-bold tabular-nums leading-tight mt-0.5">{gBatches.length}</div>
         </div>
         <div className="rounded-xl bg-chicken-yellow/15 text-chicken-yellow p-2.5 text-center">
-          <div className="text-[11px] font-bold opacity-80">🪑 保留</div>
-          <div className="text-2xl font-black tabular-nums leading-tight mt-0.5">
+          <div className="text-[11px] font-bold opacity-80">保留</div>
+          <div className="text-2xl font-bold tabular-nums leading-tight mt-0.5">
             {heldNumbers.length}<span className="text-sm">桌</span> <span className="text-sm">{heldSeats} 席</span>
           </div>
         </div>
@@ -99,20 +99,20 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
             const nums = (b.tableNumbers || []).map(String)
             return (
               <div key={b.id} className={`rounded-lg border p-2.5 flex items-center gap-2 flex-wrap ${b.isEscort ? 'border-indigo-200 bg-indigo-50' : 'border-chicken-brown/10 bg-chicken-cream/30'}`}>
-                <span className={`text-sm font-black ${b.isEscort ? 'text-indigo-700' : 'text-chicken-brown'}`}>{b.isEscort ? '🚗 司領桌' : b.label}</span>
+                <span className={`text-sm font-bold ${b.isEscort ? 'text-indigo-700' : 'text-chicken-brown'}`}>{b.isEscort ? '司領桌' : b.label}</span>
                 {sea && !b.isEscort && <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>}
-                <span className="px-2 py-0.5 rounded-full bg-white text-chicken-brown text-xs font-bold tabular-nums">🕐 {b.timeSlot || '未排'}</span>
-                <span className="px-2 py-0.5 rounded-full bg-white text-chicken-brown text-xs font-bold tabular-nums">👥 {batchGuests(b)} 位</span>
+                <span className="px-2 py-0.5 rounded-full bg-white text-chicken-brown text-xs font-bold tabular-nums">{b.timeSlot || '未排'}</span>
+                <span className="px-2 py-0.5 rounded-full bg-white text-chicken-brown text-xs font-bold tabular-nums">{batchGuests(b)} 位</span>
                 {nums.length > 0 ? (
                   <span className="flex flex-wrap gap-1">
                     {nums.map(n => (
-                      <span key={n} className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-xs font-black tabular-nums">{n}</span>
+                      <span key={n} className="px-2 py-0.5 rounded-full bg-indigo-600 text-white text-xs font-bold tabular-nums">{n}</span>
                     ))}
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">未圈桌</span>
                 )}
-                {b.note && <span className="text-xs text-chicken-brown/55 w-full">📝 {b.note}</span>}
+                {b.note && <span className="text-xs text-chicken-brown/55 w-full">{b.note}</span>}
               </div>
             )
           })}
@@ -133,7 +133,7 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
             <dd className="font-bold text-chicken-brown text-right">
               {group.guideName || '（未填）'}
               {group.guidePhone && (
-                <a href={`tel:${group.guidePhone}`} className="ml-2 text-chicken-red underline tabular-nums">📞 {group.guidePhone}</a>
+                <a href={`tel:${group.guidePhone}`} className="ml-2 text-chicken-red underline tabular-nums">{group.guidePhone}</a>
               )}
             </dd>
           </div>
@@ -156,7 +156,7 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
           )}
         </div>
         {(group.allergyText || '').trim() && (
-          <div className="rounded-lg bg-chicken-red text-white px-3 py-2 text-xs font-bold">⚠ 過敏：{group.allergyText.trim()}</div>
+          <div className="rounded-lg bg-chicken-red text-white px-3 py-2 text-xs font-bold">過敏：{group.allergyText.trim()}</div>
         )}
         {(group.tableSideNeeds || '').trim() && (
           <div className="text-xs text-chicken-brown"><span className="text-chicken-brown/60">桌邊需求：</span>{group.tableSideNeeds.trim()}</div>
@@ -197,7 +197,7 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
               onSelectTable={() => {}}
             />
           </div>
-          <div className="text-center text-[11px] text-chicken-brown/45 mt-2">藍紫色＝本團保留桌 · 要調整圈桌請點右上「✏️ 編輯」</div>
+          <div className="text-center text-[11px] text-chicken-brown/45 mt-2">藍紫色＝本團保留桌 · 要調整圈桌請點右上「編輯」</div>
         </div>
       )}
 

@@ -17,16 +17,16 @@ import { todayStr, dayLabel, formatDate, addDays } from '../../utils/timeSlots'
 // 註：旅行社團體請走「規劃」分頁的預排流程（整桌容量把關 + 回傳單），不再用單筆 group 訂位，
 // 避免與團體預排的容量重複計算。
 const SOURCE_OPTIONS = [
-  { value: 'phone',  label: '📞 電話' },
-  { value: 'line',   label: '💚 LINE' },
-  { value: 'walkin', label: '🚶 現場' },
-  { value: 'online', label: '🌐 線上代訂' },
+  { value: 'phone',  label: '電話' },
+  { value: 'line',   label: 'LINE' },
+  { value: 'walkin', label: '現場' },
+  { value: 'online', label: '線上代訂' },
 ]
 
 const NOTE_OPTIONS = [
-  { key: 'pet',      label: '🐾 寵物' },
-  { key: 'child',    label: '👶 兒童' },
-  { key: 'mobility', label: '♿ 行動不便' },
+  { key: 'pet',      label: '寵物' },
+  { key: 'child',    label: '兒童' },
+  { key: 'mobility', label: '行動不便' },
 ]
 
 export default function AddBookingView({ onCreated, onAssignTable, initial }) {
@@ -135,13 +135,13 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
         const best = suggestTable(guests)
         if (best) {
           const r = seatingService.assignBookingToTable(b.id, best.number)
-          if (r.ok) toast.success(`✅ ${name} ${guests} 位 · ${date} ${timeSlot} · 已自動指派 ${best.number}`)
-          else toast.action(`✅ 已建立訂位（自動指派失敗：${r.error}）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
+          if (r.ok) toast.success(`${name} ${guests} 位 · ${date} ${timeSlot} · 已自動指派 ${best.number}`)
+          else toast.action(`已建立訂位（自動指派失敗：${r.error}）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
         } else {
-          toast.action(`✅ 已建立訂位（無可自動指派的桌）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
+          toast.action(`已建立訂位（無可自動指派的桌）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
         }
       } else {
-        toast.action(`✅ ${name} ${guests} 位 · ${date} ${timeSlot} 已建立`,
+        toast.action(`${name} ${guests} 位 · ${date} ${timeSlot} 已建立`,
           { label: date === todayStr() ? '指派桌' : '預配桌位', onClick: () => onAssignTable?.(b) })
       }
       // 重設（保留 source）
@@ -158,7 +158,7 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
     <div className="space-y-3 max-w-3xl mx-auto">
       {/* === ① 客人 === */}
       <Card>
-        <h2 className="font-bold text-chicken-brown mb-3">📱 客人資訊</h2>
+        <h2 className="font-bold text-chicken-brown mb-3">客人資訊</h2>
         <div className="space-y-3">
           <div ref={phoneRef} className="relative">
             <Input
@@ -174,27 +174,27 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
               <div className="mt-2 flex flex-wrap gap-2 text-xs">
                 {matchedCustomer && (
                   <span className="px-2.5 py-1 bg-chicken-green/15 text-chicken-green rounded-full font-bold">
-                    🔄 第 {(matchedCustomer.visits || 0) + 1} 次 · 上次 {new Date(matchedCustomer.lastVisit).toLocaleDateString('zh-TW')}
+                    第 {(matchedCustomer.visits || 0) + 1} 次 · 上次 {new Date(matchedCustomer.lastVisit).toLocaleDateString('zh-TW')}
                   </span>
                 )}
                 {matchedCustomer?.vipTier && matchedCustomer.vipTier !== 'none' && (
                   <span className="px-2.5 py-1 bg-chicken-yellow/20 text-chicken-yellow rounded-full font-bold">
-                    ⭐ {matchedCustomer.vipTier.toUpperCase()}
+                    {matchedCustomer.vipTier.toUpperCase()}
                   </span>
                 )}
                 {matchedCustomer?.allergies && (
                   <span className="px-2.5 py-1 bg-chicken-red/10 text-chicken-red rounded-full font-bold">
-                    ⚠️ 過敏：{matchedCustomer.allergies}
+                    過敏：{matchedCustomer.allergies}
                   </span>
                 )}
                 {noshowCount > 0 && (
                   <span className="px-2.5 py-1 bg-chicken-red text-white rounded-full font-bold">
-                    ⚠️ no-show ×{noshowCount}
+                    no-show ×{noshowCount}
                   </span>
                 )}
                 {matchedCustomer?.blacklisted && (
                   <span className="px-2.5 py-1 bg-chicken-red text-white rounded-full font-bold">
-                    🚫 黑名單：{matchedCustomer.blacklistReason || ''}
+                    黑名單：{matchedCustomer.blacklistReason || ''}
                   </span>
                 )}
               </div>
@@ -224,7 +224,7 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
 
       {/* === ② 人數 · 日期 · 時段 === */}
       <Card>
-        <h2 className="font-bold text-chicken-brown mb-3">🍲 用餐資訊</h2>
+        <h2 className="font-bold text-chicken-brown mb-3">用餐資訊</h2>
         <div className="space-y-4">
           {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
           <div ref={guestsRef}>
@@ -255,7 +255,7 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
                   !isQuickDate
                     ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'
                     : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-                📅 選月曆
+                選月曆
                 <span className="block text-[10px] font-bold opacity-70">
                   {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合 ▴' : '可排數月後 ▾'}
                 </span>
@@ -289,7 +289,7 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
 
       {/* === ③ 備註 === */}
       <Card>
-        <h2 className="font-bold text-chicken-brown mb-3">📝 特殊需求（選填）</h2>
+        <h2 className="font-bold text-chicken-brown mb-3">特殊需求（選填）</h2>
         <div className="grid grid-cols-3 gap-2 mb-3">
           {NOTE_OPTIONS.map(n => {
             const active = notes[n.key]
@@ -320,7 +320,7 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
              填齊才展開自動指派選項＋確認鈕——避免手機上整塊蓋住日期/時段；
              自動指派僅今天才有意義 → 只在今天顯示，未來日（多為團體）直接收起 === */}
       <div className="sticky bottom-20 lg:bottom-3 z-20 pt-2">
-        <div className="rounded-2xl border border-chicken-brown/10 bg-white/95 p-2.5 shadow-lg backdrop-blur">
+        <div className="rounded-xl border border-chicken-brown/10 bg-white/95 p-2.5 shadow-lg backdrop-blur">
           {valid ? (
             <>
               {date === todayStr() && (
@@ -335,7 +335,7 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
                 </label>
               )}
               <Button onClick={handleSubmit} disabled={busy} className="w-full min-h-[44px]">
-                {busy ? '建立中...' : `✅ 確認新增 · ${dayLabel(date)} ${timeSlot} · ${guests} 位`}
+                {busy ? '建立中...' : `確認新增 · ${dayLabel(date)} ${timeSlot} · ${guests} 位`}
               </Button>
             </>
           ) : (
@@ -343,7 +343,7 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
               <span className="font-bold text-chicken-brown/55">還差</span>
               {missing.map(m => (
                 <button key={m.key} type="button" onClick={() => scrollToField(m)}
-                  className="rounded-full bg-chicken-red/10 px-2.5 py-1 font-black text-chicken-red hover:bg-chicken-red/20 min-h-[28px]">
+                  className="rounded-full bg-chicken-red/10 px-2.5 py-1 font-bold text-chicken-red hover:bg-chicken-red/20 min-h-[28px]">
                   {m.label}
                 </button>
               ))}

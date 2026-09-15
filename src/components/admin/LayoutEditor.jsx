@@ -6,6 +6,8 @@ import {
   FLOOR_VIEWBOX, INITIAL_TABLES, tableDims,
   FIXTURES, ZONE_PALETTE, DEFAULT_BACKGROUND_IMAGES,
 } from '../../data/tables'
+import Icon from '../ui/Icon'
+import SegmentedControl from '../ui/SegmentedControl'
 
 // 全螢幕桌位佈局編輯器（2026-06 升級）
 // 三種模式：
@@ -510,7 +512,7 @@ export default function LayoutEditor({ open, onClose }) {
         toast.warning(`已存本機，雲端同步被拒（${pushResult?.error || '請檢查網路'}），請確認同步狀態後再離開，避免變更遺失`)
         return // 不自動關閉：店主還需要知道剛才的佈局其實還沒真的上雲
       }
-      toast.success(`✅ 已儲存佈局（${localTables.length} 桌）`)
+      toast.success(`已儲存佈局（${localTables.length} 桌）`)
       onClose?.()
     } catch (err) {
       // 🔴 驗收回饋：flushCloudNow 用 Promise reject（不是回傳 {ok:false}）失敗時，若沒有這個
@@ -600,26 +602,26 @@ export default function LayoutEditor({ open, onClose }) {
         >
           {/* === Header === */}
           <header className="bg-chicken-brown text-white px-4 py-3 flex items-center gap-3 flex-shrink-0">
-            <span className="text-2xl">🛠</span>
+            <Icon name="wrench" size={22} />
             <div className="flex-1 min-w-0">
-              <h1 className="text-base font-black leading-tight">桌位佈局編輯器</h1>
+              <h1 className="text-base font-bold leading-tight">桌位佈局編輯器</h1>
               <p className="text-[11px] opacity-80 leading-tight truncate">
                 {stats.total} 桌（4P×{stats.cap4} + 6P×{stats.cap6}）· 1F:{stats.f1} · 2F:{stats.f2}
-                {isDirty && <span className="ml-2 px-1.5 py-0.5 bg-chicken-yellow text-chicken-brown rounded text-[10px] font-black">未儲存</span>}
+                {isDirty && <span className="ml-2 px-1.5 py-0.5 bg-chicken-yellow text-chicken-brown rounded text-[10px] font-bold">未儲存</span>}
               </p>
             </div>
             <button onClick={handleReset} disabled={isSaving} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">↺ 重設本樓層預設</button>
             <button onClick={handleCancel} disabled={isSaving} className="px-3 py-1.5 min-h-[44px] text-xs font-bold bg-white/10 hover:bg-white/20 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed">返回</button>
             <button onClick={handleSave} disabled={!isDirty || isSaving}
                     className={`px-4 py-1.5 min-h-[44px] text-xs font-bold rounded-lg ${isDirty && !isSaving ? 'bg-chicken-green text-white hover:opacity-90' : 'bg-white/10 text-white/40 cursor-not-allowed'}`}>
-              {isSaving ? '⏳ 同步中…' : '💾 儲存並返回'}
+              {isSaving ? '同步中…' : '儲存並返回'}
             </button>
           </header>
 
           {/* === 工具列：模式 + 樓層 + 對齊 === */}
           <div className="bg-white border-b border-chicken-brown/10 px-4 py-2 flex items-center gap-2 flex-wrap flex-shrink-0">
             <div className="flex gap-1.5">
-              {[['tables', '🪑 桌位'], ['fixtures', '🏷 設施'], ['zones', '🎨 分區']].map(([m, label]) => (
+              {[['tables', '桌位'], ['fixtures', '設施'], ['zones', '分區']].map(([m, label]) => (
                 <button key={m} onClick={() => { setMode(m); setSelectedNumber(null); setSelectedNumbers(new Set()); setSelectedFixtureId(null) }}
                         className={`px-3 py-1.5 rounded-lg text-sm font-bold border-2 ${mode === m ? 'bg-chicken-brown border-chicken-brown text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
                   {label}
@@ -627,14 +629,7 @@ export default function LayoutEditor({ open, onClose }) {
               ))}
             </div>
             <div className="w-px h-6 bg-chicken-brown/10 mx-1" />
-            <div className="flex gap-1.5">
-              {['1F', '2F'].map(f => (
-                <button key={f} onClick={() => { setFloor(f); setSelectedFixtureId(null) }}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-bold border-2 ${floor === f ? 'bg-chicken-red border-chicken-red text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
-                  {f}（{f === '1F' ? stats.f1 : stats.f2}）
-                </button>
-              ))}
-            </div>
+            <SegmentedControl size="sm" options={['1F', '2F'].map(f => ({ key: f, label: `${f}（${f === '1F' ? stats.f1 : stats.f2}）` }))} value={floor} onChange={(f) => { setFloor(f); setSelectedFixtureId(null) }} ariaLabel="樓層" />
             {mode === 'tables' && (
               <button onClick={() => setShowZoneColor(v => !v)}
                       className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border-2 ${showZoneColor ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
@@ -645,7 +640,7 @@ export default function LayoutEditor({ open, onClose }) {
             {mode === 'tables' && multi && (
               <div className="flex items-center gap-1 ml-1 px-2 py-1 bg-chicken-cream rounded-lg">
                 <span className="text-[11px] font-bold text-chicken-brown/60 mr-1">已選 {selectedNumbers.size}</span>
-                {[['left', '⬅'], ['centerH', '↔'], ['right', '➡'], ['top', '⬆'], ['centerV', '↕'], ['bottom', '⬇']].map(([k, ic]) => (
+                {[['left', '←'], ['centerH', '↔'], ['right', '→'], ['top', '↑'], ['centerV', '↕'], ['bottom', '↓']].map(([k, ic]) => (
                   <button key={k} title={`對齊 ${k}`} onClick={() => alignSelected(k)} className="w-7 h-7 rounded bg-white border border-chicken-brown/15 text-xs hover:bg-chicken-brown/5">{ic}</button>
                 ))}
                 <button title="水平等距" onClick={() => distributeSelected('h')} className="px-1.5 h-7 rounded bg-white border border-chicken-brown/15 text-[11px] font-bold hover:bg-chicken-brown/5">⇔等距</button>
@@ -662,7 +657,7 @@ export default function LayoutEditor({ open, onClose }) {
           {/* === 主區：地圖 + 編輯面板 === */}
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 p-3 overflow-hidden">
-              <div className="bg-white rounded-2xl border border-chicken-brown/10 h-full overflow-hidden">
+              <div className="bg-white rounded-xl border border-chicken-brown/10 h-full overflow-hidden">
                 <svg
                   ref={svgRef}
                   viewBox={`0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}`}
@@ -784,7 +779,7 @@ export default function LayoutEditor({ open, onClose }) {
               {mode === 'tables' && (
                 multi ? (
                   <div className="space-y-4">
-                    <div className="text-lg font-black text-chicken-brown">已選 {selectedNumbers.size} 桌</div>
+                    <div className="text-lg font-bold text-chicken-brown">已選 {selectedNumbers.size} 桌</div>
                     <p className="text-xs text-chicken-brown/60">上方工具列可對齊／等距。指派分區：</p>
                     <ZonePicker zones={localZones} value={null} onChange={assignZoneToSelected} />
                     <p className="text-[11px] text-chicken-brown/45">提示：Shift 點可加減選；點單一桌回到單選。</p>
@@ -792,7 +787,7 @@ export default function LayoutEditor({ open, onClose }) {
                 ) : selected ? (
                   <div className="space-y-4">
                     <div>
-                      <div className="text-3xl font-black text-chicken-red">{selected.number}</div>
+                      <div className="text-3xl font-bold text-chicken-red">{selected.number}</div>
                       <div className="text-xs text-chicken-brown/60 mt-1">編輯桌位屬性</div>
                     </div>
                     <div>
@@ -810,10 +805,10 @@ export default function LayoutEditor({ open, onClose }) {
                       <label className="text-xs font-bold text-chicken-brown/70 block mb-2">尺寸（寬 × 高）</label>
                       <div className="flex items-center gap-2">
                         <input type="number" value={selected.w} min={MIN_SIZE} onChange={(e) => setWH({ w: e.target.value })}
-                               className="w-full px-2 py-2 rounded-lg border-2 border-chicken-brown/15 text-sm" />
+                               className="w-full px-2 py-2 rounded-lg border border-chicken-brown/10 text-sm" />
                         <span className="text-chicken-brown/40">×</span>
                         <input type="number" value={selected.h} min={MIN_SIZE} onChange={(e) => setWH({ h: e.target.value })}
-                               className="w-full px-2 py-2 rounded-lg border-2 border-chicken-brown/15 text-sm" />
+                               className="w-full px-2 py-2 rounded-lg border border-chicken-brown/10 text-sm" />
                       </div>
                       <button onClick={applyStdSize} className="mt-2 w-full py-1.5 rounded-lg text-xs font-bold bg-chicken-brown/5 hover:bg-chicken-brown/10 text-chicken-brown">套用標準尺寸（{selected.capacity}人）</button>
                     </div>
@@ -821,7 +816,7 @@ export default function LayoutEditor({ open, onClose }) {
                       <label className="text-xs font-bold text-chicken-brown/70 block mb-2">旋轉（度）</label>
                       <div className="flex items-center gap-2">
                         <input type="number" value={Number(selected.rotation) || 0} onChange={(e) => setRotation(e.target.value)}
-                               className="w-full px-2 py-2 rounded-lg border-2 border-chicken-brown/15 text-sm" />
+                               className="w-full px-2 py-2 rounded-lg border border-chicken-brown/10 text-sm" />
                         <button onClick={() => setRotation(0)} className="px-3 py-2 rounded-lg text-xs font-bold bg-chicken-brown/5 hover:bg-chicken-brown/10 whitespace-nowrap">回正 0°</button>
                       </div>
                     </div>
@@ -848,12 +843,12 @@ export default function LayoutEditor({ open, onClose }) {
                     </div>
                     <button onClick={handleDelete} disabled={isOccupied(selected)}
                             className={`w-full py-2.5 rounded-xl text-sm font-bold ${isOccupied(selected) ? 'bg-chicken-brown/5 text-chicken-brown/30 cursor-not-allowed' : 'bg-chicken-red/10 text-chicken-red hover:bg-chicken-red/20'}`}>
-                      🗑 刪除此桌
+                      刪除此桌
                     </button>
                   </div>
                 ) : (
                   <div className="text-center text-chicken-brown/50 text-sm py-8">
-                    <div className="text-5xl mb-3 opacity-30">🪑</div>
+                    <div className="mb-3 flex justify-center opacity-30"><Icon name="chair" size={40} strokeWidth={1.4} /></div>
                     <p>點桌位查看編輯</p>
                     <p className="text-xs mt-2 text-chicken-brown/40">空白拖曳＝框選多桌 · 點空白＝新增</p>
                   </div>
@@ -864,7 +859,7 @@ export default function LayoutEditor({ open, onClose }) {
               {mode === 'fixtures' && (
                 selectedFixture ? (
                   <div className="space-y-4">
-                    <div className="text-lg font-black text-chicken-brown">編輯設施</div>
+                    <div className="text-lg font-bold text-chicken-brown">編輯設施</div>
                     <div>
                       <label className="text-xs font-bold text-chicken-brown/70 block mb-2">類型</label>
                       <div className="grid grid-cols-3 gap-2">
@@ -877,7 +872,7 @@ export default function LayoutEditor({ open, onClose }) {
                     <div>
                       <label className="text-xs font-bold text-chicken-brown/70 block mb-2">文字</label>
                       <input value={selectedFixture.text} onChange={(e) => updateFixture(selectedFixture.id, { text: e.target.value })}
-                             className="w-full px-2 py-2 rounded-lg border-2 border-chicken-brown/15 text-sm" />
+                             className="w-full px-2 py-2 rounded-lg border border-chicken-brown/10 text-sm" />
                     </div>
                     {selectedFixture.type !== 'label' && (
                       <label className="flex items-center gap-2 cursor-pointer">
@@ -889,11 +884,11 @@ export default function LayoutEditor({ open, onClose }) {
                       <div className="flex justify-between"><span>位置</span><span className="font-mono">x={Math.round(selectedFixture.x)} y={Math.round(selectedFixture.y)}</span></div>
                       {selectedFixture.type !== 'label' && <div className="flex justify-between"><span>尺寸</span><span className="font-mono">{selectedFixture.w}×{selectedFixture.h}</span></div>}
                     </div>
-                    <button onClick={deleteFixture} className="w-full py-2.5 rounded-xl text-sm font-bold bg-chicken-red/10 text-chicken-red hover:bg-chicken-red/20">🗑 刪除設施</button>
+                    <button onClick={deleteFixture} className="w-full py-2.5 rounded-xl text-sm font-bold bg-chicken-red/10 text-chicken-red hover:bg-chicken-red/20">刪除設施</button>
                   </div>
                 ) : (
                   <div className="text-center text-chicken-brown/50 text-sm py-8">
-                    <div className="text-5xl mb-3 opacity-30">🏷</div>
+                    <div className="mb-3 flex justify-center opacity-30"><Icon name="layout" size={40} strokeWidth={1.4} /></div>
                     <p>點設施查看編輯</p>
                     <p className="text-xs mt-2 text-chicken-brown/40">點空白區域 → 新增設施（預設文字）</p>
                   </div>
@@ -904,12 +899,12 @@ export default function LayoutEditor({ open, onClose }) {
               {mode === 'zones' && (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="text-lg font-black text-chicken-brown">分區</div>
+                    <div className="text-lg font-bold text-chicken-brown">分區</div>
                     <button onClick={addZone} className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-chicken-green text-white">＋ 新增</button>
                   </div>
                   <button onClick={() => setActiveZoneId(null)}
                           className={`w-full text-left px-3 py-2 rounded-lg border-2 text-sm font-bold ${activeZoneId === null ? 'border-chicken-brown bg-chicken-brown/5' : 'border-chicken-brown/10'}`}>
-                    🧽 橡皮擦（點桌清除分區）
+                    橡皮擦（點桌清除分區）
                   </button>
                   {localZones.length === 0 && <p className="text-xs text-chicken-brown/45 py-2">尚無分區。按「＋ 新增」建立，選一個當畫筆後點桌上色。</p>}
                   {localZones.map(z => (
@@ -920,10 +915,10 @@ export default function LayoutEditor({ open, onClose }) {
                         <input value={z.name} onChange={(e) => renameZone(z.id, e.target.value)}
                                className="flex-1 min-w-0 px-2 py-1 rounded border border-chicken-brown/15 text-sm" />
                         <input type="color" value={z.color} onChange={(e) => recolorZone(z.id, e.target.value)} className="w-7 h-7 rounded cursor-pointer" />
-                        <button onClick={() => deleteZone(z.id)} className="text-chicken-red text-sm px-1">🗑</button>
+                        <button onClick={() => deleteZone(z.id)} className="text-chicken-red px-1" aria-label="刪除分區"><Icon name="trash" size={15} /></button>
                       </div>
                       <div className="text-[11px] text-chicken-brown/45 mt-1">
-                        {activeZoneId === z.id ? '✏️ 畫筆中 — 點桌上色' : `${localTables.filter(t => t.zoneId === z.id).length} 桌`}
+                        {activeZoneId === z.id ? '畫筆中 — 點桌上色' : `${localTables.filter(t => t.zoneId === z.id).length} 桌`}
                       </div>
                     </div>
                   ))}
@@ -933,7 +928,7 @@ export default function LayoutEditor({ open, onClose }) {
               {/* ---- 底圖（桌位 / 設施模式底部）---- */}
               {mode !== 'zones' && (
                 <div className="mt-5 pt-4 border-t border-chicken-brown/10 space-y-2">
-                  <div className="text-sm font-black text-chicken-brown">🖼 {floor} 底圖參考</div>
+                  <div className="text-sm font-bold text-chicken-brown">{floor} 底圖參考</div>
                   {bg?.url ? (
                     <>
                       <div className="rounded-lg overflow-hidden border border-chicken-brown/10">
@@ -960,8 +955,8 @@ export default function LayoutEditor({ open, onClose }) {
           {/* === 新增桌位對話框 === */}
           {showAddDialog && (
             <div className="absolute inset-0 z-10 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowAddDialog(null)}>
-              <div className="bg-white rounded-2xl shadow-xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                <h3 className="text-lg font-black text-chicken-brown mb-3">➕ 新增桌位</h3>
+              <div className="bg-white rounded-xl shadow-xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-chicken-brown mb-3">新增桌位</h3>
                 <p className="text-xs text-chicken-brown/60 mb-4">位置：{floor} · x={showAddDialog.x} y={showAddDialog.y}</p>
                 <label className="text-xs font-bold text-chicken-brown/70 block mb-1.5">容量</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -987,7 +982,7 @@ export default function LayoutEditor({ open, onClose }) {
 function ZonePicker({ zones, value, onChange }) {
   return (
     <select value={value || ''} onChange={(e) => onChange(e.target.value || null)}
-            className="w-full px-2 py-2 rounded-lg border-2 border-chicken-brown/15 text-sm bg-white">
+            className="w-full px-2 py-2 rounded-lg border border-chicken-brown/10 text-sm bg-white">
       <option value="">無分區</option>
       {zones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
     </select>

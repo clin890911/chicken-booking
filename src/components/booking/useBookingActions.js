@@ -104,7 +104,7 @@ export function useBookingActions(booking, { onAssign } = {}) {
     if (!ok) return false
     const r = finalizeBooking(booking.id)
     if (!r.ok) { toast.error(r.error); return false }
-    toast.success(`✨ ${booking.name} 已離席 · ${booking.assignedTableId || ''} 已釋出（用餐 ${minutes} 分）`)
+    toast.success(`${booking.name} 已離席 · ${booking.assignedTableId || ''} 已釋出（用餐 ${minutes} 分）`)
     return true
   }, [booking, confirm, finalizeBooking, minutes, toast])
 

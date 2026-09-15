@@ -68,7 +68,7 @@ export default function OpsRail({
           >
             {t.label}
             {t.badge > 0 && (
-              <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-chicken-red text-white text-[10px] font-black align-middle">
+              <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-chicken-red text-white text-[10px] font-bold align-middle">
                 {t.badge > 99 ? '99+' : t.badge}
               </span>
             )}

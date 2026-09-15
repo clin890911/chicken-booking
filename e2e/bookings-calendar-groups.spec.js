@@ -44,7 +44,7 @@ test('日曆月格同時顯示散客與旅行社團體人數', async ({ page }) 
 
   // 17 號月格：散客（🧍 1 組 · 2 位）與旅行社團體（🚌 2 團 · 30 位）都要顯示。
   // 用 button + hasText 定位日格（頂部月摘要的同字串是 span，不是 button，故不衝突）
-  const cell17 = page.locator('button').filter({ hasText: '🚌 2 團 · 30 位' }).filter({ hasText: '🧍 1 組 · 2 位' })
+  const cell17 = page.locator('button').filter({ hasText: '2 團 · 30 位' }).filter({ hasText: '1 組 · 2 位' })
   await expect(cell17).toBeVisible()
   await expect(cell17).toContainText('17')
 

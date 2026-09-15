@@ -26,7 +26,7 @@ export default function TableSummaryView({ tables, groupHoldTables = {}, setting
   const Chip = ({ t, cls, sub, subCls }) => (
     <button onClick={() => onSelectTable?.(t.number)}
       className={`inline-flex flex-col items-center justify-center min-w-[56px] px-2 py-1.5 rounded-xl border-2 ${cls}`}>
-      <span className="text-sm font-black leading-none">{t.number}</span>
+      <span className="text-sm font-bold leading-none">{t.number}</span>
       <span className={`text-[10px] font-bold mt-0.5 ${subCls || ''}`}>{sub}</span>
     </button>
   )
@@ -39,7 +39,7 @@ export default function TableSummaryView({ tables, groupHoldTables = {}, setting
       <div className="grid grid-cols-4 gap-2">
         {stockCards.map(([k, label]) => (
           <div key={k} className="bg-chicken-cream rounded-xl p-2 text-center">
-            <div className={`text-2xl font-black ${data.stock[k] > 0 ? 'text-chicken-green' : 'text-chicken-brown/30'}`}>{data.stock[k]}</div>
+            <div className={`text-2xl font-bold ${data.stock[k] > 0 ? 'text-chicken-green' : 'text-chicken-brown/30'}`}>{data.stock[k]}</div>
             <div className="text-[10px] text-chicken-brown/60">{label}可坐</div>
           </div>
         ))}
@@ -69,7 +69,7 @@ export default function TableSummaryView({ tables, groupHoldTables = {}, setting
           const stage = stageOf(m, settings)
           const over = stage === 'overtime' || stage === 'buffer-overtime'
           return (
-            <Chip key={t.number} t={t} sub={`${over ? '⚠ ' : ''}${m} 分`} subCls={over ? 'text-chicken-red' : 'text-chicken-brown/50'}
+            <Chip key={t.number} t={t} sub={`${over ? '' : ''}${m} 分`} subCls={over ? 'text-chicken-red' : 'text-chicken-brown/50'}
               cls={over ? 'border-chicken-red/50 bg-chicken-red/8 text-chicken-red' : 'border-chicken-brown/15 bg-chicken-cream text-chicken-brown/70'} />
           )
         })}

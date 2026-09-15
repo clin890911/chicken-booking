@@ -19,7 +19,7 @@ export default function OpsLogModal({ open, onClose }) {
   if (!open) return null
   const logs = listAll()
   return (
-    <Modal open={open} onClose={onClose} title="🤖 系統自動處理紀錄">
+    <Modal open={open} onClose={onClose} title="系統自動處理紀錄">
       {logs.length === 0 ? (
         <div className="text-center py-8 text-sm text-chicken-brown/45">目前沒有自動處理紀錄</div>
       ) : (

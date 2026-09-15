@@ -330,7 +330,7 @@ export default function FloorMap({
         // 團保優先（實心紫色已表達更強的保留語意）；桌面下緣以「📌 時段 預配」提示。
         const pre = preassignTables[t.number]
         const preassignLabel = t.status === 'vacant' && !holdLabel && pre
-          ? `📌 ${pre.timeSlot} 預配`.trim()
+          ? `${pre.timeSlot} 預配`.trim()
           : null
         return (
           <TableShape

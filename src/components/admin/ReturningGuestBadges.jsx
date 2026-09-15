@@ -25,20 +25,20 @@ export default function ReturningGuestBadges({ phone, matched }) {
     <div className="mt-2 flex flex-wrap gap-2 text-xs">
       {c && (
         <span className="px-2.5 py-1 bg-chicken-green/15 text-chicken-green rounded-full font-bold">
-          🔄 第 {(c.visits || 0) + 1} 次{c.lastVisit ? ` · 上次 ${new Date(c.lastVisit).toLocaleDateString('zh-TW')}` : ''}
+          第 {(c.visits || 0) + 1} 次{c.lastVisit ? ` · 上次 ${new Date(c.lastVisit).toLocaleDateString('zh-TW')}` : ''}
         </span>
       )}
       {c?.vipTier && c.vipTier !== 'none' && (
-        <span className="px-2.5 py-1 bg-chicken-yellow/20 text-chicken-yellow rounded-full font-bold">⭐ {c.vipTier.toUpperCase()}</span>
+        <span className="px-2.5 py-1 bg-chicken-yellow/20 text-chicken-yellow rounded-full font-bold">{c.vipTier.toUpperCase()}</span>
       )}
       {c?.allergies && (
-        <span className="px-2.5 py-1 bg-chicken-red/10 text-chicken-red rounded-full font-bold">⚠️ 過敏：{c.allergies}</span>
+        <span className="px-2.5 py-1 bg-chicken-red/10 text-chicken-red rounded-full font-bold">過敏：{c.allergies}</span>
       )}
       {noshow > 0 && (
-        <span className="px-2.5 py-1 bg-chicken-red text-white rounded-full font-bold">⚠️ no-show ×{noshow}</span>
+        <span className="px-2.5 py-1 bg-chicken-red text-white rounded-full font-bold">no-show ×{noshow}</span>
       )}
       {c?.blacklisted && (
-        <span className="px-2.5 py-1 bg-chicken-red text-white rounded-full font-bold">🚫 黑名單{c.blacklistReason ? `：${c.blacklistReason}` : ''}</span>
+        <span className="px-2.5 py-1 bg-chicken-red text-white rounded-full font-bold">黑名單{c.blacklistReason ? `：${c.blacklistReason}` : ''}</span>
       )}
     </div>
   )

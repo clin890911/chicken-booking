@@ -12,18 +12,18 @@ import { listToday as opsLogToday } from '../../../services/opsLogService'
 export function pickHints({ pulse, tables, settings, groups, autoCount, now }) {
   const hints = []
   if (pulse.overdue.length) {
-    hints.push({ level: 'danger', text: `⚠ ${pulse.overdue.length} 組過時未到待處理`, action: 'open-upcoming' })
+    hints.push({ level: 'danger', text: `${pulse.overdue.length} 組過時未到待處理`, action: 'open-upcoming' })
   }
   // 刻意不過濾 isActive/outage：停用或維修中但仍佔用的桌（不一致狀態）更需要被提示處理。
   const overtime = (tables || []).filter(t => t.status === 'dining' && t.seatedAt
     && ['overtime', 'buffer-overtime'].includes(stageOf(diffMin(t.seatedAt, now), settings)))
   if (overtime.length) {
-    hints.push({ level: 'danger', text: `🔴 ${overtime.length} 桌已超時用餐，可禮貌詢問結帳` })
+    hints.push({ level: 'danger', text: `${overtime.length} 桌已超時用餐，可禮貌詢問結帳` })
   }
   const cleaning = (tables || []).filter(t => t.status === 'cleaning').length
-  if (cleaning) hints.push({ level: 'warn', text: `🧹 ${cleaning} 桌待清` })
+  if (cleaning) hints.push({ level: 'warn', text: `${cleaning} 桌待清` })
   if (autoCount > 0) {
-    hints.push({ level: 'info', text: `🤖 系統今日自動處理 ${autoCount} 筆`, action: 'open-log' })
+    hints.push({ level: 'info', text: `系統今日自動處理 ${autoCount} 筆`, action: 'open-log' })
   }
   if (!hints.length) {
     const p = dayPhase(settings, now)
@@ -34,10 +34,10 @@ export function pickHints({ pulse, tables, settings, groups, autoCount, now }) {
       if (g) parts.push(`${g} 團`)
       return parts.length ? `今日還有 ${parts.join('、')}` : '今日無待到訂位'
     }
-    if (p.phase === 'before-open') hints.push({ level: 'calm', text: `☀️ 開店前 · ${upcomingTxt()}` })
-    else if (p.phase === 'service') hints.push({ level: 'calm', text: `🍲 ${p.seating?.name || '營業中'} · ${upcomingTxt()}` })
-    else if (p.phase === 'between') hints.push({ level: 'calm', text: `☕ 場次空檔${p.next ? ` · ${p.next.start} ${p.next.name}` : ''} · ${upcomingTxt()}` })
-    else hints.push({ level: 'calm', text: '🌙 已過打烊時間 · 桌況乾淨即可收工' })
+    if (p.phase === 'before-open') hints.push({ level: 'calm', text: `開店前 · ${upcomingTxt()}` })
+    else if (p.phase === 'service') hints.push({ level: 'calm', text: `${p.seating?.name || '營業中'} · ${upcomingTxt()}` })
+    else if (p.phase === 'between') hints.push({ level: 'calm', text: `場次空檔${p.next ? ` · ${p.next.start} ${p.next.name}` : ''} · ${upcomingTxt()}` })
+    else hints.push({ level: 'calm', text: '已過打烊時間 · 桌況乾淨即可收工' })
   }
   return hints.slice(0, 2)
 }

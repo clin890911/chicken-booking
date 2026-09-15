@@ -9,6 +9,7 @@ import { normalize } from '../../services/customerService'
 import { customerBookings } from '../../utils/customerHistory'
 import { dayLabel, seatingForSlot } from '../../utils/timeSlots'
 import { copyText } from '../../utils/clipboard'
+import Icon from '../ui/Icon'
 
 // 散客訂位詳情（bottom sheet）。
 // 店主回饋：規劃頁的散客列只看得到「姓名 · 人數 · 時間 · 狀態 · 桌號」，點下去沒反應——
@@ -44,8 +45,8 @@ export default function BookingDetailSheet({ bookingId, onClose, onAssign, onFoc
 function Fact({ icon, label, children, tone = '' }) {
   return (
     <div className={`rounded-xl px-3 py-2 ${tone || 'bg-chicken-cream/70'}`}>
-      <div className="text-[10px] font-bold text-chicken-brown/50">{icon} {label}</div>
-      <div className="text-sm font-black text-chicken-brown mt-0.5 break-words">{children}</div>
+      <div className="flex items-center gap-1 text-[10px] font-bold text-chicken-brown/50">{icon && <Icon name={icon} size={11} />}{label}</div>
+      <div className="text-sm font-bold text-chicken-brown mt-0.5 break-words">{children}</div>
     </div>
   )
 }
@@ -55,13 +56,13 @@ function ActionButton({ onClick, tone = 'neutral', children, className = '' }) {
     primary: 'bg-chicken-red text-white shadow-sm',
     green: 'bg-chicken-green text-white shadow-sm',
     orange: 'bg-orange-500 text-white shadow-sm',
-    neutral: 'bg-white border-2 border-chicken-brown/15 text-chicken-brown',
+    neutral: 'bg-white border border-chicken-brown/10 text-chicken-brown',
     danger: 'bg-white border-2 border-chicken-red/40 text-chicken-red',
     indigo: 'bg-white border-2 border-indigo-300 text-indigo-700',
-  }[tone] || 'bg-white border-2 border-chicken-brown/15 text-chicken-brown'
+  }[tone] || 'bg-white border border-chicken-brown/10 text-chicken-brown'
   return (
     <button type="button" onClick={onClick}
-      className={`tap min-h-[48px] px-3 rounded-xl text-sm font-black inline-flex items-center justify-center gap-1 ${cls} ${className}`}>
+      className={`tap min-h-[48px] px-3 rounded-xl text-sm font-bold inline-flex items-center justify-center gap-1 ${cls} ${className}`}>
       {children}
     </button>
   )
@@ -99,11 +100,11 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-2xl font-black text-chicken-brown tabular-nums leading-none">{booking.timeSlot || '未排'}</span>
-            <span className="text-lg font-black text-chicken-brown truncate">{booking.name || '（未填姓名）'}</span>
+            <span className="text-2xl font-bold text-chicken-brown tabular-nums leading-none">{booking.timeSlot || '未排'}</span>
+            <span className="text-lg font-bold text-chicken-brown truncate">{booking.name || '（未填姓名）'}</span>
           </div>
           <div className="text-xs text-chicken-brown/60 mt-1 flex items-center gap-2 flex-wrap">
-            <span>📅 {booking.date ? dayLabel(booking.date) : '未排日期'}</span>
+            <span>{booking.date ? dayLabel(booking.date) : '未排日期'}</span>
             {seating && <span className="font-bold text-indigo-700/80">{seating.name}</span>}
             {act.dayKind === 'today' && <span className="rounded-full bg-chicken-yellow/15 text-chicken-yellow px-2 py-0.5 font-bold">今天</span>}
           </div>
@@ -122,9 +123,9 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable }) {
 
       {/* 警示列（有才顯示）：no-show / 黑名單 / 取消原因 / LINE 送達 / 客人自行修改 */}
       {(act.noshowCount > 0 || customer?.blacklisted || booking.cancellationReason?.reason || lineBlocked || booking.lastGuestEditAt) && (
-        <div className="flex flex-wrap gap-1.5 text-[11px] font-black">
-          {act.noshowCount > 0 && <span className="rounded-full bg-chicken-red text-white px-2 py-0.5">⚠️ no-show ×{act.noshowCount}</span>}
-          {customer?.blacklisted && <span className="rounded-full bg-chicken-red text-white px-2 py-0.5">🚫 黑名單{customer.blacklistReason ? `：${customer.blacklistReason}` : ''}</span>}
+        <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
+          {act.noshowCount > 0 && <span className="rounded-full bg-chicken-red text-white px-2 py-0.5">no-show ×{act.noshowCount}</span>}
+          {customer?.blacklisted && <span className="rounded-full bg-chicken-red text-white px-2 py-0.5">黑名單{customer.blacklistReason ? `：${customer.blacklistReason}` : ''}</span>}
           {booking.cancellationReason?.reason && <span className="rounded-full bg-chicken-red/10 text-chicken-red px-2 py-0.5">取消原因：{booking.cancellationReason.reason}</span>}
           {lineBlocked && <span className="rounded-full bg-chicken-red/10 text-chicken-red px-2 py-0.5">LINE 無法送達</span>}
           {booking.lastGuestEditAt && <span className="rounded-full bg-[#06C755]/10 text-[#06A848] px-2 py-0.5">客人自行修改 {fmtDateTime(booking.lastGuestEditAt)}</span>}
@@ -133,30 +134,30 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable }) {
 
       {/* 用餐計時（用餐中） */}
       {booking.status === 'arrived' && (
-        <div className={`rounded-xl px-3 py-2 text-sm font-black tabular-nums ${
+        <div className={`rounded-xl px-3 py-2 text-sm font-bold tabular-nums ${
           act.stage === 'buffer-overtime' || act.stage === 'overtime' ? 'bg-chicken-red text-white'
             : act.stage === 'late' ? 'bg-chicken-yellow/20 text-chicken-yellow' : 'bg-orange-50 text-orange-700'}`}>
-          ⏱ 已用餐 {act.minutes} 分{act.stage === 'buffer-overtime' ? ' · 超過清桌緩衝' : act.stage === 'overtime' ? ' · 用餐時間到' : act.stage === 'late' ? ' · 即將結束' : ''}
+          已用餐 {act.minutes} 分{act.stage === 'buffer-overtime' ? ' · 超過清桌緩衝' : act.stage === 'overtime' ? ' · 用餐時間到' : act.stage === 'late' ? ' · 即將結束' : ''}
           {booking.actualArrivalTime && <span className="ml-2 font-bold opacity-80">到店 {fmtTime(booking.actualArrivalTime)}</span>}
         </div>
       )}
 
       {/* 關鍵資訊 */}
       <div className="grid grid-cols-2 gap-2">
-        <Fact icon="👥" label="人數">{booking.guests} 位</Fact>
-        <Fact icon="🪑" label={act.dayKind === 'future' && tableNums.length ? '預配桌位' : '桌位'}
+        <Fact icon="users" label="人數">{booking.guests} 位</Fact>
+        <Fact icon="chair" label={act.dayKind === 'future' && tableNums.length ? '預配桌位' : '桌位'}
           tone={tableNums.length ? (booking.status === 'arrived' ? 'bg-orange-50' : 'bg-emerald-50') : 'bg-amber-50'}>
           {tableNums.length ? tableNums.join(' + ') : <span className="text-amber-700">未配桌</span>}
           {act.suggestion && !tableNums.length && (
             <span className="ml-2 text-[11px] font-bold text-chicken-green">建議 {act.suggestion.number}</span>
           )}
         </Fact>
-        <Fact icon="📞" label="電話">
+        <Fact icon="phone" label="電話">
           {booking.phone
             ? <a href={`tel:${booking.phone}`} className="underline decoration-chicken-brown/30 underline-offset-2">{booking.phone}</a>
             : <span className="text-chicken-brown/40 font-bold">未填</span>}
         </Fact>
-        <Fact icon="🧾" label="來源">
+        <Fact icon="receipt" label="來源">
           {SOURCE_MAP[booking.source] || booking.source || '—'}
           {booking.lineUserId && !lineBlocked && (
             <span className="ml-1.5 text-[11px] font-bold text-[#06A848]" title={booking.lineDisplayName ? `LINE：${booking.lineDisplayName}` : 'LINE 已綁定'}>
@@ -169,12 +170,12 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable }) {
       {/* 需求 / 備註 */}
       {(hasTags || notes.text) ? (
         <div className="rounded-xl border border-chicken-brown/10 bg-white px-3 py-2 space-y-1.5">
-          <div className="text-[10px] font-bold text-chicken-brown/50">📝 需求 / 備註</div>
+          <div className="text-[10px] font-bold text-chicken-brown/50">需求 / 備註</div>
           {hasTags && (
             <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
-              {notes.pet && <span className="rounded-full bg-chicken-yellow/15 text-chicken-yellow px-2 py-0.5">🐾 寵物</span>}
-              {notes.child && <span className="rounded-full bg-chicken-green/15 text-chicken-green px-2 py-0.5">👶 兒童</span>}
-              {notes.mobility && <span className="rounded-full bg-chicken-brown text-white px-2 py-0.5">♿ 行動不便</span>}
+              {notes.pet && <span className="rounded-full bg-chicken-yellow/15 text-chicken-yellow px-2 py-0.5">寵物</span>}
+              {notes.child && <span className="rounded-full bg-chicken-green/15 text-chicken-green px-2 py-0.5">兒童</span>}
+              {notes.mobility && <span className="rounded-full bg-chicken-brown text-white px-2 py-0.5">行動不便</span>}
             </div>
           )}
           {notes.text && <p className="text-sm text-chicken-brown leading-relaxed whitespace-pre-wrap">「{notes.text}」</p>}
@@ -187,16 +188,16 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable }) {
       {customer && (
         <div className="rounded-xl border border-chicken-brown/10 bg-white px-3 py-2 space-y-1.5">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="text-[10px] font-bold text-chicken-brown/50">👤 顧客檔 · {customer.name || booking.name}</div>
+            <div className="text-[10px] font-bold text-chicken-brown/50">顧客檔 · {customer.name || booking.name}</div>
             <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
-              <span className="rounded-full bg-chicken-green/15 text-chicken-green px-2 py-0.5">🔄 來訪 {customer.visits || 0} 次</span>
+              <span className="rounded-full bg-chicken-green/15 text-chicken-green px-2 py-0.5">來訪 {customer.visits || 0} 次</span>
               <span className="rounded-full bg-chicken-brown/10 text-chicken-brown px-2 py-0.5">累計 {customer.totalGuests || 0} 位</span>
               {customer.vipTier && customer.vipTier !== 'none' && (
-                <span className="rounded-full bg-chicken-yellow/20 text-chicken-yellow px-2 py-0.5">⭐ {VIP_LABEL[customer.vipTier] || customer.vipTier}</span>
+                <span className="rounded-full bg-chicken-yellow/20 text-chicken-yellow px-2 py-0.5">{VIP_LABEL[customer.vipTier] || customer.vipTier}</span>
               )}
             </div>
           </div>
-          {customer.allergies && <div className="text-xs font-black text-chicken-red">⚠️ 過敏：{customer.allergies}</div>}
+          {customer.allergies && <div className="text-xs font-bold text-chicken-red">過敏：{customer.allergies}</div>}
           {customer.notes && <div className="text-xs text-chicken-brown/70 italic">「{customer.notes}」</div>}
           {history.length > 0 && (
             <div className="pt-1 border-t border-chicken-brown/5">
@@ -224,23 +225,23 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable }) {
       <div className="grid grid-cols-2 gap-2 pt-1">
         {act.show.assign && (
           <ActionButton tone="primary" className="col-span-2" onClick={() => { onClose?.(); act.assign() }}>
-            🪑 {act.dayKind === 'future' ? '指派桌位（預配）' : '指派桌位'}
+            {act.dayKind === 'future' ? '指派桌位（預配）' : '指派桌位'}
           </ActionButton>
         )}
         {act.show.seat && (
-          <ActionButton tone="green" className="col-span-2" onClick={then(async () => { act.seat(); return true })}>✅ 客人到了</ActionButton>
+          <ActionButton tone="green" className="col-span-2" onClick={then(async () => { act.seat(); return true })}>客人到了</ActionButton>
         )}
         {act.show.checkout && (
           <>
-            <ActionButton tone="orange" onClick={then(act.checkout)}>🚪 客人已離席</ActionButton>
+            <ActionButton tone="orange" onClick={then(act.checkout)}>客人已離席</ActionButton>
             <ActionButton tone="neutral" onClick={then(act.finalize)}>直接釋出（已清桌）</ActionButton>
           </>
         )}
         {onFocusTable && tableNums.length > 0 && (
-          <ActionButton tone="indigo" onClick={() => { onClose?.(); onFocusTable(booking) }}>🗺️ 在地圖標示</ActionButton>
+          <ActionButton tone="indigo" onClick={() => { onClose?.(); onFocusTable(booking) }}>在地圖標示</ActionButton>
         )}
         {act.show.edit && (
-          <ActionButton tone="neutral" onClick={() => setEditing(true)}>✏️ 編輯資料</ActionButton>
+          <ActionButton tone="neutral" onClick={() => setEditing(true)}>編輯資料</ActionButton>
         )}
         {act.show.unpreassign && (
           <ActionButton tone="neutral" onClick={then(act.unpreassign)}>解除預配</ActionButton>

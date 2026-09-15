@@ -17,6 +17,7 @@ import AddWalkinModal from './AddWalkinModal'
 import SlotMapPanel from './SlotMapPanel'
 import BookingDetailSheet from '../../booking/BookingDetailSheet'
 import Icon from '../../ui/Icon'
+import SegmentedControl from '../../ui/SegmentedControl'
 
 const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 
@@ -161,7 +162,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   )
 
   // === 轉場 ===
-  // 點團卡 → 詳情頁（唯讀確認 + 回傳單）；要改內容由詳情頁的「✏️ 編輯」進精靈。
+  // 點團卡 → 詳情頁（唯讀確認 + 回傳單）；要改內容由詳情頁的「編輯」進精靈。
   const openExisting = (id) => {
     if (!groupReservations.some(x => x.id === id)) return
     setDetailGroupId(id)
@@ -220,7 +221,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     setMapFocus({
       tableNumbers: nums,
       seatingId: seatingForSlot(settings, booking.timeSlot)?.id || null,
-      agencyName: `🧍 ${booking.name || '散客'}`,
+      kind: 'walkin',
+      agencyName: booking.name || '散客',
       batchLabel: `${booking.guests || 0} 位 · ${booking.timeSlot || ''}`,
     })
     setPane('map')
@@ -347,19 +349,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
           sticky：手機上當日總覽很長，捲到下面要切地圖／換日不必先捲回頂端。 */}
       <div className="sticky top-0 z-20 py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap">
         {/* 分段控制（segmented control）：灰底槽 + 白色浮起的選中段，與 iPadOS 一致 */}
-        <div className="inline-flex rounded-[10px] bg-chicken-brown/[0.07] p-0.5">
-          {[['day', '當日總覽'], ['map', '排位地圖']].map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              aria-pressed={pane === k}
-              onClick={() => setPane(k)}
-              className={`tap h-8 px-3.5 rounded-lg text-[13px] font-semibold transition-colors ${
-                pane === k ? 'bg-white text-chicken-brown shadow-[0_1px_2px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.04)]' : 'text-chicken-brown/60 hover:text-chicken-brown'
-              }`}
-            >{label}</button>
-          ))}
-        </div>
+        <SegmentedControl options={[{ key: 'day', label: '當日總覽' }, { key: 'map', label: '排位地圖' }]} value={pane} onChange={setPane} ariaLabel="規劃視圖" />
         {pane === 'map' && (
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => shiftDay(-1)} aria-label="前一日" className="tap w-8 h-8 rounded-lg bg-white border border-chicken-brown/15 text-chicken-brown flex items-center justify-center"><Icon name="chevronLeft" size={14} strokeWidth={2.2} /></button>

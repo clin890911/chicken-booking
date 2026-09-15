@@ -5,6 +5,7 @@ import { useBooking } from '../../contexts/BookingContext'
 import { totalActiveSeats } from '../../utils/capacity'
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../utils/tableAvailability'
 import { todayStr } from '../../utils/timeSlots'
+import Icon from '../ui/Icon'
 
 export default function TableGrid() {
   const { tables, toggleTable, bookings } = useBooking()
@@ -111,8 +112,8 @@ export default function TableGrid() {
         }`}
         title={out || upcoming ? outageLabel(t, today) : undefined}
       >
-        <span>{out ? '🛠' : ''}{t.number}</span>
-        <span className="text-[9px] opacity-70">{out ? '維修' : upcoming ? '🛠排定' : `${t.capacity}人`}</span>
+        <span className="inline-flex items-center gap-0.5">{out && <Icon name="wrench" size={10} />}{t.number}</span>
+        <span className="text-[9px] opacity-70">{out ? '維修' : upcoming ? '排定' : `${t.capacity}人`}</span>
       </button>
     )
   }
@@ -123,19 +124,19 @@ export default function TableGrid() {
         <div className="grid grid-cols-3 gap-2 text-center">
           <div>
             <div className="text-xs text-chicken-brown/60">四人桌</div>
-            <div className="text-xl font-black text-chicken-brown">{stats.fourActive}<span className="text-sm text-chicken-brown/40">/{stats.fourTotal}</span></div>
+            <div className="text-xl font-bold text-chicken-brown">{stats.fourActive}<span className="text-sm text-chicken-brown/40">/{stats.fourTotal}</span></div>
           </div>
           <div>
             <div className="text-xs text-chicken-brown/60">六人桌</div>
-            <div className="text-xl font-black text-chicken-brown">{stats.sixActive}<span className="text-sm text-chicken-brown/40">/{stats.sixTotal}</span></div>
+            <div className="text-xl font-bold text-chicken-brown">{stats.sixActive}<span className="text-sm text-chicken-brown/40">/{stats.sixTotal}</span></div>
           </div>
           <div>
             <div className="text-xs text-chicken-brown/60">可用座位</div>
-            <div className="text-xl font-black text-chicken-red">{stats.seats}</div>
+            <div className="text-xl font-bold text-chicken-red">{stats.seats}</div>
           </div>
         </div>
         {stats.outToday > 0 && (
-          <p className="mt-2 text-center text-xs font-bold text-orange-600">🛠 今日有 {stats.outToday} 桌維修中（今日實際可訂 {stats.seats - stats.outSeats} 位 = 上方 {stats.seats} − 維修 {stats.outSeats}；到現場頁點該桌可結束維修）</p>
+          <p className="mt-2 text-center text-xs font-bold text-orange-600">今日有 {stats.outToday} 桌維修中（今日實際可訂 {stats.seats - stats.outSeats} 位 = 上方 {stats.seats} − 維修 {stats.outSeats}；到現場頁點該桌可結束維修）</p>
         )}
       </Card>
 
@@ -166,7 +167,7 @@ export default function TableGrid() {
 
       {(typeFilter === 'all' || typeFilter === '4') && (
         <Card>
-          <h3 className="font-bold text-chicken-brown mb-3">🪑 四人桌（{rangeLabel(fourSeaters)}）</h3>
+          <h3 className="font-bold text-chicken-brown mb-3">四人桌（{rangeLabel(fourSeaters)}）</h3>
           {fourSeaters.length === 0 ? (
             <p className="text-sm text-chicken-brown/50">無符合條件的四人桌</p>
           ) : (
@@ -179,7 +180,7 @@ export default function TableGrid() {
 
       {(typeFilter === 'all' || typeFilter === '6') && (
         <Card>
-          <h3 className="font-bold text-chicken-brown mb-3">🪑 六人桌（{rangeLabel(sixSeaters)}）</h3>
+          <h3 className="font-bold text-chicken-brown mb-3">六人桌（{rangeLabel(sixSeaters)}）</h3>
           {sixSeaters.length === 0 ? (
             <p className="text-sm text-chicken-brown/50">無符合條件的六人桌</p>
           ) : (

@@ -54,7 +54,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
       }
       return
     }
-    toast.success(`✅ ${g.agencyName} ${batch.label} 已入座（${tablesTxt}）`)
+    toast.success(`${g.agencyName} ${batch.label} 已入座（${tablesTxt}）`)
   }
 
   const handleCheckout = async () => {
@@ -88,7 +88,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
     if (!ok) return
     const r = seatNextBatchOnTable(table.number, g.id, nextBatch.id)
     if (!r.ok) return toast.error('接梯失敗：' + r.error)
-    toast.success(`✨ ${table.number} 已清桌，${g.agencyName} ${nextBatch.label} 入座`)
+    toast.success(`${table.number} 已清桌，${g.agencyName} ${nextBatch.label} 入座`)
   }
 
   const handleClearOnly = () => {
@@ -106,7 +106,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
     if (!ok) return
     const r = releaseGroupBatch(g.id, batch.id)
     if (!r.ok) return toast.error('清桌失敗：' + r.error)
-    toast.success(`✨ ${g.agencyName} ${batch?.label || ''} 已清桌釋出（${(r.cleared || []).length} 桌）`)
+    toast.success(`${g.agencyName} ${batch?.label || ''} 已清桌釋出（${(r.cleared || []).length} 桌）`)
     onClose?.()
   }
 
@@ -122,7 +122,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
   return (
     <div className="space-y-2">
       <div className="px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
-        <div className="font-bold text-indigo-700">🚌 {g.agencyName || '旅行社團體'}</div>
+        <div className="font-bold text-indigo-700">{g.agencyName || '旅行社團體'}</div>
         <div className="text-xs text-indigo-700/80 mt-0.5">
           {batch ? `${batch.label} ${batch.timeSlot}${batch.guests ? ` · ${batch.guests} 人` : ''}` : ''} · 導遊 {g.guideName || '—'}
         </div>
@@ -135,7 +135,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
       <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
         <span className="px-2 py-0.5 rounded-full bg-chicken-red/10 text-chicken-red">總 {g.counts?.total || 0}</span>
         {g.counts?.vegetarian > 0 && <span className="px-2 py-0.5 rounded-full bg-chicken-green/15 text-chicken-green">素 {g.counts.vegetarian}</span>}
-        {g.counts?.mobility > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">♿ {g.counts.mobility}</span>}
+        {g.counts?.mobility > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">行動 {g.counts.mobility}</span>}
         {g.counts?.wheelchair > 0 && <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">輪椅 {g.counts.wheelchair}</span>}
       </div>
       {g.allergyText && <div className="text-[11px] text-chicken-red font-bold">過敏：{g.allergyText}</div>}
@@ -146,7 +146,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
           {hold && table.status === 'vacant' && (
             <>
               <button onClick={handleSeatHold} className="btn-primary w-full">
-                ✅ {batch.label} 入座（整梯 {(batch.tableNumbers || []).length} 桌）
+                {batch.label} 入座（整梯 {(batch.tableNumbers || []).length} 桌）
               </button>
               <button
                 onClick={handleWalkInOverride}
@@ -160,8 +160,8 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
           {/* 情境 2：dining 團體桌 */}
           {groupRef && table.status === 'dining' && (
             <>
-              <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-2xl w-full">
-                🚪 此梯離席（整梯）
+              <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-xl w-full">
+                此梯離席（整梯）
               </button>
               <button
                 onClick={handleFinalize}
@@ -177,7 +177,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
             nextBatch ? (
               <>
                 <button onClick={handleClearAndNext} className="btn-primary w-full">
-                  ✨ 清桌完成＋{nextBatch.label} 入座
+                  清桌完成＋{nextBatch.label} 入座
                 </button>
                 <button
                   onClick={handleClearOnly}
@@ -197,7 +197,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
             ) : batchCleaningCount > 1 ? (
               <>
                 <button onClick={handleReleaseBatch} className="btn-primary w-full">
-                  ✨ 整梯清桌釋出（{batchCleaningCount} 桌）
+                  整梯清桌釋出（{batchCleaningCount} 桌）
                 </button>
                 <button
                   onClick={handleClearOnly}
@@ -207,7 +207,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
                 </button>
               </>
             ) : (
-              <button onClick={handleClearOnly} className="btn-primary w-full">✨ 清桌完成</button>
+              <button onClick={handleClearOnly} className="btn-primary w-full">清桌完成</button>
             )
           )}
         </div>

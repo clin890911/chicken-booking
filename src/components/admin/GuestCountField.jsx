@@ -66,7 +66,7 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
     <button
       type="button"
       onClick={() => { setMore(true); setRaw('9'); onChange(9) }}
-      className={`px-3 rounded-xl border-2 border-chicken-brown/15 bg-white text-sm font-bold text-chicken-brown/70 ${lg ? 'h-9' : 'h-11'}`}
+      className={`px-3 rounded-xl border border-chicken-brown/10 bg-white text-sm font-bold text-chicken-brown/70 ${lg ? 'h-9' : 'h-11'}`}
     >
       9+ ▾
     </button>
@@ -88,7 +88,7 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
             // 這些是切換鈕，選中狀態原本只用顏色表達 → 補 aria-pressed，讀屏才讀得出來
             aria-pressed={value === n && !showInput}
             onClick={() => { setMore(false); onChange(n) }}
-            className={`rounded-xl border-2 font-black tabular-nums transition-all ${
+            className={`rounded-xl border-2 font-bold tabular-nums transition-all ${
               lg ? 'h-[60px] text-[22px]' : 'w-11 h-11 text-base'} ${
               value === n && !showInput ? chipActive : chipIdle}`}
           >

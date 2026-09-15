@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { turnInPeriod } from '../../../utils/tableTurns'
 import { STATUS_COLOR } from '../floormap/statusColors'
+import SegmentedControl from '../../ui/SegmentedControl'
 
 // 現場頁「排程視圖」：仿 inline 桌圖——每張桌卡堆疊顯示當天每一批用餐（turns）。
 // 與 SVG 桌況圖（FloorMap）並存切換；本視圖是「總覽／規劃」用途，不參與帶位模式。
@@ -54,19 +55,7 @@ export default function TableScheduleView({ tables, turnsByTable, selectedTableN
     <div className="space-y-3">
       {/* 篩選 + 圖例 */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="flex gap-1.5">
-          {PERIODS.map(p => (
-            <button
-              key={p.key}
-              onClick={() => setPeriod(p.key)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition-all ${
-                period === p.key
-                  ? 'bg-chicken-red border-chicken-red text-white'
-                  : 'bg-white border-chicken-brown/15 text-chicken-brown'
-              }`}
-            >{p.label}</button>
-          ))}
-        </div>
+        <SegmentedControl size="sm" options={PERIODS} value={period} onChange={setPeriod} ariaLabel="時段" />
         <span className="text-[11px] font-bold text-chicken-brown/55">顯示 {totalTurns} 桌次 · 用餐中 {seatedNow} 桌</span>
         <div className="flex-1" />
         <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-bold text-chicken-brown/55">
@@ -94,12 +83,12 @@ export default function TableScheduleView({ tables, turnsByTable, selectedTableN
             >
               <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-chicken-brown/10">
                 <i className="h-2 w-2 rounded-full" style={{ background: STATUS_DOT_COLOR[t.status] || STATUS_COLOR.vacant.stroke }} />
-                <span className="text-sm font-black text-chicken-brown">{t.number}</span>
+                <span className="text-sm font-bold text-chicken-brown">{t.number}</span>
                 <span className="ml-auto text-[10px] font-bold text-chicken-brown/50">{t.capacity} 位 · 今日 {all.filter(x => !x.isExtra).length} 轉</span>
               </div>
               <div className="p-1.5 space-y-1">
                 {blocked ? (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-2.5 text-center text-[11px] font-bold text-slate-400">🛠 停用／維修中</div>
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-2.5 text-center text-[11px] font-bold text-slate-400">停用／維修中</div>
                 ) : turns.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-emerald-300 bg-emerald-50/40 py-2.5 text-center text-[11px] font-bold text-emerald-600">本時段可排</div>
                 ) : (

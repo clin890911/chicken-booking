@@ -105,7 +105,7 @@ export default function StaffAdminSection() {
         <div className="mt-2 flex flex-wrap gap-2">
           {envAdmins.map(email => (
             <span key={email} className="inline-flex items-center gap-1 rounded-full bg-chicken-brown/10 px-3 py-1 text-xs font-bold text-chicken-brown">
-              🔒 {email}{email === user?.email ? '（我）' : ''}
+              {email}{email === user?.email ? '（我）' : ''}
             </span>
           ))}
           {!envAdmins.length && !loading && <span className="text-xs text-chicken-brown/50">（讀取中或未設定）</span>}

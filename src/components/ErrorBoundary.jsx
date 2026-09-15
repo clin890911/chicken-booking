@@ -34,7 +34,7 @@ export default class ErrorBoundary extends Component {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-chicken-cream px-6 text-center">
         <div className="w-full max-w-sm rounded-3xl border border-chicken-brown/10 bg-white p-7 shadow-sm">
-          <div className="text-5xl">🐔</div>
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-chicken-red text-white text-2xl font-black flex items-center justify-center">王</div>
           <h1 className="mt-3 text-xl font-black text-chicken-brown">這個畫面出了點狀況</h1>
           <p className="mt-2 text-sm leading-6 text-chicken-brown/60">
             可能是網路或資料暫時異常。您的訂位資料不會因此遺失，請重新整理或回首頁再試一次。

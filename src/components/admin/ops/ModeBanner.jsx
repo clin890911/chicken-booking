@@ -1,10 +1,11 @@
+import Icon from '../../ui/Icon'
 // 現場營運的「模式 banner」：指派 / 候位入座 / 立即帶位 / 換桌 / 團體改派桌位
 // 依模式不同底色 + emoji 避免誤判；指派類模式帶二步確認列與預配衝突警告
 const BANNER_STYLE = {
-  assign:         { bg: 'bg-sky-600',    btn: 'text-sky-700',     emoji: '📋' },
-  'seat-waitlist':{ bg: 'bg-emerald-600',btn: 'text-emerald-700', emoji: '🚦' },
-  move:           { bg: 'bg-indigo-600', btn: 'text-indigo-700',  emoji: '↔' },
-  'group-reseat': { bg: 'bg-violet-600', btn: 'text-violet-700',  emoji: '🚌' },
+  assign:         { bg: 'bg-sky-600',    btn: 'text-sky-700',     icon: 'bookings' },
+  'seat-waitlist':{ bg: 'bg-emerald-600',btn: 'text-emerald-700', icon: 'traffic' },
+  move:           { bg: 'bg-indigo-600', btn: 'text-indigo-700',  icon: 'move' },
+  'group-reseat': { bg: 'bg-violet-600', btn: 'text-violet-700',  icon: 'bus' },
 }
 
 const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
@@ -29,9 +30,9 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
       <div className={`${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
-            <span className="text-base leading-none">{isWaitlist ? '🚦' : '📋'}</span>
+            <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
             <span>{isWaitlist ? '候位入座' : '指派桌位'}（併桌）：{name} {need} 位</span>
-            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-black text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
+            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
             <span className="text-xs opacity-90">點桌加 / 減</span>
@@ -46,7 +47,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
           <button
             onClick={onConfirmMulti}
             disabled={!enough}
-            className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-black whitespace-nowrap shadow-sm ${
+            className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
               enough ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
           >✓ {isWaitlist ? '確認併桌入座' : '確認併桌指派'}</button>
         </div>
@@ -83,13 +84,13 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
     <div className={`${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
-          <span className="text-base leading-none">{style.emoji}</span>
+          <Icon name={style.icon} size={18} />
           <span>{bannerText}</span>
           {/* C5：建議桌以底色塊 + 💡 突出 */}
           {CONFIRMABLE.includes(mode.type) && (
             mode.suggestion ? (
-              <span className="inline-flex items-center gap-1 bg-white/95 text-chicken-brown px-2.5 py-1 rounded-lg font-black text-sm shadow-sm">
-                💡 建議 {mode.suggestion}
+              <span className="inline-flex items-center gap-1 bg-white/95 text-chicken-brown px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm">
+                建議 {mode.suggestion}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold">
@@ -107,7 +108,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
           {/* 防呆：此桌已被別筆 booking 預先配走 → 紅底示警，確認鈕改為「仍要覆蓋」 */}
           {pendingConflict && (
             <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
-              <span className="text-sm leading-none">⚠️</span>
+              <Icon name="warning" size={16} className="shrink-0 mt-px" />
               <span>
                 此桌已於排位規劃預留給 <span className="underline">{pendingConflict.name}</span>
                 （{pendingConflict.guests} 位{pendingConflict.timeSlot ? ` · ${pendingConflict.timeSlot}` : ''}）。
@@ -118,7 +119,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
           {/* 防呆：此桌為今日團體圈桌未入座 → 紅底示警（桌況雖空，散客坐下去團體就沒桌了） */}
           {pendingGroupHold && (
             <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
-              <span className="text-sm leading-none">🚌</span>
+              <Icon name="bus" size={16} className="shrink-0 mt-px" />
               <span>
                 此桌為今日團體 <span className="underline">{pendingGroupHold.agencyName || '旅行社'}</span> 預留
                 {pendingGroupHold.holds?.[0]?.batch ? (
@@ -138,9 +139,9 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
               >取消</button>
               <button
                 onClick={onConfirm}
-                className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-black whitespace-nowrap shadow-sm ${
+                className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
                   (pendingConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-              >{(pendingConflict || pendingGroupHold) ? '⚠️ 仍要覆蓋指派' : mode.type === 'group-reseat' ? '✓ 確認改派' : '✓ 確認指派'}</button>
+              >{(pendingConflict || pendingGroupHold) ? '仍要覆蓋指派' : mode.type === 'group-reseat' ? '✓ 確認改派' : '✓ 確認指派'}</button>
             </div>
           </div>
         </div>

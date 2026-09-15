@@ -56,7 +56,7 @@ export default function GroupCalendar({ value, onSelect, cursor, onCursorChange,
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-chicken-brown/10 p-3 sm:p-4 shadow-[0_1px_2px_rgba(58,46,38,0.04)]">
+    <div className="bg-white rounded-xl border border-chicken-brown/10 p-3 sm:p-4 shadow-[0_1px_2px_rgba(58,46,38,0.04)]">
       <div className="flex items-center gap-2.5 mb-3 flex-wrap">
         <h3 className="font-semibold text-lg sm:text-xl text-chicken-brown tracking-tight">{cursor.year}年 {cursor.month + 1}月</h3>
         <div className="text-xs text-chicken-brown/60 tabular-nums">

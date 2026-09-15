@@ -91,13 +91,13 @@ test('整團完成 → 卡片移入「已完成」摺疊區、不可再入座、
   await expect(page.getByText(/整團已完成/)).toBeVisible()
 
   // active 區沒有卡片、出現「皆已完成」與摺疊區
-  await expect(page.getByText('🎉 今日團體皆已完成')).toBeVisible()
+  await expect(page.getByText('今日團體皆已完成')).toBeVisible()
   const toggle = page.getByRole('button', { name: /已完成（1）/ })
   await expect(toggle).toBeVisible()
   await toggle.click()
 
   // 展開後：卡片唯讀（無入座/離席/整團完成按鈕），回傳單列印仍在
-  await expect(page.getByText('✅ 改派旅行社已完成')).toBeVisible()
+  await expect(page.getByText('改派旅行社已完成')).toBeVisible()
   await expect(page.getByRole('button', { name: /梯次入座/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /梯次離席/ })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '整團完成', exact: true })).toHaveCount(0)

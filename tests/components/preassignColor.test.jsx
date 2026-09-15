@@ -25,7 +25,7 @@ describe('TableShape：預配桌著色', () => {
     expect(html).toContain(`fill="${PREASSIGN_COLOR.fill}"`)
     expect(html).toContain(`stroke-dasharray="${PREASSIGN_COLOR.strokeDash}"`)
     expect(html).not.toContain(`fill="${STATUS_COLOR.vacant.fill}"`)
-    expect(html).toContain('📌 11:30 預配')
+    expect(html).toContain('11:30 預配')
   })
 
   it('預配藍與已預訂藍同一支（「藍＝有人要來」語意一致），只差線型', () => {
@@ -94,7 +94,7 @@ describe('FloorMap：預配與已預訂在同一張圖上可分辨', () => {
   it('仍分得出差別：111 顯示訂位人姓名（桌已鎖）、112 顯示「預配」＋虛線（桌還是空的）', () => {
     const html = render()
     expect(html).toContain('周晴茹')
-    expect(html).toContain('📌 11:30 預配')
+    expect(html).toContain('11:30 預配')
     expect(html).toContain('stroke-dasharray')
   })
 })

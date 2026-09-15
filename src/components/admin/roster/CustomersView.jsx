@@ -4,6 +4,7 @@ import CustomerDetailModal from './CustomerDetailModal'
 import { useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 import { getNoshowCount, noshowRisk } from '../../../services/bookingService'
+import SegmentedControl from '../../ui/SegmentedControl'
 
 const VIP_LABEL = { none: '一般', bronze: '銅卡', silver: '銀卡', gold: '金卡' }
 const VIP_COLOR = {
@@ -93,10 +94,10 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
     <div className="space-y-3">
       {/* 統計 */}
       <div className="grid grid-cols-4 gap-2">
-        <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-brown">{stats.total}</div><div className="text-[11px] text-chicken-brown/60">總顧客</div></Card>
-        <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-green">{stats.repeat}</div><div className="text-[11px] text-chicken-brown/60">回頭客</div></Card>
-        <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-yellow">{stats.vip}</div><div className="text-[11px] text-chicken-brown/60">VIP</div></Card>
-        <Card className="!p-3 text-center"><div className="text-2xl font-black text-chicken-red">{stats.blacklist}</div><div className="text-[11px] text-chicken-brown/60">黑名單</div></Card>
+        <Card className="!p-3 text-center"><div className="text-2xl font-bold text-chicken-brown">{stats.total}</div><div className="text-[11px] text-chicken-brown/60">總顧客</div></Card>
+        <Card className="!p-3 text-center"><div className="text-2xl font-bold text-chicken-green">{stats.repeat}</div><div className="text-[11px] text-chicken-brown/60">回頭客</div></Card>
+        <Card className="!p-3 text-center"><div className="text-2xl font-bold text-chicken-yellow">{stats.vip}</div><div className="text-[11px] text-chicken-brown/60">VIP</div></Card>
+        <Card className="!p-3 text-center"><div className="text-2xl font-bold text-chicken-red">{stats.blacklist}</div><div className="text-[11px] text-chicken-brown/60">黑名單</div></Card>
       </div>
 
       {/* 搜尋 + 過濾 */}
@@ -104,7 +105,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
         <div className="relative flex-1 min-w-[200px]">
           <input
             type="search"
-            placeholder="🔍 搜尋姓名 / 電話"
+            placeholder="搜尋姓名 / 電話"
             value={query}
             onChange={e => setQuery(e.target.value)}
             className="input w-full pr-9"
@@ -118,23 +119,13 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
             >✕</button>
           )}
         </div>
-        <div className="flex gap-1.5 flex-wrap">
-          {[
-            { v: 'all', label: '全部' },
-            { v: 'repeat', label: '回頭客' },
-            { v: 'vip', label: 'VIP' },
-            { v: 'blacklist', label: '黑名單' },
-            { v: 'archived', label: `已歸檔${stats.archived ? ` (${stats.archived})` : ''}` },
-          ].map(f => (
-            <button
-              key={f.v}
-              onClick={() => setFilter(f.v)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-bold ${
-                filter === f.v ? 'bg-chicken-red text-white' : 'bg-white border border-chicken-brown/15 text-chicken-brown'
-              }`}
-            >{f.label}</button>
-          ))}
-        </div>
+        <SegmentedControl size="sm" ariaLabel="顧客篩選" value={filter} onChange={setFilter} options={[
+          { key: 'all', label: '全部' },
+          { key: 'repeat', label: '回頭客' },
+          { key: 'vip', label: 'VIP' },
+          { key: 'blacklist', label: '黑名單' },
+          { key: 'archived', label: `已歸檔${stats.archived ? ` (${stats.archived})` : ''}` },
+        ]} />
       </div>
 
       {/* 搜尋結果計數 */}
@@ -151,7 +142,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
 
       {/* 列表 */}
       {list.length === 0 ? (
-        <EmptyState icon="👥" title="尚無顧客資料" hint="客人訂位後會自動建立顧客檔" />
+        <EmptyState icon="users" title="尚無顧客資料" hint="客人訂位後會自動建立顧客檔" />
       ) : (
         <div className="space-y-2">
           {list.map(c => {
@@ -169,7 +160,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                     <div className="flex items-baseline gap-2 flex-wrap">
                       <span className="text-base font-bold">{c.name || '未填姓名'}</span>
                       <span className="text-chicken-brown/30 text-xs">▸ 記錄</span>
-                      <span className="text-sm text-chicken-brown/60">📱 {c.phone}</span>
+                      <span className="text-sm text-chicken-brown/60">{c.phone}</span>
                       {c.archived && (
                         <span className="text-[10px] font-bold bg-chicken-brown/10 text-chicken-brown/60 px-2 py-0.5 rounded-full">已歸檔</span>
                       )}
@@ -182,7 +173,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                       <span>最後 {fmtDate(c.lastVisit)}</span>
                       {noshow > 0 && (
                         <span className={`px-2 py-0.5 rounded-full ${riskBadge}`}>
-                          ⚠️ no-show ×{noshow}{risk >= 3 ? '（高風險）' : ''}
+                          no-show ×{noshow}{risk >= 3 ? '（高風險）' : ''}
                         </span>
                       )}
                     </div>
@@ -192,7 +183,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                       </span>
                       {c.allergies && (
                         <span className="text-[10px] font-bold bg-chicken-red/10 text-chicken-red px-2 py-0.5 rounded-full">
-                          ⚠️ {c.allergies}
+                          {c.allergies}
                         </span>
                       )}
                       {c.blacklisted && (
@@ -218,11 +209,11 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                           ? 'bg-chicken-brown/10 text-chicken-brown hover:bg-chicken-brown/15'
                           : 'bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5'
                       }`}
-                    >{c.blacklisted ? '✅ 解除黑名單' : '🚫 加黑名單'}</button>
+                    >{c.blacklisted ? '解除黑名單' : '加黑名單'}</button>
                     <button
                       onClick={() => updateCustomer(c.phone, { archived: !c.archived })}
                       className="text-xs px-3 min-h-[44px] rounded-lg font-bold bg-white border border-chicken-brown/15 text-chicken-brown/70 hover:bg-chicken-brown/5"
-                    >{c.archived ? '↩ 取消歸檔' : '🗄 歸檔'}</button>
+                    >{c.archived ? '↩ 取消歸檔' : '歸檔'}</button>
                   </div>
                 </div>
               </Card>
@@ -282,7 +273,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
 
       {/* 加黑名單 Modal（取代原生 prompt） */}
       <Modal open={!!blacklisting} onClose={() => setBlacklisting(null)}
-             title={blacklisting ? `⚠️ 將 ${blacklisting.name} 加入黑名單` : ''}
+             title={blacklisting ? `將 ${blacklisting.name} 加入黑名單` : ''}
              footer={
                <>
                  <button onClick={() => setBlacklisting(null)} className="btn-secondary px-4 py-2">取消</button>
@@ -293,9 +284,9 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                      if (blacklisting) setCustomerBlacklist(blacklisting.phone, true, blacklistReason.trim())
                      setBlacklisting(null)
                    }}
-                   className={`px-4 py-2 rounded-2xl font-bold text-white shadow-md
+                   className={`px-4 py-2 rounded-xl font-bold text-white shadow-md
                      ${blacklistReason.trim() ? 'bg-chicken-red' : 'bg-chicken-red/40 cursor-not-allowed'}`}
-                 >🚫 確認加入黑名單</button>
+                 >確認加入黑名單</button>
                </>
              }
       >

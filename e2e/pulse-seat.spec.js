@@ -46,9 +46,9 @@ test('訂位脈動：遲到且已指派的訂位可直接「客人到了」入�
   // 種子只寫了 booking.assignedTableId、沒把 113 設成 reserved（見上方 beforeEach 註解「空桌」），
   // 即「預配」狀態 → 徽章是「📌 已預配」而非「✓ 已指派」（2026-08 起兩者分開，
   // 免得訂位卡一律寫已指派、桌況圖卻一藍一綠）。
-  await expect(page.getByText('⚠ 過時未到（1 組）— 請聯絡或標記')).toBeVisible()
+  await expect(page.getByText('過時未到（1 組）— 請聯絡或標記')).toBeVisible()
   await expect(page.getByText('遲到客')).toBeVisible()
-  await expect(page.getByText('📌 已預配 113')).toBeVisible()
+  await expect(page.getByText('已預配 113')).toBeVisible()
   const seatBtn = page.getByRole('button', { name: /客人到了/ })
   await expect(seatBtn).toBeVisible()
   await expect(page.getByRole('button', { name: /標 No-show/ })).toBeVisible()
@@ -60,7 +60,7 @@ test('訂位脈動：遲到且已指派的訂位可直接「客人到了」入�
   // 「✅ 遲到客 已入座 113」，也含這三個字，於是永遠數不到 0（這條斷言長期是紅的）。
   // 改驗「過時未到區整段消失」——該區只在還有過時未到訂位時才渲染，等價於卡片已離開，
   // 且這句文案不會出現在任何 toast。順帶確認入座鈕也跟著消失。
-  await expect(page.getByText('⚠ 過時未到（1 組）— 請聯絡或標記')).toHaveCount(0)
+  await expect(page.getByText('過時未到（1 組）— 請聯絡或標記')).toHaveCount(0)
   await expect(page.getByRole('button', { name: /客人到了/ })).toHaveCount(0)
 })
 

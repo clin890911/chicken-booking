@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Icon from '../../ui/Icon'
 
 // 滑動帶位：取代二次確認的手勢元件。領檯用手指把 knob 拖到 ≥60% 行程放手才觸發 onConfirm，
 // 比「點擊→彈窗確認→再點擊」防誤觸（誤觸一下不會整桌帶位），也省一次點擊。
@@ -111,7 +112,7 @@ export default function SlideToSeat({ onConfirm, disabled = false, label = '滑�
       aria-label={label}
       aria-disabled={disabled ? 'true' : undefined}
       onKeyDown={handleKeyDown}
-      className={`relative w-full h-[66px] rounded-xl overflow-hidden select-none border-2 border-chicken-brown/15 bg-white ${
+      className={`relative w-full h-[66px] rounded-xl overflow-hidden select-none border border-chicken-brown/10 bg-white ${
         disabled ? 'opacity-40 pointer-events-none' : ''}`}
     >
       <div
@@ -131,7 +132,7 @@ export default function SlideToSeat({ onConfirm, disabled = false, label = '滑�
         style={{ width: `${KNOB_WIDTH}px`, transform: `translateX(${dragX}px)` }}
         className={`absolute left-0 top-1.5 h-[54px] rounded-lg bg-white shadow-md flex items-center justify-center text-xl touch-none cursor-grab active:cursor-grabbing ${transitionClass}`}
       >
-        🪑
+        <Icon name="chair" size={22} className="text-chicken-brown" />
       </div>
     </div>
   )

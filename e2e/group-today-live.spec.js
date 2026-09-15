@@ -58,7 +58,7 @@ test('管理端：今日團體 梯次入座 → 此梯離席 → 清桌＋接下
 
   // 點地圖上的團體桌 101 → 抽屜顯示團體資訊與「此梯離席」
   await page.locator('svg g:has(:text-is("101"))').first().click()
-  await expect(page.getByText('🚌 快樂旅行社')).toBeVisible()
+  await expect(page.getByText('快樂旅行社')).toBeVisible()
   await page.getByRole('button', { name: /此梯離席/ }).click()
   await page.getByRole('button', { name: '確認離席', exact: true }).click()
   await expect(page.getByText(/已離席，桌位待清/)).toBeVisible()

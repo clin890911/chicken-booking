@@ -45,7 +45,7 @@ test('新增訂位：缺漏清單即時提示 → 補齊 → 建立成功', asyn
   await page.getByRole('button', { name: /18:00/ }).click()
 
   // 按鈕轉為可提交（含日期+時段+人數摘要）
-  const confirmBtn = page.getByRole('button', { name: /✅ 確認新增 · .*18:00 · 2 位/ })
+  const confirmBtn = page.getByRole('button', { name: /確認新增 · .*18:00 · 2 位/ })
   await expect(confirmBtn).toBeEnabled()
   await confirmBtn.click()
 

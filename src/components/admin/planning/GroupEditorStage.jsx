@@ -325,7 +325,7 @@ export default function GroupEditorStage({
         await reserveExisting(draft.id, patch)
         onSaved(draft.id)
       }
-      toast.success('✅ 團單已儲存')
+      toast.success('團單已儲存')
     } catch (err) {
       if (err?.status === 409) toast.error('桌位衝突：' + (err.message || '已被其他團或現場訂位佔用，請重新圈桌'))
       else toast.error('儲存失敗：' + (err?.message || '未知錯誤'))
@@ -380,7 +380,7 @@ export default function GroupEditorStage({
       {/* 改期橫幅：由「📅 改期」進入時顯示原日期→新日期，提示須重新圈桌 */}
       {rescheduleFrom && rescheduleFrom !== date && (
         <div className="rounded-xl border-2 border-indigo-300 bg-indigo-50 px-4 py-3 text-sm">
-          <div className="font-black text-indigo-700">📅 改期中：{dayLabel(rescheduleFrom)} → {dayLabel(date)}</div>
+          <div className="font-bold text-indigo-700">改期中：{dayLabel(rescheduleFrom)} → {dayLabel(date)}</div>
           <div className="mt-0.5 text-xs font-bold text-indigo-600/80">原圈桌位已清空，請於下方為新日期重新圈桌後儲存；未儲存前團單仍留在原日期。</div>
         </div>
       )}
@@ -463,10 +463,10 @@ export default function GroupEditorStage({
                       onClick={() => selectSession(s)}
                       className={`rounded-xl border-2 p-3 text-left transition-all disabled:cursor-not-allowed ${toneCls}`}
                     >
-                      <div className="text-sm font-black">{s.name}</div>
+                      <div className="text-sm font-bold">{s.name}</div>
                       <div className={`text-xs ${selected ? 'text-white/80' : 'opacity-70'}`}>{s.start}–{s.end}</div>
                       <div className="mt-1.5 text-xs font-bold">
-                        {tone === 'closed' ? '🚫 已關閉'
+                        {tone === 'closed' ? '已關閉'
                           : tone === 'full' ? '已客滿'
                             : `剩 ${r?.remainingTables ?? '—'} 桌 / ${r?.remainingSeats ?? '—'} 席`}
                       </div>
@@ -530,7 +530,7 @@ export default function GroupEditorStage({
                 return (
                   <div key={b.id} className={`rounded-lg border-2 p-2 ${active ? 'border-indigo-500 bg-indigo-50' : 'border-chicken-brown/10'}`}>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-black text-chicken-brown">{b.label}</span>
+                      <span className="text-sm font-bold text-chicken-brown">{b.label}</span>
                       {sea && (
                         <span className="rounded-full bg-chicken-brown/5 px-2 py-0.5 text-xs font-bold text-chicken-brown/70">{sea.name}</span>
                       )}
@@ -548,7 +548,7 @@ export default function GroupEditorStage({
                       )}
                       <span className="text-xs text-chicken-brown/60">桌 {(b.tableNumbers || []).join('、') || '未圈'}</span>
                       <div className="flex-1" />
-                      <button onClick={() => setActiveBatchId(b.id)} className={`text-xs px-2.5 py-1 rounded-lg font-bold ${active ? 'bg-indigo-600 text-white' : 'bg-white border-2 border-chicken-brown/15 text-chicken-brown'}`}>
+                      <button onClick={() => setActiveBatchId(b.id)} className={`text-xs px-2.5 py-1 rounded-lg font-bold ${active ? 'bg-indigo-600 text-white' : 'bg-white border border-chicken-brown/10 text-chicken-brown'}`}>
                         {active ? '圈桌中' : '圈此梯桌'}
                       </button>
                       {gBatches.length > 1 && (
@@ -591,7 +591,7 @@ export default function GroupEditorStage({
               {escortBatch ? (
                 <div className={`rounded-lg border-2 p-2 ${activeBatchId === escortBatch.id ? 'border-indigo-500 bg-indigo-50' : 'border-indigo-200 bg-indigo-50/40'}`}>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-black text-indigo-700">🚗 司領桌</span>
+                    <span className="text-sm font-bold text-indigo-700">司領桌</span>
                     <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700">司機+領隊</span>
                     {(() => {
                       const sea = seatingForSlot(settings, escortBatch.timeSlot)
@@ -632,13 +632,13 @@ export default function GroupEditorStage({
             style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 12px, rgba(99,102,241,0.05) 12px, rgba(99,102,241,0.05) 24px)' }}>
             <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
               <div className="min-w-[200px]">
-                <div className="text-sm font-black text-indigo-700">📐 規劃模式 · {dayLabel(date)}（非今日即時）</div>
+                <div className="text-sm font-bold text-indigo-700">規劃模式 · {dayLabel(date)}（非今日即時）</div>
                 <div className="text-xs text-indigo-600/80">
                   {activeBatch ? `圈桌中：${activeBatch.label}${seatingForSlot(settings, activeBatch.timeSlot) ? ' · ' + seatingForSlot(settings, activeBatch.timeSlot).name : ' ' + activeBatch.timeSlot}` : '請於上方選一個梯次'}
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <button onClick={autoSuggest} className="rounded-lg bg-chicken-green px-3 py-1.5 text-xs font-black text-white hover:opacity-90">✨ 一鍵推薦桌位</button>
+                <button onClick={autoSuggest} className="rounded-lg bg-chicken-green px-3 py-1.5 text-xs font-bold text-white hover:opacity-90">一鍵推薦桌位</button>
                 {['1F', '2F'].map(f => (
                   <button key={f} onClick={() => setFloor(f)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 ${floor === f ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-indigo-200 text-indigo-700'}`}>{f}</button>
@@ -656,7 +656,7 @@ export default function GroupEditorStage({
             {/* 圈到的桌事後被設停用/維修：地圖已置灰不可點，這裡提供一鍵移除（否則無法取消圈選） */}
             {outCircledTables.length > 0 && (
               <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs">
-                <span className="font-bold text-amber-800">🛠 本梯圈到的桌在此日期停用/維修中（不會供餐、儲存會被擋）：</span>
+                <span className="font-bold text-amber-800">本梯圈到的桌在此日期停用/維修中（不會供餐、儲存會被擋）：</span>
                 <span className="ml-1 inline-flex flex-wrap gap-1.5 align-middle">
                   {outCircledTables.map(n => (
                     <button key={n} onClick={() => removeCircledTable(n)}
@@ -717,8 +717,8 @@ export default function GroupEditorStage({
               )}
             </dl>
             <div className="flex flex-wrap gap-2 items-center pt-1">
-              <Button onClick={save} disabled={busy} className="flex-1 min-w-[160px]">{busy ? '儲存中…' : '💾 儲存團單（含衝突檢查）'}</Button>
-              <Button variant="secondary" onClick={() => setSheetOpen(true)}>🖨 回傳單</Button>
+              <Button onClick={save} disabled={busy} className="flex-1 min-w-[160px]">{busy ? '儲存中…' : '儲存團單（含衝突檢查）'}</Button>
+              <Button variant="secondary" onClick={() => setSheetOpen(true)}>回傳單</Button>
               {!isNew && (
                 <button onClick={doDelete} className="px-3 py-2 rounded-xl text-sm font-bold text-chicken-red border-2 border-chicken-red/30">刪除</button>
               )}
@@ -730,11 +730,11 @@ export default function GroupEditorStage({
       {/* 頁面導覽列 */}
       <div className="bg-white rounded-xl border border-chicken-brown/10 p-3 flex items-center gap-2">
         <button onClick={goPrev} disabled={step === 1}
-          className="px-4 py-2 rounded-xl text-sm font-bold border-2 border-chicken-brown/15 text-chicken-brown disabled:opacity-40">← 上一頁</button>
+          className="px-4 py-2 rounded-xl text-sm font-bold border border-chicken-brown/10 text-chicken-brown disabled:opacity-40">← 上一頁</button>
         <div className="flex-1" />
         {step < 2
           ? <Button onClick={goNext}>下一步：圈選座位 →</Button>
-          : <Button onClick={save} disabled={busy}>{busy ? '儲存中…' : '💾 儲存'}</Button>}
+          : <Button onClick={save} disabled={busy}>{busy ? '儲存中…' : '儲存'}</Button>}
       </div>
 
       {sheetOpen && (

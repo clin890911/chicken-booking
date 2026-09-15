@@ -8,15 +8,15 @@ import MonthCalendar from './MonthCalendar'
 import { dayLabel, todayStr, formatDate, addDays } from '../../utils/timeSlots'
 
 const SOURCE_OPTIONS = [
-  { value: 'phone',  label: '📞 電話' },
-  { value: 'line',   label: '💚 LINE' },
-  { value: 'walkin', label: '🚶 現場' },
-  { value: 'online', label: '🌐 線上' },
+  { value: 'phone',  label: '電話' },
+  { value: 'line',   label: 'LINE' },
+  { value: 'walkin', label: '現場' },
+  { value: 'online', label: '線上' },
 ]
 const NOTE_OPTIONS = [
-  { key: 'pet',      label: '🐾 寵物' },
-  { key: 'child',    label: '👶 兒童' },
-  { key: 'mobility', label: '♿ 行動不便' },
+  { key: 'pet',      label: '寵物' },
+  { key: 'child',    label: '兒童' },
+  { key: 'mobility', label: '行動不便' },
 ]
 // 員工後台編輯既有訂位：姓名／電話／人數／日期／時段／來源／備註。
 // 採「按需掛載」（父層 {editing && <EditBookingModal/>}）→ 每次開啟都以當前 booking 初始化。
@@ -87,7 +87,7 @@ export default function EditBookingModal({ booking, onClose }) {
     <Modal
       open
       onClose={onClose}
-      title={`✏️ 編輯訂位 · #${booking.id}`}
+      title={`編輯訂位 · #${booking.id}`}
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={busy}>取消</Button>
@@ -118,7 +118,7 @@ export default function EditBookingModal({ booking, onClose }) {
             <button type="button" onClick={() => setShowCalendar(s => !s)}
               className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
                 !isQuickDate ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-              📅 {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合月曆 ▴' : '選月曆 ▾'}
+              {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合月曆 ▴' : '選月曆 ▾'}
             </button>
           </div>
           {showCalendar && (

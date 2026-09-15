@@ -57,7 +57,7 @@ export default function TelegramSettings({ embedded = false }) {
     setBusy(true)
     try {
       const r = await tg.sendTest()
-      if (r.ok) toast.success('✅ 測試訊息已送達 Telegram')
+      if (r.ok) toast.success('測試訊息已送達 Telegram')
       else toast.error('送出失敗：' + (r.description || r.reason || r.error || '未知'))
     } finally {
       setBusy(false)
@@ -75,7 +75,7 @@ export default function TelegramSettings({ embedded = false }) {
     applyEnabled(on)
     // 可復原：尤其關閉時，避免誤關後新事件靜默不推送
     toast.action(
-      on ? '✅ 通知已開啟' : '🔕 通知已關閉，新事件不會推送',
+      on ? '通知已開啟' : '通知已關閉，新事件不會推送',
       { label: '↩ 復原', onClick: () => applyEnabled(prev) },
       { type: on ? 'success' : 'warning' },
     )
@@ -155,7 +155,7 @@ export default function TelegramSettings({ embedded = false }) {
                   onClick={handleDetect}
                   disabled={busy}
                   className="text-xs px-3 py-1.5 bg-chicken-yellow text-white rounded-lg font-bold disabled:opacity-50"
-                >🔍 自動偵測</button>
+                >自動偵測</button>
                 {tg.getChatId() && (
                   <button
                     onClick={handleClear}
@@ -164,7 +164,7 @@ export default function TelegramSettings({ embedded = false }) {
                 )}
               </div>
               <p className="text-[11px] text-chicken-brown/50 mt-2 leading-snug">
-                💡 自動偵測前請先到 <a href="https://t.me/materofchichenbooking_bot" target="_blank" rel="noopener" className="underline text-chicken-red">t.me/materofchichenbooking_bot</a> 按 <b>Start</b>。
+                自動偵測前請先到 <a href="https://t.me/materofchichenbooking_bot" target="_blank" rel="noopener" className="underline text-chicken-red">t.me/materofchichenbooking_bot</a> 按 <b>Start</b>。
                 若想推到群組，把 bot 加進群再讓 bot 收到一條訊息。
               </p>
             </div>
@@ -192,7 +192,7 @@ export default function TelegramSettings({ embedded = false }) {
                 variant="secondary"
                 className="min-h-[44px]"
               >
-                📤 送出測試訊息
+                送出測試訊息
               </Button>
               <Button
                 onClick={handleSendDigest}
@@ -200,7 +200,7 @@ export default function TelegramSettings({ embedded = false }) {
                 variant="secondary"
                 className="min-h-[44px]"
               >
-                📊 立即送每日彙總
+                立即送每日彙總
               </Button>
             </div>
 

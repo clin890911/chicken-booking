@@ -161,15 +161,15 @@ export default function AdminPage() {
             在 iPad 橫向卻是 66px 的實體高度（左欄會因此捲動）→ ops 不渲染，
             右邊的登入者/角色改由 OperationsView 接在統計條最右端。其他分頁完全不變。 */}
         {tab !== 'ops' && (
-        <div className="hidden lg:block flex-shrink-0 bg-white border-b border-chicken-brown/10 px-6 py-3">
+        <div className="hidden lg:block flex-shrink-0 bg-[#fbfaf8] border-b border-chicken-brown/10 px-6 py-2">
           <div className="flex items-center justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-black text-chicken-brown">{tabInfo.label}</h1>
-              <p className="text-xs text-chicken-brown/60 mt-0.5">{tabInfo.subtitle}</p>
+            <div className="flex items-baseline gap-2.5">
+              <h1 className="text-lg font-semibold tracking-tight text-chicken-brown">{tabInfo.label}</h1>
+              <p className="text-xs text-chicken-brown/50">{tabInfo.subtitle}</p>
             </div>
             <div className="text-right text-xs">
-              <div className="font-bold text-chicken-brown">{user?.displayName}</div>
-              <div className="text-chicken-brown/60">{user?.roleLabel}</div>
+              <div className="font-semibold text-chicken-brown">{user?.displayName}</div>
+              <div className="text-chicken-brown/55">{user?.roleLabel}</div>
             </div>
           </div>
         </div>
@@ -178,7 +178,7 @@ export default function AdminPage() {
         <main className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 py-4 overflow-x-hidden max-w-[1600px] w-full mx-auto">
           {!usingFirebase && (
             <div className="mb-4 flex-shrink-0 rounded-xl border-2 border-chicken-red bg-red-50 px-4 py-3">
-              <p className="text-sm font-black text-chicken-red">⚠️ 雲端同步未啟用</p>
+              <p className="text-sm font-black text-chicken-red">雲端同步未啟用</p>
               <p className="text-xs text-chicken-red/80 mt-1 leading-5">
                 未偵測到 Firebase 設定（VITE_FIREBASE_*），系統以本機開發模式運行：資料只存在這台裝置、
                 <b>不會上傳雲端、也不會與其他裝置同步</b>。若這是正式上線環境，請設定環境變數後重新部署。
