@@ -90,3 +90,22 @@ export function specialOverMessage(counts = {}) {
   if (!first) return null
   return `${first.label} ${first.value} 人超過總人數 ${first.total}，先改總人數或減少這項`
 }
+
+// 圈桌側欄的「夠不夠坐」三態文案（純函式，UI 只負責套色）。
+// 店員腦中的判準是「這一梯圈到的席位，夠不夠這一梯的人坐」，不是百分比；
+// 所以直接給完整句子（夠坐 X 人多 Y 席／還差 Y 席再圈一桌），不必自己心算、
+// 也不必捲回整單摘要卡（那張算的是整團，這裡算的是「目前這一梯」）。
+//   tone: 'idle'（還沒圈桌／還沒填人數）｜'ok'（夠坐）｜'short'（不夠）
+export function seatCompareText({ circled = 0, needed = 0, tableCount = 0 } = {}) {
+  const c = Math.max(0, Number(circled) || 0)
+  const n = Math.max(0, Number(needed) || 0)
+  const t = Math.max(0, Number(tableCount) || 0)
+  if (t <= 0 && c <= 0) return { tone: 'idle', text: '還沒圈桌' }
+  // 已圈桌但沒人數：不能說「夠坐 0 人」，那是假的綠燈
+  if (n <= 0) return { tone: 'idle', text: '還沒填本梯人數' }
+  if (c >= n) {
+    const over = c - n
+    return { tone: 'ok', text: over === 0 ? `剛好夠坐 ${n} 人` : `夠坐 ${n} 人，多 ${over} 席` }
+  }
+  return { tone: 'short', text: `還差 ${n - c} 席，再圈一桌` }
+}

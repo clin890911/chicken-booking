@@ -7,6 +7,7 @@ import {
   parseBusInfo,
   overSpecialCounts,
   specialOverMessage,
+  seatCompareText,
 } from '../../src/components/admin/planning/groupEditorFields'
 
 describe('composeBusInfo 三格 → busInfo 字串', () => {
@@ -108,5 +109,34 @@ describe('常數與 schema 對齊', () => {
   })
   it('總人數快速鍵＝店主口語的車型', () => {
     expect(TOTAL_PRESETS.map(p => p.total)).toEqual([20, 43, 86])
+  })
+})
+
+describe('seatCompareText 圈桌側欄「夠不夠坐」三態', () => {
+  it('還沒圈桌 → idle', () => {
+    expect(seatCompareText({ circled: 0, needed: 20, tableCount: 0 })).toEqual({ tone: 'idle', text: '還沒圈桌' })
+    expect(seatCompareText()).toEqual({ tone: 'idle', text: '還沒圈桌' })
+  })
+  it('圈了桌但還沒填人數 → idle（不可報成「夠坐 0 人」的假綠燈）', () => {
+    expect(seatCompareText({ circled: 12, needed: 0, tableCount: 2 }))
+      .toEqual({ tone: 'idle', text: '還沒填本梯人數' })
+  })
+  it('夠坐且有餘 → ok，講清楚多幾席', () => {
+    expect(seatCompareText({ circled: 30, needed: 20, tableCount: 5 }))
+      .toEqual({ tone: 'ok', text: '夠坐 20 人，多 10 席' })
+  })
+  it('剛好夠坐 → ok，不說「多 0 席」', () => {
+    expect(seatCompareText({ circled: 20, needed: 20, tableCount: 4 }))
+      .toEqual({ tone: 'ok', text: '剛好夠坐 20 人' })
+  })
+  it('不夠坐 → short，直接給下一步動作', () => {
+    expect(seatCompareText({ circled: 12, needed: 20, tableCount: 2 }))
+      .toEqual({ tone: 'short', text: '還差 8 席，再圈一桌' })
+  })
+  it('負數／字串一律當 0 處理，不產生 NaN 文案', () => {
+    expect(seatCompareText({ circled: -5, needed: '20', tableCount: '1' }))
+      .toEqual({ tone: 'short', text: '還差 20 席，再圈一桌' })
+    expect(seatCompareText({ circled: 'x', needed: 'y', tableCount: 'z' }))
+      .toEqual({ tone: 'idle', text: '還沒圈桌' })
   })
 })

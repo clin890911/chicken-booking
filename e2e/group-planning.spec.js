@@ -298,3 +298,45 @@ test('規劃：當日總覽「新增散客」快速表單 → 落地當日散客
   await expect(page.getByText(/規劃散客 4 位 .* 已新增/)).toBeVisible()
   await expect(page.getByText('規劃散客', { exact: true })).toBeVisible()
 })
+
+test('規劃：圈桌側欄即時算「夠不夠坐」，點桌號 chip 可取消', async ({ page }) => {
+  await loginAndOpenPlanning(page)
+  await page.getByRole("button", { name: /新增團單/ }).first().click()
+
+  // 側欄初始：還沒圈桌
+  const hero = page.getByLabel(/^本梯已圈 \d+ 席、\d+ 桌$/)
+  await expect(hero).toBeVisible()
+  await expect(hero).toHaveAttribute('aria-label', '本梯已圈 0 席、0 桌')
+  await expect(page.getByText('還沒圈桌')).toBeVisible()
+
+  // 總人數 20（中巴）；1F 的 101/102/103/108/110 都是六人桌
+  await page.getByRole('button', { name: /^中巴/ }).click()
+  await expect(page.getByLabel('總人數', { exact: true })).toHaveValue('20')
+
+  // 圈 2 桌 → 12 席、還差 8 席
+  await page.locator('svg g:has(:text-is("101"))').first().click()
+  await page.locator('svg g:has(:text-is("102"))').first().click()
+  await expect(hero).toHaveAttribute('aria-label', '本梯已圈 12 席、2 桌')
+  await expect(page.getByText('還差 8 席，再圈一桌')).toBeVisible()
+
+  // 再圈 2 桌 → 24 席、夠坐 20 人多 4 席
+  await page.locator('svg g:has(:text-is("103"))').first().click()
+  await page.locator('svg g:has(:text-is("110"))').first().click()
+  await expect(hero).toHaveAttribute('aria-label', '本梯已圈 24 席、4 桌')
+  await expect(page.getByText('夠坐 20 人，多 4 席')).toBeVisible()
+
+  // 點側欄桌號 chip 取消 → 數字下降、回到「還差」
+  await page.getByRole('button', { name: '移除桌 110' }).click()
+  await expect(page.getByRole('button', { name: '移除桌 110' })).toHaveCount(0)
+  await expect(hero).toHaveAttribute('aria-label', '本梯已圈 18 席、3 桌')
+  await expect(page.getByText('還差 2 席，再圈一桌')).toBeVisible()
+
+  // 司領桌切換鈕：按下去就有司領梯，側欄切到它（0 席起算），再按移除
+  const escortBtn = page.getByRole('button', { name: /^司領桌/ })
+  await expect(escortBtn).toHaveAttribute('aria-pressed', 'false')
+  await escortBtn.click()
+  await expect(hero).toHaveAttribute('aria-label', '本梯已圈 0 席、0 桌')
+  await expect(page.getByRole('button', { name: /^司領桌（再按移除）/ })).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: /^司領桌（再按移除）/ }).click()
+  await expect(page.getByRole('button', { name: /^司領桌/ })).toHaveAttribute('aria-pressed', 'false')
+})
