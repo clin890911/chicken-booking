@@ -25,6 +25,7 @@ const isActive = w => w.status === 'waiting' || w.status === 'called'
 
 function fmtTime(d) {
   const t = new Date(d)
+  if (!d || Number.isNaN(t.getTime())) return '—'   // 舊資料缺 takenAt，不要顯示 NaN:NaN
   return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
 }
 
@@ -119,10 +120,12 @@ export default function WaitlistHistorySheet({ open, onClose }) {
             { key: 'history', label: '歷史', sub: String(historyCount) },
           ]} />
 
+        {/* 列表區固定高度：切分頁時視窗不跟著縮放，分頁鈕才不會跑離手指（iPad 上會點到下面的列） */}
+        <div className="h-[50vh] overflow-y-auto pr-1">
         {isEmpty ? (
           <EmptyState icon="traffic" title={emptyTitle} />
         ) : filter === 'history' ? (
-          <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+          <div className="space-y-3">
             {groups.history.map(g => (
               <section key={g.date || 'unknown'} className="space-y-2">
                 <div className="sticky top-0 z-10 bg-white py-1 text-xs font-bold text-chicken-brown/70">
@@ -133,11 +136,12 @@ export default function WaitlistHistorySheet({ open, onClose }) {
             ))}
           </div>
         ) : (
-          <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+          <div className="space-y-2">
             {/* 活躍中可能混到前幾天沒結掉的號，那幾筆要帶日期才分得出來 */}
             {flatList.map(w => <WaitRow key={w.id} w={w} showDate={filter === 'active' && localDateOf(w.takenAt) !== today} />)}
           </div>
         )}
+        </div>
       </div>
     </Modal>
   )

@@ -98,6 +98,7 @@ describe('WaitlistHistorySheet 呈現', () => {
     expect(text()).toContain('9/14（一） · 2 組')
     expect(text()).toContain('9/12（六） · 1 組')
     expect(text()).toContain('日期不明 · 1 組')
+    expect(text()).not.toContain('NaN')
     expect(text()).not.toContain('客5')
   })
 
