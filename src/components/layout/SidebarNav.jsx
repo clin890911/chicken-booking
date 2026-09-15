@@ -14,9 +14,7 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
     <aside className="hidden lg:flex flex-col w-[76px] xl:w-56 bg-[#fbfaf8] border-r border-chicken-brown/10 sticky top-0 h-[100dvh]">
       {/* Logo */}
       <div className="px-3 py-4 flex items-center justify-center xl:justify-start gap-2.5">
-        <div className="w-10 h-10 bg-chicken-red rounded-xl flex items-center justify-center text-white font-black text-xl flex-shrink-0">
-          王
-        </div>
+        <img src="/brand/master-of-chicken-logo-transparent.png" alt="雞王涮涮鍋" className="w-10 h-10 object-contain flex-shrink-0" />
         <div className="hidden xl:block min-w-0">
           <div className="text-sm font-bold text-chicken-brown leading-tight">雞王涮涮鍋</div>
           <div className="text-[11px] text-chicken-brown/50 leading-tight">Master of Chicken</div>
