@@ -13,6 +13,13 @@ const ROLE_OPTIONS = [
   { value: 'kitchen', label: '廚房（唯讀）' },
 ]
 
+// 最後登入只顯示到分鐘、24 小時制（2026/9/16 00:16）：手機一行放得下，秒數對店長沒意義。
+function formatLastLogin(value) {
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return String(value)
+  return d.toLocaleString('zh-TW', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 export default function StaffAdminSection() {
   const { user, usingFirebase, roleLabels } = useAuth()
   const toast = useToast()
@@ -130,23 +137,35 @@ export default function StaffAdminSection() {
         ) : (
           <div className="mt-2 space-y-2">
             {admins.map(admin => (
-              <div key={admin.email} className="flex flex-wrap items-center gap-2 rounded-xl border border-chicken-brown/10 bg-white px-3 py-2">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-mono text-sm font-bold text-chicken-brown">{admin.email}</div>
-                  {admin.name && <div className="text-xs text-chicken-brown/55">{admin.name}</div>}
-                  {/* 最後登入時間：後端 staffWhoAmI 寫入 lastLoginAt 後即顯示（未提供則不顯示） */}
-                  {admin.lastLoginAt && (
-                    <div className="text-xs text-chicken-brown/45">最後登入：{new Date(admin.lastLoginAt).toLocaleString('zh-TW')}</div>
+              // 手機版上下堆疊（帳號資訊一列、角色＋移除一列），sm 以上才左右並排。
+              // 之前是單列 flex：下拉選單本身就快 200px 寬，帳號欄被擠到只剩幾個字寬，
+              // 稱呼／最後登入變成一個字一行。
+              <div key={admin.email} className="rounded-xl border border-chicken-brown/10 bg-white px-3 py-2.5 sm:flex sm:items-center sm:gap-3">
+                <div className="min-w-0 sm:flex-1">
+                  <div className="break-all font-mono text-sm font-bold leading-snug text-chicken-brown">{admin.email}</div>
+                  {(admin.name || admin.lastLoginAt) && (
+                    <div className="mt-0.5 flex flex-wrap gap-x-2 text-xs leading-5 text-chicken-brown/55">
+                      {admin.name && <span>{admin.name}</span>}
+                      {/* 最後登入時間：後端 staffWhoAmI 寫入 lastLoginAt 後即顯示（未提供則不顯示） */}
+                      {admin.lastLoginAt && (
+                        <span className="text-chicken-brown/45">最後登入：{formatLastLogin(admin.lastLoginAt)}</span>
+                      )}
+                    </div>
                   )}
                 </div>
-                <Select
-                  className="!w-auto"
-                  value={admin.role || 'floor'}
-                  onChange={e => handleRoleChange(admin, e.target.value)}
-                  options={ROLE_OPTIONS}
-                  disabled={busy}
-                />
-                <button onClick={() => handleRemove(admin)} disabled={busy} className="btn-danger !px-3 !py-2 text-xs">移除</button>
+                <div className="mt-2 flex items-center gap-2 sm:mt-0 sm:shrink-0">
+                  <div className="min-w-0 flex-1 sm:flex-none">
+                    <Select
+                      className="sm:!w-auto"
+                      aria-label={`${admin.email} 的角色`}
+                      value={admin.role || 'floor'}
+                      onChange={e => handleRoleChange(admin, e.target.value)}
+                      options={ROLE_OPTIONS}
+                      disabled={busy}
+                    />
+                  </div>
+                  <button onClick={() => handleRemove(admin)} disabled={busy} className="btn-danger shrink-0 !px-3 !py-2 text-xs">移除</button>
+                </div>
               </div>
             ))}
           </div>
