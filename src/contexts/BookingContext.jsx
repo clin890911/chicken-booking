@@ -15,7 +15,7 @@ import {
   computeOvertimeActions, computeDayRolloverActions,
   canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled,
 } from '../utils/opsSweep'
-import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus } from '../utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE } from '../utils/syncStatus'
 import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
 import { useAuth } from './AuthContext'
@@ -98,13 +98,20 @@ export function BookingProvider({ children }) {
   // 🔴 必須在拉取成功處直接設，不可由 cloudStatus.state === 'synced' 推導：
   // 部分推送被拒後狀態會黏在 'rejected'（拉取不得清除），推導會讓該裝置永遠不結號。
   const cloudPulledRef = useRef(false)
+  // pullCloud 定義在 syncCloudSoon 之前，用 ref 取得後者（首拉開閘後要主動推一次）。
+  const syncCloudSoonRef = useRef(null)
 
   const pullCloud = useCallback(async () => {
     try {
       const data = await cloudData.pullCloudData()
+      const gateWasOpen = cloudData.hasPulledCloud()
       cloudData.applyCloudSnapshot(data)
       cloudPulledRef.current = true
       refresh()
+      // 這次拉取打開了推送閘門（這台裝置第一次成功拉到雲端）：首拉前在這台建立、被閘門擋下的
+      // 資料（訂位／候位…）現在才推得上去——主動推一次，不要等店員下一個動作。沒有待推資料時
+      // pushChangedData 回 skipped、不發請求。
+      if (!gateWasOpen) syncCloudSoonRef.current?.()
       // 狀態轉移規則見 utils/syncStatus——拉取成功**不得**清掉 'rejected'。
       // 狀態沒變時不每 5 秒換一次物件（shouldCommitPullStatus）：避免整個後台跟著重繪。
       setCloudStatus(s => {
@@ -124,6 +131,8 @@ export function BookingProvider({ children }) {
     syncTimerRef.current = window.setTimeout(async () => {
       try {
         const r = await cloudData.pushChangedData()
+        // 首拉閘門未開：資料留在本機，首拉成功後由 pullCloud 主動補推。不是成功也不是失敗，狀態不動。
+        if (isPushDeferred(r)) return
         setCloudStatus(statusFromPushResult(r, new Date().toISOString()))
         if (r?.rejected) {
           const now = Date.now()
@@ -143,16 +152,22 @@ export function BookingProvider({ children }) {
       }
     }, 250)
   }, [])
+  syncCloudSoonRef.current = syncCloudSoon
 
   // 立即把本機變更推上雲端並回報「雲端是否真的寫入成功」。供「儲存」等主動操作 await：
   // 不走 250ms 節流（避免存完馬上關頁而推送從未送出），並以後端真實結果（含 403 等原因）回報，
   // 讓呼叫端能顯示誠實的成功/失敗，而非只憑本機 localStorage 就宣告成功。
   const flushCloudNow = useCallback(async () => {
     if (!isStaffRef.current) return { ok: false, error: 'not-staff' }
+    // 首拉閘門未開：這台還沒成功拉過雲端，推送一律延後。要誠實回報「沒上雲」（不可回 ok），
+    // 也不動同步狀態（不顯示成同步中／已同步／失敗）。取得雲端資料後：本機訂位／候位等會補送；
+    // 桌位與設定以雲端為準，首拉前的修改不會保留（呼叫端據 deferred 顯示對應文案）。
+    if (!cloudData.hasPulledCloud()) return { ok: false, deferred: true, error: PUSH_DEFERRED_MESSAGE }
     window.clearTimeout(syncTimerRef.current) // 取消待送的節流推送，改為立即送出
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     try {
       const r = await cloudData.pushChangedData()
+      if (isPushDeferred(r)) return { ok: false, deferred: true, error: PUSH_DEFERRED_MESSAGE }
       setCloudStatus(statusFromPushResult(r, new Date().toISOString()))
       // 有被拒的部分就不算成功——呼叫端（例如「儲存」）必須據此顯示誠實的失敗訊息，
       // 而不是本機存好就宣告成功。
@@ -277,25 +292,12 @@ export function BookingProvider({ children }) {
     let cancelled = false
     async function bootCloud() {
       setCloudStatus(s => ({ ...s, state: 'syncing' }))
-      try {
-        await cloudData.migrateLocalToCloudOnce()
-      } catch (err) {
-        console.warn('Firestore migration skipped:', err)
-      }
-      // 一次性把雲端舊桌號（A1–B19）換成「雞王座號圖」新桌號（101–267）。
-      // 必須在 pullCloud 之前，否則首拉會用雲端舊桌位覆寫。
-      try {
-        await cloudData.migrateTableLayoutOnce()
-      } catch (err) {
-        console.warn('Table layout migration skipped:', err)
-      }
-      // 一次性把六人桌改成橫式（90×75）並對齊同列；只更新桌位幾何、保留運營狀態。
-      // 同樣須在 pullCloud 之前（已推到雲端，首拉才不會用舊尺寸蓋回）。
-      try {
-        await cloudData.migrateTableDimsOnce()
-      } catch (err) {
-        console.warn('Table dims migration skipped:', err)
-      }
+      // 開機第一個網路動作就是拉取：雲端是唯一真相。
+      // 🔴 已退役：migrateLocalToCloudOnce / migrateTableLayoutOnce / migrateTableDimsOnce。
+      // 三支都是 2026-05／06 的一次性遷移（正式環境早已完成），卻在「全新裝置」（空 localStorage
+      // → tableService 種出廠桌、settings 讀到出廠值）上把出廠佈局／設定以 merge-upsert 推上雲端，
+      // 蓋掉店家排好的桌位與設定。不可加回任何「拉取之前就推送」的步驟（推送另有 cloudDataService
+      // 的首拉閘門兜底）。見 tests/integration/freshDeviceCloudPush.test.jsx。
       if (!cancelled) await pullCloud()
     }
     bootCloud()
@@ -692,9 +694,19 @@ export function BookingProvider({ children }) {
     return { ok: true }
   }, [pullCloud, refresh])
 
+  // 設定頁「上傳本機資料到 Firestore」（僅店長）：整份本機資料推上雲端。
+  // 首拉閘門未開時，本機可能只有出廠佔位資料 → 拒絕並給看得懂的提示（SettingsView 以 toast 顯示），
+  // 不發請求、不動同步狀態。改用 partial：有被拒的集合時不可整份標記為已同步（否則被拒的本機變更
+  // 會被當成已上雲、下一次拉取就被雲端值蓋掉）。
   const migrateLocalToCloud = async () => {
+    if (!cloudData.hasPulledCloud()) throw new Error(PUSH_DEFERRED_MESSAGE)
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
-    const result = await cloudData.pushCloudData()
+    const result = await cloudData.pushCloudData(undefined, { partial: true })
+    if (isPushDeferred(result)) throw new Error(PUSH_DEFERRED_MESSAGE)
+    if (result?.rejected) {
+      setCloudStatus(statusFromPushResult(result, new Date().toISOString()))
+      throw new Error(`部分資料未能上雲：${result.rejectedMessage || '權限不足'}`)
+    }
     cloudData.markLocalAsSynced()
     setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
     return result

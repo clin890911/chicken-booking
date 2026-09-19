@@ -9,6 +9,15 @@
 // 狀態：idle（尚未同步）/ syncing / synced / rejected（部分變更被權限擋下）/ offline。
 // 'rejected' 只能由「乾淨的推送成功」或「使用者主動放棄」清除，拉取不得清除它。
 
+// 推送被 cloudDataService 的「首拉閘門」延後（這台裝置還沒成功拉取過雲端，見
+// cloudDataService.PUSH_AWAITING_FIRST_PULL）。既不是成功也不是失敗/被拒：呼叫端不得據此把
+// 狀態改成 synced / offline / rejected，維持原狀態（idle / syncing 會由拉取收尾、offline 保留
+// 拉取失敗的原因），等首拉成功開閘後再推。
+export const PUSH_DEFERRED_MESSAGE = '尚未從雲端取得資料，請稍候再試'
+export function isPushDeferred(result) {
+  return result?.skipped === true && result?.reason === 'awaiting-first-pull'
+}
+
 // 推送結果 → 狀態。有 rejected 就進入 'rejected'，否則視為完全同步。
 export function statusFromPushResult(result, nowIso) {
   if (result?.rejected) {

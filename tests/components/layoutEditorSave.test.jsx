@@ -127,6 +127,22 @@ describe('LayoutEditor：儲存要 await 雲端推送結果', () => {
     expect(saveBtnAgain.disabled).toBe(false)
   })
 
+  it('這台還沒取得雲端資料（deferred）：講清楚「這次調整沒存到雲端、要再排一次」，不說成被拒，也不自動關閉', async () => {
+    bookingCtx.flushCloudNow = vi.fn(async () => ({ ok: false, deferred: true, error: '尚未從雲端取得資料，請稍候再試' }))
+    render()
+    await makeDirty()
+    await act(async () => { findButton('儲存並返回').click(); await flushMicrotasks() })
+
+    expect(bookingCtx.saveFloorPlan).toHaveBeenCalledTimes(1)
+    expect(toastMock.warning).toHaveBeenCalledTimes(1)
+    const msg = toastMock.warning.mock.calls[0][0]
+    expect(msg).toBe('尚未從雲端取得資料，這次的桌位調整沒有存到雲端；請等同步完成後再排一次')
+    expect(msg).not.toContain('被拒')
+    expect(toastMock.success).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled() // #109：沒真的存到雲端就不自動關閉
+    expect(findButton('儲存並返回').disabled).toBe(false)
+  })
+
   it('🔴 flushCloudNow 用 Promise reject（不是回傳 {ok:false}）失敗：顯示錯誤 toast、不自動關閉，不是 unhandled rejection 悄悄過去', async () => {
     bookingCtx.flushCloudNow = vi.fn(async () => { throw new Error('網路中斷') })
     render()

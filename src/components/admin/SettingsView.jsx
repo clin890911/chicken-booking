@@ -172,6 +172,8 @@ export default function SettingsView({ onOpenCustomer }) {
       }
       const r = await flushCloudNow()
       if (r.ok) toast.success('已儲存並同步雲端')
+      // 這台還沒從雲端取得資料：設定取得後會以雲端版本為準，這次的修改不會補送（不是「重試」能解決的）。
+      else if (r.deferred) toast.error('設定尚未存到雲端：這台裝置還沒取得雲端資料，取得後會以雲端版本為準。請等同步完成後再改一次')
       else if (r.rejected) toast.error(`本機已存，但雲端拒絕了這筆變更：${r.error}。請改用有權限的帳號，或到下方同步狀態列選擇以雲端為準`)
       else toast.error(`本機已存，但雲端同步失敗：${r.error}。請按「重試同步」或檢查網路後再試`)
     } finally {
@@ -184,6 +186,7 @@ export default function SettingsView({ onOpenCustomer }) {
     try {
       const r = await flushCloudNow()
       if (r.ok) toast.success('已同步雲端')
+      else if (r.deferred) toast.error('這台裝置還沒取得雲端資料，請稍候再試')
       else toast.error(`雲端同步仍失敗：${r.error}`)
     } finally {
       setSaving(false)

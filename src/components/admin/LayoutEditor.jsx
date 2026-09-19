@@ -508,6 +508,12 @@ export default function LayoutEditor({ open, onClose }) {
     setIsSaving(true)
     try {
       const pushResult = await flushCloudNow?.()
+      if (pushResult?.deferred) {
+        // 這台還沒從雲端取得資料：不是被拒，而且取得後桌位會以雲端版本為準——這次的調整不會補送。
+        // 同 #109 規則：不自動關閉，店主要知道這次沒存到雲端。
+        toast.warning('尚未從雲端取得資料，這次的桌位調整沒有存到雲端；請等同步完成後再排一次')
+        return
+      }
       if (!pushResult?.ok) {
         toast.warning(`已存本機，雲端同步被拒（${pushResult?.error || '請檢查網路'}），請確認同步狀態後再離開，避免變更遺失`)
         return // 不自動關閉：店主還需要知道剛才的佈局其實還沒真的上雲
