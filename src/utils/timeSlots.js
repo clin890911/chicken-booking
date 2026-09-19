@@ -26,6 +26,11 @@ export function todayStr() {
   return formatDate(new Date())
 }
 
+// 現在時間向下取整到 30 分的抵達時段（walk-in／現場即時建議用，本地時間）
+export function nowSlot(now = new Date()) {
+  return `${String(now.getHours()).padStart(2, '0')}:${String(Math.floor(now.getMinutes() / 30) * 30).padStart(2, '0')}`
+}
+
 export function addDays(d, days) {
   const r = new Date(d)
   r.setDate(r.getDate() + days)

@@ -1887,3 +1887,188 @@ describe('bulkSaveTablesGuarded：刪桌守門（不孤兒化未來預約/團圈
     expect(tableService.getByNumber('101')).toBeFalsy()
   })
 })
+
+// ============================================================
+// 撞桌止血（2026-09 店主回報：余先生現場訂位後沒辦法選桌 → 系統性修流程）
+// S1 入座佔用守門 / S2 改桌不清別組的舊桌 / S3 建議桌看時段 / S4 覆蓋預配真的解除
+// ============================================================
+describe('撞桌止血：S1 seatBooking 佔用守門', () => {
+  beforeEach(() => { seedDefaultTables() })
+
+  it('桌已被別組用餐中 → 擋下並指名是誰，兩邊狀態都不動', () => {
+    const chen = mkBooking({ name: '陳小姐', phone: '0911000001' })
+    seating.assignBookingToTable(chen.id, '101')
+    seating.seatBooking(chen.id)                                 // 101 dining（陳）
+    const yu = mkBooking({ name: '余先生', phone: '0911000002' })
+    bookingService.assignTable(yu.id, '101')                     // 余仍掛著 101（預配被覆蓋的殘留）
+    const r = seating.seatBooking(yu.id)
+    expect(r.ok).toBe(false)
+    expect(r.code).toBe('table-occupied')
+    expect(r.error).toBe('101 目前由 陳小姐 使用，請先改桌')
+    const t = tableService.getByNumber('101')
+    expect(t.status).toBe('dining')
+    expect(t.currentBookingId).toBe(chen.id)
+    expect(bookingService.getById(yu.id).status).toBe('confirmed')
+  })
+
+  it('桌已鎖給別筆訂位（reserved）→ 同樣擋下', () => {
+    const chen = mkBooking({ name: '陳小姐', phone: '0911000001' })
+    seating.assignBookingToTable(chen.id, '101')                 // 101 reserved（陳）
+    const yu = mkBooking({ name: '余先生', phone: '0911000002' })
+    bookingService.assignTable(yu.id, '101')
+    const r = seating.seatBooking(yu.id)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('陳小姐')
+    expect(tableService.getByNumber('101').currentBookingId).toBe(chen.id)
+  })
+
+  it('團體梯次正在用這張桌 → 擋下並指名團體', () => {
+    const g = groupService.create({
+      date: '2026-06-15', agencyName: '快樂旅行社', status: 'confirmed',
+      batches: [{ id: 'BT1', label: '第一梯', timeSlot: '12:00', tableNumbers: ['101'], guests: 4 }],
+    })
+    tableService.seatTableForGroup('101', g.id, 'BT1')
+    const b = mkBooking()
+    bookingService.assignTable(b.id, '101')
+    const r = seating.seatBooking(b.id)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('團體 快樂旅行社')
+  })
+
+  it('自己持有的桌（現場指派鎖桌）→ 可入座', () => {
+    const b = mkBooking()
+    seating.assignBookingToTable(b.id, '101')
+    expect(seating.seatBooking(b.id).ok).toBe(true)
+    expect(tableService.getByNumber('101').status).toBe('dining')
+  })
+
+  it('預配（只記在 booking、桌仍 vacant）→ 可直接入座', () => {
+    const b = mkBooking()
+    bookingService.assignTable(b.id, '101')
+    expect(tableService.getByNumber('101').status).toBe('vacant')
+    const r = seating.seatBooking(b.id)
+    expect(r).toEqual({ ok: true, tableNumber: '101' })
+    expect(tableService.getByNumber('101').currentBookingId).toBe(b.id)
+  })
+})
+
+describe('撞桌止血：S2 moveTable 只清仍由本訂位持有的舊桌', () => {
+  beforeEach(() => { seedDefaultTables() })
+
+  it('預配的舊桌已被別組佔用 → 改桌不清那組；預配改桌只改桌號、不鎖新桌', () => {
+    const chen = mkBooking({ name: '陳小姐', phone: '0911000001' })
+    seating.assignBookingToTable(chen.id, '101')
+    seating.seatBooking(chen.id)                                 // 101 dining（陳）
+    const yu = mkBooking({ name: '余先生', phone: '0911000002' })
+    bookingService.assignTable(yu.id, '101')                     // 余預配 101（桌已被陳佔走）
+    const r = seating.moveTable(yu.id, '108')
+    expect(r.ok).toBe(true)
+    const old = tableService.getByNumber('101')
+    expect(old.status).toBe('dining')
+    expect(old.currentBookingId).toBe(chen.id)
+    expect(bookingService.getById(yu.id).assignedTableId).toBe('108')
+    const nt = tableService.getByNumber('108')
+    expect(nt.status).toBe('vacant')                             // 預配→預配：不鎖桌
+    expect(nt.currentBookingId).toBeNull()
+  })
+
+  it('現場指派鎖桌（held）改桌 → 仍是 held：新桌 reserved、舊桌釋出', () => {
+    const b = mkBooking()
+    seating.assignBookingToTable(b.id, '101')
+    expect(seating.moveTable(b.id, '108').ok).toBe(true)
+    expect(tableService.getByNumber('101').status).toBe('vacant')
+    expect(tableService.getByNumber('108').status).toBe('reserved')
+    expect(tableService.getByNumber('108').currentBookingId).toBe(b.id)
+  })
+})
+
+describe('撞桌止血：S3 建議桌看時段', () => {
+  const TODAY = '2026-06-15'
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(`${TODAY}T10:00:00`))
+    tableService.bulkWrite([mkTable('105', 4, '1F'), mkTable('106', 4, '1F')])
+  })
+  afterEach(() => vi.useRealTimers())
+
+  const yuAt1100 = () => {
+    const yu = mkBooking({ name: '余先生', date: TODAY, timeSlot: '11:00' })
+    bookingService.assignTable(yu.id, '105')                     // 預配 105（桌況仍 vacant）
+    return yu
+  }
+
+  it('11:00 已預配 105 → 11:30 同規模不建議 105', () => {
+    yuAt1100()
+    expect(seating.suggestTable(2, { date: TODAY, timeSlot: '11:30' }).number).toBe('106')
+    expect(seating.findSuitableTables(2, { date: TODAY, timeSlot: '11:30' }).map(t => t.number)).toEqual(['106'])
+  })
+
+  it('13:30（11:00＋用餐 90＋清桌 10 之後）可建議 105', () => {
+    yuAt1100()
+    expect(seating.suggestTable(2, { date: TODAY, timeSlot: '13:30' }).number).toBe('105')
+  })
+
+  it('不帶時段參數＝既有行為：可點選集合不縮小（105 仍在）', () => {
+    yuAt1100()
+    expect(seating.findSuitableTables(2).map(t => t.number)).toEqual(['105', '106'])
+  })
+
+  it('自己的預配不算衝突（bookingId 排除自己）', () => {
+    const yu = yuAt1100()
+    expect(seating.suggestTable(2, { bookingId: yu.id, date: TODAY, timeSlot: '11:00' }).number).toBe('105')
+  })
+
+  it('已取消的預配不擋；併桌的額外桌也算', () => {
+    const c = mkBooking({ date: TODAY, timeSlot: '11:00', status: 'cancelled' })
+    bookingService.assignTable(c.id, '105')
+    expect(seating.suggestTable(2, { date: TODAY, timeSlot: '11:30' }).number).toBe('105')
+    const big = mkBooking({ date: TODAY, timeSlot: '11:00', guests: 8 })
+    bookingService.assignTables(big.id, ['106', '105'])
+    expect(seating.suggestTable(2, { date: TODAY, timeSlot: '11:30' })).toBeNull()
+  })
+
+  it('今日團保桌不建議', () => {
+    groupService.create({
+      date: TODAY, agencyName: '快樂旅行社', status: 'confirmed',
+      batches: [{ id: 'BT1', label: '第一梯', timeSlot: '18:00', tableNumbers: ['105'], guests: 4 }],
+    })
+    expect(seating.suggestTable(2, { date: TODAY, timeSlot: '11:30' }).number).toBe('106')
+  })
+})
+
+describe('撞桌止血：S4 releaseOverriddenAssignment（覆蓋預配後解除被覆蓋那筆）', () => {
+  beforeEach(() => { seedDefaultTables() })
+
+  it('陳小姐覆蓋余先生的預配 101 → 余先生 assignedTableId 為空，101 仍鎖給陳小姐', () => {
+    const yu = mkBooking({ name: '余先生', phone: '0911000002' })
+    bookingService.assignTable(yu.id, '101')
+    const chen = mkBooking({ name: '陳小姐', phone: '0911000001' })
+    expect(seating.assignBookingToTable(chen.id, '101').ok).toBe(true)
+    const r = seating.releaseOverriddenAssignment(yu.id)
+    expect(r).toEqual({ ok: true, tableNumbers: ['101'], released: [] })
+    expect(bookingService.getById(yu.id).assignedTableId).toBeNull()
+    expect(bookingService.getById(yu.id).extraTableIds).toEqual([])
+    const t = tableService.getByNumber('101')
+    expect(t.status).toBe('reserved')
+    expect(t.currentBookingId).toBe(chen.id)
+  })
+
+  it('被覆蓋那筆仍持有的其他桌（reserved）一併釋出，不留孤兒 reserved 桌', () => {
+    const big = mkBooking({ guests: 8 })
+    bookingService.assignTables(big.id, ['101', '108'])
+    tableService.reserveTable('108', big.id)                     // 108 仍鎖給它、101 只是預配
+    const r = seating.releaseOverriddenAssignment(big.id)
+    expect(r.released).toEqual(['108'])
+    expect(tableService.getByNumber('108').status).toBe('vacant')
+    expect(bookingService.getById(big.id).assignedTableId).toBeNull()
+  })
+
+  it('已到店的訂位不處理（不把用餐中客人的桌號拔掉）', () => {
+    const b = mkBooking()
+    seating.assignBookingToTable(b.id, '101')
+    seating.seatBooking(b.id)
+    const r = seating.releaseOverriddenAssignment(b.id)
+    expect(r.ok).toBe(false)
+    expect(bookingService.getById(b.id).assignedTableId).toBe('101')
+  })
+})

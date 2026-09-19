@@ -9,6 +9,7 @@ import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadge
 import SlideToSeat from './SlideToSeat'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import Icon from '../../ui/Icon'
+import { todayStr, nowSlot } from '../../../utils/timeSlots'
 
 const KEYPAD_WIDTH = 392
 const KEYPAD_GAP = 12
@@ -91,7 +92,8 @@ export default function FastWalkInPanel({
         ? { tone: 'ok', icon: 'checkCircle', text: `${g} 位 → ${label}（${seats} 席）` }
         : { tone: 'none', icon: 'warning', text: `${g} 位坐不下 ${seats} 席 → 再加一桌或換桌` }
   } else if (g > 0) {
-    const single = suggestTable(g)
+    // 建議桌看「現在起的用餐時段」：避開接下來已被別筆預配且時段重疊的桌與團保桌（只影響建議，不擋點選）
+    const single = suggestTable(g, { date: todayStr(), timeSlot: nowSlot() })
     if (single) verdict = { tone: 'ok', icon: 'pointer', text: `${g} 位 · 點桌況圖選位，建議 ${single.number}` }
     else {
       const combo = suggestTableCombo(g)

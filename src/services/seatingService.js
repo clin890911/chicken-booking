@@ -5,10 +5,12 @@ import * as bookingService from './bookingService'
 import * as waitlistService from './waitlistService'
 import * as customerService from './customerService'
 import * as groupService from './groupReservationService'
-import { statusZh } from '../utils/tableStatus'
+import { getSettings } from './settingsService'
+import { statusZh, assignmentKind } from '../utils/tableStatus'
 import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
-import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES } from '../utils/capacity'
-import { todayStr } from '../utils/timeSlots'
+import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables } from '../utils/capacity'
+import { buildGroupHolds } from '../utils/groupLive'
+import { todayStr, nowSlot } from '../utils/timeSlots'
 
 // === 停用/維修守門（service 層底線；UI 防線會被新介面或程式呼叫繞過）===
 // 所有「把客人放上桌」的入口共用：今日停用或維修中的桌一律拒絕。
@@ -28,8 +30,27 @@ export function bookingTableNumbers(booking) {
 
 // 現在時間的 30 分鐘抵達時段（walk-in 用）
 function nowTimeSlot() {
-  const now = new Date()
-  return `${String(now.getHours()).padStart(2, '0')}:${String(Math.floor(now.getMinutes() / 30) * 30).padStart(2, '0')}`
+  return nowSlot()
+}
+
+// 這張桌「此刻由本訂位持有」：currentBookingId 指向本訂位（字串比對，避免數字/字串 id 混用）。
+function heldBy(table, bookingId) {
+  return !!table && bookingId != null && table.currentBookingId != null
+    && String(table.currentBookingId) === String(bookingId)
+}
+
+// 桌上現在是誰（給錯誤訊息用）：散客訂位 → 姓名；團體梯次 → 團名；查不到 → null。
+function occupantName(table) {
+  if (!table) return null
+  if (table.currentBookingId) {
+    const other = bookingService.getById(table.currentBookingId)
+    if (other) return other.name || '另一組客人'
+  }
+  if (table.currentRef?.groupId) {
+    const g = groupService.getById(table.currentRef.groupId)
+    return `團體${g?.agencyName ? ` ${g.agencyName}` : ''}`
+  }
+  return null
 }
 
 // === 訂位 → 指派桌 ===
@@ -84,6 +105,10 @@ export function assignBookingTablesMulti(bookingId, tableNumbers) {
 // === 客人到了 → 入座 ===
 // reserved + 客人到了 → dining
 // 自動記錄 actualArrivalTime + 同步桌位狀態
+// ★ 佔用守門：桌必須是「空桌（預配）」或「由本訂位持有（現場指派鎖桌）」才放行。
+//   過去不看桌上是誰就直接 seatTable 覆寫——同一張桌被兩筆訂位掛著時（預配被覆蓋、建議桌撞時段），
+//   後按「客人到了」的那組會把正在用餐的那組從桌況圖上無聲抹掉（他們的訂位仍 arrived、卻沒有桌）。
+//   擋下時回 code:'table-occupied'，UI 以 toast 顯示並給「改桌」出口。
 export function seatBooking(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
@@ -92,6 +117,16 @@ export function seatBooking(bookingId) {
   const table = tableService.getByNumber(booking.assignedTableId)
   if (table && !tableUsableToday(table)) {
     return { ok: false, error: `${booking.assignedTableId} 停用/維修中，請先改派其他桌再入座` }
+  }
+  if (table && table.status !== 'vacant' && !heldBy(table, bookingId)) {
+    const who = occupantName(table)
+    return {
+      ok: false,
+      code: 'table-occupied',
+      error: who
+        ? `${booking.assignedTableId} 目前由 ${who} 使用，請先改桌`
+        : `${booking.assignedTableId} 目前${statusZh(table.status)}，請先改桌`,
+    }
   }
 
   bookingService.setStatus(bookingId, 'arrived')   // setStatus 內會自動記 actualArrivalTime
@@ -423,7 +458,13 @@ export function reseatBookingTables(bookingId) {
   return { ok: true, tableNumbers: nums }
 }
 
-// === 換桌（已入座的客人換到另一張空桌）===
+// === 換桌／改桌（把訂位換到另一張空桌）===
+// 三種來源語意各自保留（不因改桌而升級或降級）：
+//   用餐中（arrived）→ 新桌 dining
+//   現場指派鎖桌（held：舊桌 reserved 且 currentBookingId＝本訂位）→ 新桌 reserved
+//   預配（preassign：只記在 booking 上、桌況沒鎖）→ 只改 booking.assignedTableId，不鎖新桌
+// ★ 舊桌只有「仍由本訂位持有」才清（與 bookingService.releaseTableIfHeldBy 同口徑）：
+//   預配的舊桌此刻可能已被別組帶位，無條件 clearTable 會把那組清掉。
 export function moveTable(bookingId, newTableNumber) {
   const booking = bookingService.getById(bookingId)
   if (!booking || !booking.assignedTableId) return { ok: false, error: '訂位無桌位資料' }
@@ -439,24 +480,45 @@ export function moveTable(bookingId, newTableNumber) {
   if (newTable.status !== 'vacant') return { ok: false, error: '目標桌位非空桌' }
   if (booking.guests > newTable.capacity) return { ok: false, error: '目標桌容量不足' }
 
-  // 釋放舊桌、佔用新桌
+  // 釋放舊桌（僅限仍由本訂位持有）、佔用新桌（依原本的語意）
+  const oldTable = tableService.getByNumber(oldNumber)
   const wasDining = booking.status === 'arrived'
-  tableService.clearTable(oldNumber)
+  const wasHeld = !wasDining && assignmentKind(booking, oldTable) === 'held'
+  if (heldBy(oldTable, bookingId)) tableService.clearTable(oldNumber)
   if (wasDining) tableService.seatTable(newTableNumber, bookingId)
-  else tableService.reserveTable(newTableNumber, bookingId)
+  else if (wasHeld) tableService.reserveTable(newTableNumber, bookingId)
   bookingService.assignTable(bookingId, newTableNumber)
   return { ok: true }
+}
+
+// === 依時段會撞桌的桌號（建議桌排除用）===
+// 當日其他有效訂位已預配/持有、且用餐時段重疊的桌（見 capacity.overlappingBookedTables），
+// 加上當日團體保留（有效團、未釋出、未入座的梯次圈桌，與桌況圖 🚌 標記同口徑）。
+export function timeConflictTableNumbers({ bookingId, date, timeSlot } = {}) {
+  const day = date || todayStr()
+  const set = overlappingBookedTables(
+    bookingService.listAll(), { date: day, timeSlot, excludeBookingId: bookingId }, getSettings())
+  const groups = groupService.listAll()
+    .filter(g => g.date === day && !['cancelled', 'completed'].includes(g.status))
+  Object.entries(buildGroupHolds(groups, tableService.listAll())).forEach(([n, v]) => {
+    if (v?.holds?.length) set.add(String(n))
+  })
+  return set
 }
 
 // === 找適合容量的空桌（給「指派桌」UI 用）===
 // 排序邏輯：
 // 1) 最小容量浪費（capacity - partySize 越小越好）
 // 2) 1F 優先（行動方便、走道近）
-// 3) 天然氣優先（火力穩定、體驗較好）
-export function findSuitableTables(partySize) {
+// 3) 桌號字典序
+// opts（可選）＝{ bookingId, date, timeSlot }：帶了就再排除「依時段會撞桌」的桌（timeConflictTableNumbers）。
+//   只有「建議／候選」才帶 opts；現場指派/帶位的可點選集合一律不帶（不可縮小，預配/團保靠警示＋勾選解鎖）。
+export function findSuitableTables(partySize, opts = null) {
   const today = todayStr()
+  const conflicts = opts ? timeConflictTableNumbers(opts) : null
   return tableService.listAll()
     .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && t.capacity >= partySize)
+    .filter(t => !conflicts || !conflicts.has(String(t.number)))
     .sort((a, b) => {
       const wasteA = a.capacity - partySize
       const wasteB = b.capacity - partySize
@@ -466,10 +528,34 @@ export function findSuitableTables(partySize) {
     })
 }
 
-// 取得「最佳建議桌」— 上面排序的第一張
-export function suggestTable(partySize) {
-  const list = findSuitableTables(partySize)
+// 取得「最佳建議桌」— 上面排序的第一張（opts 同 findSuitableTables：帶時段就不建議會撞桌的桌）
+export function suggestTable(partySize, opts = null) {
+  const list = findSuitableTables(partySize, opts)
   return list[0] || null
+}
+
+// === 覆蓋預配後，解除被覆蓋那筆的桌號 ===
+// 現場指派／帶位／候位入座／換桌時店員確認「仍要覆蓋」某筆訂位的預配：警示寫的是「○○ 將變回未配桌」，
+// 過去程式卻沒這樣做 → 兩筆訂位同時聲稱擁有同一張桌，之後按「客人到了」就撞桌。
+// 這裡把被覆蓋那筆的主桌＋額外桌一起解除（booking 回到未配桌，卡片重新長出「指派桌位」）；
+// 它仍持有（reserved）的其他桌一併釋出，不留孤兒 reserved 桌。只處理尚未到店（confirmed/pending）的訂位。
+export function releaseOverriddenAssignment(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (!['confirmed', 'pending'].includes(booking.status)) {
+    return { ok: false, error: '這筆訂位已不是待到狀態，未解除桌號' }
+  }
+  const tableNumbers = bookingTableNumbers(booking)
+  const released = []
+  for (const n of tableNumbers) {
+    const t = tableService.getByNumber(n)
+    if (t && t.status === 'reserved' && heldBy(t, bookingId)) {
+      tableService.clearTable(n)
+      released.push(n)
+    }
+  }
+  bookingService.unassignTable(bookingId)
+  return { ok: true, tableNumbers, released }
 }
 
 // === 大組多桌組合建議（單桌裝不下時的併桌建議）===

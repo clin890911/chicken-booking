@@ -533,8 +533,9 @@ export function BookingProvider({ children }) {
     }
     return r
   }
-  const findSuitableTables = (partySize) => seatingService.findSuitableTables(partySize)
-  const suggestTable = (partySize) => seatingService.suggestTable(partySize)
+  // opts（{ bookingId, date, timeSlot }）只給「建議／候選」用：帶了就排除依時段會撞桌的桌。
+  const findSuitableTables = (partySize, opts) => seatingService.findSuitableTables(partySize, opts)
+  const suggestTable = (partySize, opts) => seatingService.suggestTable(partySize, opts)
   const suggestTableCombo = (partySize) => seatingService.suggestTableCombo(partySize)
 
   // 統一座位地圖的「預先配桌」：僅在 booking 上記錄 assignedTableId（per-date），
@@ -544,6 +545,12 @@ export function BookingProvider({ children }) {
   // 大組併桌的預先配桌：主桌 + 額外桌一起記在 booking（同樣不動 live tables）。
   const preassignBookingTables = (bookingId, tableNumbers) => { const b = bookingService.assignTables(bookingId, tableNumbers); refresh(); syncCloudSoon(); return b }
   const clearBookingPreassign = (bookingId) => { const b = bookingService.unassignTable(bookingId); refresh(); syncCloudSoon(); return b }
+  // 覆蓋預配後，把被覆蓋那筆的桌號解除（它仍持有的 reserved 桌一併釋出）。見 seatingService.releaseOverriddenAssignment。
+  const releaseOverriddenAssignment = (bookingId) => {
+    const r = seatingService.releaseOverriddenAssignment(bookingId)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
 
   // ============ 候位動作 ============
   const addWaitlist = (data) => {
@@ -700,7 +707,7 @@ export function BookingProvider({ children }) {
     backgroundImages: settings.floorPlan?.backgroundImages,
     assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
     completeWithoutSeating, undoCompleteWithoutSeating,
-    preassignBookingTable, preassignBookingTables, clearBookingPreassign,
+    preassignBookingTable, preassignBookingTables, clearBookingPreassign, releaseOverriddenAssignment,
     addWaitlist, callWaitlist, seatWaitlist, seatWaitlistMulti, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,

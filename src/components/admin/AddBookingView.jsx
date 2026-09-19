@@ -8,7 +8,6 @@ import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
 import * as customerService from '../../services/customerService'
 import { getNoshowCount } from '../../services/bookingService'
-import * as seatingService from '../../services/seatingService'
 import { todayStr, dayLabel, formatDate, addDays } from '../../utils/timeSlots'
 
 // 後台新增訂位 — 電話為先導鍵，自動帶顧客檔
@@ -30,7 +29,7 @@ const NOTE_OPTIONS = [
 ]
 
 export default function AddBookingView({ onCreated, onAssignTable, initial }) {
-  const { bookings, tables, groupReservations, settings, addBooking, suggestTable } = useBooking()
+  const { bookings, tables, groupReservations, settings, addBooking, suggestTable, assignBookingToTable } = useBooking()
   const { user } = useAuth()
   const toast = useToast()
 
@@ -130,11 +129,13 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
         status: 'confirmed',
         createdBy: user?.email || 'staff',
       })
-      // 自動指派最佳桌（查今日即時空桌——僅今天的訂位適用；未來日請用規劃頁預配）
+      // 自動指派最佳桌（查今日即時空桌——僅今天的訂位適用；未來日請用規劃頁預配）。
+      // 建議桌看所選時段：不挑別筆已預配且用餐時段重疊的桌、不挑今日團保桌。
+      // 指派走 Context（含 refresh／同步／Telegram 通知），存檔後清單立刻就是指派後的樣子。
       if (autoAssign && date === todayStr()) {
-        const best = suggestTable(guests)
+        const best = suggestTable(guests, { date, timeSlot })
         if (best) {
-          const r = seatingService.assignBookingToTable(b.id, best.number)
+          const r = assignBookingToTable(b.id, best.number)
           if (r.ok) toast.success(`${name} ${guests} 位 · ${date} ${timeSlot} · 已自動指派 ${best.number}`)
           else toast.action(`已建立訂位（自動指派失敗：${r.error}）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
         } else {

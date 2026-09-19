@@ -18,6 +18,8 @@ import {
   totalActiveSeats,
   findPreassignedBooking,
   resolveSlotOccupancy,
+  overlappingBookedTables,
+  rangesOverlap,
 } from '../../src/utils/capacity'
 
 // ---- 假資料工廠 ----
@@ -730,5 +732,41 @@ describe('resolveSlotOccupancy — 大組併桌（extraTableIds）', () => {
     const booking = mkBooking({ guests: 8, timeSlot: '18:00', source: 'walkin', status: 'arrived', assignedTableId: '101', extraTableIds: ['102'] })
     const r = resolveSlotOccupancy(tables, [booking], [], DATE, seating, settings)
     expect(r.summary.walkinGuests).toBe(8)
+  })
+})
+
+// 建議桌看時段（2026-09 撞桌止血 S3）：同日其他訂位已預配/持有、且用餐窗重疊的桌
+describe('overlappingBookedTables', () => {
+  const pre = (over = {}) => mkBooking({ id: 'Y', timeSlot: '11:00', assignedTableId: '105', ...over })
+
+  it('11:00 預配 105：11:30 重疊、13:30 不重疊（預設 90＋10 分）', () => {
+    const list = [pre()]
+    expect([...overlappingBookedTables(list, { date: '2026-06-15', timeSlot: '11:30' })]).toEqual(['105'])
+    expect([...overlappingBookedTables(list, { date: '2026-06-15', timeSlot: '13:30' })]).toEqual([])
+  })
+
+  it('吃 settings 的用餐時長：用餐 150 分時 13:30 仍重疊', () => {
+    const r = overlappingBookedTables([pre()], { date: '2026-06-15', timeSlot: '13:30' }, { diningDurationMin: 150 })
+    expect([...r]).toEqual(['105'])
+  })
+
+  it('排除自己、別日、已取消/未到/完成；額外桌也算', () => {
+    const list = [
+      pre({ id: 'SELF' }),
+      pre({ id: 'OTHERDAY', date: '2026-06-16', assignedTableId: '106' }),
+      pre({ id: 'CXL', status: 'cancelled', assignedTableId: '107' }),
+      pre({ id: 'BIG', assignedTableId: '111', extraTableIds: ['112'] }),
+    ]
+    const r = overlappingBookedTables(list, { date: '2026-06-15', timeSlot: '11:30', excludeBookingId: 'SELF' })
+    expect([...r].sort()).toEqual(['111', '112'])
+  })
+
+  it('沒給時段 → 同日任何預配都算（保守）', () => {
+    expect([...overlappingBookedTables([pre({ timeSlot: '18:00' })], { date: '2026-06-15' })]).toEqual(['105'])
+  })
+
+  it('rangesOverlap 已 export：半開區間，剛好接上不算重疊', () => {
+    expect(rangesOverlap(660, 760, 760, 100)).toBe(false)
+    expect(rangesOverlap(660, 760, 690, 100)).toBe(true)
   })
 })

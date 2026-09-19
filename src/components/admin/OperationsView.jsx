@@ -16,7 +16,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { findPreassignedBooking } from '../../utils/capacity'
 import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
 import { buildTableTurns } from '../../utils/tableTurns'
-import { todayStr } from '../../utils/timeSlots'
+import { todayStr, nowSlot } from '../../utils/timeSlots'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
 import SegmentedControl from '../ui/SegmentedControl'
 
@@ -57,6 +57,25 @@ export function handleArriveNow(table, booking, { seatBooking, setStatus, setTab
   return r
 }
 
+// 覆蓋預配（S4）：店員已在警示下確認「仍要覆蓋」→ 真的把被覆蓋那筆的桌號解除，
+// 警示寫的「○○ 將變回未配桌」才與實際行為一致（過去只改了新的那筆，兩筆同時聲稱同一張桌，
+// 之後被覆蓋那位按「客人到了」就撞桌）。純函式（注入 releaseOverriddenAssignment/toast）方便單測。
+// conflicts 在動手「之前」查好（警示指名誰就解除誰）；同一筆只處理一次（併桌帶位可能多桌指向同一筆）。
+export function releaseOverriddenPreassigns(conflicts, tableLabel, { releaseOverriddenAssignment, toast }) {
+  const seen = new Set()
+  const done = []
+  ;(conflicts || []).forEach(c => {
+    if (!c?.id || seen.has(c.id)) return
+    seen.add(c.id)
+    const r = releaseOverriddenAssignment(c.id)
+    if (!r?.ok) return
+    const nums = r.tableNumbers?.length ? r.tableNumbers.join(' + ') : tableLabel
+    toast.info(`${c.name}原本的預配 ${nums} 已解除，請重新指派`, { duration: 8000 })
+    done.push(c.id)
+  })
+  return done
+}
+
 // 「現場營運」主畫面
 // 模式：normal | assign-booking | seat-waitlist | move-table | group-reseat
 // ★ 現場帶位（walk-in）v3 不再是「模式」：帶位籤常駐左欄，點桌／選人數順序不拘，
@@ -67,7 +86,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
     assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
-    cancelBooking, seatBooking, setStatus, setTableStatus,
+    cancelBooking, seatBooking, setStatus, setTableStatus, releaseOverriddenAssignment,
     findSuitableTables, suggestTable, suggestTableCombo,
   } = useBooking()
   const toast = useToast()
@@ -139,8 +158,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     const guests = Number(booking.guests) || 0
     const suitable = findSuitableTables(guests).map(t => t.number)
     if (suitable.length > 0) {
-      // 有單桌容納 → 既有單桌指派流程
-      const suggestion = suggestTable(guests)
+      // 有單桌容納 → 既有單桌指派流程。可點選集合（suitable）不縮小；
+      // 只有「建議桌」看這筆的時段，避開別筆已預配且時段重疊的桌與團保桌。
+      const suggestion = suggestTable(guests, {
+        bookingId: booking.id, date: booking.date || todayStr(), timeSlot: booking.timeSlot,
+      })
       setMode({ type: 'assign', booking, suitable, suggestion: suggestion?.number })
       setSelectedTable(null)
       setPendingConfirm(null)
@@ -181,7 +203,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     const guests = Number(wait.partySize) || 0
     const suitable = findSuitableTables(guests).map(t => t.number)
     if (suitable.length > 0) {
-      const suggestion = suggestTable(guests)
+      // 候位客人是「現在」入座：建議桌避開接下來用餐時段內已被預配的桌與團保桌
+      const suggestion = suggestTable(guests, { date: todayStr(), timeSlot: nowSlot() })
       setMode({ type: 'seat-waitlist', wait, suitable, suggestion: suggestion?.number })
       setSelectedTable(null)
       setPendingConfirm(null)
@@ -219,9 +242,24 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     if (!booking) return
     const suitable = findSuitableTables(booking.guests).map(t => t.number)
     if (suitable.length === 0) return toast.error('沒有可換的空桌')
-    setMode({ type: 'move', booking, suitable, suggestion: suggestTable(booking.guests)?.number })
+    // 建議桌看時段：用餐中的客人以「現在」起算，待到的客人以其訂位時段起算；不建議自己目前這張
+    const slotOpts = booking.status === 'arrived'
+      ? { bookingId: booking.id, date: todayStr(), timeSlot: nowSlot() }
+      : { bookingId: booking.id, date: booking.date || todayStr(), timeSlot: booking.timeSlot }
+    const suggestion = findSuitableTables(booking.guests, slotOpts).find(t => t.number !== booking.assignedTableId)
+    setMode({ type: 'move', booking, suitable, suggestion: suggestion?.number })
     setSelectedTable(null)
     setPendingConfirm(null)
+  }
+
+  const releaseOverridden = (conflicts, tableLabel) =>
+    releaseOverriddenPreassigns(conflicts, tableLabel, { releaseOverriddenAssignment, toast })
+  // 與 pendingConflict 同一個查詢（警示指名誰，就解除誰）
+  const preassignConflictFor = (number) => {
+    if (!mode || !['assign', 'seat-waitlist', 'move'].includes(mode.type)) return null
+    const excludeBookingId = mode.booking?.id
+    const date = mode.type === 'seat-waitlist' ? todayStr() : (mode.booking?.date || todayStr())
+    return findPreassignedBooking(bookings, number, { date, excludeBookingId })
   }
 
   const cancelMode = () => { setMode(null); setPendingConfirm(null) }
@@ -282,9 +320,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
   // 真正執行指派/候位入座/換桌（由二步確認的第二步或確認鈕觸發）
   const executeAssign = (number) => {
     if (!mode || !number) return
+    // 動手前先記下被覆蓋的預配（指派後 bookings 會變，警示指名的就是這一筆）
+    const overridden = preassignConflictFor(number)
     if (mode.type === 'assign') {
       const r = assignBookingToTable(mode.booking.id, number)
       if (!r.ok) return toast.error('指派失敗：' + r.error)
+      releaseOverridden([overridden], number)
       toast.success(`${mode.booking.name}（${mode.booking.guests} 位）指派至 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
@@ -295,6 +336,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     if (mode.type === 'seat-waitlist') {
       const r = seatWaitlist(mode.wait.id, number)
       if (!r.ok) return toast.error('入座失敗：' + r.error)
+      releaseOverridden([overridden], number)
       toast.success(`${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
@@ -304,6 +346,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     if (mode.type === 'move') {
       const r = moveTable(mode.booking.id, number)
       if (!r.ok) return toast.error('換桌失敗：' + r.error)
+      releaseOverridden([overridden], number)
       toast.success(`${mode.booking.name} 已換到 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
@@ -456,8 +499,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     const guestData = {
       name: payload.name, phone: payload.phone, guests: payload.guests, notes: payload.notes,
     }
+    // 帶位前記下被覆蓋的預配（面板警示逐桌列出的那幾筆；店員已勾「仍要帶」才滑得動）
+    const overridden = nums.map(n => findPreassignedBooking(bookings, n, { date: todayStr() })).filter(Boolean)
     const r = nums.length === 1 ? walkInSeat(nums[0], guestData) : walkInSeatMulti(nums, guestData)
     if (!r.ok) { toast.error('入座失敗：' + r.error); return false }
+    releaseOverridden(overridden, nums.join(' + '))
     const label = nums.join(' + ')
     const name = r.booking?.name || '散客'
     const guests = r.booking?.guests || payload.guests

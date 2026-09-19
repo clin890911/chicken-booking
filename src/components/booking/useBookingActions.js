@@ -24,7 +24,7 @@ export function useDiningMinutes(seatedAt) {
 //   onAssign(booking)：沒有桌時「指派桌位」的跨頁導向（今天→現場、未來→規劃排位地圖），由容器決定。
 export function useBookingActions(booking, { onAssign } = {}) {
   const {
-    tables, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking,
+    tables, bookings, groupReservations, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking,
     setStatus, clearTable, suggestTable, clearBookingPreassign,
   } = useBooking()
   const toast = useToast()
@@ -46,11 +46,15 @@ export function useBookingActions(booking, { onAssign } = {}) {
   const noshowCount = useMemo(() => getNoshowCount(booking.phone), [booking.phone, status])
 
   // 建議桌查的是「今日即時空桌」，對未來/過去日無意義且誤導。
-  // suggestTable 走 service 讀桌況；以 tables state 當 key，桌況一變才重算（原本每次 render 都 parse 一次桌位表）。
+  // 帶上這筆的時段：排除「別筆訂位已預配/持有、用餐時段重疊」的桌與今日團保桌——
+  // 過去只看此刻桌況，11:00 已預配 105 時 11:30 的客人仍被建議 105（撞桌）。
+  // suggestTable 走 service 讀資料；以 tables/bookings/團體 state 當 key，資料一變才重算。
   const suggestion = useMemo(
-    () => (dayKind === 'today' && status === 'confirmed' && !booking.assignedTableId) ? suggestTable(booking.guests) : null,
+    () => (dayKind === 'today' && status === 'confirmed' && !booking.assignedTableId)
+      ? suggestTable(booking.guests, { bookingId: booking.id, date: booking.date, timeSlot: booking.timeSlot })
+      : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tables, dayKind, status, booking.assignedTableId, booking.guests],
+    [tables, bookings, groupReservations, dayKind, status, booking.id, booking.date, booking.timeSlot, booking.assignedTableId, booking.guests],
   )
 
   // === 按鈕顯示條件（兩個入口共用）===

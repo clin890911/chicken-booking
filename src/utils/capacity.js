@@ -20,8 +20,8 @@ export function occupancyMinutes(settings = {}) {
   return Math.max(0, dining + buffer)
 }
 
-// 兩個時間窗是否重疊：[start, start+durationMin) 與 [targetMinutes, targetMinutes+durationMin)
-function rangesOverlap(start, end, targetMinutes, durationMin) {
+// 兩個時間窗是否重疊：[start, end) 與 [targetMinutes, targetMinutes+durationMin)
+export function rangesOverlap(start, end, targetMinutes, durationMin) {
   return start < targetMinutes + durationMin && targetMinutes < end
 }
 
@@ -238,4 +238,28 @@ export function findPreassignedBooking(bookings = [], tableNumber, { date, exclu
     const nums = [b.assignedTableId, ...(b.extraTableIds || [])].filter(n => n != null).map(String)
     return nums.includes(target)
   }) || null
+}
+
+// === 依時段的桌位衝突（建議桌用）===
+// 回傳「同日其他有效訂位已預配或持有、且用餐時段與目標時段重疊」的桌號集合（含併桌額外桌）。
+// 用途：建議桌／新增表單候選。過去建議桌只看「此刻桌況是不是空桌」，預配不動桌況（桌仍 vacant），
+// 於是 11:00 已預配 105 時，11:30 的訂位仍被建議 105 → 撞桌。這裡補上時間維度。
+// 口徑與容量引擎一致：佔用窗＝timeSlot 起算 occupancyMinutes（用餐＋清桌緩衝），排除 CAPACITY_EXCLUDED_STATUSES。
+//   - excludeBookingId：正在找桌的這筆自己（改桌時自己的舊桌不算衝突）。
+//   - timeSlot 缺：無從比時間 → 同日任何預配都算衝突（保守）；對方缺 timeSlot 同樣保守視為重疊。
+// ⚠️ 只給「建議／候選」用；現場指派／帶位的可點選集合不可拿它縮小（預配/團保走警示＋勾選解鎖）。
+export function overlappingBookedTables(bookings = [], { date, timeSlot, excludeBookingId } = {}, settings = {}) {
+  const durationMin = occupancyMinutes(settings)
+  const target = timeSlot ? toMinutes(timeSlot) : null
+  const set = new Set()
+  ;(bookings || []).forEach(b => {
+    if (!b || (excludeBookingId != null && b.id === excludeBookingId)) return
+    if (date != null && b.date !== date) return
+    if (CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return
+    const nums = [b.assignedTableId, ...(b.extraTableIds || [])].filter(n => n != null && n !== '').map(String)
+    if (!nums.length) return
+    if (target != null && b.timeSlot && !overlapsSlot(b, target, durationMin)) return
+    nums.forEach(n => set.add(n))
+  })
+  return set
 }
