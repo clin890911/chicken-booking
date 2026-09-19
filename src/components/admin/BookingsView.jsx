@@ -15,8 +15,9 @@ const SUB_TABS = [
 
 // 訂位總頁：合併 今日 / 日曆 / 新增 為 sub-tabs
 // 「指派桌」按鈕呼叫 onAssignTable（今天→現場、未來日→規劃排位地圖，由 AdminPage 分流）；
+// 「改桌」呼叫 onMoveTable（今日待到、已有桌 → 現場頁 move 模式，由 AdminPage 跨頁）；
 // 團體卡點擊呼叫 onOpenGroup → 規劃頁團單詳情
-export default function BookingsView({ onAssignTable, onOpenGroup, onCreated, openAdd }) {
+export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, onCreated, openAdd }) {
   const [sub, setSub] = useState(openAdd ? 'add' : 'today')
   // 新增表單的預填：可能來自名冊（openAdd prop）或日曆選日期後按「＋ 新增訂位」（本地觸發）。
   // 兩條路共用同一個 state，誰後觸發就以誰為準（都帶 seq，AddBookingView 依 seq 變更才重灌欄位）。
@@ -49,10 +50,10 @@ export default function BookingsView({ onAssignTable, onOpenGroup, onCreated, op
 
       {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
       <div key={sub} className="animate-soft-enter">
-          {sub === 'today' && <TodayView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} />}
-          {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onOpenGroup={onOpenGroup} onAddBooking={handleAddBookingFromCalendar} />}
-          {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} />}
-          {sub === 'add' && <AddBookingView initial={addPrefill} onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} />}
+          {sub === 'today' && <TodayView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} />}
+          {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} onAddBooking={handleAddBookingFromCalendar} />}
+          {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
+          {sub === 'add' && <AddBookingView initial={addPrefill} onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
       </div>
     </div>
   )

@@ -182,6 +182,15 @@ describe('create', () => {
     expect(customerService.listAll()).toHaveLength(0)
   })
 
+  it('現場來源、電話空白（含只打空白）：可建立訂位，且兩位不同客人不會被併成同一個顧客檔', () => {
+    const a = bookingService.create(baseInput({ source: 'walkin', name: '余先生', phone: '' }))
+    const b = bookingService.create(baseInput({ source: 'walkin', name: '陳小姐', phone: '   ' }))
+    expect(a.phone).toBe('')
+    expect(b.phone).toBe('')
+    expect(rawBookings()).toHaveLength(2)
+    expect(customerService.listAll()).toHaveLength(0)
+  })
+
   it('多筆 create 各有不同 id', () => {
     const a = bookingService.create(baseInput())
     const b = bookingService.create(baseInput())

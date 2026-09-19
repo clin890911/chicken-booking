@@ -13,7 +13,7 @@ import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
 //   week＝週條（7 日快切 + 前後週）+ 當日訂位清單為主體（散客卡 + 團體梯次卡同框）
 // 解決「點日期後清單在月曆下方、使用者以為沒反應」：收合後清單直接在視口內。
 // 視圖切換用純條件渲染 + animate-soft-enter（動畫不變量：內容可見性不依賴 JS 回呼）。
-export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking }) {
+export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking, onMoveTable }) {
   const { bookings, groupReservations, tables } = useBooking()
   const totalSeats = useMemo(() => totalActiveSeats(tables || []), [tables]) // 熱圖分母；測試的 mock context 可能不帶 tables
   const [cursor, setCursor] = useState(() => {
@@ -295,7 +295,7 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking 
                 {dayEntries.map(({ slot, bookings: list, groupBatches }) => (
                   <div key={slot || 'unscheduled'} className="space-y-2">
                     {list.map(b => (
-                      <BookingCard key={b.id} booking={b} onAssign={onAssignTable} />
+                      <BookingCard key={b.id} booking={b} onAssign={onAssignTable} onMove={onMoveTable} />
                     ))}
                     {groupBatches.map(({ group, batch }) => (
                       <GroupBatchCard key={`${group.id}:${batch.id || batch.timeSlot}`} group={group} batch={batch} onOpen={onOpenGroup} />

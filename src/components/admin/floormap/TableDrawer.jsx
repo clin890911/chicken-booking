@@ -107,7 +107,13 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const handleSeat = () => {
     if (!booking) return
     const r = seatBooking(booking.id)
-    if (!r.ok) return toast.error(r.error)
+    if (!r.ok) {
+      // 入座被擋（佔用／停用）→ 直接給「改桌」出口；併桌訂位不支援單桌改桌
+      if (onStartMove && !isCombo) {
+        return toast.action('入座失敗：' + r.error, { label: '改桌', onClick: () => onStartMove() }, { type: 'error', duration: 8000 })
+      }
+      return toast.error(r.error)
+    }
     toast.success(`${booking.name} 已入座 ${table.number}`)
   }
 
@@ -470,6 +476,16 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           {table.status === 'reserved' && booking && (
             <>
               <button onClick={handleSeat} className="btn-primary w-full">客人到了 — 入座</button>
+              {/* 改桌：待到的訂位也能換桌（過去只有用餐中分支有「換桌」，鎖了桌就改不了）。
+                  沿用 move 模式（地圖選桌＋二步確認＋預配/團保警示）；併桌訂位不支援單桌改桌 → 停用並寫原因。 */}
+              <button
+                onClick={onStartMove}
+                disabled={isCombo}
+                className="btn-secondary w-full text-sm min-h-[44px] disabled:opacity-45 disabled:cursor-not-allowed"
+              >↔ 改桌（{booking.name} 換到別桌）</button>
+              {isCombo && (
+                <p className="text-[11px] text-chicken-brown/55 text-center -mt-1">併桌訂位不支援單桌改桌：請取消後重新指派。</p>
+              )}
               <button onClick={handleCancel} className="w-full text-sm rounded-xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
             </>
           )}

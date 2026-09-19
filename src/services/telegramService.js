@@ -132,7 +132,7 @@ function fmtBookingHeader(b) {
   const lines = [
     `📅 ${b.date} ${b.timeSlot}`,
     `👤 ${escapeHTML(b.name)}  ${b.guests} 位`,
-    `📱 <code>${escapeHTML(b.phone)}</code>`,
+    `📱 <code>${escapeHTML(b.phone || '—')}</code>`,   // 現場客可不留電話（空 <code></code> 不好讀）
   ]
   if (b.assignedTableId) lines.push(`🪑 ${b.assignedTableId}`)
   if (SOURCE_LABEL[b.source]) lines.push(SOURCE_LABEL[b.source])

@@ -37,10 +37,16 @@ function LegendSwatch({ fill, stroke, label, dashed = false }) {
 // setTableStatus/toast）。不二次確認——這顆鈕本身就是「已經在合理時間窗內」的防呆。
 // 復原必須同時倒回 booking（confirmed）與 table（reserved + seatedAt:null）兩邊，
 // 不能只復原 booking——那是 repo 內其他復原路徑曾經犯過的不完整實作，這裡刻意都做。
-export function handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, toast }) {
+// onMove（可選）：入座被擋（桌被別組佔用／停用）時，toast 直接帶「改桌」出口。
+export function handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, toast, onMove }) {
   const r = seatBooking(booking.id)
   if (!r?.ok) {
-    toast.error('入座失敗：' + (r?.error || '未知錯誤'))
+    const msg = '入座失敗：' + (r?.error || '未知錯誤')
+    if (onMove && !(booking.extraTableIds || []).length) {
+      toast.action(msg, { label: '改桌', onClick: () => onMove(booking) }, { type: 'error', duration: 8000 })
+    } else {
+      toast.error(msg)
+    }
     return r
   }
   toast.action(
@@ -82,7 +88,7 @@ export function releaseOverriddenPreassigns(conflicts, tableLabel, { releaseOver
 //   兩者到齊由面板滑動入座（walkin / walkin-multi 兩個舊 mode 已移除）。
 // 每個模式有對應的 banner、桌位 highlight、確認 toast
 // 候位入座由右側欄（OpsRail > WaitlistPanel）頁內觸發；指派桌仍可由「訂位」分頁跨頁觸發（pendingAssign）
-export default function OperationsView({ pendingAssign, onAssignDone, onAddBooking }) {
+export default function OperationsView({ pendingAssign, onAssignDone, pendingMove, onMoveDone, onAddBooking }) {
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
     assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
@@ -237,11 +243,20 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     if (sug) setFloor(sug.floor)
   }
 
-  // 換桌模式：當前用餐桌 → 選一張新空桌
+  // 換桌／改桌模式：用餐中、現場鎖桌、預配的訂位都走這裡 → 選一張新空桌（二步確認＋預配/團保警示）。
+  // 入口：抽屜（用餐中／已預訂）、今日訂位籤、訂位分頁卡片／詳情（經 pendingMove 跨頁）。
   const startMove = (booking) => {
     if (!booking) return
+    if ((booking.extraTableIds || []).length) {
+      onMoveDone?.()
+      return toast.error('併桌訂位不支援單桌改桌，請取消後重新指派，或整組清桌後重新帶位')
+    }
+    if (!booking.assignedTableId) {
+      onMoveDone?.()
+      return toast.error('這筆訂位還沒有桌，請改用「指派桌位」')
+    }
     const suitable = findSuitableTables(booking.guests).map(t => t.number)
-    if (suitable.length === 0) return toast.error('沒有可換的空桌')
+    if (suitable.length === 0) { onMoveDone?.(); return toast.error('沒有可換的空桌') }
     // 建議桌看時段：用餐中的客人以「現在」起算，待到的客人以其訂位時段起算；不建議自己目前這張
     const slotOpts = booking.status === 'arrived'
       ? { bookingId: booking.id, date: todayStr(), timeSlot: nowSlot() }
@@ -250,6 +265,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     setMode({ type: 'move', booking, suitable, suggestion: suggestion?.number })
     setSelectedTable(null)
     setPendingConfirm(null)
+    const focus = tables.find(t => t.number === (suggestion?.number || booking.assignedTableId))
+    if (focus) setFloor(focus.floor)
   }
 
   const releaseOverridden = (conflicts, tableLabel) =>
@@ -347,10 +364,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
       const r = moveTable(mode.booking.id, number)
       if (!r.ok) return toast.error('換桌失敗：' + r.error)
       releaseOverridden([overridden], number)
-      toast.success(`${mode.booking.name} 已換到 ${number} · 可指派下一組`)
+      toast.success(`${mode.booking.name} 已從 ${mode.booking.assignedTableId} 改到 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
+      onMoveDone?.()
       return
     }
     if (mode.type === 'group-reseat') {
@@ -585,12 +603,24 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAssign?.id])
 
+  // 從外部觸發改桌模式（訂位卡／詳情／新增後 toast 的「改桌」）。
+  // 以當下 bookings 為準重新取這筆（跨頁帶來的是按鈕當時的快照，桌號可能已變）。
+  useEffect(() => {
+    if (!pendingMove?.booking) return
+    const fresh = bookings.find(b => b.id === pendingMove.booking.id) || pendingMove.booking
+    startMove(fresh)
+    // 一觸發就消耗掉：ESC 取消模式時不會回報，若留著，下次切回現場頁（元件重掛）會又自動進改桌模式
+    onMoveDone?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingMove?.seq])
+
   const cancelModeAndNotify = () => {
     // 只有「訂位指派」是跨頁來的（BookingsView 的指派桌 → pendingAssign），取消時要回報消耗掉；
     // 候位併桌是現場頁內互動，沒有待消耗的跨頁請求。
     const isBookingAssign = mode?.type === 'assign'
       || (mode?.type === 'assign-multi' && mode.kind !== 'waitlist')
     if (isBookingAssign) onAssignDone?.()
+    if (mode?.type === 'move') onMoveDone?.()
     cancelMode()
   }
 
@@ -699,6 +729,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
                 if (b.assignedTableId) setSelectedTable(b.assignedTableId)
               }}
               onAssignTable={startAssign}
+              onMoveTable={can('booking.update') && can('table.update') ? startMove : null}
               onSeatWaitlist={startSeatWaitlist}
               onReseatBatch={startGroupReseat}
               onAddBooking={onAddBooking && can('booking.create') ? onAddBooking : null}
@@ -782,7 +813,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, onAddBooki
                     if (t) setFloor(t.floor)
                     setSelectedTable(n)
                   }}
-                  onArrive={(table, booking) => handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, toast })}
+                  onArrive={(table, booking) => handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, toast, onMove: startMove })}
                 />
               )}
             </>

@@ -20,9 +20,10 @@ import Icon from '../ui/Icon'
 // 立即反映最新狀態；訂位被別台裝置刪除或同步移除時自動關閉。
 //   onAssign(booking)：「指派桌位」跨頁導向（今天→現場、未來→規劃排位地圖），由容器決定。
 //   onFocusTable(booking)：（規劃頁）在排位地圖上標示這筆訂位的桌位；未傳則不顯示該鈕。
+//   onMove(booking)：今日待到、已有桌的「改桌」跨頁導向（→ 現場頁 move 模式）；未傳則不顯示改桌。
 const VIP_LABEL = { none: '', bronze: '銅卡', silver: '銀卡', gold: '金卡' }
 
-export default function BookingDetailSheet({ bookingId, onClose, onAssign, onFocusTable }) {
+export default function BookingDetailSheet({ bookingId, onClose, onAssign, onFocusTable, onMove }) {
   const { bookings } = useBooking()
   const booking = useMemo(
     () => (bookingId ? (bookings || []).find(b => b.id === bookingId) || null : null),
@@ -36,7 +37,7 @@ export default function BookingDetailSheet({ bookingId, onClose, onAssign, onFoc
   return (
     <Modal open={!!booking} onClose={onClose} size="lg" title={null}>
       {booking && (
-        <SheetBody booking={booking} onClose={onClose} onAssign={onAssign} onFocusTable={onFocusTable} />
+        <SheetBody booking={booking} onClose={onClose} onAssign={onAssign} onFocusTable={onFocusTable} onMove={onMove} />
       )}
     </Modal>
   )
@@ -51,7 +52,7 @@ function Fact({ icon, label, children, tone = '' }) {
   )
 }
 
-function ActionButton({ onClick, tone = 'neutral', children, className = '' }) {
+function ActionButton({ onClick, tone = 'neutral', children, className = '', disabled = false, title }) {
   const cls = {
     primary: 'bg-chicken-red text-white shadow-sm',
     green: 'bg-chicken-green text-white shadow-sm',
@@ -61,18 +62,18 @@ function ActionButton({ onClick, tone = 'neutral', children, className = '' }) {
     indigo: 'bg-white border-2 border-indigo-300 text-indigo-700',
   }[tone] || 'bg-white border border-chicken-brown/10 text-chicken-brown'
   return (
-    <button type="button" onClick={onClick}
-      className={`tap min-h-[48px] px-3 rounded-xl text-sm font-bold inline-flex items-center justify-center gap-1 ${cls} ${className}`}>
+    <button type="button" onClick={onClick} disabled={disabled} title={title}
+      className={`tap min-h-[48px] px-3 rounded-xl text-sm font-bold inline-flex items-center justify-center gap-1 disabled:opacity-45 disabled:cursor-not-allowed ${cls} ${className}`}>
       {children}
     </button>
   )
 }
 
-function SheetBody({ booking, onClose, onAssign, onFocusTable }) {
+function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
   const { settings, customers, bookings } = useBooking()
   const toast = useToast()
   const [editing, setEditing] = useState(false)
-  const act = useBookingActions(booking, { onAssign })
+  const act = useBookingActions(booking, { onAssign, onMove })
 
   const st = STATUS_MAP[booking.status] || STATUS_MAP.pending
   const seating = seatingForSlot(settings, booking.timeSlot)
@@ -230,6 +231,14 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable }) {
         )}
         {act.show.seat && (
           <ActionButton tone="green" className="col-span-2" onClick={then(async () => { act.seat(); return true })}>客人到了</ActionButton>
+        )}
+        {act.show.move && (
+          <ActionButton tone="indigo" className="col-span-2" disabled={!!act.moveDisabledReason}
+            title={act.moveDisabledReason || undefined}
+            onClick={() => { onClose?.(); act.move() }}>↔ 改桌（目前 {booking.assignedTableId}）</ActionButton>
+        )}
+        {act.show.move && act.moveDisabledReason && (
+          <div className="col-span-2 text-[11px] font-bold text-chicken-brown/50 text-center -mt-1">{act.moveDisabledReason}</div>
         )}
         {act.show.checkout && (
           <>

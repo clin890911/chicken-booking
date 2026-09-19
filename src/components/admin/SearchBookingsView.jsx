@@ -7,7 +7,7 @@ import { dayLabel } from '../../utils/timeSlots'
 
 // 後台「🔍 查詢」分頁：用訂位編號 / 姓名 / 電話查詢，跨所有日期、含已取消。
 // 員工端 bookings 已是全量同步（BookingContext），故純前端比對即可，不需後端。
-export default function SearchBookingsView({ onAssignTable }) {
+export default function SearchBookingsView({ onAssignTable, onMoveTable }) {
   const { bookings, pullCloud } = useBooking()
   const [query, setQuery] = useState('')
   const [hideCancelled, setHideCancelled] = useState(false)
@@ -93,7 +93,7 @@ export default function SearchBookingsView({ onAssignTable }) {
               </div>
               <div className="space-y-2">
                 {list.map(b => (
-                  <BookingCard key={b.id} booking={b} onAssign={onAssignTable} />
+                  <BookingCard key={b.id} booking={b} onAssign={onAssignTable} onMove={onMoveTable} />
                 ))}
               </div>
             </div>

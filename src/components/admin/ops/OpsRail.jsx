@@ -12,7 +12,7 @@ import FastWalkInPanel from './FastWalkInPanel'
 // 今日沒有團體時不渲染「今日團體」籤（一天 0~5 團的稀疏性，無團體日不佔空間）。
 // 選中桌時整欄被 TableDrawer 取代（由 OperationsView 控制），籤狀態保留在外層不重設。
 export default function OpsRail({
-  activeTab, onTabChange, onClickBooking, onAssignTable, onSeatWaitlist, onFocusTable, onReseatBatch,
+  activeTab, onTabChange, onClickBooking, onAssignTable, onMoveTable, onSeatWaitlist, onFocusTable, onReseatBatch,
   onAddBooking,
   // 帶位籤（v3）：桌與人數的真相在 OperationsView，這裡純轉發給 FastWalkInPanel
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
@@ -104,7 +104,7 @@ export default function OpsRail({
                   ＋ 新增今日訂位
                 </button>
               )}
-              <UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} />
+              <UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} />
             </>
           )}
           {effective === 'waitlist' && (

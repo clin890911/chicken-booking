@@ -78,7 +78,9 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
 
   const confirmText = mode.type === 'group-reseat'
     ? `把 ${mode.current} 改派為 ${pendingConfirm} 並整梯入座？（將更新該梯圈桌）`
-    : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
+    : mode.type === 'move'
+      ? `確認把 ${pendingTargetName} 從 ${mode.booking?.assignedTableId} 改到桌 ${pendingConfirm}？`
+      : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
 
   return (
     <div className={`${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
@@ -141,7 +143,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
                 onClick={onConfirm}
                 className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
                   (pendingConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-              >{(pendingConflict || pendingGroupHold) ? '仍要覆蓋指派' : mode.type === 'group-reseat' ? '✓ 確認改派' : '✓ 確認指派'}</button>
+              >{(pendingConflict || pendingGroupHold) ? '仍要覆蓋指派' : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'move' ? '✓ 確認改桌' : '✓ 確認指派'}</button>
             </div>
           </div>
         </div>

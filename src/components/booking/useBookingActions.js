@@ -19,10 +19,15 @@ export function useDiningMinutes(seatedAt) {
   return Math.max(0, diffMin(seatedAt))
 }
 
+// 併桌（主桌＋額外桌）訂位不支援單桌改桌：現場 move 模式只換主桌，會留下孤兒額外桌
+// （seatingService.moveTable 也會擋）。按鈕照樣顯示但停用，並寫明原因。
+export const MOVE_COMBO_REASON = '併桌訂位不支援單桌改桌，請取消後重新指派，或到現場頁整組處理'
+
 // 訂位卡（BookingCard）與訂位詳情（BookingDetailSheet）共用的「衍生資訊 + 動作」。
 // 兩個入口的按鈕顯示條件、確認文案、toast 一律以這裡為準，避免同一筆訂位在兩處行為不一致。
 //   onAssign(booking)：沒有桌時「指派桌位」的跨頁導向（今天→現場、未來→規劃排位地圖），由容器決定。
-export function useBookingActions(booking, { onAssign } = {}) {
+//   onMove(booking)：今日待到、已有桌時「改桌」的跨頁導向（→ 現場頁 move 模式），由容器決定；沒給就不顯示改桌。
+export function useBookingActions(booking, { onAssign, onMove } = {}) {
   const {
     tables, bookings, groupReservations, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking,
     setStatus, clearTable, suggestTable, clearBookingPreassign,
@@ -59,9 +64,12 @@ export function useBookingActions(booking, { onAssign } = {}) {
 
   // === 按鈕顯示條件（兩個入口共用）===
   const isOpen = status === 'confirmed' || status === 'pending'
+  const isCombo = (booking.extraTableIds || []).length > 0
   const show = {
     assign: status === 'confirmed' && !booking.assignedTableId && dayKind !== 'past',
     seat: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'today',
+    // 改桌：今日待到、已有桌（現場鎖桌或預配都算）。過去只有「客人到了」，指派後就再也改不了桌。
+    move: !!onMove && status === 'confirmed' && !!booking.assignedTableId && dayKind === 'today',
     futureAssignedNote: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'future',
     checkout: status === 'arrived',
     edit: isOpen,
@@ -74,7 +82,14 @@ export function useBookingActions(booking, { onAssign } = {}) {
     pastNote: dayKind === 'past' && status !== 'completed' && status !== 'cancelled',
   }
 
+  const moveDisabledReason = isCombo ? MOVE_COMBO_REASON : ''
+
   // === 動作 ===
+  const move = useCallback(() => {
+    if (isCombo) { toast.info(MOVE_COMBO_REASON); return }
+    onMove?.(booking)
+  }, [isCombo, onMove, booking, toast])
+
   const seat = useCallback(() => {
     if (!booking.assignedTableId) {
       onAssign?.(booking)
@@ -82,9 +97,15 @@ export function useBookingActions(booking, { onAssign } = {}) {
       return
     }
     const r = seatBooking(booking.id)
-    if (!r.ok) return toast.error('入座失敗：' + r.error)
+    if (!r.ok) {
+      // 桌被別組佔用／停用維修 → 直接給「改桌」出口（不必再自己找入口）
+      if (onMove && !isCombo) {
+        return toast.action('入座失敗：' + r.error, { label: '改桌', onClick: () => onMove(booking) }, { type: 'error', duration: 8000 })
+      }
+      return toast.error('入座失敗：' + r.error)
+    }
     toast.success(`${booking.name} 已入座 ${booking.assignedTableId}`)
-  }, [booking, onAssign, seatBooking, toast])
+  }, [booking, onAssign, onMove, isCombo, seatBooking, toast])
 
   const checkout = useCallback(async () => {
     const ok = await confirm(`${booking.name} 已離席？\n桌位將進入「等待清桌」狀態`,
@@ -145,7 +166,7 @@ export function useBookingActions(booking, { onAssign } = {}) {
   const assign = useCallback(() => { onAssign?.(booking) }, [onAssign, booking])
 
   return {
-    dayKind, table, minutes, stage, noshowCount, suggestion, show,
-    seat, checkout, finalize, cancel, noshow, restore, unpreassign, assign,
+    dayKind, table, minutes, stage, noshowCount, suggestion, show, moveDisabledReason,
+    seat, checkout, finalize, cancel, noshow, restore, unpreassign, assign, move,
   }
 }

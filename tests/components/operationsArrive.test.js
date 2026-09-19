@@ -56,3 +56,27 @@ describe('handleArriveNow', () => {
     expect(deps.setTableStatus).not.toHaveBeenCalled()
   })
 })
+
+// S1 擋下入座（桌被別組佔用／停用）時，報到列的 toast 直接帶「改桌」出口（2026-09）
+describe('handleArriveNow：入座被擋時給改桌出口', () => {
+  it('有 onMove → toast.action（label 改桌），點了把這筆訂位交給 onMove；不動 booking/table', () => {
+    const onMove = vi.fn()
+    const deps = makeDeps({ seatBooking: vi.fn(() => ({ ok: false, error: 'A2 目前由 陳小姐 使用，請先改桌' })), onMove })
+    handleArriveNow(table, booking, deps)
+    const [msg, action, opts] = deps.toast.action.mock.calls[0]
+    expect(msg).toBe('入座失敗：A2 目前由 陳小姐 使用，請先改桌')
+    expect(action.label).toBe('改桌')
+    expect(opts.type).toBe('error')
+    action.onClick()
+    expect(onMove).toHaveBeenCalledWith(booking)
+    expect(deps.setStatus).not.toHaveBeenCalled()
+    expect(deps.setTableStatus).not.toHaveBeenCalled()
+  })
+
+  it('併桌訂位不給改桌（單桌 move 會留孤兒額外桌）→ 退回 toast.error', () => {
+    const deps = makeDeps({ seatBooking: vi.fn(() => ({ ok: false, error: '被佔用' })), onMove: vi.fn() })
+    handleArriveNow(table, { ...booking, extraTableIds: ['A3'] }, deps)
+    expect(deps.toast.error).toHaveBeenCalledWith('入座失敗：被佔用')
+    expect(deps.toast.action).not.toHaveBeenCalled()
+  })
+})

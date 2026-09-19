@@ -3,6 +3,7 @@ import MonthCalendar from '../booking/MonthCalendar'
 import TimeSlotPicker from '../booking/TimeSlotPicker'
 import { Card, Input, Textarea, Button } from '../ui'
 import GuestCountField from './GuestCountField'
+import TablePickField from './TablePickField'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
@@ -28,8 +29,10 @@ const NOTE_OPTIONS = [
   { key: 'mobility', label: '行動不便' },
 ]
 
-export default function AddBookingView({ onCreated, onAssignTable, initial }) {
-  const { bookings, tables, groupReservations, settings, addBooking, suggestTable, assignBookingToTable } = useBooking()
+// onAssignTable(booking)：「到桌況圖選」或事後「指派桌」→ 今天去現場指派模式、未來去規劃頁預配（AdminPage 分流）
+// onMoveTable(booking)：存檔後 toast 的「改桌」→ 現場頁 move 模式
+export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, initial }) {
+  const { bookings, tables, groupReservations, settings, addBooking, findSuitableTables, assignBookingToTable } = useBooking()
   const { user } = useAuth()
   const toast = useToast()
 
@@ -41,7 +44,9 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
   const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState('')
   const [notes, setNotes] = useState({ pet: false, child: false, mobility: false, text: '' })
-  const [autoAssign, setAutoAssign] = useState(true)
+  // 桌位選擇：'auto'＝跟著建議（第一張候選）｜桌號＝店員點選的桌｜'map'＝到桌況圖選｜'none'＝先不指派
+  const [tablePick, setTablePick] = useState('auto')
+  const [tableNotice, setTableNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false) // 按過提交才顯示欄位級紅框
 
@@ -90,14 +95,75 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial?.seq])
 
+  // 來源＝現場：電話選填。現場客常不留電話，過去必填逼得店員填 09000000 這類假號，
+  // 而 create 依電話 upsert 顧客檔 → 不同客人被併成同一個顧客檔（過敏備註、no-show 次數全混在一起）。
+  // 空電話本來就不建/不併顧客檔（bookingService.create／customerService.upsert 都有守門）。
+  const phoneOptional = source === 'walkin'
+
   // 缺漏清單：底部黏性列即時顯示「還差哪幾欄」，點 pill 捲到該欄
   const missing = useMemo(() => [
-    !phone.trim() && { key: 'phone', label: '電話', ref: phoneRef },
+    !phoneOptional && !phone.trim() && { key: 'phone', label: '電話', ref: phoneRef },
     !name.trim() && { key: 'name', label: '姓名', ref: nameRef },
     !(guests > 0) && { key: 'guests', label: '人數', ref: guestsRef },
     !timeSlot && { key: 'slot', label: '時段', ref: slotRef },
-  ].filter(Boolean), [phone, name, guests, timeSlot])
+  ].filter(Boolean), [phoneOptional, phone, name, guests, timeSlot])
   const valid = missing.length === 0
+
+  // === 桌位（僅今天）===
+  // 候選＝現在空桌、今日可用、容量 ≥ 人數、且依所選時段不撞別筆預配/團保的單桌（排序沿用 findSuitableTables）。
+  // 今日指派語意維持「存檔即鎖桌（reserved）」；未來日不在這裡選桌（存檔後 toast 引導到規劃頁預配）。
+  const isToday = date === todayStr()
+  const tableCandidates = useMemo(
+    () => (isToday && timeSlot && guests > 0) ? findSuitableTables(guests, { date, timeSlot }) : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isToday, date, timeSlot, guests, tables, bookings, groupReservations],
+  )
+  // 沒有候選時分辨原因：是「沒有單桌坐得下」還是「坐得下的空桌在這時段都被預配/團保了」
+  const anySingleFits = useMemo(
+    () => (isToday && timeSlot && guests > 0 && tableCandidates.length === 0)
+      ? findSuitableTables(guests).length > 0 : false,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isToday, timeSlot, guests, tableCandidates, tables],
+  )
+  // 實際會用的選擇（智慧預設：沒選過就用第一張候選；沒有單桌可用就預設「到桌況圖選」）
+  const tableChoice = useMemo(() => {
+    if (!isToday || !timeSlot) return null
+    if (tablePick === 'none') return { kind: 'none' }
+    if (tablePick === 'map') return { kind: 'map' }
+    const explicit = tablePick !== 'auto' ? tableCandidates.find(t => t.number === tablePick) : null
+    const t = explicit || tableCandidates[0]
+    return t ? { kind: 'table', table: t } : { kind: 'map' }
+  }, [isToday, timeSlot, tablePick, tableCandidates])
+
+  // 人數/時段改變後，店員點選的桌不再合格 → 回到新的建議，並明講換了（不讓桌號悄悄變掉）
+  useEffect(() => {
+    if (!isToday || !timeSlot) return
+    if (['auto', 'map', 'none'].includes(tablePick)) return
+    if (tableCandidates.some(t => t.number === tablePick)) return
+    const next = tableCandidates[0]
+    setTablePick('auto')
+    setTableNotice(next
+      ? `${tablePick} 不適用目前的人數／時段，已改回建議桌 ${next.number}`
+      : `${tablePick} 不適用目前的人數／時段，且沒有其他單桌可用，已改為「到桌況圖選」`)
+  }, [isToday, timeSlot, tablePick, tableCandidates])
+
+  // 跟著建議走時，建議桌因人數／時段／桌況變動而換了 → 同樣提示
+  const lastAutoTableRef = useRef(null)
+  useEffect(() => {
+    const n = tablePick === 'auto' && tableChoice?.kind === 'table' ? tableChoice.table.number : null
+    const prev = lastAutoTableRef.current
+    lastAutoTableRef.current = n
+    if (prev && n && prev !== n) setTableNotice(`建議桌已改為 ${n}（人數、時段或桌況有變動）`)
+  }, [tablePick, tableChoice])
+
+  const pickTable = (v) => { setTablePick(v); setTableNotice('') }
+  const tableEmptyReason = anySingleFits
+    ? `坐得下 ${guests} 位的空桌在 ${timeSlot} 前後都已有預配或團體保留，存檔後到桌況圖選桌（覆蓋前會提示）。`
+    : `目前沒有單桌坐得下 ${guests} 位，存檔後到桌況圖選桌（可點多張同層空桌併桌）。`
+  const tableSuffix = tableChoice?.kind === 'table' ? ` · 桌 ${tableChoice.table.number}`
+    : tableChoice?.kind === 'map' ? ' · 到桌況圖選桌'
+    : tableChoice?.kind === 'none' ? ' · 先不指派'
+    : ''
 
   // 點「還差」pill：亮出欄位級紅框並捲到該欄（缺欄時不再顯示提交鈕，紅框改由此觸發）
   const scrollToField = (m) => {
@@ -123,33 +189,46 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
     }
     setBusy(true)
     try {
+      const choice = tableChoice
       const b = addBooking({
-        name, phone, guests, date, timeSlot, notes,
+        name, phone: phone.trim(), guests, date, timeSlot, notes,
         source,
         status: 'confirmed',
         createdBy: user?.email || 'staff',
       })
-      // 自動指派最佳桌（查今日即時空桌——僅今天的訂位適用；未來日請用規劃頁預配）。
-      // 建議桌看所選時段：不挑別筆已預配且用餐時段重疊的桌、不挑今日團保桌。
-      // 指派走 Context（含 refresh／同步／Telegram 通知），存檔後清單立刻就是指派後的樣子。
-      if (autoAssign && date === todayStr()) {
-        const best = suggestTable(guests, { date, timeSlot })
-        if (best) {
-          const r = assignBookingToTable(b.id, best.number)
-          if (r.ok) toast.success(`${name} ${guests} 位 · ${date} ${timeSlot} · 已自動指派 ${best.number}`)
-          else toast.action(`已建立訂位（自動指派失敗：${r.error}）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
+      const summary = `${name} ${guests} 位 · ${date} ${timeSlot}`
+      let goToMap = false
+      if (isToday && choice?.kind === 'table') {
+        // 指派店員選的桌（或建議桌）。走 Context（含 refresh／同步／Telegram 通知），
+        // 存檔後清單立刻就是指派後的樣子；toast 帶「改桌」出口。
+        const n = choice.table.number
+        const r = assignBookingToTable(b.id, n)
+        if (r.ok) {
+          if (onMoveTable) {
+            toast.action(`${summary} · 已指派 ${n}`,
+              { label: '改桌', onClick: () => onMoveTable({ ...b, assignedTableId: n }) }, { duration: 8000 })
+          } else {
+            toast.success(`${summary} · 已指派 ${n}`)
+          }
         } else {
-          toast.action(`已建立訂位（無可自動指派的桌）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
+          toast.action(`已建立訂位（指派 ${n} 失敗：${r.error}）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
         }
+      } else if (isToday && choice?.kind === 'map') {
+        goToMap = true
+        toast.info(`${summary} 已建立 · 請在桌況圖點桌指派`)
+      } else if (isToday) {
+        toast.action(`${summary} 已建立（未指派桌）`, { label: '指派桌', onClick: () => onAssignTable?.(b) })
       } else {
-        toast.action(`${name} ${guests} 位 · ${date} ${timeSlot} 已建立`,
-          { label: date === todayStr() ? '指派桌' : '預配桌位', onClick: () => onAssignTable?.(b) })
+        toast.action(`${summary} 已建立`, { label: '預配桌位', onClick: () => onAssignTable?.(b) })
       }
       // 重設（保留 source）
       setPhone(''); setName(''); setGuests(2); setTimeSlot('')
       setNotes({ pet: false, child: false, mobility: false, text: '' })
-      setAutoAssign(true); setAttempted(false); setShowCalendar(false)
+      setTablePick('auto'); setTableNotice('')
+      setAttempted(false); setShowCalendar(false)
       onCreated?.(b)
+      // 「到桌況圖選（可併桌）」→ 既有 handleAssignTable：今天的訂位進現場指派模式（大組自動走併桌）
+      if (goToMap) onAssignTable?.(b)
     } finally {
       setBusy(false)
     }
@@ -163,13 +242,13 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
         <div className="space-y-3">
           <div ref={phoneRef} className="relative">
             <Input
-              label="電話（鍵入時自動帶顧客檔）"
+              label={phoneOptional ? '電話（選填 · 現場客可不填）' : '電話（鍵入時自動帶顧客檔）'}
               type="tel"
               inputMode="numeric"
               value={phone}
               onChange={e => setPhone(e.target.value)}
-              placeholder="0912345678"
-              error={attempted && !phone.trim() ? '必填' : ''}
+              placeholder={phoneOptional ? '現場客可不填' : '0912345678'}
+              error={attempted && !phoneOptional && !phone.trim() ? '必填' : ''}
             />
             {(matchedCustomer || noshowCount > 0) && (
               <div className="mt-2 flex flex-wrap gap-2 text-xs">
@@ -285,6 +364,18 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
             />
             {attempted && !timeSlot && <p className="text-xs text-chicken-red font-bold mt-1">請選時段</p>}
           </div>
+
+          {/* 桌位：只在今天顯示（未來日存檔後 toast 引導到規劃頁預配） */}
+          {isToday && (
+            <TablePickField
+              hasSlot={!!timeSlot}
+              candidates={tableCandidates}
+              choice={tableChoice}
+              onPick={pickTable}
+              notice={tableNotice}
+              emptyReason={tableEmptyReason}
+            />
+          )}
         </div>
       </Card>
 
@@ -318,27 +409,14 @@ export default function AddBookingView({ onCreated, onAssignTable, initial }) {
       </Card>
 
       {/* === 底部黏性操作列：缺欄時收成一列「還差」pills（點捲到該欄），
-             填齊才展開自動指派選項＋確認鈕——避免手機上整塊蓋住日期/時段；
-             自動指派僅今天才有意義 → 只在今天顯示，未來日（多為團體）直接收起 === */}
+             填齊才展開確認鈕——避免手機上整塊蓋住日期/時段。
+             確認鈕帶出所選桌號（今天），存檔前就看得到會指派哪張桌 === */}
       <div className="sticky bottom-20 lg:bottom-3 z-20 pt-2">
         <div className="rounded-xl border border-chicken-brown/10 bg-white/95 p-2.5 shadow-lg backdrop-blur">
           {valid ? (
-            <>
-              {date === todayStr() && (
-                <label className="mb-2 flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={autoAssign}
-                    onChange={e => setAutoAssign(e.target.checked)}
-                    className="h-4 w-4"
-                  />
-                  <span className="text-xs font-bold text-chicken-brown/80">建立後立刻自動指派最佳桌（可手動修改）</span>
-                </label>
-              )}
-              <Button onClick={handleSubmit} disabled={busy} className="w-full min-h-[44px]">
-                {busy ? '建立中...' : `確認新增 · ${dayLabel(date)} ${timeSlot} · ${guests} 位`}
-              </Button>
-            </>
+            <Button onClick={handleSubmit} disabled={busy} className="w-full min-h-[44px]">
+              {busy ? '建立中...' : `確認新增 · ${dayLabel(date)} ${timeSlot} · ${guests} 位${tableSuffix}`}
+            </Button>
           ) : (
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <span className="font-bold text-chicken-brown/55">還差</span>

@@ -54,8 +54,11 @@ export default function EditBookingModal({ booking, onClose }) {
   })
   const isQuickDate = quickDates.some(q => q.date === date)
 
+  // 與新增表單同口徑：來源＝現場時電話選填（現場客常不留電話；空電話不建/不併顧客檔）。
+  // 否則在新增時沒留電話的現場訂位，一打開編輯就被「還差：電話」卡住存不了。
+  const phoneOptional = source === 'walkin'
   const missing = [
-    !phone.trim() && '電話',
+    !phoneOptional && !phone.trim() && '電話',
     !name.trim() && '姓名',
     !(guests > 0) && '人數',
     !timeSlot && '時段',
@@ -99,7 +102,7 @@ export default function EditBookingModal({ booking, onClose }) {
     >
       <div className="space-y-4">
         <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />
-        <Input label="電話" type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder="0912345678" />
+        <Input label={phoneOptional ? '電話（選填 · 現場客可不填）' : '電話'} type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder={phoneOptional ? '現場客可不填' : '0912345678'} />
 
         {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
         <GuestCountField value={guests} onChange={setGuests} />
