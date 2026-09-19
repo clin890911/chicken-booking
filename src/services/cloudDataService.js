@@ -1,5 +1,4 @@
 import { getSettings, saveSettings } from './settingsService'
-import { INITIAL_TABLES } from '../data/tables'
 
 const DEFAULT_FUNCTION_BASE = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
 
@@ -11,7 +10,6 @@ const KEYS = {
   agencies: 'chicken_agencies_v1',
   guides: 'chicken_guides_v1',
   groupReservations: 'chicken_group_reservations_v1',
-  migration: 'chicken_firestore_migrated_v1',
 }
 
 function endpoint(name) {
@@ -89,6 +87,20 @@ let lastSynced = { ...emptyColMap(), settings: null }
 const pendingDeletes = Object.fromEntries(DIFF_COLLECTIONS.map(c => [c, new Set()]))
 let initialized = false
 
+// === 推送閘門：這台裝置「第一次成功拉取雲端」之前，一律不推送 ===
+// 全新裝置（空 localStorage）一掛載，tableService 就會種下出廠 INITIAL_TABLES、settings 讀到的
+// 也是出廠預設。首拉成功前，本機的基準線是空的——此時任何推送都會把出廠佔位資料當成「本機變更」
+// 送上雲端，以 merge-upsert 蓋掉店家排好的佈局／設定，再經 5 秒輪詢擴散到全店每台裝置。
+// 🔴 只有 applyCloudSnapshot 成功套用一次 adminPullData 回應才能把它設成 true；
+//    不可從「本機有資料」推論（restoreSyncStateFromStorage 的 hasAnyLocalData 分支不得開閘）。
+// 落地在 SYNC_STATE_KEY；舊版落地狀態沒有這個欄位 → 視為尚未拉取，下一次成功拉取才開閘。
+let cloudPulled = false
+export const PUSH_AWAITING_FIRST_PULL = 'awaiting-first-pull'
+const awaitingFirstPullResult = () => ({ ok: true, skipped: true, reason: PUSH_AWAITING_FIRST_PULL })
+export function hasPulledCloud() {
+  return cloudPulled
+}
+
 // === 佈局遺失根治：把同步基準線落地到 localStorage，撐過「整頁重新整理」===
 // initialized / lastSynced / pendingDeletes 原本全是模組層級記憶體變數：整頁重新整理＝
 // JS 模組重新載入＝全部歸零。歸零後的第一次拉取會誤判成「全新裝置」，走 applyCloudSnapshot
@@ -111,6 +123,7 @@ function persistSyncState() {
   try {
     localStorage.setItem(SYNC_STATE_KEY, JSON.stringify({
       initialized,
+      cloudPulled,
       lastSynced,
       pendingDeletes: Object.fromEntries(DIFF_COLLECTIONS.map(c => [c, [...pendingDeletes[c]]])),
     }))
@@ -153,16 +166,24 @@ function hasAnyLocalData() {
 //      視同「已初始化過」，避免下一次拉取又把它當全新裝置整包覆寫。
 //   3) 兩者都沒有 → 保持 initialized=false，交給 applyCloudSnapshot 的首次拉取分支
 //      去接雲端的初始資料（真正的全新裝置需要這條路）。
+// 推送閘門（cloudPulled）只從落地狀態復原，三條路徑都**不會**因為「本機有資料」而開閘。
 function restoreSyncStateFromStorage() {
   const persisted = loadPersistedSyncState()
   if (persisted?.initialized) {
     initialized = true
+    // 舊版落地狀態沒有 cloudPulled → 視為尚未拉取，等下一次成功拉取才開閘。
+    cloudPulled = persisted.cloudPulled === true
     lastSynced = { ...emptyColMap(), settings: null, ...(persisted.lastSynced || {}) }
     for (const col of DIFF_COLLECTIONS) {
       pendingDeletes[col] = new Set(persisted.pendingDeletes?.[col] || [])
     }
     return
   }
+  // 新版落地過的「全新裝置、尚未首拉」標記（initialized:false、cloudPulled:false，由閘門擋下
+  // 推送時寫入）：這台從來沒成功拉過雲端，本機現有資料只可能是出廠佔位桌或首拉前在這台新建的
+  // 訂位／候位。不可走下面的 seed——那會把首拉前新建的資料記成「已同步」，首拉時被雲端版本洗掉
+  // （離線開機→建了候位→重新整理→回線拉取，候位消失）。維持 initialized=false 交給首拉分支。
+  if (persisted && persisted.cloudPulled === false) return
   if (hasAnyLocalData()) {
     seedLastSyncedFromLocal()
     initialized = true
@@ -212,17 +233,37 @@ export function markLocalAsSynced() {
 }
 
 export function applyCloudSnapshot(data = {}) {
-  // 首次拉取：以雲端為準整份覆寫，並 seed lastSynced（之後才做合併）。
+  // 首次拉取：以雲端為準，並 seed lastSynced（之後才做合併）。
+  // initialized=false 代表模組載入時本機沒有任何集合資料（或落地了「尚未首拉」標記），
+  // 所以此刻本機的東西只有兩種來源：tableService 種的出廠佔位桌、首拉前在這台新建的文件。
   if (!initialized) {
+    const localOnlyIds = {}
     for (const col of DIFF_COLLECTIONS) {
       const arr = data[col]
       if (!Array.isArray(arr)) continue
-      if (col === 'tables' && arr.length === 0) continue // 不因雲端空白清掉桌位
-      writeArrayOf(col, arr) // customers 由 writeArrayOf 轉成 phone-map，其餘為普通陣列
+      if (col === 'tables') {
+        // 雲端非空 → 雲端整包為準（本機出廠佔位桌丟掉）；雲端空白 → 保留本機、視為已同步、不推。
+        if (arr.length > 0) writeArrayOf(col, arr)
+        continue
+      }
+      // 其他集合：雲端文件為準；本機有、雲端沒有的＝首拉前在這台新建的 → 保留在本機且**不設基準線**
+      // （＝dirty），閘門打開後由 pushChangedData 推上去。整包覆寫會把它們靜默洗掉。
+      const cloudMap = indexDocs(col, arr)
+      const localOnly = localArrayOf(col).filter(doc => {
+        const id = idOf(col, doc)
+        return id && !cloudMap[id]
+      })
+      writeArrayOf(col, [...arr, ...localOnly]) // customers 由 writeArrayOf 轉成 phone-map，其餘為普通陣列
+      if (localOnly.length) localOnlyIds[col] = localOnly.map(doc => idOf(col, doc))
     }
+    // settings：雲端有 → 雲端為準；基準線取「存進本機後再讀出來」的形式（見下方 key 順序說明）。
     if (data.settings) saveSettings(data.settings)
     seedLastSyncedFromLocal()
+    for (const [col, ids] of Object.entries(localOnlyIds)) {
+      ids.forEach(id => { delete lastSynced[col][id] })
+    }
     initialized = true
+    cloudPulled = true // 🔴 推送閘門只在 applyCloudSnapshot（成功套用一次雲端快照）打開
     persistSyncState()
     return
   }
@@ -259,6 +300,7 @@ export function applyCloudSnapshot(data = {}) {
     // 另兩處寫基準線（seedLastSyncedFromLocal、push 成功後）本就用本機形式，此處與之對齊。
     if (!settingsDirty) { saveSettings(data.settings); lastSynced.settings = stable(getSettings()) }
   }
+  cloudPulled = true // 舊裝置（已 initialized、落地狀態沒有 cloudPulled）在第一次成功拉取時開閘
   persistSyncState()
 }
 
@@ -290,7 +332,9 @@ export async function pullCloudData() {
 // partial=true 告訴後端「這個客戶端看得懂部分成功的回應」：越權的集合會被剔除、
 // 其餘照寫，並在回應的 rejected 裡如實回報。不送這個旗標時後端維持舊的
 // 「任一集合越權即整包 403」行為（新後端＋舊前端的部署時間窗需要這個相容性）。
+// 🔴 推送閘門放在最底層：所有推送（差異推送、設定頁「上傳本機資料」）都經過這裡。
 export async function pushCloudData(dataset = localDataset(), { partial = false } = {}) {
+  if (!cloudPulled) return awaitingFirstPullResult()
   return requestJson(endpoint('adminPushData'), {
     method: 'POST',
     headers: await authHeader(),
@@ -301,6 +345,14 @@ export async function pushCloudData(dataset = localDataset(), { partial = false 
 // P1-2：只推送與雲端不一致的文件（dirty），避免整份覆寫蓋掉其他裝置的變更。
 // 後端 adminPushData 本就逐筆 merge-upsert，接受「部分資料集」。
 export async function pushChangedData() {
+  // 推送閘門：首拉成功前不發請求、不動基準線、不動 pendingDeletes（必須在下方刪除偵測之前）。
+  if (!cloudPulled) {
+    // 全新裝置（尚未 initialized）落地「尚未首拉」標記：此時本機可能已有首拉前新建的資料，
+    // 萬一在首拉前整頁重新整理，restoreSyncStateFromStorage 才不會把它們 seed 成已同步。
+    // 只寫目前的（未變動的）狀態，基準線與 pendingDeletes 一律不碰。
+    if (!initialized) persistSyncState()
+    return awaitingFirstPullResult()
+  }
   const ds = localDataset()
   const changed = {}
   const deletedIds = {}
@@ -374,115 +426,6 @@ export function discardRejectedChanges({ writes = [], deletes = [], settings = f
   }
   if (settings) lastSynced.settings = stable(getSettings())
   persistSyncState()
-}
-
-export async function migrateLocalToCloudOnce() {
-  if (localStorage.getItem(KEYS.migration) === '1') return { ok: true, skipped: true }
-  const result = await pushCloudData(localDataset())
-  localStorage.setItem(KEYS.migration, '1')
-  return result
-}
-
-// === 未爆彈拆除：migrateTableLayoutOnce / migrateTableDimsOnce 都是自由佈局編輯器
-// （LayoutEditor）問世**之前**寫的一次性遷移，語意只適用於「桌位都還在出廠預設位置」的
-// 階段——它們會無條件把 x/y/w/h 打回 INITIAL_TABLES，沒有任何確認對話框，也完全不管
-// 店家是否已經在編輯器裡手動排過。若照跑，店主辛苦排好的佈局會被這兩支「幽靈遷移」默默蓋掉。
-// 判定依據：只要有任一桌號的 x/y/w/h 已偏離 INITIAL_TABLES 的出廠值，就代表店家自訂過，
-// 兩支遷移都要安全地不作為（旗標仍照樣標記完成——「已經有自訂佈局」本身就是終態，不需要
-// 也不該再被這兩支遷移碰）。
-// ⚠️ 刻意寧可誤判也不要漏判：只比對「桌號能對上 INITIAL_TABLES」的桌，抓不到「是店家自訂
-// 還是這台裝置單純還沒套用某次出廠尺寸更新」的差別，兩者一律當成「已自訂」跳過——
-// 跳過遷移最差就是某次視覺微調沒套用到（店家自己在編輯器調一下即可），
-// 照跑遷移最差是把店主排好的佈局整包蓋掉（正是這次要修的資料遺失事故），兩者代價不對等。
-function hasCustomTableLayout(list) {
-  if (!Array.isArray(list) || list.length === 0) return false
-  const defByNumber = new Map(INITIAL_TABLES.map(t => [t.number, t]))
-  return list.some(t => {
-    const def = defByNumber.get(t?.number)
-    if (!def) return false // 桌號對不上預設集合（例如尚未套用桌號遷移）：不計入這個判準
-    return ['x', 'y', 'w', 'h'].some(f => Number(t[f]) !== Number(def[f]))
-  })
-}
-
-// 一次性桌位佈局遷移：把雲端的舊桌號（如 A1–B19）刪除、改成「雞王座號圖」新桌號（101–267）。
-// 必須在首次 pull 之前執行，否則首拉會用雲端舊桌位覆寫本機新桌位（見 applyCloudSnapshot 首拉分支）。
-const TABLE_LAYOUT_VERSION = 'kingchicken-2026-06'
-const LAYOUT_FLAG = 'chicken_table_layout_version'
-
-export async function migrateTableLayoutOnce() {
-  if (localStorage.getItem(LAYOUT_FLAG) === TABLE_LAYOUT_VERSION) return { ok: true, skipped: true }
-  if (hasCustomTableLayout(readJson(KEYS.tables, []))) {
-    console.warn('[cloudDataService] migrateTableLayoutOnce：偵測到本機桌位已偏離出廠預設佈局（疑似店家自訂過），跳過一次性桌號遷移以免蓋掉店家排版。')
-    localStorage.setItem(LAYOUT_FLAG, TABLE_LAYOUT_VERSION)
-    return { ok: true, skipped: true, reason: 'custom-layout-detected' }
-  }
-  // 先看雲端目前有哪些桌（用來算出要刪除的舊桌號）
-  let cloudTables = []
-  try {
-    const data = await pullCloudData()
-    cloudTables = Array.isArray(data.tables) ? data.tables : []
-  } catch (err) {
-    // 連不上雲端就先不標記，下次載入再試（避免錯過遷移）
-    return { ok: false, reason: err?.message || 'pull-failed' }
-  }
-  const newNumbers = new Set(INITIAL_TABLES.map(t => t.number))
-  const oldNumbers = cloudTables
-    .map(t => t.number)
-    .filter(n => n && !newNumbers.has(n))
-  // 本機先換成新桌位
-  writeJson(KEYS.tables, INITIAL_TABLES)
-  // 推送：寫入全部新桌 + 刪除雲端舊桌（沿用 adminPushData 的 deletedIds 機制）
-  const payload = { tables: INITIAL_TABLES }
-  if (oldNumbers.length) payload.deletedIds = { tables: oldNumbers }
-  await pushCloudData(payload)
-  localStorage.setItem(LAYOUT_FLAG, TABLE_LAYOUT_VERSION)
-  return { ok: true, migrated: true, removed: oldNumbers.length }
-}
-
-// 一次性桌位「尺寸正規化」遷移：六人桌由直式（80×100）改為橫式（90×75，較寬）。
-// 只依桌號把既有桌位的 x/y/w/h 對齊到新版 INITIAL_TABLES，保留 status/currentBookingId/
-// seatedAt/mergedWith 等運營狀態（不像 layout 遷移會整份覆寫）。在首次 pull 之前執行，
-// 並把更新後的桌位推到雲端，確保各裝置一致。
-const TABLE_DIMS_VERSION = 'wide-6p-2026-06'
-const DIMS_FLAG = 'chicken_table_dims_version'
-
-export async function migrateTableDimsOnce() {
-  if (localStorage.getItem(DIMS_FLAG) === TABLE_DIMS_VERSION) return { ok: true, skipped: true }
-  const defByNumber = new Map(INITIAL_TABLES.map(t => [t.number, t]))
-  const local = readJson(KEYS.tables, [])
-  if (!Array.isArray(local) || local.length === 0) {
-    // 還沒有本機桌位（會由 layout 遷移或首次 read seed 出新尺寸）→ 直接標記，避免日後誤改
-    localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
-    return { ok: true, skipped: true }
-  }
-  if (hasCustomTableLayout(local)) {
-    console.warn('[cloudDataService] migrateTableDimsOnce：偵測到本機桌位已偏離出廠預設佈局（疑似店家自訂過），跳過一次性尺寸正規化以免蓋掉店家排版。')
-    localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
-    return { ok: true, skipped: true, reason: 'custom-layout-detected' }
-  }
-  let changed = 0
-  const patched = local.map(t => {
-    const def = defByNumber.get(t.number)
-    if (!def) return t
-    if (t.x !== def.x || t.y !== def.y || t.w !== def.w || t.h !== def.h) {
-      changed++
-      return { ...t, x: def.x, y: def.y, w: def.w, h: def.h }
-    }
-    return t
-  })
-  if (changed === 0) {
-    localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
-    return { ok: true, skipped: true }
-  }
-  writeJson(KEYS.tables, patched)
-  try {
-    await pushCloudData({ tables: patched })
-  } catch (err) {
-    // 推送失敗：本機已更新、雲端尚未。先不標記旗標，下次載入再試（避免首拉用雲端舊尺寸蓋回卻不再重試）。
-    return { ok: false, reason: err?.message || 'push-failed', localUpdated: true }
-  }
-  localStorage.setItem(DIMS_FLAG, TABLE_DIMS_VERSION)
-  return { ok: true, migrated: true, changed }
 }
 
 // 團體預排桌位原子把關（員工端，需帶 Bearer token）。回 { ok, group } 或丟出含 409 的錯誤。

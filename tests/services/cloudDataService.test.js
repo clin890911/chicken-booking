@@ -6,7 +6,7 @@ import { INITIAL_TABLES } from '../../src/data/tables'
 // 才會重置未推送狀態」的原因。測試必須每條都 resetModules + 動態 import，
 // 否則前一條的基準線會污染下一條（曾讓本檔的斷言假性失敗）。
 let applyCloudSnapshot, pushChangedData, localDataset, markLocalAsSynced, getSettings, discardRejectedChanges,
-  migrateTableLayoutOnce, migrateTableDimsOnce, isSyncPersistDegraded
+  isSyncPersistDegraded, cloudModule
 
 // === 差異同步基準線的回歸測試 ===
 //
@@ -45,8 +45,9 @@ beforeEach(async () => {
   vi.resetModules()
   const cloud = await import('../../src/services/cloudDataService')
   const settings = await import('../../src/services/settingsService')
+  cloudModule = cloud
   ;({ applyCloudSnapshot, pushChangedData, localDataset, markLocalAsSynced, discardRejectedChanges,
-    migrateTableLayoutOnce, migrateTableDimsOnce, isSyncPersistDegraded } = cloud)
+    isSyncPersistDegraded } = cloud)
   ;({ getSettings } = settings)
 })
 
@@ -360,79 +361,53 @@ describe('整頁重新整理：本機未推送的桌位變更不得被雲端覆�
   })
 })
 
-// === 兩顆未爆彈：migrateTableLayoutOnce / migrateTableDimsOnce 偵測到自訂佈局要安全不作為 ===
+// === 三支一次性遷移已退役（全新裝置地雷）===
 //
-// 兩支都是自由佈局編輯器問世前寫的一次性遷移，會無條件把 x/y/w/h 打回 INITIAL_TABLES、
-// 沒有任何確認對話框。店家一旦在編輯器排過自己的佈局，這兩支「幽靈遷移」只要旗標沒設就會
-// 在下次開機默默把排版蓋掉。修法：偵測到任一桌號的 x/y/w/h 已偏離出廠預設就跳過（見
-// hasCustomTableLayout）。
-describe('migrateTableLayoutOnce / migrateTableDimsOnce：已有自訂佈局時安全不作為', () => {
+// migrateLocalToCloudOnce / migrateTableLayoutOnce / migrateTableDimsOnce 是 2026-05／06 的一次性遷移。
+// 舊版這裡測的是「本機桌位已自訂 → 遷移跳過」與「本機桌位仍是出廠值 → 遷移照常執行」——後者正是
+// 地雷：全新裝置（空 localStorage）的本機桌位**一定**是 tableService 剛種下的出廠值，守門只看本機，
+// 遷移就把出廠 INITIAL_TABLES 以 merge-upsert 推上雲端、蓋掉店家排好的佈局（外場／訂位專員也會）。
+// 現在三支都已刪除，雲端是唯一真相；改為鎖住「全新裝置首拉以雲端為準、且不推任何桌位」。
+// 完整開機時序見 tests/integration/freshDeviceCloudPush.test.jsx。
+describe('一次性遷移已退役：全新裝置不得再把出廠桌位推上雲端', () => {
   const TABLES_KEY = 'chicken_tables_v3'
-  const LAYOUT_FLAG_KEY = 'chicken_table_layout_version'
-  const DIMS_FLAG_KEY = 'chicken_table_dims_version'
   const cloneDefaults = () => JSON.parse(JSON.stringify(INITIAL_TABLES))
 
-  function mockFetch() {
-    const calls = []
-    global.fetch = vi.fn(async (url, options = {}) => {
-      calls.push({ url, method: options.method })
-      if (options.method === 'GET') return { ok: true, json: async () => ({ ok: true, tables: [] }) }
-      return { ok: true, json: async () => ({ ok: true }) }
-    })
-    return calls
-  }
-
-  it('migrateTableLayoutOnce：本機桌位已偏離出廠預設（店家自訂過）→ 跳過遷移、完全不打雲端請求', async () => {
-    const custom = cloneDefaults()
-    custom[0] = { ...custom[0], x: custom[0].x + 999 } // 模擬店主在編輯器把第一張桌拖走
-    localStorage.setItem(TABLES_KEY, JSON.stringify(custom))
-    const calls = mockFetch()
-
-    const r = await migrateTableLayoutOnce()
-
-    expect(calls).toHaveLength(0) // 完全不該打任何雲端請求
-    expect(r).toMatchObject({ ok: true, skipped: true, reason: 'custom-layout-detected' })
-    expect(localStorage.getItem(LAYOUT_FLAG_KEY)).toBe('kingchicken-2026-06') // 旗標仍照樣標記完成
-    // 本機桌位維持店家自訂的樣子，不被打回預設
-    expect(JSON.parse(localStorage.getItem(TABLES_KEY))[0].x).toBe(custom[0].x)
+  it('cloudDataService 不再匯出三支一次性遷移（防止有人把它們接回開機流程）', () => {
+    expect(cloudModule.migrateLocalToCloudOnce).toBeUndefined()
+    expect(cloudModule.migrateTableLayoutOnce).toBeUndefined()
+    expect(cloudModule.migrateTableDimsOnce).toBeUndefined()
   })
 
-  it('migrateTableLayoutOnce：本機桌位仍是出廠預設值 → 遷移照常執行（不被新的守門誤擋）', async () => {
+  it('本機桌位是出廠預設、雲端是店家自訂座標 → 首拉後本機採雲端座標，且推送不帶任何桌位', async () => {
+    localStorage.setItem(TABLES_KEY, JSON.stringify(cloneDefaults())) // tableService 在新裝置上種的出廠桌
+    const custom = cloneDefaults().map(t => ({ ...t, x: t.x + 999 }))  // 店主在編輯器排過
+    const spy = vi.fn()
+    global.fetch = spy
+
+    applyCloudSnapshot({ tables: custom, settings: cloudSettingsPayload() })
+
+    expect(JSON.parse(localStorage.getItem(TABLES_KEY))).toEqual(custom)
+    const r = await pushChangedData()
+    expect(r.skipped).toBe(true)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('雲端 6P 尺寸與出廠不同（店主調過）→ 首拉後不會被打回出廠尺寸，也不推送', async () => {
     localStorage.setItem(TABLES_KEY, JSON.stringify(cloneDefaults()))
-    const calls = mockFetch()
-
-    const r = await migrateTableLayoutOnce()
-
-    expect(calls.length).toBeGreaterThan(0) // 照常打了雲端請求，代表沒被守門擋下
-    expect(r.reason).not.toBe('custom-layout-detected')
-    expect(localStorage.getItem(LAYOUT_FLAG_KEY)).toBe('kingchicken-2026-06')
-  })
-
-  it('migrateTableDimsOnce：本機桌位已偏離出廠預設（店家自訂過）→ 跳過遷移、完全不打雲端請求', async () => {
     const custom = cloneDefaults()
     const sixP = custom.find(t => t.capacity === 6)
-    custom[custom.indexOf(sixP)] = { ...sixP, w: sixP.w + 40, h: sixP.h + 40 } // 模擬店主自己調過尺寸
-    localStorage.setItem(TABLES_KEY, JSON.stringify(custom))
-    const calls = mockFetch()
+    custom[custom.indexOf(sixP)] = { ...sixP, w: sixP.w + 40, h: sixP.h + 40 }
+    const spy = vi.fn()
+    global.fetch = spy
 
-    const r = await migrateTableDimsOnce()
+    applyCloudSnapshot({ tables: custom, settings: cloudSettingsPayload() })
 
-    expect(calls).toHaveLength(0)
-    expect(r).toMatchObject({ ok: true, skipped: true, reason: 'custom-layout-detected' })
-    expect(localStorage.getItem(DIMS_FLAG_KEY)).toBe('wide-6p-2026-06')
-    // 本機桌位維持店家自訂的尺寸，不被打回預設
     const stored = JSON.parse(localStorage.getItem(TABLES_KEY))
     expect(stored.find(t => t.number === sixP.number).w).toBe(sixP.w + 40)
-  })
-
-  it('migrateTableDimsOnce：本機桌位仍是出廠預設值 → 遷移照常執行（不被新的守門誤擋）', async () => {
-    localStorage.setItem(TABLES_KEY, JSON.stringify(cloneDefaults()))
-    const calls = mockFetch()
-
-    const r = await migrateTableDimsOnce()
-
-    expect(r.reason).not.toBe('custom-layout-detected')
-    expect(localStorage.getItem(DIMS_FLAG_KEY)).toBe('wide-6p-2026-06')
+    const r = await pushChangedData()
+    expect(r.skipped).toBe(true)
+    expect(spy).not.toHaveBeenCalled()
   })
 })
 
