@@ -8,7 +8,7 @@ import * as groupService from './groupReservationService'
 import { getSettings } from './settingsService'
 import { statusZh, assignmentKind } from '../utils/tableStatus'
 import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
-import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow } from '../utils/capacity'
+import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes } from '../utils/capacity'
 import { buildGroupHolds } from '../utils/groupLive'
 import { todayStr, nowSlot, formatDate } from '../utils/timeSlots'
 
@@ -566,12 +566,39 @@ export function releaseOverriddenAssignment(bookingId) {
   return { ok: true, tableNumbers, released }
 }
 
+// 某張桌「此刻被別組佔著」會佔到什麼時候（還原預配前的撞桌判定用；分鐘，本地時間）。
+//   reserved（別筆鎖桌）→ 那筆的鎖桌區間（assignmentWindow 'hold'）
+//   dining → [現在, max(入座＋佔位, 現在＋清桌緩衝))：超時未走的也還佔著
+//   cleaning → [現在, 現在＋清桌緩衝)
+//   其他（團體用餐、停用等查不到時間）→ 保守視為 [現在, 現在＋佔位)；blocked 無結束時間 → 到當日結束
+function occupiedWindow(table, now, settings) {
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  const occ = occupancyMinutes(settings)
+  const buffer = Number(settings.cleanupBufferMin) || 10   // 與 occupancyMinutes 同一個預設
+  if (table.status === 'reserved' && table.currentBookingId) {
+    const holder = bookingService.getById(table.currentBookingId)
+    const w = holder?.timeSlot ? assignmentWindow({ mode: 'hold', timeSlot: holder.timeSlot, date: holder.date, now }, settings) : null
+    if (w) return w
+  }
+  if (table.status === 'dining' && table.seatedAt) {
+    const s = new Date(table.seatedAt)
+    const seatedMin = formatDate(s) === formatDate(now) ? s.getHours() * 60 + s.getMinutes() : nowMin
+    return { start: nowMin, end: Math.max(seatedMin + occ, nowMin + buffer) }
+  }
+  if (table.status === 'cleaning') return { start: nowMin, end: nowMin + buffer }
+  if (table.status === 'blocked') return { start: nowMin, end: 48 * 60 }
+  return { start: nowMin, end: nowMin + occ }
+}
+
 // releaseOverriddenAssignment 的反向（帶位／指派按「復原」時把被解除的預配還回去）。
 // snapshot＝release 的回傳值加上 bookingId：{ bookingId, tableNumbers, released }。
 // 與其他復原同口徑：
 //   - 只在那筆「仍是待到、且仍未配桌」時才寫回桌號（期間若已被重新指派別桌，不覆寫別人的結果）
-//   - 原本鎖著（released）的桌只在「仍是空桌」時才重新鎖回；被別組佔走的不搶，維持預配
-export function restoreOverriddenAssignment({ bookingId, tableNumbers = [], released = [] } = {}) {
+//   - 寫回前逐桌檢查：此刻被別組鎖住／入座／待清、且佔用區間與這筆的用餐區間重疊 → 不寫回，
+//     回 code:'table-taken' 與原因（寫回只會讓他到店時被 S1 擋下，toast 卻說已還原）
+//   - 原本鎖著（released）的桌只在「仍是空桌」時才重新鎖回；被別組佔走的不搶，維持預配（notRelocked 回報）
+// now 可注入（測試固定時間）。
+export function restoreOverriddenAssignment({ bookingId, tableNumbers = [], released = [] } = {}, { now = new Date() } = {}) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
   if (!['confirmed', 'pending'].includes(booking.status)) {
@@ -580,6 +607,19 @@ export function restoreOverriddenAssignment({ bookingId, tableNumbers = [], rele
   if (bookingTableNumbers(booking).length) return { ok: false, error: '這筆訂位已重新配桌，未覆寫' }
   const nums = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
   if (!nums.length) return { ok: false, error: '沒有可還原的桌號' }
+  const settings = getSettings()
+  for (const n of nums) {
+    const t = tableService.getByNumber(n)
+    if (!t || t.status === 'vacant' || heldBy(t, bookingId)) continue
+    if (bookingOverlapsWindow(booking, occupiedWindow(t, now, settings), settings)) {
+      const who = ['dining', 'reserved'].includes(t.status) ? occupantName(t) : null
+      return {
+        ok: false,
+        code: 'table-taken',
+        error: who ? `${n} 目前由 ${who} 使用` : `${n} 目前${statusZh(t.status)}`,
+      }
+    }
+  }
   bookingService.assignTables(bookingId, nums)
   const relocked = []
   for (const n of (released || []).map(String)) {
@@ -589,7 +629,8 @@ export function restoreOverriddenAssignment({ bookingId, tableNumbers = [], rele
       relocked.push(n)
     }
   }
-  return { ok: true, tableNumbers: nums, relocked }
+  const notRelocked = (released || []).map(String).filter(n => !relocked.includes(n))
+  return { ok: true, tableNumbers: nums, relocked, notRelocked }
 }
 
 // 現場指派（assignBookingToTable）的復原：只在「這筆仍是待到、仍指向這張桌、沒有額外桌」時解除，

@@ -33,23 +33,30 @@ export function releaseOverlappingPreassigns(conflicts, { releaseOverriddenAssig
   return snapshots
 }
 
-// 復原時把被解除的預配寫回（context.restoreOverriddenAssignment 只在那筆仍未配桌時才寫）。
-// 回傳 { restored, failed }（各為快照陣列），由呼叫端決定怎麼跟店員講。
+// 復原時把被解除的預配寫回（context.restoreOverriddenAssignment：那筆仍未配桌、且桌此刻沒被別組
+// 佔在重疊時段，才寫回）。回傳 { restored, failed }，每筆帶 service 的結果（relocked／error），
+// 由 restoreNote 據實告訴店員。
 export function restoreReleasedPreassigns(snapshots, { restoreOverriddenAssignment }) {
   const restored = []
   const failed = []
   ;(snapshots || []).forEach(s => {
     const r = restoreOverriddenAssignment(s)
-    if (r?.ok) restored.push(s)
-    else failed.push(s)
+    if (r?.ok) restored.push({ ...s, notRelocked: r.notRelocked || [] })
+    else failed.push({ ...s, error: r?.error || '' })
   })
   return { restored, failed }
 }
 
-// 復原結果的附註句（空字串＝沒有要還原的預配）
+// 復原結果的附註句（空字串＝沒有要還原的預配）。據實：還原不了的講原因，
+// 例「L 的預配 105 無法還原：105 目前由 T3 使用，請重新指派」；原本鎖著的桌沒鎖回也講。
 export function restoreNote({ restored = [], failed = [] } = {}) {
   const parts = []
-  if (restored.length) parts.push(`${restored.map(s => `${s.name} 的預配 ${s.tableNumbers.join(' + ')}`).join('、')} 已還原`)
-  if (failed.length) parts.push(`${failed.map(s => s.name).join('、')} 已重新配桌或狀態已變，預配未還原`)
+  restored.forEach(s => {
+    const kept = s.notRelocked?.length ? `（${s.notRelocked.join('、')} 已被佔用，未鎖回、維持預配）` : ''
+    parts.push(`${s.name} 的預配 ${s.tableNumbers.join(' + ')} 已還原${kept}`)
+  })
+  failed.forEach(s => {
+    parts.push(`${s.name} 的預配 ${s.tableNumbers.join(' + ')} 無法還原${s.error ? `：${s.error}` : ''}，請重新指派`)
+  })
   return parts.length ? `（${parts.join('；')}）` : ''
 }

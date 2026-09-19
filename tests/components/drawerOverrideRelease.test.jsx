@@ -31,6 +31,8 @@ function setCtx(bookings) {
     seatBooking: vi.fn(() => ({ ok: true })),
     seatWaitlist: vi.fn(() => ({ ok: true })),
     releaseOverriddenAssignment: vi.fn(() => ({ ok: true, tableNumbers: ['105'], released: [] })),
+    undoAssignBooking: vi.fn(() => ({ ok: true })),
+    restoreOverriddenAssignment: vi.fn(() => ({ ok: true, tableNumbers: ['105'], relocked: [], notRelocked: [] })),
     blockTable: vi.fn(), unblockTable: vi.fn(), reseatBookingTables: vi.fn(), checkoutBooking: vi.fn(),
     finalizeBooking: vi.fn(), clearTable: vi.fn(), undoClearTable: vi.fn(), cancelBooking: vi.fn(),
     undoCancelBooking: vi.fn(), setTableOutage: vi.fn(), clearTableOutage: vi.fn(),
@@ -96,5 +98,59 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
     act(() => { btn('入座').click() })
     expect(ctx.seatWaitlist).toHaveBeenCalledWith('W9', '105')
     expect(ctx.releaseOverriddenAssignment).toHaveBeenCalledWith('YU')
+  })
+})
+
+// 重驗 verify-2 問題 A：抽屜提示用「現在入座」算，但「預訂」是「現在就鎖桌」——兩者結果可能相反。
+// 修正後：提示分開講入座／預訂；每顆「預訂」鈕在按下前就標明會不會解除；解除後給「↩ 復原」。
+describe('抽屜「入座」與「預訂」分開據實（12:00，P 18:00 預配 105）', () => {
+  let container, root
+  const NOON = new Date(2026, 8, 19, 12, 0)
+  const P = { ...yuAt('18:00'), id: 'P', name: 'P' }
+  const Q = { ...CHEN, id: 'Q', name: 'Q', timeSlot: '17:30' }
+  const Q2 = { ...CHEN, id: 'Q2', name: 'Q2', timeSlot: '12:30' }
+  const rowOf = (name) => [...container.querySelectorAll('.rounded-lg.p-2')]
+    .find(r => r.querySelector('span.truncate')?.textContent === name)
+  const rowBtn = (name, label) => [...rowOf(name).querySelectorAll('button')].find(b => b.textContent.startsWith(label))
+
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOON); vi.clearAllMocks() })
+  afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
+  const mountDrawer = () => {
+    setCtx([P, Q, Q2])
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root.render(<TableDrawer table={T105} booking={null} preassign={P} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} />) })
+  }
+
+  it('提示分開講：入座→會保留；預訂→看鈕上的標示。Q 17:30 的「預訂」事先標明「將解除 P 18:00 的預配」，「入座」不標', () => {
+    mountDrawer()
+    expect(container.textContent).toContain('入座：現在讓別組入座不會撞到其用餐時段，這筆預配會保留')
+    expect(container.textContent).toContain('預訂：會從現在鎖桌到那組用完餐')
+    expect(rowBtn('Q', '預訂').textContent).toBe('預訂（將解除 P 18:00 的預配）')
+    expect(rowBtn('Q', '入座').textContent).toBe('入座')
+    expect(rowBtn('Q2', '預訂').textContent).toBe('預訂')            // 12:30 鎖到 14:10，不撞 18:00
+  })
+
+  it('按標了「將解除」的預訂 → 真的解除 P，toast 帶「↩ 復原」：撤回預訂並寫回 P 的預配', () => {
+    mountDrawer()
+    act(() => { rowBtn('Q', '預訂').click() })
+    expect(ctx.assignBookingToTable).toHaveBeenCalledWith('Q', '105')
+    expect(ctx.releaseOverriddenAssignment).toHaveBeenCalledWith('P')
+    const [msg, action] = toast.action.mock.calls.at(-1)
+    expect(msg).toContain('Q 已預訂 105')
+    expect(action.label).toBe('↩ 復原')
+    action.onClick()
+    expect(ctx.undoAssignBooking).toHaveBeenCalledWith('Q', '105')
+    expect(ctx.restoreOverriddenAssignment).toHaveBeenCalledWith(expect.objectContaining({ bookingId: 'P', tableNumbers: ['105'] }))
+    expect(toast.info).toHaveBeenLastCalledWith('已復原：Q 回到未配桌（P 的預配 105 已還原）')
+  })
+
+  it('按沒標示的預訂（Q2）→ 不解除 P、一般成功 toast', () => {
+    mountDrawer()
+    act(() => { rowBtn('Q2', '預訂').click() })
+    expect(ctx.assignBookingToTable).toHaveBeenCalledWith('Q2', '105')
+    expect(ctx.releaseOverriddenAssignment).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith('Q2 已預訂 105（12:30）')
   })
 })

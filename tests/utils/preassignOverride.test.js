@@ -82,3 +82,20 @@ describe('解除 → 復原（真的 service）', () => {
     expect(restoreNote(res)).toBe('（午客 的預配 105 已還原）')
   })
 })
+
+describe('restoreNote：據實', () => {
+  it('還原不了 → 「L 的預配 105 無法還原：105 目前由 T3 使用，請重新指派」', () => {
+    expect(restoreNote({ failed: [{ name: 'L', tableNumbers: ['105'], error: '105 目前由 T3 使用' }] }))
+      .toBe('（L 的預配 105 無法還原：105 目前由 T3 使用，請重新指派）')
+  })
+  it('還原了但原本鎖著的桌被佔、沒鎖回 → 講清楚維持預配', () => {
+    expect(restoreNote({ restored: [{ name: '大組', tableNumbers: ['101', '108'], notRelocked: ['108'] }] }))
+      .toBe('（大組 的預配 101 + 108 已還原（108 已被佔用，未鎖回、維持預配））')
+  })
+  it('restoreReleasedPreassigns 把 service 的錯誤帶進 failed', () => {
+    const res = restoreReleasedPreassigns([{ bookingId: 'L', name: 'L', tableNumbers: ['105'] }],
+      { restoreOverriddenAssignment: () => ({ ok: false, code: 'table-taken', error: '105 目前由 T3 使用' }) })
+    expect(res.failed[0].error).toBe('105 目前由 T3 使用')
+    expect(restoreNote(res)).toContain('無法還原：105 目前由 T3 使用，請重新指派')
+  })
+})

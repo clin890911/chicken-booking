@@ -2123,7 +2123,7 @@ describe('覆蓋預配的復原：restoreOverriddenAssignment / undoAssignBookin
     expect(tableService.getByNumber('101').status).toBe('vacant')
     expect(bookingService.getById(chen.id).assignedTableId).toBeNull()
     const r = seating.restoreOverriddenAssignment(snap)
-    expect(r).toEqual({ ok: true, tableNumbers: ['101'], relocked: [] })
+    expect(r).toEqual({ ok: true, tableNumbers: ['101'], relocked: [], notRelocked: [] })
     expect(bookingService.getById(yu.id).assignedTableId).toBe('101')
     expect(tableService.getByNumber('101').status).toBe('vacant')   // 預配→預配，不鎖桌
   })
@@ -2147,6 +2147,7 @@ describe('覆蓋預配的復原：restoreOverriddenAssignment / undoAssignBookin
     const r = seating.restoreOverriddenAssignment(snap)
     expect(r.ok).toBe(true)
     expect(r.relocked).toEqual([])
+    expect(r.notRelocked).toEqual(['108'])
     expect(tableService.getByNumber('108').status).toBe('dining')
     expect(bookingService.getById(big.id).assignedTableId).toBe('101')
   })
@@ -2157,5 +2158,41 @@ describe('覆蓋預配的復原：restoreOverriddenAssignment / undoAssignBookin
     seating.seatBooking(b.id)
     expect(seating.undoAssignBooking(b.id, '101').ok).toBe(false)
     expect(tableService.getByNumber('101').status).toBe('dining')
+  })
+})
+
+// 重驗 verify-2 問題 B：復原寫回預配前，桌此刻被別組佔在重疊時段 → 不寫回，據實回報原因
+describe('restoreOverriddenAssignment：桌已被第三組佔在重疊時段 → 不寫回', () => {
+  const at = (h, m = 0) => new Date(2026, 5, 15, h, m)
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(at(12, 20))
+    tableService.bulkWrite([mkTable('105', 4, '1F'), mkTable('106', 4, '1F')])
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('12:20 W 帶位 105 解除 L(12:30) → W 換到 106、T3 坐上 105 → 按 W 的復原：L 不寫回，錯誤指名 T3', () => {
+    const L = mkBooking({ name: 'L', phone: '0911000011', date: '2026-06-15', timeSlot: '12:30' })
+    bookingService.assignTable(L.id, '105')
+    const w = seating.walkInSeat('105', { name: 'W', guests: 2 })
+    const snap = { bookingId: L.id, ...seating.releaseOverriddenAssignment(L.id) }
+    expect(seating.moveTable(w.booking.id, '106').ok).toBe(true)
+    expect(seating.walkInSeat('105', { name: 'T3', guests: 2 }).ok).toBe(true)
+
+    seating.cancelBooking(w.booking.id)                            // 帶位「復原」＝取消 W
+    const r = seating.restoreOverriddenAssignment(snap, { now: at(12, 21) })
+    expect(r).toEqual({ ok: false, code: 'table-taken', error: '105 目前由 T3 使用' })
+    expect(bookingService.getById(L.id).assignedTableId).toBeNull()
+    expect(tableService.getByNumber('105').status).toBe('dining')
+  })
+
+  it('桌被佔但與 L 的用餐區間不重疊（L 在 20:30）→ 照常寫回預配', () => {
+    const L = mkBooking({ name: 'L', phone: '0911000011', date: '2026-06-15', timeSlot: '20:30' })
+    bookingService.assignTable(L.id, '105')
+    const snap = { bookingId: L.id, ...seating.releaseOverriddenAssignment(L.id) }
+    seating.walkInSeat('105', { name: 'T3', guests: 2 })          // 12:20 入座，約 14:00 用畢
+    const r = seating.restoreOverriddenAssignment(snap, { now: at(12, 21) })
+    expect(r.ok).toBe(true)
+    expect(bookingService.getById(L.id).assignedTableId).toBe('105')
   })
 })

@@ -4,7 +4,7 @@ import { useToast } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { fmtOverdueMin } from '../../../utils/bookingPulse'
 import { preassignConflicts, assignmentWindow } from '../../../utils/capacity'
-import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
+import { releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } from '../../../utils/preassignOverride'
 
 // 點空桌時顯示「可入座」候選名單
 // - 待指派訂位（今日 confirmed + assignedTableId=null + 人數 ≤ 桌容量）
@@ -14,7 +14,10 @@ import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
 //   - 訂位列：[入座]（指派+客人到了）/ [預訂]（只指派、status reserved）
 //   - 候位列：[入座]
 export default function TableCandidatePanel({ table, onPicked }) {
-  const { bookings, waitlist, settings, assignBookingToTable, seatBooking, seatWaitlist, releaseOverriddenAssignment } = useBooking()
+  const {
+    bookings, waitlist, settings, assignBookingToTable, seatBooking, seatWaitlist,
+    releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
+  } = useBooking()
   const toast = useToast()
 
   const today = todayStr()
@@ -76,6 +79,14 @@ export default function TableCandidatePanel({ table, onPicked }) {
     window: assignmentWindow({ mode, timeSlot: booking?.timeSlot, date: today }, settings),
   }, settings)
   const releaseOpts = { releaseOverriddenAssignment, toast }
+  // 按下前就講清楚：這顆鈕會解除誰的預配（入座＝現在入座區間、預訂＝現在就鎖桌到那組用完），
+  // 空字串＝不會解除任何人。按鈕文案直接帶出，店員不必先按才知道（重驗 verify-2 問題 A）。
+  const releaseText = (conflicts) => {
+    const rel = conflicts.filter(c => c.willRelease)
+    return rel.length
+      ? `將解除 ${rel.map(c => `${c.booking.name}${c.booking.timeSlot ? ` ${c.booking.timeSlot}` : ''}`).join('、')} 的預配`
+      : ''
+  }
 
   // === 動作 ===
   const assignAndSeat = (booking) => {
@@ -97,8 +108,20 @@ export default function TableCandidatePanel({ table, onPicked }) {
     const overridden = conflictsFor('hold', booking)
     const r = assignBookingToTable(booking.id, table.number)
     if (!r.ok) return toast.error('指派失敗：' + r.error)
-    releaseOverlappingPreassigns(overridden, releaseOpts)
-    toast.success(`${booking.name} 已預訂 ${table.number}（${booking.timeSlot}）`)
+    const released = releaseOverlappingPreassigns(overridden, releaseOpts)
+    const msg = `${booking.name} 已預訂 ${table.number}（${booking.timeSlot}）`
+    if (released.length) {
+      // 解除了別人的預配 → 給復原（與現場指派模式同一套：撤回預訂只清不搶＋把預配寫回）
+      const tableNumber = table.number
+      toast.action(msg, { label: '↩ 復原', onClick: () => {
+        const u = undoAssignBooking(booking.id, tableNumber)
+        if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+        const note = restoreNote(restoreReleasedPreassigns(released, { restoreOverriddenAssignment }))
+        toast.info(`已復原：${booking.name} 回到未配桌${note}`)
+      } }, { duration: 8000 })
+    } else {
+      toast.success(msg)
+    }
     onPicked?.()
   }
 
@@ -148,6 +171,8 @@ export default function TableCandidatePanel({ table, onPicked }) {
   const renderBookingRow = (b, { arrived } = {}) => {
     const imminent = !arrived && isImminent(b.timeSlot)
     const over = slotOverdueMin(b.timeSlot)
+    const seatRel = releaseText(conflictsFor('now', b))
+    const holdRel = releaseText(conflictsFor('hold', b))
     return (
       <div key={b.id} className={`bg-white rounded-lg p-2 border-2 ${arrived ? 'border-chicken-red' : imminent ? 'border-chicken-yellow' : 'border-chicken-brown/10'}`}>
         <div className="flex items-center gap-2 flex-wrap">
@@ -165,13 +190,15 @@ export default function TableCandidatePanel({ table, onPicked }) {
             onClick={() => assignAndSeat(b)}
             className="flex-1 min-h-[44px] text-[11px] py-1.5 bg-chicken-green text-white rounded font-bold hover:opacity-90"
           >
-            入座
+            入座{seatRel ? <span className="block text-[10px] font-bold text-amber-100">（{seatRel}）</span> : null}
           </button>
           <button
             onClick={() => assignOnly(b)}
-            className="flex-1 min-h-[44px] text-[11px] py-1.5 bg-white border border-chicken-brown/15 text-chicken-brown rounded font-bold hover:border-chicken-yellow"
+            className={`flex-1 min-h-[44px] text-[11px] py-1.5 rounded font-bold border ${holdRel
+              ? 'bg-amber-50 border-amber-400 text-amber-900 hover:border-amber-500'
+              : 'bg-white border-chicken-brown/15 text-chicken-brown hover:border-chicken-yellow'}`}
           >
-            預訂
+            預訂{holdRel ? <span className="block text-[10px] font-bold">（{holdRel}）</span> : null}
           </button>
         </div>
       </div>
@@ -179,6 +206,7 @@ export default function TableCandidatePanel({ table, onPicked }) {
   }
 
   // 候位列
+  const waitRel = releaseText(conflictsFor('now', null))
   const renderWaitRow = (w) => (
     <div key={w.id} className="bg-white rounded-lg p-2 border border-chicken-brown/10">
       <div className="flex items-center gap-2 flex-wrap">
@@ -194,7 +222,7 @@ export default function TableCandidatePanel({ table, onPicked }) {
         onClick={() => seatWait(w)}
         className="w-full min-h-[44px] mt-1.5 text-[11px] py-1.5 bg-chicken-green text-white rounded font-bold hover:opacity-90"
       >
-        入座
+        入座{waitRel ? <span className="block text-[10px] font-bold text-amber-100">（{waitRel}）</span> : null}
       </button>
     </div>
   )

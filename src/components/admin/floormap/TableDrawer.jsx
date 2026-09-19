@@ -413,10 +413,15 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           <div className="px-3 py-2 bg-blue-50 border border-dashed border-blue-300 rounded-lg text-xs">
             <span className="font-bold text-blue-800">已預配：</span>
             <span className="text-blue-800/90">排位規劃已預先配給 {preassign.name}（{preassign.guests} 位{preassign.timeSlot ? ` · ${preassign.timeSlot}` : ''}）</span>
+            {/* 依動作分開講（重驗 verify-2 問題 A）：入座＝從現在坐到用完；預訂＝從現在鎖桌到「那組」用完，
+                結果取決於是哪一組 → 由候選名單每顆「預訂」鈕自己標明會不會解除，不在這裡替它下結論。 */}
             <p className="text-[11px] text-blue-800/70 mt-0.5">
               {nowConflicts().some(c => c.booking.id === preassign.id && c.willRelease)
-                ? '桌況仍是空桌：現在讓別組入座會與其用餐時段重疊，入座後這筆預配將解除（需重新指派）。'
-                : '桌況仍是空桌：現在讓別組入座不會撞到其用餐時段，這筆預配會保留。'}
+                ? '入座：現在讓別組入座會與其用餐時段重疊，入座後這筆預配將解除（需重新指派）。'
+                : '入座：現在讓別組入座不會撞到其用餐時段，這筆預配會保留。'}
+            </p>
+            <p className="text-[11px] text-blue-800/70 mt-0.5">
+              預訂：會從現在鎖桌到那組用完餐；若會撞到這筆預配，下方候選的「預訂」鈕會標明「將解除」。
             </p>
             {canEdit && (
               <button
