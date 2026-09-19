@@ -446,6 +446,17 @@ export function BookingProvider({ children }) {
     }
     return r
   }
+  // 預配大組到店：整組（主桌＋額外桌）都空才一起入座（見 seatingService.seatBookingAllTables）
+  const seatBookingAllTables = (bookingId) => {
+    const r = seatingService.seatBookingAllTables(bookingId)
+    refresh()
+    syncCloudSoon()
+    if (r.ok) {
+      const b = bookingService.getById(bookingId)
+      if (b) safeNotify(() => tg.notifyBookingArrived(b))
+    }
+    return r
+  }
   // 報到列預配入座的 5 秒復原：桌回空桌、訂位回待到且保留預配（見 seatingService.undoSeatPreassigned）
   const undoSeatPreassigned = (bookingId, tableNumber) => {
     const r = seatingService.undoSeatPreassigned(bookingId, tableNumber)
@@ -741,7 +752,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

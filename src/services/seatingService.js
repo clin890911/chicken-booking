@@ -137,23 +137,49 @@ export function seatBooking(bookingId) {
   return { ok: true, tableNumber: booking.assignedTableId }
 }
 
+// === 預配的大組（主桌＋額外桌）到店：整組一起入座 ===
+// seatBooking 只把主桌設成用餐中（鎖桌型的大組額外桌早已 reserved）；預配型的額外桌此刻是空桌，
+// 只坐主桌會讓額外桌在桌況圖上仍是空桌、被別組帶走。這裡要求每張桌「今日可用、且空桌或由本訂位持有」，
+// 全部符合才一起入座（booking → arrived、每張桌 dining）；任一張被佔／停用就整組不動，回 code:'table-occupied'。
+// 單桌訂位直接走 seatBooking（同一套守門）。
+export function seatBookingAllTables(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  const nums = bookingTableNumbers(booking)
+  if (nums.length <= 1) return seatBooking(bookingId)
+  for (const n of nums) {
+    const t = tableService.getByNumber(n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    if (!tableUsableToday(t)) return { ok: false, error: `${n} 停用/維修中，請先改派其他桌再入座` }
+    if (t.status !== 'vacant' && !heldBy(t, bookingId)) {
+      return { ok: false, code: 'table-occupied', error: occupiedError(n, t) }
+    }
+  }
+  bookingService.setStatus(bookingId, 'arrived')
+  nums.forEach(n => tableService.seatTable(n, bookingId))
+  return { ok: true, tableNumber: nums[0], tableNumbers: nums }
+}
+
 // === 報到列「到了」入座「預配」訂位後的 5 秒復原 ===
 // 預配入座前桌是空桌（或別組剛離開後的空桌）→ 復原要把桌倒回空桌、訂位回待到，且保留預配
-// （assignedTableId 不動：客人其實還沒到，預配要留著）。不能沿用鎖桌那條把桌寫回 reserved——
-// 那會把原本沒鎖的桌憑空鎖住。
-// 復原鐵律：只在「這筆仍是用餐中、仍指向這張桌、桌仍由這筆用餐中」時才倒；期間被改桌／清桌／
-// 別組接手就不動（不清別人的桌、不搶桌）。
+// （assignedTableId／extraTableIds 不動：客人其實還沒到，預配要留著）。不能沿用鎖桌那條把桌寫回
+// reserved——那會把原本沒鎖的桌憑空鎖住。大組（主桌＋額外桌）整組一起倒。
+// 復原鐵律：只在「這筆仍是用餐中、仍指向這張主桌、每張桌仍由這筆用餐中」時才倒；期間被改桌／清桌／
+// 別組接手就整組不動（不清別人的桌、不搶桌）。
 export function undoSeatPreassigned(bookingId, tableNumber) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
-  const t = tableService.getByNumber(tableNumber)
-  if (booking.status !== 'arrived' || String(booking.assignedTableId) !== String(tableNumber)
-    || !t || t.status !== 'dining' || !heldBy(t, bookingId)) {
+  const nums = bookingTableNumbers(booking)
+  const stillHeld = nums.length > 0 && nums.every(n => {
+    const t = tableService.getByNumber(n)
+    return t && t.status === 'dining' && heldBy(t, bookingId)
+  })
+  if (booking.status !== 'arrived' || String(booking.assignedTableId) !== String(tableNumber) || !stillHeld) {
     return { ok: false, error: '這筆訂位或桌位已被更動，無法復原' }
   }
-  bookingService.setStatus(bookingId, 'confirmed')   // 會清掉 actualArrivalTime；assignedTableId 保留
-  tableService.clearTable(tableNumber)
-  return { ok: true }
+  bookingService.setStatus(bookingId, 'confirmed')   // 會清掉 actualArrivalTime；桌號（預配）保留
+  nums.forEach(n => tableService.clearTable(n))
+  return { ok: true, tableNumbers: nums }
 }
 
 // === 已離席 → 等待清桌 ===

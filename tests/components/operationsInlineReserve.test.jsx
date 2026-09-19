@@ -36,7 +36,10 @@ const ctx = {
   preassignableTables: (g, o) => seating.preassignableTables(g, o),
   assignBookingTablesMulti: vi.fn(), seatWaitlist: vi.fn(), seatWaitlistMulti: vi.fn(), walkInSeat: vi.fn(),
   walkInSeatMulti: vi.fn(), moveTable: vi.fn(), reseatGroupBatchTable: vi.fn(), cancelBooking: vi.fn(),
-  seatBooking: vi.fn(), setStatus: vi.fn(), setTableStatus: vi.fn(), releaseOverriddenAssignment: vi.fn(),
+  seatBooking: vi.fn((id) => seating.seatBooking(id)),
+  seatBookingAllTables: vi.fn((id) => seating.seatBookingAllTables(id)),
+  undoSeatPreassigned: vi.fn((id, n) => seating.undoSeatPreassigned(id, n)),
+  setStatus: vi.fn(), setTableStatus: vi.fn(), releaseOverriddenAssignment: vi.fn(),
   restoreOverriddenAssignment: vi.fn(), undoAssignBooking: vi.fn(), completeWithoutSeating: vi.fn(),
   undoCompleteWithoutSeating: vi.fn(), addWaitlist: vi.fn(), callWaitlist: vi.fn(), leaveWaitlist: vi.fn(),
   saveFloorPlan: vi.fn(), flushCloudNow: vi.fn(),
@@ -152,6 +155,42 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
     expect(tableService.getByNumber('105')).toMatchObject({ status: 'reserved', currentBookingId: b.id })
   })
 
+  // 驗收 v4-4：面板開著跨過時段 → 所選時段已過就自動改選目前時段並說明；存檔不會存成已過時段
+  it('16:55 開面板（預設 17:00）→ 開著到 17:31：自動改選 17:30 並說明，存檔存 17:30', () => {
+    vi.setSystemTime(new Date(2026, 8, 19, 16, 55))
+    openPanel()
+    expect(byLabel('17:00').getAttribute('aria-pressed')).toBe('true')
+    act(() => { vi.advanceTimersByTime(36 * 60 * 1000) })
+    expect(byLabel('17:30').getAttribute('aria-pressed')).toBe('true')
+    expect(panel().querySelector('[data-testid="slot-notice"]').textContent).toBe('17:00 已經過了，已改選目前時段 17:30')
+    click(byLabel('王'))
+    click(byLabel('來源：現場'))
+    const btn = byStart('確認新增')
+    expect(btn.textContent).toContain('17:30')
+    click(btn)
+    expect(bookingService.listAll().find(x => x.name === '王先生').timeSlot).toBe('17:30')
+  })
+
+  // 驗收 v4-5：面板開著時，先前 toast 上的「改桌」不可進模式／卸載面板
+  it('面板開著時按先前 toast 的「改桌」→ 不進換桌模式、面板留著，提示先完成或返回', () => {
+    vi.setSystemTime(new Date(2026, 8, 19, 11, 40))
+    const occ = bookingService.create({ name: '別組', phone: '', guests: 2, date: '2026-09-19', timeSlot: '11:00', source: 'walkin', status: 'arrived' })
+    tableService.bulkWrite([mkTable('105', 4, { status: 'dining', currentBookingId: occ.id, seatedAt: new Date(2026, 8, 19, 11, 5).toISOString() }), mkTable('106')])
+    const yu = bookingService.create({ name: '余先生', phone: '0911', guests: 2, date: '2026-09-19', timeSlot: '12:00', source: 'phone', status: 'confirmed' })
+    bookingService.assignTable(yu.id, '105')
+    render()
+    click(container.querySelector('button[aria-label="余先生 到了，入座 105"]'))
+    const [msg, action] = toast.action.mock.calls.at(-1)
+    expect(msg).toContain('入座失敗：105 目前由 別組 使用')
+    expect(action.label).toBe('改桌')
+    click(byStart('今日訂位'))
+    click(byText('＋ 新增今日訂位'))
+    act(() => { action.onClick() })
+    expect(toast.info).toHaveBeenCalledWith('新增訂位中，請先完成或返回')
+    expect(panel()).toBeTruthy()
+    expect(container.textContent).not.toContain('換桌：余先生')
+  })
+
   it('返回：沒填東西直接回今日訂位籤', () => {
     openPanel()
     click(byText('返回今日訂位'))
@@ -168,6 +207,7 @@ describe('saveQuickReserve（存檔語意）', () => {
     preassignBookingTable: vi.fn(() => ({ id: 'B1' })),
     toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), action: vi.fn() },
     onAssignLater: vi.fn(),
+    now: new Date(2026, 8, 19, 9, 0),     // 固定時間：18:00 未過
     ...over,
   })
   const payload = { name: '王先生', phone: '0912', source: 'phone', guests: 2, timeSlot: '18:00', notes: {} }
@@ -198,6 +238,14 @@ describe('saveQuickReserve（存檔語意）', () => {
     expect(fail.toast.success).toHaveBeenCalledWith('已新增 王先生 18:00')
   })
 
+  it('時段已過（早於目前這個 30 分時段）→ 不建單；目前時段本身可以', () => {
+    const d = mk({ now: new Date(2026, 8, 19, 17, 31) })
+    expect(saveQuickReserve({ ...payload, timeSlot: '17:00' }, d)).toEqual({ ok: false })
+    expect(d.toast.error).toHaveBeenCalledWith('17:00 已經過了，請改選目前或之後的時段')
+    expect(d.addBooking).not.toHaveBeenCalled()
+    expect(saveQuickReserve({ ...payload, timeSlot: '17:30' }, d).ok).toBe(true)
+  })
+
   it('建單失敗（例外）→ ok:false、toast.error，不碰桌', () => {
     const d = mk({ addBooking: vi.fn(() => { throw new Error('儲存空間不足') }) })
     expect(saveQuickReserve(payload, d)).toEqual({ ok: false })
@@ -211,5 +259,39 @@ describe('saveQuickReserve（存檔語意）', () => {
     expect(d.preassignBookingTable).not.toHaveBeenCalled()
     expect(d.assignBookingToTable).not.toHaveBeenCalled()
     expect(d.toast.info).toHaveBeenCalledWith('大組請接近時段再到今日訂位指派併桌', { duration: 8000 })
+  })
+})
+
+// 驗收 v4-1 重現：105 被今日團體 12:30 梯圈走、12:00 訂位預配 105、11:50 在報到列按「到了」→ 必須先確認
+describe('報到列：預配訂位遇團保先確認（掛整個 OperationsView）', () => {
+  let container, root
+  afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
+
+  it('取消 → 不入座；確認 → 入座', async () => {
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 8, 19, 11, 50))
+    tableService.bulkWrite([mkTable('105'), mkTable('106')])
+    groupService.create({ date: '2026-09-19', status: 'confirmed', agencyName: '甲旅行社',
+      batches: [{ label: '第一梯', timeSlot: '12:30', tableNumbers: ['105'], guests: 4 }] })
+    const b = bookingService.create({ name: '余先生', phone: '0911', guests: 2, date: '2026-09-19', timeSlot: '12:00', source: 'phone', status: 'confirmed' })
+    bookingService.assignTable(b.id, '105')
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root.render(<OperationsView onAddBooking={vi.fn()} />) })
+    const arrive = () => container.querySelector('button[aria-label="余先生 到了，入座 105"]')
+
+    confirmMock.mockResolvedValueOnce(false)
+    await act(async () => { arrive().dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(confirmMock).toHaveBeenCalledWith(expect.stringContaining('105 為今日團體「甲旅行社」預留（第一梯 12:30）'),
+      expect.objectContaining({ title: '桌位有預留' }))
+    expect(tableService.getByNumber('105').status).toBe('vacant')
+    expect(bookingService.getById(b.id).status).toBe('confirmed')
+
+    confirmMock.mockResolvedValueOnce(true)
+    await act(async () => { arrive().dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(tableService.getByNumber('105')).toMatchObject({ status: 'dining', currentBookingId: b.id })
+    expect(bookingService.getById(b.id).status).toBe('arrived')
   })
 })

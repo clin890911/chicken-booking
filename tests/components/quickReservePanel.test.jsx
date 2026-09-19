@@ -20,7 +20,7 @@ vi.mock('../../src/components/ui/Toast', () => ({ useConfirm: () => confirmMock,
 vi.mock('../../src/services/customerService', () => ({ getByPhone: () => null, search: () => [] }))
 vi.mock('../../src/services/bookingService', () => ({ getNoshowCount: () => 0 }))
 
-const { default: QuickReservePanel, nextBookableSlot } = await import('../../src/components/admin/ops/QuickReservePanel')
+const { default: QuickReservePanel, nextBookableSlot, pastSlotFix } = await import('../../src/components/admin/ops/QuickReservePanel')
 
 const NOW = new Date(2026, 8, 19, 13, 10)
 const TODAY = '2026-09-19'
@@ -36,6 +36,19 @@ describe('nextBookableSlot（預設時段＝下一個還沒開始、可訂的時
     expect(nextBookableSlot({ ...base, settings: closed, now: NOW })).toBe('14:00')
     expect(nextBookableSlot({ ...base, guests: 15, now: NOW })).toBe('')       // 全店 14 席
     expect(nextBookableSlot({ ...base, now: new Date(2026, 8, 19, 19, 5) })).toBe('')
+  })
+})
+
+describe('pastSlotFix（面板開著跨過時段）', () => {
+  it('所選時段早於目前時段 → 改選目前時段＋說明；目前時段本身／之後 → null', () => {
+    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), settings))
+      .toEqual({ slot: '17:30', notice: '17:00 已經過了，已改選目前時段 17:30' })
+    expect(pastSlotFix('17:30', new Date(2026, 8, 19, 17, 31), settings)).toBeNull()
+    expect(pastSlotFix('18:00', new Date(2026, 8, 19, 17, 31), settings)).toBeNull()
+  })
+  it('打烊後（目前時段不在營業時段內）→ 清空並說明', () => {
+    expect(pastSlotFix('19:00', new Date(2026, 8, 19, 19, 40), settings))
+      .toEqual({ slot: '', notice: '19:00 已經過了，今天已沒有可訂的時段' })
   })
 })
 
@@ -120,8 +133,10 @@ describe('QuickReservePanel', () => {
     click(byLabel('來源：現場'))
     click(byLabel('3 位'))
     click(byText('兒童'))
+    expect(byText('先不指派').className).toContain('min-h-[44px]')     // 觸控尺寸 ≥44px
     click(byText('先不指派'))
     expect(onPick).toHaveBeenCalledWith('none')
+    expect(byText('用建議桌 105').className).toContain('min-h-[44px]')
     expect(mainBtn().textContent).toBe('確認新增 · 14:00 · 3 位 · 先不指派')
     click(mainBtn())
     expect(onSave).toHaveBeenCalledWith({
@@ -165,15 +180,16 @@ describe('QuickReservePanel', () => {
     expect(onBack).toHaveBeenCalledTimes(2)
   })
 
-  it('「其他日期」→ 完整表單，帶上已填的姓名／電話；沒給入口就不顯示', () => {
+  it('「其他日期」→ 完整表單，帶上已填的姓名／電話／來源（完整表單 prefill 支援的欄位）；沒給入口就不顯示', () => {
     render()
     expect(byText('其他日期')).toBeUndefined()
     act(() => root.unmount()); container.remove()
     const onOpenFullForm = vi.fn()
     render({ onOpenFullForm })
     click(byLabel('蔡'))
+    click(byLabel('來源：現場'))
     click(byText('其他日期'))
-    expect(onOpenFullForm).toHaveBeenCalledWith({ name: '蔡先生', phone: '' })
+    expect(onOpenFullForm).toHaveBeenCalledWith({ name: '蔡先生', phone: '', source: 'walkin' })
   })
 
   it('ESC 等同返回（有填先確認）', async () => {

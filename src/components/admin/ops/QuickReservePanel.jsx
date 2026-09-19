@@ -8,7 +8,7 @@ import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadge
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import TimeSlotPicker from '../../booking/TimeSlotPicker'
 import Icon from '../../ui/Icon'
-import { generateTimeSlots, todayStr } from '../../../utils/timeSlots'
+import { generateTimeSlots, todayStr, nowSlot } from '../../../utils/timeSlots'
 import { calcSlotCapacity, isSlotClosed, HOLD_LEAD_MIN } from '../../../utils/capacity'
 
 const KEYPAD_WIDTH = 392
@@ -35,6 +35,18 @@ export function nextBookableSlot({ settings = {}, tables = [], bookings = [], gr
       && calcSlotCapacity(tables, bookings, date, t, settings, groupReservations) >= guests) || ''
 }
 
+// 面板開著跨過時段：所選時段已早於目前這個 30 分時段（nowSlot）→ 改選目前時段（在營業時段內才選得到，
+// 否則清空）並給一行說明；沒過回 null。目前時段本身不算過（與 TimeSlotPicker 同口徑）。純函式，now 可注入。
+export function pastSlotFix(slot, now = new Date(), settings = {}) {
+  const cur = nowSlot(now)
+  if (!slot || slot >= cur) return null
+  const next = generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval).includes(cur) ? cur : ''
+  return {
+    slot: next,
+    notice: next ? `${slot} 已經過了，已改選目前時段 ${next}` : `${slot} 已經過了，今天已沒有可訂的時段`,
+  }
+}
+
 // 現場「今日訂位 → ＋新增今日訂位」的內嵌面板（2026-09 店主選「留在現場頁新增」）：
 // 過去這顆鈕把整個後台切到「訂位 → 新增」長表單——離開現場、看不到桌況圖、姓名要用系統鍵盤打、
 // 存完停在訂位清單。現在左欄原地換成這個面板：姓氏／人數／電話跟帶位一樣是大按鈕，時段只列還沒過的，
@@ -58,10 +70,11 @@ export function nextBookableSlot({ settings = {}, tables = [], bookings = [], gr
 //   canAssign                     有沒有指派桌位的權限（沒有就不顯示桌位列）
 //   onSave(payload)               回傳 false＝失敗（留在面板、不丟資料）
 //   onBack()                      返回今日訂位（面板已處理「放棄這筆新增？」確認）
-//   onOpenFullForm({ name, phone })（可選）其他日期 → 完整新增表單（帶上已填的姓名／電話）
+//   slotNotice                    所選時段已過、已自動改選目前時段的說明（父層 pastSlotFix 算）
+//   onOpenFullForm({ name, phone, source })（可選）其他日期 → 完整新增表單（只帶完整表單 prefill 支援的欄位）
 //   now                           （可選）目前時間，測試注入
 export default function QuickReservePanel({
-  guests, onGuestsChange, timeSlot, onTimeSlotChange,
+  guests, onGuestsChange, timeSlot, onTimeSlotChange, slotNotice,
   lockKind, table, tablePick, onTablePickChange, suggestedNumber, notice, needsCombo, canAssign = true,
   onSave, onBack, onOpenFullForm, now,
 }) {
@@ -201,12 +214,12 @@ export default function QuickReservePanel({
           <div className="flex-1" />
           {tablePick === 'none' && suggestedNumber ? (
             <button type="button" onClick={() => onTablePickChange?.('auto')}
-              className="min-h-[36px] px-2.5 rounded-lg border border-chicken-brown/15 bg-white text-xs font-bold text-chicken-brown/70">
+              className="min-h-[44px] px-3 rounded-lg border border-chicken-brown/15 bg-white text-xs font-bold text-chicken-brown/70">
               用建議桌 {suggestedNumber}
             </button>
           ) : table ? (
             <button type="button" onClick={() => onTablePickChange?.('none')}
-              className="min-h-[36px] px-2.5 rounded-lg border border-chicken-brown/15 bg-white text-xs font-bold text-chicken-brown/70">
+              className="min-h-[44px] px-3 rounded-lg border border-chicken-brown/15 bg-white text-xs font-bold text-chicken-brown/70">
               先不指派
             </button>
           ) : null}
@@ -232,8 +245,9 @@ export default function QuickReservePanel({
         </button>
         <div className="flex-1 text-right text-sm font-bold text-chicken-red">新增今日訂位</div>
         {onOpenFullForm && (
-          // 已填的姓名／電話一起帶過去（完整表單的預填語意：key 存在就覆蓋，空字串＝清空）
-          <button type="button" onClick={() => onOpenFullForm({ name: displayName, phone: phone.trim() })}
+          // 已填的姓名／電話／來源一起帶過去（完整表單 prefill 支援的欄位；key 存在就覆蓋，空字串＝清空）。
+          // 人數、特殊需求完整表單的 prefill 不支援，不帶。
+          <button type="button" onClick={() => onOpenFullForm({ name: displayName, phone: phone.trim(), source })}
             title="訂明天以後、或需要 LINE／線上代訂等其他來源時用完整表單"
             className="min-h-[44px] px-2 text-xs font-bold text-chicken-brown/55 underline underline-offset-2">
             其他日期
@@ -265,6 +279,9 @@ export default function QuickReservePanel({
 
         <div>
           <label className="label !text-xs !mb-1">時段（今天 · 已過的不列）</label>
+          {slotNotice && (
+            <p role="status" data-testid="slot-notice" className="mb-1 text-xs font-bold text-amber-700">{slotNotice}</p>
+          )}
           <TimeSlotPicker
             variant="compact"
             date={todayStr()}

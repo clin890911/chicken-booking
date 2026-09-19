@@ -20,13 +20,14 @@ const YU = {
   status: 'confirmed', source: 'phone', assignedTableId: '105', extraTableIds: [], notes: {}, createdBy: 'staff',
 }
 
-async function seed(page, { tables, bookings }) {
-  await page.addInitScript(({ tables, bookings }) => {
+async function seed(page, { tables, bookings, groups = [] }) {
+  await page.addInitScript(({ tables, bookings, groups }) => {
     localStorage.setItem('chicken_tables_v3', JSON.stringify(tables))
     localStorage.setItem('chicken_bookings_v1', JSON.stringify(bookings))
-    localStorage.removeItem('chicken_group_reservations_v1')
+    localStorage.setItem('chicken_group_reservations_v1', JSON.stringify(groups))
+    localStorage.setItem('chicken_group_blank_purge_v1', '1')
     localStorage.removeItem('chicken_waitlist_v1')
-  }, { tables, bookings })
+  }, { tables, bookings, groups })
 }
 
 async function loginToOps(page) {
@@ -103,4 +104,36 @@ test('預配的桌此刻被別組佔 → 報到列標「預配·桌被佔」，�
   // 改桌出口 → 現場換桌模式（預配維持預配語意）
   await page.getByRole('button', { name: '改桌', exact: true }).click()
   await expect(page.getByText(/換桌：余先生 從 105 → 選新桌/)).toBeVisible()
+})
+
+// 驗收 v4-1：預配的桌被今日團體圈走（12:30 梯）→ 11:50 按到了要先確認（與今日訂位卡同一道防呆）
+test('預配桌是今日團保 → 按到了先跳「桌位有預留」確認；取消不入座、仍要入座才入座', async ({ page }) => {
+  await page.clock.setFixedTime(at('11:50'))
+  await seed(page, {
+    tables: [mkTable('105'), mkTable('106', { y: 462 })],
+    bookings: [YU],
+    groups: [{
+      id: 'G-HOLD', schemaVersion: 2, date: TODAY, agencyName: '甲旅行社', guideName: '', guidePhone: '',
+      counts: { total: 4 }, status: 'confirmed',
+      batches: [{ id: 'GB1', label: '第一梯', timeSlot: '12:30', tableNumbers: ['105'], guests: 4, note: '' }],
+      createdAt: at('08:00').toISOString(), updatedAt: at('08:00').toISOString(),
+    }],
+  })
+  await loginToOps(page)
+
+  const strip = page.getByRole('list', { name: '可入座名單' })
+  await strip.getByRole('button', { name: '余先生 到了，入座 105' }).click()
+  await expect(page.getByText('桌位有預留')).toBeVisible()
+  await expect(page.getByText(/105 為今日團體「甲旅行社」預留（第一梯 12:30）/)).toBeVisible()
+  await page.getByRole('button', { name: '取消' }).click()
+  let { bookings, tables } = await readState(page)
+  expect(bookings.find(b => b.id === YU.id).status).toBe('confirmed')
+  expect(tables.find(t => t.number === '105').status).toBe('vacant')
+
+  await strip.getByRole('button', { name: '余先生 到了，入座 105' }).click()
+  await page.getByRole('button', { name: '仍要入座' }).click()
+  await expect(page.getByText('余先生 已入座 105')).toBeVisible()
+  ;({ bookings, tables } = await readState(page))
+  expect(bookings.find(b => b.id === YU.id).status).toBe('arrived')
+  expect(tables.find(t => t.number === '105').status).toBe('dining')
 })

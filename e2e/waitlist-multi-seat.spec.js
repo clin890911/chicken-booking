@@ -138,3 +138,21 @@ test('今日訂位籤的「＋ 新增今日訂位」→ 留在現場開內嵌面
   await expect(page.getByPlaceholder('0912345678')).toBeVisible()
   await expect(page.getByRole('button', { name: /今天/ })).toBeVisible()
 })
+
+// 驗收 v4-6：「其他日期」把面板已填、且完整表單 prefill 支援的欄位帶過去（姓名／電話／來源）
+test('內嵌面板填了姓名、來源＝現場 →「其他日期」→ 完整表單帶入姓名與來源（電話變選填）', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+  await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await page.getByRole('button', { name: '＋ 新增今日訂位' }).click()
+  const panel = page.getByTestId('quick-reserve-panel')
+  await panel.getByRole('button', { name: '來源：現場' }).click()
+  await panel.getByRole('button', { name: '黃', exact: true }).click()
+  await panel.getByRole('button', { name: '其他日期' }).click()
+
+  await expect(page.getByPlaceholder('王小姐')).toHaveValue('黃先生')
+  await expect(page.getByPlaceholder('現場客可不填')).toBeVisible()      // 來源＝現場才會出現
+})

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import ArrivalStrip from '../../src/components/admin/floormap/ArrivalStrip'
+import ArrivalStrip, { buildTargets } from '../../src/components/admin/floormap/ArrivalStrip'
 
 // 報到列（二版設計，取代疊在桌況圖上的「到了」浮動鈕——一版在相鄰桌同時進窗時，鈕會互相
 // 完全遮擋，document.elementFromPoint 命中蓋在上面那顆，真的點擊會誤觸入座錯的訂位，
@@ -381,5 +381,38 @@ describe('ArrivalStrip：預配訂位', () => {
         bookings={[pre()]} onSelectTable={() => {}} onArrive={() => {}} now={new Date(2026, 8, 19, 11, 0).getTime()} />,
     ))
     expect(container.firstChild).toBeNull()
+  })
+})
+
+// 驗收 v4-2：鎖桌的大組（主桌 106＋額外桌 105 都 reserved 指向同一筆）只出一顆 chip、用主桌，
+// 「等報到 N」以訂位數計，React 不可報重複 key。
+describe('ArrivalStrip：依訂位去重', () => {
+  let container, root
+  afterEach(() => { act(() => root?.unmount()); container?.remove() })
+  const NOW3 = new Date(2026, 8, 19, 17, 50).getTime()
+  const big = { id: 'B', name: '大組', guests: 8, date: '2026-09-19', timeSlot: '18:00', status: 'confirmed', assignedTableId: '106', extraTableIds: ['105'] }
+
+  it('buildTargets：鎖桌大組只一筆、用主桌 106（桌列順序 105 在前也一樣）', () => {
+    const list = buildTargets([table({ number: '105', currentBookingId: 'B' }), table({ number: '106', currentBookingId: 'B' })], [big], NOW3)
+    expect(list).toHaveLength(1)
+    expect(list[0].table.number).toBe('106')
+    expect(list[0].nums).toEqual(['106', '105'])
+  })
+
+  it('渲染：1 顆 chip、等報到 1、標整組桌號、沒有重複 key 警告', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => root.render(
+      <ArrivalStrip tables={[table({ number: '105', currentBookingId: 'B' }), table({ number: '106', currentBookingId: 'B' })]}
+        bookings={[big]} onSelectTable={() => {}} onArrive={() => {}} now={NOW3} />,
+    ))
+    expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(1)
+    expect(container.textContent).toContain('等報到 1')
+    expect(container.textContent).toContain('106+105')
+    expect(container.querySelector('button[aria-label="大組 到了，入座 106"]')).toBeTruthy()
+    expect(spy.mock.calls.filter(a => String(a[0]).includes('same key'))).toHaveLength(0)
+    spy.mockRestore()
   })
 })

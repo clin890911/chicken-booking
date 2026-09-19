@@ -23,27 +23,41 @@ import { isArriveEligible, isPreassignArriveEligible } from './FloorMap'
 // 遲到判定沿用 UpcomingPanel/BookingCard 既有口徑（graceMin=15，見 utils/bookingPulse.js）。
 const LATE_GRACE_MIN = 15
 
+// 這筆訂位的全部桌號（主桌＋併桌額外桌，去重去空）
+const bookingNums = (b) => [...new Set([b?.assignedTableId, ...(b?.extraTableIds || [])].filter(Boolean).map(String))]
+
 // 判定：鎖桌（桌 reserved、currentBookingId 指向訂位）＋預配（訂位 assignedTableId 指向空桌/他人佔用的桌）。
+// 一筆訂位只出一顆 chip（「等報到 N」＝訂位數）：鎖桌的大組每張桌都 reserved 指向同一筆，
+// 依訂位去重、優先用主桌（過去同一筆會出兩顆、React key 重複）。
+// 每筆帶 nums（整組桌號，chip 顯示「106+105」）與 taken（預配的桌此刻有任一張被別組佔）。
 // 排序邏輯不變。純函式匯出方便單測。
 export function buildTargets(tables, bookings, now) {
   const bookingMap = {}
   bookings.forEach(b => { if (b.id) bookingMap[b.id] = b })
   const tableMap = {}
   tables.forEach(t => { if (t?.number != null) tableMap[String(t.number)] = t })
-  const list = []
-  const seen = new Set()
+  const byBooking = new Map()
   tables.forEach(t => {
     const booking = t.currentBookingId ? bookingMap[t.currentBookingId] : null
-    if (isArriveEligible(t, booking, now)) {
-      list.push({ table: t, booking, preassigned: false })
-      seen.add(booking.id)
+    if (!isArriveEligible(t, booking, now)) return
+    const isMain = String(booking.assignedTableId) === String(t.number)
+    const prev = byBooking.get(booking.id)
+    if (!prev || (isMain && !prev.isMain)) {
+      byBooking.set(booking.id, { table: t, booking, preassigned: false, taken: false, isMain, nums: bookingNums(booking) })
     }
   })
   bookings.forEach(b => {
-    if (!b?.id || seen.has(b.id) || !b.assignedTableId) return
+    if (!b?.id || byBooking.has(b.id) || !b.assignedTableId) return
     const t = tableMap[String(b.assignedTableId)]
-    if (isPreassignArriveEligible(t, b, now)) list.push({ table: t, booking: b, preassigned: true })
+    if (!isPreassignArriveEligible(t, b, now)) return
+    const nums = bookingNums(b)
+    const taken = nums.some(n => {
+      const x = tableMap[n]
+      return x && x.status !== 'vacant' && String(x.currentBookingId ?? '') !== String(b.id)
+    })
+    byBooking.set(b.id, { table: t, booking: b, preassigned: true, taken, isMain: true, nums })
   })
+  const list = [...byBooking.values()]
   // 排序：遲到（已過訂位時間 >15 分）優先，且越晚到的排越前面；其餘依訂位時段由早到晚。
   return list.sort((a, b) => {
     const oa = overdueMinOf(a.booking.timeSlot, now)
@@ -115,13 +129,13 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
           onScroll={updateEdge}
           className="flex items-center gap-2.5 overflow-x-auto overflow-y-hidden pb-1"
         >
-          {targets.map(({ table, booking, preassigned }) => {
+          {targets.map(({ table, booking, preassigned, taken, nums }) => {
             const overdueMin = overdueMinOf(booking.timeSlot, effectiveNow)
             const late = overdueMin > LATE_GRACE_MIN
             // 跨樓層標記：只有桌所在樓層跟目前顯示的樓層不同才標，避免同樓層 chip 多一截視覺噪音。
             const crossFloor = currentFloor != null && table.floor !== currentFloor
-            // 預配桌此刻被別組佔著（用餐中／待清／他筆鎖桌）→ 先標出來，按到了會被擋下並給改桌
-            const taken = preassigned && table.status !== 'vacant'
+            // 大組顯示整組桌號（主桌在前）
+            const label = (nums && nums.length > 1) ? nums.join('+') : table.number
             return (
               <div
                 key={booking.id}
@@ -139,12 +153,12 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                   className={`text-[11px] font-bold ${crossFloor ? 'text-chicken-brown/70' : 'text-chicken-brown/50'}`}
                   title={crossFloor ? `此桌在 ${table.floor}，點選會自動切換樓層` : undefined}
                 >
-                  {crossFloor ? `${table.floor} ${table.number}` : table.number}
+                  {crossFloor ? `${table.floor} ${label}` : label}
                 </span>
                 {preassigned && (
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
                     taken ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}
-                    title={taken ? `${table.number} 此刻有別組，按到了會請你改桌` : '預配：桌子沒鎖，按到了直接入座'}>
+                    title={taken ? `${label} 此刻有別組，按到了不會入座` : '預配：桌子沒鎖，按到了直接入座'}>
                     {taken ? '預配·桌被佔' : '預配'}
                   </span>
                 )}
