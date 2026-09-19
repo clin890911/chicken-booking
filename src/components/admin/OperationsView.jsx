@@ -65,6 +65,21 @@ export function handleArriveNow(table, booking, { seatBooking, setStatus, setTab
   return r
 }
 
+// 候位入座成功後的共同收尾（三條路徑共用：二步確認單桌、併桌、桌況抽屜候選名單）。
+// 抽成純函式方便單測（同 handleArriveNow 同一套手法：注入 setSelectedTable/setMode/
+// setPendingConfirm/setRailTab/toast，不必掛載整個 OperationsView——那需要
+// BookingProvider/AuthProvider/ToastProvider 才能跑，不划算）。
+// 店主原話：「候位的客人選定位子後，會直接回到帶位頁面，這樣 UX 比較順」——
+// 入座當下客人已經在現場、桌也定了，不開桌況抽屜（那是給還要再操作這張桌的情境），
+// 直接切回帶位籤讓店員接著帶下一組；toast 帶「查看」動作，店員想確認剛剛那桌仍隨時點得到。
+export function seatedToWalkin(tableNumber, msg, { setSelectedTable, setMode, setPendingConfirm, setRailTab, toast }) {
+  setSelectedTable(null)
+  setMode(null)
+  setPendingConfirm(null)
+  setRailTab('walkin')
+  toast.action(msg, { label: '查看', onClick: () => setSelectedTable(tableNumber) })
+}
+
 // 「現場營運」主畫面
 // 模式：normal | assign-booking | seat-waitlist | move-table | group-reseat
 // ★ 現場帶位（walk-in）v3 不再是「模式」：帶位籤常駐左欄，點桌／選人數順序不拘，
@@ -280,6 +295,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
   const cancelMode = () => { setMode(null); setPendingConfirm(null) }
 
+  // seatedToWalkin（純函式，見上方）綁上這個畫面的真實 setter——三條候位入座路徑共用
+  const finishWaitlistSeat = (tableNumber, msg) =>
+    seatedToWalkin(tableNumber, msg, { setSelectedTable, setMode, setPendingConfirm, setRailTab, toast })
+
   // 桌位點選 — 依模式分流
   const handleTableClick = (number) => {
     if (!mode) {
@@ -369,10 +388,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const r = seatWaitlist(mode.wait.id, number)
       if (!r.ok) return toast.error('入座失敗：' + r.error)
       releaseOverlappingPreassigns(overridden, releaseOpts)
-      toast.success(`${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`)
       flashAssigned(number)
-      cancelMode()
-      setSelectedTable(number)
+      finishWaitlistSeat(number, `${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`)
       return
     }
     if (mode.type === 'move') {
@@ -437,10 +454,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (mode.kind === 'waitlist') {
       const r = seatWaitlistMulti(mode.wait.id, mode.selected)
       if (!r.ok) return toast.error('入座失敗：' + r.error)
-      toast.success(`${mode.wait.name}（候位 #${mode.wait.queueNumber}・${mode.need} 位）併桌入座 ${tablesText} · 可指派下一組`)
       flashAssigned(mode.selected[0])
-      cancelMode()
-      setSelectedTable(mode.selected[0])
+      finishWaitlistSeat(mode.selected[0], `${mode.wait.name}（候位 #${mode.wait.queueNumber}・${mode.need} 位）併桌入座 ${tablesText} · 可指派下一組`)
       return
     }
     const r = assignBookingTablesMulti(mode.booking.id, mode.selected)
@@ -734,6 +749,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               onClose={() => setSelectedTable(null)}
               onStartMove={() => startMove(selectedBooking)}
               onReseatBatch={startGroupReseat}
+              onWaitlistSeated={finishWaitlistSeat}
               mode={{ assigning: mode?.type === 'assign' }}
             />
           ) : (

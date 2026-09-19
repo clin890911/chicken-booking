@@ -46,7 +46,7 @@ function addDaysStr(dateStr, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export default function TableDrawer({ table, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, mode }) {
+export default function TableDrawer({ table, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, onWaitlistSeated, mode }) {
   const { can } = useAuth()
   const toast = useToast()
   const confirmDialog = useConfirm()
@@ -468,7 +468,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
         {table.status === 'vacant' && !activeHold && !mode?.assigning && !outToday && (
           <>
             <p className="text-chicken-brown/40 text-center py-2 text-xs">此桌目前可使用</p>
-            <TableCandidatePanel table={table} onPicked={onClose} />
+            <TableCandidatePanel table={table} onPicked={onClose} onWaitlistSeated={onWaitlistSeated} />
           </>
         )}
 

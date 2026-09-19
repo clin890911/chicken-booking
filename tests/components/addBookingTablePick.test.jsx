@@ -60,10 +60,16 @@ describe('AddBookingView：今日訂位選桌', () => {
   }
   const confirmBtn = () => btn(b => b.textContent.includes('確認新增'))
 
-  beforeEach(() => { resetCtx(); vi.clearAllMocks() })
+  // 固定時鐘：早於所有測試預設的 11:00 時段（2026-09 起 TimeSlotPicker 會把「今天」已過的
+  // 時段濾掉，見 tests/components/timeSlotPickerPastHidden.test.jsx）。不固定的話，這份測試
+  // 一過中午跑就會找不到 11:00 的時段按鈕，fillBasics() 就會炸。
+  const NOW = new Date(2026, 8, 19, 9, 0, 0)
+
+  beforeEach(() => { resetCtx(); vi.clearAllMocks(); vi.useFakeTimers(); vi.setSystemTime(NOW) })
   afterEach(() => {
     act(() => root?.unmount())
     container?.remove()
+    vi.useRealTimers()
   })
 
   it('S5：存檔後的指派走 Context 的 assignBookingToTable（帶建議桌），不直接戳 service', () => {
