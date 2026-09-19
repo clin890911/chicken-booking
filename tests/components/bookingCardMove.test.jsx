@@ -32,7 +32,7 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
   const render = (booking, { tables = [mkTable()], move = onMove } = {}) => {
     Object.assign(ctx, {
       tables, bookings: [booking], groupReservations: [], settings: {},
-      seatBooking: vi.fn(() => ({ ok: true })), suggestTable: vi.fn(() => null),
+      seatBooking: vi.fn(() => ({ ok: true })), findReserveCandidates: vi.fn(() => ({ kind: 'hold', tables: [] })),
       checkoutBooking: vi.fn(), finalizeBooking: vi.fn(), cancelBooking: vi.fn(), undoCancelBooking: vi.fn(),
       setStatus: vi.fn(), clearTable: vi.fn(), clearBookingPreassign: vi.fn(),
     })

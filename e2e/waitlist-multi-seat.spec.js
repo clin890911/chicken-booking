@@ -6,7 +6,11 @@ import { test, expect } from '@playwright/test'
 // 即使併兩三張桌明明坐得下。修正後應自動進入併桌模式（預選建議組合，可加減桌後確認）。
 // 種子把全店（含 2F）其餘桌位佔滿，只留 105/106/109 三張空桌逼出「無單桌可容」的分支。
 
-const TODAY = new Date().toISOString().slice(0, 10)
+// 本地日（不可用 toISOString().slice：台灣 00:00–08:00 會拿到 UTC 的前一天）
+const TODAY = (() => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})()
 
 // 全店只留 105 / 106 / 109 為空桌，其餘（含 2F）一律設成用餐中。
 // 沿用佈局本身的容量（105=4、106=4、109=6，與店主截圖一致）：任一單桌都塞不下 9 位，
@@ -113,7 +117,9 @@ test('併桌模式下把桌減到席數不足 → 確認鈕鎖住並提示還差
 
 // 現場「今日訂位」籤的「＋ 新增今日訂位」按鈕（2026-08 店主需求）：
 // 現場接到電話要加今天的訂位時，原本得自己跳去「訂位 → 新增」子分頁才找得到入口。
-test('今日訂位籤的「＋ 新增今日訂位」→ 直接開到訂位新增表單，日期預設今天', async ({ page }) => {
+// 2026-09 店主改選「留在現場頁新增」：按鈕改成左欄原地的內嵌面板（桌況圖一直看得到，
+// 完整流程見 onsite-inline-reserve.spec.js）；面板上的「其他日期」仍通往完整新增表單。
+test('今日訂位籤的「＋ 新增今日訂位」→ 留在現場開內嵌面板；「其他日期」才到完整新增表單', async ({ page }) => {
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
   await page.getByRole('button', { name: /模擬登入/ }).click()
@@ -123,7 +129,30 @@ test('今日訂位籤的「＋ 新增今日訂位」→ 直接開到訂位新增
   await page.getByRole('button', { name: /^今日訂位/ }).click()
   await page.getByRole('button', { name: '＋ 新增今日訂位' }).click()
 
-  // 落在訂位頁的「新增」子分頁，且日期快選停在「今天」
+  // 不跳頁：左欄換成內嵌面板，桌況圖仍在
+  await expect(page.getByTestId('quick-reserve-panel')).toBeVisible()
+  await expect(page.locator('svg').first()).toBeVisible()
+
+  // 「其他日期」→ 訂位頁的「新增」子分頁，日期快選停在「今天」
+  await page.getByRole('button', { name: '其他日期' }).click()
   await expect(page.getByPlaceholder('0912345678')).toBeVisible()
   await expect(page.getByRole('button', { name: /今天/ })).toBeVisible()
+})
+
+// 驗收 v4-6：「其他日期」把面板已填、且完整表單 prefill 支援的欄位帶過去（姓名／電話／來源）
+test('內嵌面板填了姓名、來源＝現場 →「其他日期」→ 完整表單帶入姓名與來源（電話變選填）', async ({ page }) => {
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+  await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await page.getByRole('button', { name: '＋ 新增今日訂位' }).click()
+  const panel = page.getByTestId('quick-reserve-panel')
+  await panel.getByRole('button', { name: '來源：現場' }).click()
+  await panel.getByRole('button', { name: '黃', exact: true }).click()
+  await panel.getByRole('button', { name: '其他日期' }).click()
+
+  await expect(page.getByPlaceholder('王小姐')).toHaveValue('黃先生')
+  await expect(page.getByPlaceholder('現場客可不填')).toBeVisible()      // 來源＝現場才會出現
 })

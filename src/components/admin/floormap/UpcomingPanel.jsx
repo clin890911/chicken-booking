@@ -1,6 +1,6 @@
 // 今日訂位「脈動」：過時未到（最優先處理）/ 90 分內將到 / 之後（收合）。
 // 之前只看未來 90 分窗：晚上時早上的 no-show 完全消失、無人處理 → 改為全日三段。
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast, useConfirm } from '../../ui/Toast'
@@ -13,7 +13,7 @@ import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
 
-function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, perms }) {
+function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, perms, flash = false }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
   const overdue = overdueMin > 15 // 與 classifyTodayPulse graceMin 同口徑
   const assigned = !!b.assignedTableId
@@ -39,10 +39,20 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
   // 已指派徽章是唯讀資訊，唯讀角色仍該看得到；整列全空時才不渲染（免留空白 margin）
   const showActions = assigned || showAssign || showNoshow || showComplete
 
+  // 剛從現場內嵌面板新增的那筆：捲到可見＋醒目框約 2 秒（純 class 切換，不靠動畫回呼，內容永遠可見）
+  const cardRef = useRef(null)
+  useEffect(() => {
+    if (flash) cardRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [flash])
+
   return (
     <div
+      ref={cardRef}
+      data-booking-id={b.id}
+      data-flash={flash ? 'true' : undefined}
       className={`p-3 rounded-xl border-2 cursor-pointer transition-all
-                 ${overdue ? 'border-chicken-red bg-chicken-red/5' : 'border-chicken-brown/10 bg-white hover:border-chicken-yellow/40'}`}
+                 ${overdue ? 'border-chicken-red bg-chicken-red/5' : 'border-chicken-brown/10 bg-white hover:border-chicken-yellow/40'}
+                 ${flash ? 'ring-4 ring-chicken-yellow/60 !bg-chicken-yellow/10' : ''}`}
       onClick={() => onClickBooking?.(b)}
     >
       <div className="flex items-center justify-between gap-2">
@@ -154,7 +164,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
   )
 }
 
-export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTable }) {
+export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTable, flashBookingId = null }) {
   const { bookings, tables, groupReservations, setStatus, seatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
   const { can } = useAuth() || {}
   const toast = useToast()
@@ -192,6 +202,11 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
     () => classifyTodayPulse(bookings, today, now),
     [bookings, today, now],
   )
+
+  // 剛新增的那筆落在收合的「之後」段 → 自動展開，才看得到它閃
+  useEffect(() => {
+    if (flashBookingId && later.some(b => b.id === flashBookingId)) setShowLater(true)
+  }, [flashBookingId, later])
 
   // No-show 會計入該電話的爽約次數（影響之後訂位的風險提示），所以不做二次確認對話框擋流程，
   // 改在 toast 裡把後果講清楚：現在是第幾次。復原時要把 recordNoshow 加上去的那一次扣回，
@@ -272,7 +287,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
           {overdue.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
               onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
-              onComplete={handleComplete} perms={perms} />
+              onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
           ))}
         </div>
       )}
@@ -283,7 +298,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
           {soon.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
               onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
-              onComplete={handleComplete} perms={perms} />
+              onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
           ))}
         </div>
       )}
@@ -302,7 +317,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
               {later.map(b => (
                 <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
                   onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
-                  onComplete={handleComplete} perms={perms} />
+                  onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
               ))}
             </div>
           )}

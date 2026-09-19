@@ -8,7 +8,7 @@ import * as groupService from './groupReservationService'
 import { getSettings } from './settingsService'
 import { statusZh, assignmentKind } from '../utils/tableStatus'
 import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
-import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes } from '../utils/capacity'
+import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor } from '../utils/capacity'
 import { buildGroupHolds } from '../utils/groupLive'
 import { todayStr, nowSlot, formatDate } from '../utils/timeSlots'
 
@@ -135,6 +135,51 @@ export function seatBooking(bookingId) {
   bookingService.setStatus(bookingId, 'arrived')   // setStatus 內會自動記 actualArrivalTime
   tableService.seatTable(booking.assignedTableId, bookingId)
   return { ok: true, tableNumber: booking.assignedTableId }
+}
+
+// === 預配的大組（主桌＋額外桌）到店：整組一起入座 ===
+// seatBooking 只把主桌設成用餐中（鎖桌型的大組額外桌早已 reserved）；預配型的額外桌此刻是空桌，
+// 只坐主桌會讓額外桌在桌況圖上仍是空桌、被別組帶走。這裡要求每張桌「今日可用、且空桌或由本訂位持有」，
+// 全部符合才一起入座（booking → arrived、每張桌 dining）；任一張被佔／停用就整組不動，回 code:'table-occupied'。
+// 單桌訂位直接走 seatBooking（同一套守門）。
+export function seatBookingAllTables(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  const nums = bookingTableNumbers(booking)
+  if (nums.length <= 1) return seatBooking(bookingId)
+  for (const n of nums) {
+    const t = tableService.getByNumber(n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    if (!tableUsableToday(t)) return { ok: false, error: `${n} 停用/維修中，請先改派其他桌再入座` }
+    if (t.status !== 'vacant' && !heldBy(t, bookingId)) {
+      return { ok: false, code: 'table-occupied', error: occupiedError(n, t) }
+    }
+  }
+  bookingService.setStatus(bookingId, 'arrived')
+  nums.forEach(n => tableService.seatTable(n, bookingId))
+  return { ok: true, tableNumber: nums[0], tableNumbers: nums }
+}
+
+// === 報到列「到了」入座「預配」訂位後的 5 秒復原 ===
+// 預配入座前桌是空桌（或別組剛離開後的空桌）→ 復原要把桌倒回空桌、訂位回待到，且保留預配
+// （assignedTableId／extraTableIds 不動：客人其實還沒到，預配要留著）。不能沿用鎖桌那條把桌寫回
+// reserved——那會把原本沒鎖的桌憑空鎖住。大組（主桌＋額外桌）整組一起倒。
+// 復原鐵律：只在「這筆仍是用餐中、仍指向這張主桌、每張桌仍由這筆用餐中」時才倒；期間被改桌／清桌／
+// 別組接手就整組不動（不清別人的桌、不搶桌）。
+export function undoSeatPreassigned(bookingId, tableNumber) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  const nums = bookingTableNumbers(booking)
+  const stillHeld = nums.length > 0 && nums.every(n => {
+    const t = tableService.getByNumber(n)
+    return t && t.status === 'dining' && heldBy(t, bookingId)
+  })
+  if (booking.status !== 'arrived' || String(booking.assignedTableId) !== String(tableNumber) || !stillHeld) {
+    return { ok: false, error: '這筆訂位或桌位已被更動，無法復原' }
+  }
+  bookingService.setStatus(bookingId, 'confirmed')   // 會清掉 actualArrivalTime；桌號（預配）保留
+  nums.forEach(n => tableService.clearTable(n))
+  return { ok: true, tableNumbers: nums }
 }
 
 // === 已離席 → 等待清桌 ===
@@ -527,13 +572,61 @@ export function findSuitableTables(partySize, opts = null) {
   return tableService.listAll()
     .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && t.capacity >= partySize)
     .filter(t => !conflicts || !conflicts.has(String(t.number)))
-    .sort((a, b) => {
-      const wasteA = a.capacity - partySize
-      const wasteB = b.capacity - partySize
-      if (wasteA !== wasteB) return wasteA - wasteB
-      if (a.floor !== b.floor) return a.floor === '1F' ? -1 : 1
-      return a.number.localeCompare(b.number)
+    .sort(bySuitability(partySize))
+}
+
+// 候選排序（findSuitableTables 與預配型候選共用）：浪費小 → 1F 優先 → 桌號
+function bySuitability(partySize) {
+  return (a, b) => {
+    const wasteA = a.capacity - partySize
+    const wasteB = b.capacity - partySize
+    if (wasteA !== wasteB) return wasteA - wasteB
+    if (a.floor !== b.floor) return a.floor === '1F' ? -1 : 1
+    return String(a.number).localeCompare(String(b.number))
+  }
+}
+
+// === 預配型（不鎖桌）的可選桌 ===
+// 預配只記在訂位上、不動桌況 → 桌子不必「此刻」空著，只要此刻的佔用不會延續進預配區間
+// [時段, 時段+佔位)（capacity.assignmentWindow 'preassign'）：
+//   用餐中 → 依 seatedAt 推估到何時（occupiedWindow）；鎖桌 → 那筆的鎖桌區間；待清 → 清桌緩衝；
+//   手動不可用（blocked）→ 當日都不行；依日期的維修停用 → isTableUsableOnDate。
+// 例：09:00 時 105 正在用餐、推估 10:40 結束 → 18:00 的預配可以選 105。
+// 這是「可點選集合」：不排除他筆預配／團保（那些走警示＋「將解除／會保留」，與指派模式同口徑）。
+// 非今天不看此刻桌況（未來日的桌況與今天無關）。now 可注入（測試固定時間）。
+export function preassignableTables(partySize, { bookingId, date, timeSlot, now = new Date() } = {}) {
+  const day = date || formatDate(now)
+  const settings = getSettings()
+  const window = assignmentWindow({ mode: 'preassign', timeSlot, date: day, now }, settings)
+  const isToday = day === formatDate(now)
+  return tableService.listAll()
+    .filter(t => isTableUsableOnDate(t, day) && (Number(t.capacity) || 0) >= partySize)
+    .filter(t => {
+      if (!isToday || t.status === 'vacant' || heldBy(t, bookingId)) return true
+      if (!window) return false
+      const occ = occupiedWindow(t, now, settings)
+      return !rangesOverlap(occ.start, occ.end, window.start, window.end - window.start)
     })
+    .sort(bySuitability(partySize))
+}
+
+// 預配型的「建議／候選」：可選桌再排除與預配區間重疊的他筆預配／鎖桌，以及今日團保
+// （timeConflictTableNumbers，與鎖桌型候選同一支 helper，只差 mode）。第一張＝建議桌。
+export function findPreassignCandidates(partySize, opts = {}) {
+  const conflicts = timeConflictTableNumbers({ ...opts, mode: 'preassign' })
+  return preassignableTables(partySize, opts).filter(t => !conflicts.has(String(t.number)))
+}
+
+// 幫一筆今日訂位挑桌（新增表單、現場新增面板、訂位卡「建議桌」、現場指派模式的建議）：
+// 依鎖桌時機（capacity.lockKindFor）分流 → { kind:'hold'|'preassign', tables }（已排序、第一張＝建議）。
+//   hold      ＝現在就鎖桌：此刻空桌、依鎖桌區間不撞他筆（findSuitableTables mode 'hold'）
+//   preassign ＝只預配：findPreassignCandidates
+export function findReserveCandidates(partySize, { bookingId, date, timeSlot, now = new Date() } = {}) {
+  const kind = lockKindFor({ date, timeSlot, now })
+  const tables = kind === 'hold'
+    ? findSuitableTables(partySize, { bookingId, date, timeSlot, mode: 'hold', now })
+    : findPreassignCandidates(partySize, { bookingId, date, timeSlot, now })
+  return { kind, tables }
 }
 
 // 取得「最佳建議桌」— 上面排序的第一張（opts 同 findSuitableTables：帶時段就不建議會撞桌的桌）

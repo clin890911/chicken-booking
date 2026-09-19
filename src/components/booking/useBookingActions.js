@@ -30,7 +30,7 @@ export const MOVE_COMBO_REASON = '併桌訂位不支援單桌改桌，請取消�
 export function useBookingActions(booking, { onAssign, onMove } = {}) {
   const {
     tables, bookings, groupReservations, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking,
-    setStatus, clearTable, suggestTable, clearBookingPreassign,
+    setStatus, clearTable, findReserveCandidates, clearBookingPreassign,
   } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -50,13 +50,14 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
   // No-show 次數讀 localStorage（JSON.parse）：改成只在電話／狀態變動時重算，不再每次 render 讀一次。
   const noshowCount = useMemo(() => getNoshowCount(booking.phone), [booking.phone, status])
 
-  // 建議桌查的是「今日即時空桌」，對未來/過去日無意義且誤導。
-  // 按「指派桌位」會在現場頁鎖桌（現在就 reserveTable）→ 佔用區間用 'hold'：[min(現在, 時段), 時段+佔位)，
-  // 排除「別筆訂位已預配/持有、用餐區間重疊」的桌與今日團保桌（與新增表單候選同一個 helper）。
-  // suggestTable 走 service 讀資料；以 tables/bookings/團體 state 當 key，資料一變才重算。
+  // 建議桌查的是「今日即時桌況」，對未來/過去日無意義且誤導。
+  // 與按「指派桌位」後現場指派模式的建議桌同一支 helper（findReserveCandidates）：依鎖桌時機
+  // （capacity.lockKindFor）分流——離用餐 ≤ 30 分＝鎖桌型（此刻空桌、依鎖桌區間不撞他筆），
+  // 更早＝預配型（桌子不必此刻空著）；兩者都排除用餐區間重疊的他筆預配／持有與今日團保桌。
+  // 走 service 讀資料；以 tables/bookings/團體 state 當 key，資料一變才重算。
   const suggestion = useMemo(
     () => (dayKind === 'today' && status === 'confirmed' && !booking.assignedTableId)
-      ? suggestTable(booking.guests, { bookingId: booking.id, date: booking.date, timeSlot: booking.timeSlot, mode: 'hold' })
+      ? (findReserveCandidates(booking.guests, { bookingId: booking.id, date: booking.date, timeSlot: booking.timeSlot }).tables[0] || null)
       : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tables, bookings, groupReservations, dayKind, status, booking.id, booking.date, booking.timeSlot, booking.assignedTableId, booking.guests],

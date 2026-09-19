@@ -22,9 +22,25 @@ export function isAlertBaselineReady({ usingFirebase, cloudStatus, hydrated } = 
 }
 
 // 相對前一份基準，這次多出來的已確認訂位（維持傳入順序）。
-export function diffNewConfirmed(prevIds, bookings) {
+// exclude(id)（可選）：回 true 的不算新訂位（例：本裝置剛建立的，見下方 wasCreatedHere）。
+export function diffNewConfirmed(prevIds, bookings, { exclude } = {}) {
   if (!prevIds) return []
-  return (bookings || []).filter(b => b?.status === 'confirmed' && !prevIds.has(b.id))
+  return (bookings || []).filter(b => b?.status === 'confirmed' && !prevIds.has(b.id)
+    && !(exclude && exclude(b.id)))
+}
+
+// === 本裝置剛建立的訂位：不通報自己 ===
+// 店員在這台裝置新增訂位時，畫面上已經有「已新增 …」的確認 toast；再跳一則「📋 新訂位」
+// 是自己通知自己（2026-09 現場內嵌新增上線後每筆都會疊兩則）。
+// 只記「這台裝置、這次開啟期間」建立的 id（記憶體）。刻意不比對 createdBy（登入者）：
+// 店裡常多台 iPad 共用同一個帳號，用登入者排除會讓其他裝置也收不到這筆的提醒。
+// 重新整理後清空也沒關係——那時這筆早已在基準裡，本來就不會再通報。
+const createdHere = new Set()
+export function markCreatedHere(id) {
+  if (id != null) createdHere.add(String(id))
+}
+export function wasCreatedHere(id) {
+  return id != null && createdHere.has(String(id))
 }
 
 // 已確認訂位的 id 集合——下一輪比對用的基準。

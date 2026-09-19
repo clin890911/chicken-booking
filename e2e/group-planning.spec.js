@@ -8,8 +8,15 @@ import { test, expect } from '@playwright/test'
 //   3) 當日總覽 ⇄ 排位地圖 三態切換（規劃分頁合併後的新動線）
 //   4) 點團卡 → 詳情頁（唯讀確認 + 回傳單）→ 編輯往返
 //   5) 散客名單出現在當日總覽，「→ 配桌」一鍵跳排位地圖預配模式
+// 時間固定（page.clock，Asia/Taipei）：今日時段選單會隱藏已過時段（PR #133），不固定的話
+// 「新增散客」選 11:30 這條一過中午就找不到按鈕。種子裡的 today 由瀏覽器 new Date() 算，跟著假時鐘走。
+
+test.use({ timezoneId: 'Asia/Taipei' })
+
+const TODAY = '2026-09-19'
 
 test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(new Date(`${TODAY}T09:00:00+08:00`))
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
   await page.route('**/adminPushData', route =>
@@ -237,7 +244,7 @@ test('規劃：團體改期 → 選新日期 → 編輯器重新圈桌 → 儲�
 
   // 改期 modal：選 3 天後（月曆格 aria-label = ISO 日期）
   await expect(page.getByText(/團體改期 ·/)).toBeVisible()
-  const t = new Date(); t.setDate(t.getDate() + 3)
+  const t = new Date(`${TODAY}T12:00:00+08:00`); t.setDate(t.getDate() + 3)   // 跟著假時鐘的「今天」算
   const target = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
   await page.getByRole('button', { name: target, exact: true }).click()
   await page.getByRole('button', { name: /下一步：重新圈桌/ }).click()

@@ -267,6 +267,25 @@ function localDateStr(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// === 鎖桌時機（2026-09 店主拍板「接近時段才鎖」）===
+// 過去今日訂位一存檔／一指派就 reserveTable：09:00 接到 18:00 的電話訂位，那張桌一整天都被鎖著，
+// 現場帶位看得到空桌卻不能坐。改成依「離用餐時段還有多久」決定寫入語意：
+//   'hold'      今天、且（時段開始 − 現在）≤ HOLD_LEAD_MIN（含已開始／已過的遲到客）→ 存檔當下就鎖桌（reserved）
+//   'preassign' 更早 → 只記在訂位上（booking.assignedTableId），桌況維持空桌，地圖藍色虛線「預配」
+//               （客人到了照樣可直接入座：seatBooking 的佔用守門允許 vacant）
+// 非今天一律 'preassign'（未來日由規劃頁預配，不會「現在就鎖桌」）。缺時段無從判斷 → 'hold'（沿用舊行為）。
+// ⚠️ 不做「到 T-30 自動轉鎖桌」：這裡只決定「存檔當下」寫什麼。
+// 呼叫端：新增表單今日存檔、現場內嵌新增面板、現場「指派桌位」（單桌）。
+// 刻意不套用：桌況抽屜「預訂」（店員明確要鎖）、帶位／候位（立即入座）、改桌（維持原 kind）。
+export const HOLD_LEAD_MIN = 30
+
+export function lockKindFor({ date, timeSlot, now = new Date(), leadMin = HOLD_LEAD_MIN } = {}) {
+  if (date && date !== localDateStr(now)) return 'preassign'
+  if (!timeSlot) return 'hold'
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  return toMinutes(timeSlot) - nowMin <= leadMin ? 'hold' : 'preassign'
+}
+
 // 這筆訂位自己的用餐區間（預配語意 [時段, 時段+佔位)）是否與 window 重疊。
 // window 為 null（無從比時間）或訂位缺時段 → 保守視為重疊。
 export function bookingOverlapsWindow(booking, window, settings = {}) {

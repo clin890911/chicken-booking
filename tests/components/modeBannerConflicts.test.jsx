@@ -13,11 +13,11 @@ const yu = (slot) => ({ id: 'Y', name: '余先生', guests: 2, timeSlot: slot, s
 
 describe('ModeBanner：預配衝突據實', () => {
   let container, root
-  const render = (pendingConflicts) => {
+  const render = (pendingConflicts, m = mode) => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
-    act(() => { root.render(<ModeBanner mode={mode} pendingConfirm="105" pendingConflicts={pendingConflicts} onCancel={() => {}} onConfirm={() => {}} onClearPending={() => {}} />) })
+    act(() => { root.render(<ModeBanner mode={m} pendingConfirm="105" pendingConflicts={pendingConflicts} onCancel={() => {}} onConfirm={() => {}} onClearPending={() => {}} />) })
   }
   const buttons = () => [...container.querySelectorAll('button')].map(b => b.textContent)
   afterEach(() => { act(() => root?.unmount()); container?.remove() })
@@ -33,5 +33,30 @@ describe('ModeBanner：預配衝突據實', () => {
     expect(container.textContent).toContain('20:30 余先生 的預配會保留')
     expect(container.textContent).not.toContain('將解除')
     expect(buttons()).toContain('仍要指派（預配保留）')
+  })
+
+  // 鎖桌時機（capacity.lockKindFor）：確認句據實講「指派並鎖桌」還是「預配（桌子現在仍可帶位）」
+  it('lockKind hold（或舊呼叫點沒帶）→「確認指派 陳小姐 至桌 105 並鎖桌？」＋「✓ 確認指派」', () => {
+    render(null, { ...mode, lockKind: 'hold' })
+    expect(container.textContent).toContain('確認指派 陳小姐 至桌 105 並鎖桌？')
+    expect(container.textContent).toContain('指派即鎖桌')
+    expect(buttons()).toContain('✓ 確認指派')
+  })
+
+  it('lockKind preassign →「確認預配 陳小姐 到 105？（桌子現在仍可帶位）」＋「✓ 確認預配」，banner 標出時段預配', () => {
+    render(null, { ...mode, lockKind: 'preassign' })
+    expect(container.textContent).toContain('確認預配 陳小姐 到 105？（桌子現在仍可帶位）')
+    expect(container.textContent).toContain('13:30 預配 · 桌子先不鎖')
+    expect(container.textContent).not.toContain('並鎖桌')
+    expect(container.textContent).not.toContain('確認指派')
+    expect(buttons()).toContain('✓ 確認預配')
+  })
+
+  it('lockKind preassign ＋他筆預配衝突 → 按鈕也講「預配」（覆蓋／保留）', () => {
+    render([{ booking: yu('11:00'), overlaps: true, willRelease: true }], { ...mode, lockKind: 'preassign' })
+    expect(buttons()).toContain('仍要覆蓋預配')
+    act(() => root.unmount()); container.remove()
+    render([{ booking: yu('20:30'), overlaps: false, willRelease: false }], { ...mode, lockKind: 'preassign' })
+    expect(buttons()).toContain('仍要預配（他筆預配保留）')
   })
 })

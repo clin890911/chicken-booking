@@ -18,6 +18,7 @@ import {
 import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE } from '../utils/syncStatus'
 import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
+import { markCreatedHere } from '../utils/newBookingAlerts'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
 
@@ -355,6 +356,7 @@ export function BookingProvider({ children }) {
   // ============ 訂位動作 ============
   const addBooking = (data) => {
     const b = bookingService.create(data)
+    markCreatedHere(b?.id)   // 本裝置建立的不再跳「📋 新訂位」提醒（見 utils/newBookingAlerts）
     refresh()
     syncCloudSoon()
     safeNotify(() => tg.notifyBookingCreated(b))
@@ -442,6 +444,23 @@ export function BookingProvider({ children }) {
       const b = bookingService.getById(bookingId)
       if (b) safeNotify(() => tg.notifyBookingArrived(b))
     }
+    return r
+  }
+  // 預配大組到店：整組（主桌＋額外桌）都空才一起入座（見 seatingService.seatBookingAllTables）
+  const seatBookingAllTables = (bookingId) => {
+    const r = seatingService.seatBookingAllTables(bookingId)
+    refresh()
+    syncCloudSoon()
+    if (r.ok) {
+      const b = bookingService.getById(bookingId)
+      if (b) safeNotify(() => tg.notifyBookingArrived(b))
+    }
+    return r
+  }
+  // 報到列預配入座的 5 秒復原：桌回空桌、訂位回待到且保留預配（見 seatingService.undoSeatPreassigned）
+  const undoSeatPreassigned = (bookingId, tableNumber) => {
+    const r = seatingService.undoSeatPreassigned(bookingId, tableNumber)
+    if (r?.ok) { refresh(); syncCloudSoon() }
     return r
   }
   // 「一鍵釋出」復原：把整組桌（含併桌的額外桌）重新入座
@@ -539,6 +558,10 @@ export function BookingProvider({ children }) {
   const findSuitableTables = (partySize, opts) => seatingService.findSuitableTables(partySize, opts)
   const suggestTable = (partySize, opts) => seatingService.suggestTable(partySize, opts)
   const suggestTableCombo = (partySize) => seatingService.suggestTableCombo(partySize)
+  // 鎖桌時機分流（capacity.lockKindFor）：今日訂位挑桌的建議／候選 → { kind:'hold'|'preassign', tables }
+  const findReserveCandidates = (partySize, opts) => seatingService.findReserveCandidates(partySize, opts)
+  // 預配型的可點選集合（桌子不必此刻空著，只要此刻的佔用不會延續進預配區間）
+  const preassignableTables = (partySize, opts) => seatingService.preassignableTables(partySize, opts)
 
   // 統一座位地圖的「預先配桌」：僅在 booking 上記錄 assignedTableId（per-date），
   // ★ 不更動 live tables（currentBookingId/status），故未來日期預排不會誤佔今日現場桌況。
@@ -729,7 +752,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

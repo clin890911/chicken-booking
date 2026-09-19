@@ -6,12 +6,13 @@ import { test, expect } from '@playwright/test'
 //    （舊版 walkin-multi 完全沒有這兩道防呆，是這次一併補上的漏洞）
 // 後台本機模式以 localStorage 為後端；攔截 admin* 雲端端點。
 
-const today = (() => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-})()
+// 時間固定（page.clock，Asia/Taipei）：種子有今天 18:00 的預配，報到列（前 30／後 60 分）會列預配訂位，
+// 不固定的話 17:30–19:00 跑測試畫面會多一條報到列。12:20＝午餐時段中段。
+test.use({ timezoneId: 'Asia/Taipei' })
+const today = '2026-09-19'
 
 async function stubCloud(page) {
+  await page.clock.setFixedTime(new Date(`${today}T12:20:00+08:00`))
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
   await page.route('**/adminPushData', route =>

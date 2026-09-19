@@ -12,7 +12,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
 import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
-import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts } from '../utils/newBookingAlerts'
+import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
 
 const TABS = [
   { key: 'ops',       label: '現場',  icon: 'ops', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
@@ -72,7 +72,8 @@ export default function AdminPage() {
       prevIdsRef.current = ids
       return
     }
-    buildNewBookingAlerts(diffNewConfirmed(prevIdsRef.current, bookings), todayStr())
+    // 本裝置剛建立的不通報（已有「已新增」確認 toast）；線上客人與其他裝置建立的照常通報
+    buildNewBookingAlerts(diffNewConfirmed(prevIdsRef.current, bookings, { exclude: wasCreatedHere }), todayStr())
       .forEach(a => toast.info(a.message, { duration: a.duration }))
     prevIdsRef.current = ids
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -138,10 +139,11 @@ export default function AdminPage() {
     navTo('roster')
   }
   // 名冊 →「新增訂位」：帶入顧客電話/姓名，切到訂位頁（BookingsView 收到 openAdd 跳「新增」子分頁）。
-  // 現場頁「＋ 新增今日訂位」也走這條（傳 null＝不預填顧客）：新增表單的日期本來就預設今天，
-  // 不必另做一套表單，也不會與名冊帶入的預填邏輯分岔。
-  const openAddBooking = (c) => {
-    setAddPrefill({ phone: c?.phone || '', name: c?.name || '', source: 'phone', seq: Date.now() })
+  // 現場頁「＋ 新增今日訂位」改成左欄原地的內嵌面板（ops/QuickReservePanel），不再走這條；
+  // 面板上的「其他日期」連結仍走這條（帶上面板已填的姓名／電話／來源），訂明天以後用完整表單。
+  // opts.source：只有現場面板會帶（面板上選的來源）；名冊傳的是顧客檔，其 source 欄位語意不同，不能拿來用。
+  const openAddBooking = (c, opts = {}) => {
+    setAddPrefill({ phone: c?.phone || '', name: c?.name || '', source: opts.source || 'phone', seq: Date.now() })
     setTab('bookings')
   }
   // 導覽切頁：離開訂位頁時清掉預填，避免下次再進訂位頁又自動跳到「新增」
@@ -206,7 +208,7 @@ export default function AdminPage() {
                   onAssignDone={handleAssignDone}
                   pendingMove={pendingMove}
                   onMoveDone={handleMoveDone}
-                  onAddBooking={() => openAddBooking(null)}
+                  onAddBooking={(c) => openAddBooking(c ? { phone: c.phone, name: c.name } : null, { source: c?.source })}
                 />
               )}
               {tab === 'planning' && (

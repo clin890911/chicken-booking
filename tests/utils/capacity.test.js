@@ -22,6 +22,8 @@ import {
   rangesOverlap,
   assignmentWindow,
   preassignConflicts,
+  lockKindFor,
+  HOLD_LEAD_MIN,
 } from '../../src/utils/capacity'
 
 // ---- 假資料工廠 ----
@@ -758,6 +760,37 @@ describe('assignmentWindow（佔用區間唯一口徑）', () => {
   it('吃 settings 的用餐時長；非 now 缺時段 → null', () => {
     expect(assignmentWindow({ mode: 'now', now: at(12) }, { diningDurationMin: 150 })).toEqual({ start: 720, end: 880 })
     expect(assignmentWindow({ mode: 'hold', date: D, now: at(9) })).toBeNull()
+  })
+})
+
+// 鎖桌時機（2026-09 店主拍板「接近時段才鎖」）：離用餐 ≤ 30 分（含已過）才鎖桌，更早只預配
+describe('lockKindFor（鎖桌時機）', () => {
+  const at = (h, m = 0) => new Date(2026, 5, 15, h, m)
+  const D = '2026-06-15'
+
+  it('門檻常數集中一處＝30 分', () => {
+    expect(HOLD_LEAD_MIN).toBe(30)
+  })
+  it('剛好 30 分 → hold；31 分 → preassign', () => {
+    expect(lockKindFor({ date: D, timeSlot: '11:00', now: at(10, 30) })).toBe('hold')
+    expect(lockKindFor({ date: D, timeSlot: '11:00', now: at(10, 29) })).toBe('preassign')
+  })
+  it('10:40 選 11:00 → hold；09:00 選 18:00 → preassign', () => {
+    expect(lockKindFor({ date: D, timeSlot: '11:00', now: at(10, 40) })).toBe('hold')
+    expect(lockKindFor({ date: D, timeSlot: '18:00', now: at(9) })).toBe('preassign')
+  })
+  it('時段已開始／已過（遲到客）→ hold', () => {
+    expect(lockKindFor({ date: D, timeSlot: '11:00', now: at(11) })).toBe('hold')
+    expect(lockKindFor({ date: D, timeSlot: '11:00', now: at(14, 10) })).toBe('hold')
+  })
+  it('明天（非今天）→ preassign，即使時間上只差幾分鐘', () => {
+    expect(lockKindFor({ date: '2026-06-16', timeSlot: '00:10', now: at(23, 55) })).toBe('preassign')
+    expect(lockKindFor({ date: '2026-06-16', timeSlot: '18:00', now: at(9) })).toBe('preassign')
+  })
+  it('不帶 date 視為今天；缺時段 → hold（沿用舊行為）；leadMin 可覆寫', () => {
+    expect(lockKindFor({ timeSlot: '18:00', now: at(9) })).toBe('preassign')
+    expect(lockKindFor({ date: D, now: at(9) })).toBe('hold')
+    expect(lockKindFor({ date: D, timeSlot: '11:00', now: at(10), leadMin: 60 })).toBe('hold')
   })
 })
 

@@ -11,6 +11,7 @@ import * as customerService from '../../services/customerService'
 import { getNoshowCount } from '../../services/bookingService'
 import { todayStr, dayLabel, formatDate, addDays } from '../../utils/timeSlots'
 import { isTableUsableOnDate } from '../../utils/tableAvailability'
+import { HOLD_LEAD_MIN } from '../../utils/capacity'
 
 // 後台新增訂位 — 電話為先導鍵，自動帶顧客檔
 // 設計：緊湊單頁、由上而下一路填完；缺漏欄位即時列在底部黏性操作列（點 pill 捲到該欄）；
@@ -33,7 +34,7 @@ const NOTE_OPTIONS = [
 // onAssignTable(booking)：「到桌況圖選」或事後「指派桌」→ 今天去現場指派模式、未來去規劃頁預配（AdminPage 分流）
 // onMoveTable(booking)：存檔後 toast 的「改桌」→ 現場頁 move 模式
 export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, initial }) {
-  const { bookings, tables, groupReservations, settings, addBooking, findSuitableTables, assignBookingToTable } = useBooking()
+  const { bookings, tables, groupReservations, settings, addBooking, findReserveCandidates, assignBookingToTable, preassignBookingTable } = useBooking()
   const { user } = useAuth()
   const toast = useToast()
 
@@ -111,16 +112,29 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   const valid = missing.length === 0
 
   // === 桌位（僅今天）===
-  // 候選＝現在空桌、今日可用、容量 ≥ 人數、且依「鎖桌佔用區間」不撞別筆預配/團保的單桌（排序沿用 findSuitableTables）。
-  // 今日存檔即鎖桌（reserved）→ 佔用區間是 [min(現在, 時段), 時段+佔位)（mode 'hold'，capacity.assignmentWindow）：
-  // 只比 [時段, 時段+佔位) 會反向撞桌（09:00 幫 13:30 鎖 105，11:00 預配 105 的客人到店時桌已被鎖）。
+  // 存檔語意依鎖桌時機（capacity.lockKindFor，店主 2026-09 拍板「接近時段才鎖」）：
+  //   hold      離用餐 ≤ 30 分（含已過）→ 存檔即鎖桌（reserved）。候選＝此刻空桌、依鎖桌區間
+  //             [min(現在, 時段), 時段+佔位) 不撞別筆預配/團保（只比時段會反向撞桌，見 PR #131）。
+  //   preassign 更早 → 只預配（booking.assignedTableId，桌況仍空）。候選＝桌子不必此刻空著，
+  //             只要此刻的佔用不延續進 [時段, 時段+佔位)，且不撞別筆預配/團保。
+  // 兩種都走 findReserveCandidates（排序沿用 findSuitableTables：浪費小 → 1F → 桌號）。
   // 未來日不在這裡選桌（存檔後 toast 引導到規劃頁預配）。
+  // 30 秒 tick：表單開著跨過「前 30 分」門檻時，候選與存檔語意跟著換（不停在過期的判斷）。
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30000)
+    return () => clearInterval(id)
+  }, [])
   const isToday = date === todayStr()
-  const tableCandidates = useMemo(
-    () => (isToday && timeSlot && guests > 0) ? findSuitableTables(guests, { date, timeSlot, mode: 'hold' }) : [],
+  const reserve = useMemo(
+    () => (isToday && timeSlot && guests > 0)
+      ? findReserveCandidates(guests, { date, timeSlot, now: new Date(nowMs) })
+      : { kind: null, tables: [] },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isToday, date, timeSlot, guests, tables, bookings, groupReservations],
+    [isToday, date, timeSlot, guests, tables, bookings, groupReservations, nowMs],
   )
+  const lockKind = reserve.kind
+  const tableCandidates = reserve.tables
   // 沒有候選時分辨原因：店裡有沒有「任何」單桌容量坐得下（不看此刻桌況）。
   //   有 → 只是此刻沒空桌可鎖（被佔、被預配、團保）→ 預設「先不指派」，接近用餐時間再到現場頁指派
   //   沒有 → 需要併桌 → 預設「到桌況圖選（可併桌）」
@@ -161,10 +175,13 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   }, [tablePick, tableChoice])
 
   const pickTable = (v) => { setTablePick(v); setTableNotice('') }
-  const tableEmptyReason = anySingleFits
-    ? '此刻沒有空桌可鎖，先存檔、接近用餐時間再到現場頁指派。'
-    : `店裡沒有單桌坐得下 ${guests} 位，需要併桌：存檔後到桌況圖選（可點多張同層空桌）。`
-  const tableSuffix = tableChoice?.kind === 'table' ? ` · 桌 ${tableChoice.table.number}`
+  const tableEmptyReason = !anySingleFits
+    ? `店裡沒有單桌坐得下 ${guests} 位，需要併桌：存檔後到桌況圖選（可點多張同層空桌）。`
+    : lockKind === 'preassign'
+      ? '這個時段沒有不撞桌的桌可預配，先存檔、接近用餐時間再到現場頁指派。'
+      : '此刻沒有空桌可鎖，先存檔、接近用餐時間再到現場頁指派。'
+  const tableSuffix = tableChoice?.kind === 'table'
+    ? (lockKind === 'preassign' ? ` · 預配 ${tableChoice.table.number}` : ` · 桌 ${tableChoice.table.number}`)
     : tableChoice?.kind === 'map' ? ' · 到桌況圖選桌'
     : tableChoice?.kind === 'none' ? ' · 先不指派'
     : ''
@@ -202,8 +219,23 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
       })
       const summary = `${name} ${guests} 位 · ${date} ${timeSlot}`
       let goToMap = false
-      if (isToday && choice?.kind === 'table') {
-        // 指派店員選的桌（或建議桌）。走 Context（含 refresh／同步／Telegram 通知），
+      if (isToday && choice?.kind === 'table' && lockKind === 'preassign') {
+        // 離用餐還早 → 只預配（桌況維持空桌）。走 Context 的預配包裝（含 refresh／同步），
+        // 與規劃頁預配同一條路徑；改桌時 moveTable 會維持預配語意、不會變成鎖桌。
+        const n = choice.table.number
+        const pb = preassignBookingTable(b.id, n)
+        if (pb) {
+          const msg = `${summary} · 已預配 ${n}（桌子先不鎖，現在仍可帶位）`
+          if (onMoveTable) {
+            toast.action(msg, { label: '改桌', onClick: () => onMoveTable({ ...b, assignedTableId: n }) }, { duration: 8000 })
+          } else {
+            toast.success(msg)
+          }
+        } else {
+          toast.action(`已建立訂位（預配 ${n} 失敗）`, { label: '手動指派', onClick: () => onAssignTable?.(b) })
+        }
+      } else if (isToday && choice?.kind === 'table') {
+        // 接近用餐時間（≤ 30 分）→ 指派並鎖桌。走 Context（含 refresh／同步／Telegram 通知），
         // 存檔後清單立刻就是指派後的樣子；toast 帶「改桌」出口。
         const n = choice.table.number
         const r = assignBookingToTable(b.id, n)
@@ -373,6 +405,8 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
           {isToday && (
             <TablePickField
               hasSlot={!!timeSlot}
+              lockKind={lockKind}
+              leadMin={HOLD_LEAD_MIN}
               candidates={tableCandidates}
               choice={tableChoice}
               onPick={pickTable}
