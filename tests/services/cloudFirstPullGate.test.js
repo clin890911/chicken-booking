@@ -68,7 +68,7 @@ function cloudSnapshot(overrides = {}) {
 }
 const newBooking = (name) => bookingService.create({ name, phone: '0912000111', guests: 2, date: '2026-09-20', timeSlot: '12:00', source: 'phone' })
 
-describe('① 閘門未開：不發請求、不動基準線與 pendingDeletes', () => {
+describe('① 閘門未開：不發請求、不動基準線（舊裝置的本機刪除仍記進 pendingDeletes）', () => {
   it('全新裝置：出廠桌＋首拉前新建的訂位，pushChangedData 一律延後、不發任何請求', async () => {
     tableService.listAll() // BookingContext.refresh() 在新裝置上會種下出廠桌
     newBooking('王先生')
@@ -95,7 +95,7 @@ describe('① 閘門未開：不發請求、不動基準線與 pendingDeletes', 
     expect(leaks).toEqual([])
   })
 
-  it('舊裝置升級（落地狀態有 initialized、沒有 cloudPulled）：本機修改＋刪除都不推，基準線與 pendingDeletes 原封不動', async () => {
+  it('舊裝置升級（落地狀態有 initialized、沒有 cloudPulled）：本機修改＋刪除都不推、基準線不動，刪除記進 pendingDeletes', async () => {
     const b1 = { id: 'b1', name: '林先生', guests: 2 }
     const g1 = { id: 'g1', agencyName: '好玩旅行社' }
     const legacyState = {
@@ -112,12 +112,13 @@ describe('① 閘門未開：不發請求、不動基準線與 pendingDeletes', 
     expect(await cloud.pushChangedData()).toEqual(DEFERRED)
     expect(calls).toEqual([])
 
-    // discardRejectedChanges({}) 什麼都不放棄、只把記憶體中的同步狀態原樣落地——用來觀察閘門有沒有偷動它。
-    cloud.discardRejectedChanges({})
+    // 閘門分支會把同步狀態落地：基準線原封不動（修改與刪除都還沒上雲），
+    // 但刪除要記進 pendingDeletes——否則回線首拉走 diff-merge 時會從雲端復活。
     const st = persisted()
     expect(st.lastSynced.bookings).toEqual({ b1: stable(b1) })
     expect(st.lastSynced.groupReservations).toEqual({ g1: stable(g1) })
-    expect(st.pendingDeletes.groupReservations).toEqual([])
+    expect(st.pendingDeletes.groupReservations).toEqual(['g1'])
+    expect(st.pendingDeletes.bookings).toEqual([])
     expect(st.cloudPulled).toBe(false)
   })
 })
@@ -261,5 +262,39 @@ describe('⑤ 雲端 tables 為空／沒帶 settings：維持現行行為', () =
 
     expect((await cloud.pushChangedData()).skipped).toBe(true)
     expect(calls).toEqual([])
+  })
+})
+
+describe('⑧ 舊裝置升級後首拉失敗期間的本機刪除：回線首拉後不復活，開閘推送帶 deletedIds', () => {
+  it('刪一筆團單（離線）→ 首拉成功（diff-merge）不從雲端復活 → 推送只帶 deletedIds', async () => {
+    const g1 = { id: 'g1', agencyName: '甲旅行社' }
+    const g2 = { id: 'g2', agencyName: '乙旅行社' }
+    const settingsBaseline = stable(settingsService.getSettings()) // 本機沒存過設定 → 出廠形式
+    localStorage.setItem(SYNC_STATE_KEY, JSON.stringify({ // 舊版落地格式：沒有 cloudPulled
+      initialized: true,
+      lastSynced: { groupReservations: { g1: stable(g1), g2: stable(g2) }, settings: settingsBaseline },
+      pendingDeletes: {},
+    }))
+    localStorage.setItem(KEY.groups, JSON.stringify([g1, g2]))
+    await loadModules()
+    expect(cloud.hasPulledCloud()).toBe(false)
+
+    // 開機就離線：首拉失敗、閘門關著。這段期間店員刪掉 g1。
+    localStorage.setItem(KEY.groups, JSON.stringify([g2]))
+    expect(await cloud.pushChangedData()).toEqual(DEFERRED)
+    expect(calls).toEqual([])
+
+    await loadModules() // 期間還整頁重新整理過一次：待刪保護必須撐過去
+    expect(cloud.hasPulledCloud()).toBe(false)
+
+    // 回線：首拉成功（已 initialized → diff-merge 分支），雲端仍有 g1
+    cloud.applyCloudSnapshot({ ok: true, groupReservations: [g1, g2] })
+    expect(cloud.hasPulledCloud()).toBe(true)
+    expect(JSON.parse(localStorage.getItem(KEY.groups)).map(g => g.id)).toEqual(['g2']) // 不復活
+
+    await cloud.pushChangedData()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].body).toEqual({ dataset: { deletedIds: { groupReservations: ['g1'] } }, partial: true })
+    expect(persisted().pendingDeletes.groupReservations).toEqual([]) // 後端確認後清掉
   })
 })

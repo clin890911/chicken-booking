@@ -342,20 +342,38 @@ export async function pushCloudData(dataset = localDataset(), { partial = false 
   })
 }
 
+// 刪除偵測：上次同步有、現在本機沒有的文件視為「本機已刪」。記進 pendingDeletes——
+// 在後端確認刪除之前，applyCloudSnapshot 不會把雲端仍存在的版本復原回本機（修 F-A）。
+// 回傳 { 集合: [id...] }（只含有刪除的集合）。正常推送與首拉閘門分支共用這一份邏輯。
+function recordLocalDeletes(ds) {
+  const deletedIds = {}
+  for (const col of DIFF_COLLECTIONS) {
+    const cur = indexDocs(col, ds[col])
+    const removed = Object.keys(lastSynced[col]).filter(id => !(id in cur))
+    if (removed.length) {
+      deletedIds[col] = removed
+      removed.forEach(id => pendingDeletes[col].add(id))
+    }
+  }
+  return deletedIds
+}
+
 // P1-2：只推送與雲端不一致的文件（dirty），避免整份覆寫蓋掉其他裝置的變更。
 // 後端 adminPushData 本就逐筆 merge-upsert，接受「部分資料集」。
 export async function pushChangedData() {
-  // 推送閘門：首拉成功前不發請求、不動基準線、不動 pendingDeletes（必須在下方刪除偵測之前）。
+  // 推送閘門：首拉成功前不發請求、不動基準線（lastSynced）。
   if (!cloudPulled) {
-    // 全新裝置（尚未 initialized）落地「尚未首拉」標記：此時本機可能已有首拉前新建的資料，
-    // 萬一在首拉前整頁重新整理，restoreSyncStateFromStorage 才不會把它們 seed 成已同步。
-    // 只寫目前的（未變動的）狀態，基準線與 pendingDeletes 一律不碰。
-    if (!initialized) persistSyncState()
+    // 已 initialized 的舊裝置（升級後尚未成功拉取，例如開機就離線）：本機刪除仍要記進
+    // pendingDeletes，否則回線首拉走 diff-merge 時會把它們從雲端復活（修補前離線刪除本來就受保護）。
+    // 全新裝置（未 initialized）基準線是空的，沒有刪除可記。
+    if (initialized) recordLocalDeletes(localDataset())
+    // 一併落地：全新裝置寫下「尚未首拉」標記（首拉前整頁重新整理時，restoreSyncStateFromStorage
+    // 才不會把首拉前新建的資料 seed 成已同步）；舊裝置則讓待刪保護撐過重新整理。
+    persistSyncState()
     return awaitingFirstPullResult()
   }
   const ds = localDataset()
   const changed = {}
-  const deletedIds = {}
   let hasChange = false
   for (const col of DIFF_COLLECTIONS) {
     const cur = indexDocs(col, ds[col])
@@ -364,14 +382,10 @@ export async function pushChangedData() {
       if (lastSynced[col][id] !== stable(doc)) list.push(doc)
     }
     if (list.length) { changed[col] = list; hasChange = true }
-    // 刪除偵測：上次同步有、現在本機沒有的文件視為「本機已刪」，請後端一併刪除。
-    const removed = Object.keys(lastSynced[col]).filter(id => !(id in cur))
-    if (removed.length) {
-      deletedIds[col] = removed
-      removed.forEach(id => pendingDeletes[col].add(id))
-      hasChange = true
-    }
   }
+  // 刪除偵測：上次同步有、現在本機沒有的文件視為「本機已刪」，請後端一併刪除。
+  const deletedIds = recordLocalDeletes(ds)
+  if (Object.keys(deletedIds).length) hasChange = true
   const settingsChanged = stable(ds.settings) !== lastSynced.settings
   if (settingsChanged) { changed.settings = ds.settings; hasChange = true }
   if (!hasChange) return { ok: true, skipped: true }

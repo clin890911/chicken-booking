@@ -514,3 +514,46 @@ describe('① 閘門未開：設定頁手動上傳／立即同步不發請求、
     expect(app.ref.ctx.cloudStatus.state).toBe('synced')
   })
 })
+
+describe('⑧ 舊裝置升級（已 initialized、無 cloudPulled）＋首拉失敗期間刪除 → 回線 diff-merge 開閘後自動補推刪除', () => {
+  it('店長刪掉一筆團單（離線）→ 回線不復活，BookingContext 自動推 deletedIds，雲端也刪掉', async () => {
+    const cloud = customCloud({ extraTable: true })
+    cloud.groupReservations = [
+      { id: 'gA', date: TODAY, status: 'planned', agencyName: '甲旅行社', batches: [] },
+      { id: 'gB', date: TODAY, status: 'planned', agencyName: '乙旅行社', batches: [] },
+    ]
+    // 這台之前已同步過（本機＝雲端）；用新版模組 seed 一份基準線後，拿掉 cloudPulled ＝ 舊版落地格式
+    localStorage.setItem('chicken_tables_v3', JSON.stringify(cloud.tables))
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify(cloud.bookings))
+    localStorage.setItem('chicken_group_reservations_v1', JSON.stringify(cloud.groupReservations))
+    localStorage.setItem('chicken_settings_v1', JSON.stringify(cloud.settings))
+    vi.resetModules()
+    await import('../../src/services/cloudDataService')
+    const st = JSON.parse(localStorage.getItem('chicken_sync_state_v1'))
+    expect(st.initialized).toBe(true)
+    delete st.cloudPulled
+    localStorage.setItem('chicken_sync_state_v1', JSON.stringify(st))
+
+    const be = createFakeBackend('manager', cloud)
+    be.state.pullFails = true
+    const app = await bootAs(be, 'manager')
+    expect(app.ref.ctx.cloudStatus.state).toBe('offline')
+
+    await act(async () => { app.ref.ctx.removeGroupReservation('gA') })
+    await sleep(400)
+    expect(be.log.pushes).toEqual([]) // 閘門未開：不發請求
+
+    be.state.pullFails = false
+    await act(async () => { window.dispatchEvent(new Event('online')) })
+    await waitUntil(() => be.log.pushes.length > 0, 'auto push after diff-merge opens gate')
+    await sleep(50)
+
+    expect(leaks).toEqual([])
+    expect(be.log.pushes.map(p => ({ status: p.status, dataset: p.dataset }))).toEqual([
+      { status: 200, dataset: { deletedIds: { groupReservations: ['gA'] } } },
+    ])
+    expect([...be.state.collections.groupReservations.keys()]).toEqual(['gB'])
+    expect(app.ref.ctx.groupReservations.map(g => g.id)).toEqual(['gB']) // 回線拉取沒有把 gA 復活
+    expect(cloudSummary(be.state)).toEqual(cloudSummary(cloud))
+  })
+})
