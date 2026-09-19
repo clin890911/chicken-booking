@@ -85,8 +85,8 @@ test('候位 9 位、無單桌可容 → 自動進併桌模式，確認後入座
 
   await expect(page.getByText(/訪客（候位 #3・9 位）併桌入座/)).toBeVisible()
 
-  // 入座後右欄被該桌的抽屜取代（籤列暫時不在），ESC 收掉才回得到候位籤。
-  await page.keyboard.press('Escape')
+  // 入座後不開桌況抽屜、直接切回「帶位」籤（店主指定 UX：候位客人選定位子後直接回帶位頁），
+  // 不必再 ESC 收抽屜。切回「候位」籤即可看到列表已清空。
   await page.getByRole('button', { name: /^候位/ }).click()
   // 候位列表清空（該筆已轉為 seated）
   await expect(page.getByText('訪客')).toHaveCount(0)

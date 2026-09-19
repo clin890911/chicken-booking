@@ -57,8 +57,15 @@ test('管理端：現場頁內 取號 → 叫號 → 入座（二步確認）→
   await page.getByRole('button', { name: /確認指派/ }).click()
   await expect(page.getByText(/入座.*可指派下一組/)).toBeVisible()
 
-  // 歷史 Sheet 可查到已入座記錄（先 ESC 關閉桌位詳情抽屜，右側欄才會回到候位籤）
+  // 入座後不開桌況抽屜、直接切回「帶位」籤讓店員接著帶下一組（店主指定 UX：
+  // 「候位的客人選定位子後，會直接回到帶位頁面，這樣 UX 比較順」）。
+  // toast 帶「查看」動作，按下才回頭開該桌抽屜確認
+  await page.getByRole('button', { name: '查看', exact: true }).click()
+  await expect(page.getByText(/人桌 ·/)).toBeVisible() // 桌況抽屜的容量列，證明抽屜真的開了
   await page.keyboard.press('Escape')
+
+  // 歷史 Sheet 在「候位」籤內（入座後預設落點是帶位籤，要切回候位籤才看得到）
+  await page.getByRole('button', { name: '候位', exact: true }).click()
   await page.getByRole('button', { name: '歷史', exact: true }).click()
   await expect(page.getByText('候位歷史與統計')).toBeVisible()
   await expect(page.getByText(/入座 \d+/).first()).toBeVisible()

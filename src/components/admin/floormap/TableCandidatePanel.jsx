@@ -13,7 +13,7 @@ import { releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } 
 // 主要動作：
 //   - 訂位列：[入座]（指派+客人到了）/ [預訂]（只指派、status reserved）
 //   - 候位列：[入座]
-export default function TableCandidatePanel({ table, onPicked }) {
+export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated }) {
   const {
     bookings, waitlist, settings, assignBookingToTable, seatBooking, seatWaitlist,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
@@ -130,8 +130,9 @@ export default function TableCandidatePanel({ table, onPicked }) {
     const r = seatWaitlist(wait.id, table.number)
     if (!r.ok) return toast.error('入座失敗：' + r.error)
     releaseOverlappingPreassigns(overridden, releaseOpts)
-    toast.success(`${wait.name}（候位 #${wait.queueNumber}）入座 ${table.number}`)
-    onPicked?.()
+    // 候位入座＝客人已在現場，不留在桌況抽屜——切回帶位籤讓店員接著帶下一組
+    // （由父層 OperationsView 的 seatedToWalkin 統一收尾：關抽屜＋切籤＋toast 帶「查看」）
+    onWaitlistSeated?.(table.number, `${wait.name}（候位 #${wait.queueNumber}）入座 ${table.number}`)
   }
 
   const totalCount = pendingBookings.length + pendingWaitlist.length
