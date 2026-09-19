@@ -2071,6 +2071,80 @@ describe('撞桌止血：S3 建議桌看佔用區間（hold / preassign / now）
   })
 })
 
+// 鎖桌時機（2026-09 店主拍板「接近時段才鎖」）：更早的訂位只預配，候選不必此刻空著，
+// 但要排除「與預配區間 [時段, 時段+佔位) 重疊」的佔用（用餐中推估、鎖桌區間、他筆預配、團保、維修）。
+describe('預配型候選：preassignableTables / findPreassignCandidates / findReserveCandidates', () => {
+  const TODAY = '2026-06-15'
+  const at = (h, m = 0) => new Date(2026, 5, 15, h, m)
+  const iso = (h, m = 0) => at(h, m).toISOString()
+  const nums = (list) => list.map(t => t.number)
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(at(9))
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('此刻用餐中但 18:00 前會結束的桌 → 18:00 預配可選（且列為候選）；10:00 會撞 → 不列', () => {
+    tableService.bulkWrite([
+      mkTable('105', 4, '1F', { status: 'dining', seatedAt: iso(8, 30) }),   // 推估 10:10 用畢
+      mkTable('106', 4, '1F'),
+    ])
+    const opts = (timeSlot) => ({ date: TODAY, timeSlot, now: at(9) })
+    expect(nums(seating.findPreassignCandidates(2, opts('18:00')))).toEqual(['105', '106'])
+    expect(nums(seating.preassignableTables(2, opts('10:00')))).toEqual(['106'])
+    // 鎖桌型（findSuitableTables）仍只看此刻空桌：105 不在
+    expect(nums(seating.findSuitableTables(2, { ...opts('18:00'), mode: 'hold' }))).toEqual(['106'])
+  })
+
+  it('已鎖桌那筆看「鎖桌區間」：09:00 鎖給 13:30 的 107 → 11:00 預配不可選（只看預配區間會漏）', () => {
+    tableService.bulkWrite([mkTable('106', 4, '1F'), mkTable('107', 4, '1F')])
+    const x = mkBooking({ name: 'X', date: TODAY, timeSlot: '13:30' })
+    seating.assignBookingToTable(x.id, '107')                       // 07 reserved 從現在鎖到 15:10
+    const opts = (timeSlot) => ({ date: TODAY, timeSlot, now: at(9) })
+    expect(nums(seating.preassignableTables(2, opts('11:00')))).toEqual(['106'])
+    expect(nums(seating.findPreassignCandidates(2, opts('11:00')))).toEqual(['106'])
+    // 17:30 起的預配與 X 的鎖桌區間不重疊 → 107 可選
+    expect(nums(seating.findPreassignCandidates(2, opts('17:30')))).toEqual(['106', '107'])
+  })
+
+  it('排除重疊的他筆預配與今日團保（可點選集合不排除），不重疊的預配不擋', () => {
+    tableService.bulkWrite([mkTable('106', 4, '1F'), mkTable('108', 4, '1F'), mkTable('109', 4, '1F')])
+    const y = mkBooking({ name: 'Y', date: TODAY, timeSlot: '17:30' })
+    bookingService.assignTable(y.id, '108')                          // 預配 17:30（17:30–19:10）
+    groupService.create({ date: TODAY, status: 'confirmed', agencyName: '甲旅行社',
+      batches: [{ label: '第一梯', timeSlot: '12:00', tableNumbers: ['109'], guests: 4 }] })
+    const opts = (timeSlot) => ({ date: TODAY, timeSlot, now: at(9) })
+    expect(nums(seating.findPreassignCandidates(2, opts('18:00')))).toEqual(['106'])
+    expect(nums(seating.preassignableTables(2, opts('18:00')))).toEqual(['106', '108', '109'])
+    // 12:00 與 Y 的 17:30 不重疊 → 108 仍是候選
+    expect(nums(seating.findPreassignCandidates(2, opts('12:00')))).toEqual(['106', '108'])
+  })
+
+  it('依日期的維修停用、手動不可用、容量不足 → 不可選；待清桌屆時已清好 → 可選', () => {
+    tableService.bulkWrite([
+      mkTable('106', 4, '1F'),
+      mkTable('110', 4, '1F', { outage: { from: TODAY, to: '', reason: '修椅子' } }),
+      mkTable('111', 4, '1F', { status: 'cleaning' }),
+      mkTable('112', 4, '1F', { status: 'blocked', blockReason: '漏水' }),
+      mkTable('113', 2, '1F'),
+    ])
+    expect(nums(seating.findPreassignCandidates(3, { date: TODAY, timeSlot: '18:00', now: at(9) }))).toEqual(['106', '111'])
+  })
+
+  it('findReserveCandidates 依鎖桌時機分流：10:40 選 11:00＝hold（只有空桌），09:00 選 18:00＝preassign', () => {
+    tableService.bulkWrite([
+      mkTable('105', 4, '1F', { status: 'dining', seatedAt: iso(8, 30) }),
+      mkTable('106', 4, '1F'),
+    ])
+    const hold = seating.findReserveCandidates(2, { date: TODAY, timeSlot: '11:00', now: at(10, 40) })
+    expect(hold.kind).toBe('hold')
+    expect(nums(hold.tables)).toEqual(['106'])
+    const pre = seating.findReserveCandidates(2, { date: TODAY, timeSlot: '18:00', now: at(9) })
+    expect(pre.kind).toBe('preassign')
+    expect(nums(pre.tables)).toEqual(['105', '106'])
+  })
+})
+
 describe('撞桌止血：S4 releaseOverriddenAssignment（覆蓋預配後解除被覆蓋那筆）', () => {
   beforeEach(() => { seedDefaultTables() })
 

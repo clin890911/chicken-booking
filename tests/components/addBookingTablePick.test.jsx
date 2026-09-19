@@ -17,9 +17,10 @@ function resetCtx() {
     bookings: [], tables: [T105, T106, T201], groupReservations: [],
     settings: { openTime: '11:00', closeTime: '21:00', slotInterval: 30 },
     addBooking: vi.fn(d => ({ id: 'BNEW', ...d })),
-    suggestTable: vi.fn(() => T105),
-    findSuitableTables: vi.fn(() => [T105, T106, T201]),
+    // 候選＋存檔語意（鎖桌時機）由 findReserveCandidates 一次給；預設「鎖桌型」（10:40 選 11:00）
+    findReserveCandidates: vi.fn(() => ({ kind: 'hold', tables: [T105, T106, T201] })),
     assignBookingToTable: vi.fn(() => ({ ok: true })),
+    preassignBookingTable: vi.fn((id, n) => ({ id, assignedTableId: n })),
   })
 }
 const toast = { success: vi.fn(), error: vi.fn(), action: vi.fn(), info: vi.fn() }
@@ -63,7 +64,8 @@ describe('AddBookingView：今日訂位選桌', () => {
   // 固定時鐘：早於所有測試預設的 11:00 時段（2026-09 起 TimeSlotPicker 會把「今天」已過的
   // 時段濾掉，見 tests/components/timeSlotPickerPastHidden.test.jsx）。不固定的話，這份測試
   // 一過中午跑就會找不到 11:00 的時段按鈕，fillBasics() 就會炸。
-  const NOW = new Date(2026, 8, 19, 9, 0, 0)
+  // 10:40：離 11:00 只剩 20 分 → 鎖桌型（capacity.lockKindFor）；預配型另見下方 describe。
+  const NOW = new Date(2026, 8, 19, 10, 40, 0)
 
   beforeEach(() => { resetCtx(); vi.clearAllMocks(); vi.useFakeTimers(); vi.setSystemTime(NOW) })
   afterEach(() => {
@@ -95,9 +97,9 @@ describe('AddBookingView：今日訂位選桌', () => {
     expect(pickArea().textContent).toContain('1F')
     expect(pickArea().textContent).toContain('2F')
     expect(confirmBtn().textContent).toMatch(/確認新增 · .* 11:00 · 2 位 · 桌 105/)
-    // 候選依所選時段查（S3 口徑）
-    // 候選依「存檔即鎖桌」的佔用區間查（mode 'hold'：[min(現在, 時段), 時段+佔位)，驗收問題 1）
-    expect(ctx.findSuitableTables).toHaveBeenCalledWith(2, expect.objectContaining({ timeSlot: '11:00', mode: 'hold' }))
+    // 候選與鎖桌時機一起由 findReserveCandidates 算（帶所選時段、注入 now；鎖桌型走 'hold' 佔用區間，驗收問題 1）
+    expect(ctx.findReserveCandidates).toHaveBeenCalledWith(2, expect.objectContaining({ timeSlot: '11:00', now: expect.any(Date) }))
+    expect(pickArea().textContent).toContain('存檔後立刻鎖桌 105')
     expect(container.querySelector('input[type="checkbox"]')).toBeNull()
     expect(container.textContent).not.toContain('自動指派最佳桌')
   })
@@ -138,7 +140,7 @@ describe('AddBookingView：今日訂位選桌', () => {
   })
 
   it('U1：人數改了、已選的 106 不再合格 → 回到新的建議並提示', () => {
-    ctx.findSuitableTables = vi.fn((g) => (g <= 4 ? [T105, T106, T201] : [T201]))
+    ctx.findReserveCandidates = vi.fn((g) => ({ kind: 'hold', tables: g <= 4 ? [T105, T106, T201] : [T201] }))
     render()
     fillBasics()
     click(chip('106'))
@@ -149,7 +151,7 @@ describe('AddBookingView：今日訂位選桌', () => {
   })
 
   it('U1：有單桌坐得下、只是此刻沒空桌可鎖 → 預設「先不指派」並說明，存檔不跳頁', () => {
-    ctx.findSuitableTables = vi.fn(() => [])
+    ctx.findReserveCandidates = vi.fn(() => ({ kind: 'hold', tables: [] }))
     render()
     fillBasics()
     expect(pickArea().textContent).toContain('此刻沒有空桌可鎖，先存檔、接近用餐時間再到現場頁指派')
@@ -162,7 +164,7 @@ describe('AddBookingView：今日訂位選桌', () => {
 
   it('U1：店裡沒有任何單桌坐得下（需併桌）→ 預設「到桌況圖選（可併桌）」並據實說明', () => {
     ctx.tables = [T105, T106]                                     // 最大 4 人桌
-    ctx.findSuitableTables = vi.fn(() => [])
+    ctx.findReserveCandidates = vi.fn(() => ({ kind: 'hold', tables: [] }))
     render()
     fillBasics()
     click(container.querySelector('button[aria-label="6 位"]'))
@@ -181,6 +183,43 @@ describe('AddBookingView：今日訂位選桌', () => {
     click(confirmBtn())
     expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
     expect(toast.action.mock.calls.at(-1)[1].label).toBe('預配桌位')
+  })
+
+  // ---- 鎖桌時機：離用餐還早 → 只預配（2026-09 店主拍板「接近時段才鎖」）----
+  const preassignKind = () => {
+    ctx.findReserveCandidates = vi.fn(() => ({ kind: 'preassign', tables: [T105, T106, T201] }))
+  }
+
+  it('預配型：確認列帶「預配 105」、提示講清楚桌子先不鎖；存檔走 Context 的 preassignBookingTable，不鎖桌', () => {
+    preassignKind()
+    render()
+    fillBasics()
+    expect(confirmBtn().textContent).toMatch(/確認新增 · .* 11:00 · 2 位 · 預配 105/)
+    expect(pickArea().textContent).toContain('先預配 105：桌子先不鎖、現在仍可帶位')
+    expect(pickArea().textContent).toContain('現場帶位用到這張桌會提醒')
+    click(confirmBtn())
+    expect(ctx.preassignBookingTable).toHaveBeenCalledWith('BNEW', '105')
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+    const [msg, action] = toast.action.mock.calls.at(-1)
+    expect(msg).toContain('已預配 105')
+    expect(action.label).toBe('改桌')
+  })
+
+  it('預配型：候選此刻有客（屆時會空出）→ 晶片標出現況', () => {
+    ctx.findReserveCandidates = vi.fn(() => ({ kind: 'preassign', tables: [{ ...T105, status: 'dining' }, T106] }))
+    render()
+    fillBasics()
+    expect(chip('105').textContent).toContain('現用餐中')
+    expect(chip('106').textContent).not.toContain('現')
+  })
+
+  it('預配型沒有候選 → 說明「沒有不撞桌的桌可預配」', () => {
+    ctx.findReserveCandidates = vi.fn(() => ({ kind: 'preassign', tables: [] }))
+    render()
+    fillBasics()
+    expect(pickArea().textContent).toContain('這個時段沒有不撞桌的桌可預配')
+    click(confirmBtn())
+    expect(ctx.preassignBookingTable).not.toHaveBeenCalled()
   })
 
   // ---- U4：來源＝現場時電話選填 ----

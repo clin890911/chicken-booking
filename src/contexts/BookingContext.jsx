@@ -539,6 +539,10 @@ export function BookingProvider({ children }) {
   const findSuitableTables = (partySize, opts) => seatingService.findSuitableTables(partySize, opts)
   const suggestTable = (partySize, opts) => seatingService.suggestTable(partySize, opts)
   const suggestTableCombo = (partySize) => seatingService.suggestTableCombo(partySize)
+  // 鎖桌時機分流（capacity.lockKindFor）：今日訂位挑桌的建議／候選 → { kind:'hold'|'preassign', tables }
+  const findReserveCandidates = (partySize, opts) => seatingService.findReserveCandidates(partySize, opts)
+  // 預配型的可點選集合（桌子不必此刻空著，只要此刻的佔用不會延續進預配區間）
+  const preassignableTables = (partySize, opts) => seatingService.preassignableTables(partySize, opts)
 
   // 統一座位地圖的「預先配桌」：僅在 booking 上記錄 assignedTableId（per-date），
   // ★ 不更動 live tables（currentBookingId/status），故未來日期預排不會誤佔今日現場桌況。
@@ -729,7 +733,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

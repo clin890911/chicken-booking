@@ -79,6 +79,10 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
     : mode.type === 'group-reseat' ? (mode.group?.agencyName || '團體')
     : ''
 
+  // 單桌指派的寫入語意（mode.lockKind，見 capacity.lockKindFor）：'preassign'＝只預配、桌況不鎖。
+  // 舊呼叫點沒帶 lockKind → 視為鎖桌（原行為）。
+  const assignPreassign = mode.type === 'assign' && mode.lockKind === 'preassign'
+
   const hasConflict = !!pendingConflicts?.length
   const willRelease = !!pendingConflicts?.some(c => c.willRelease)
 
@@ -86,7 +90,11 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
     ? `把 ${mode.current} 改派為 ${pendingConfirm} 並整梯入座？（將更新該梯圈桌）`
     : mode.type === 'move'
       ? `確認把 ${pendingTargetName} 從 ${mode.booking?.assignedTableId} 改到桌 ${pendingConfirm}？`
-      : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
+      : mode.type === 'assign'
+        ? (assignPreassign
+          ? `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm} · 預配（桌子現在仍可帶位）？`
+          : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm} 並鎖桌？`)
+        : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
 
   return (
     <div className={`${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
@@ -94,6 +102,12 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
         <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
           <Icon name={style.icon} size={18} />
           <span>{bannerText}</span>
+          {/* 單桌指派：講清楚這次是「鎖桌」還是「預配」（離用餐 30 分內才鎖） */}
+          {mode.type === 'assign' && (
+            <span className="inline-flex items-center bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold">
+              {assignPreassign ? `${mode.booking?.timeSlot || ''} 預配 · 桌子先不鎖`.trim() : '指派即鎖桌'}
+            </span>
+          )}
           {/* C5：建議桌以底色塊 + 💡 突出 */}
           {CONFIRMABLE.includes(mode.type) && (
             mode.suggestion ? (
@@ -151,7 +165,8 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
                   (hasConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
               >{(willRelease || pendingGroupHold) ? '仍要覆蓋指派'
                 : hasConflict ? '仍要指派（預配保留）'
-                : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'move' ? '✓ 確認改桌' : '✓ 確認指派'}</button>
+                : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'move' ? '✓ 確認改桌'
+                : assignPreassign ? '✓ 確認指派（預配）' : '✓ 確認指派'}</button>
             </div>
           </div>
         </div>

@@ -4,7 +4,8 @@ import { test, expect } from '@playwright/test'
 // 1) 新增表單時段下方有「桌位」區：預選建議桌、可改選；來源＝現場時電話選填。
 // 2) 存檔後訂位卡有「改桌」→ 跨頁到現場 move 模式 → 地圖點新桌 → 確認改桌。
 // 3) 建議桌看佔用區間：11:00 已預配 105 時，11:30 的訂位不再被建議 105；
-//    今日存檔即鎖桌 → 09:00 新增 13:30 的訂位也不可預選 105（反向撞桌，驗收問題 1）。
+//    鎖桌時機（2026-09 店主拍板「接近時段才鎖」）：09:00 新增 13:30 只預配、不鎖桌 →
+//    佔用區間只剩 [13:30, 15:10)，不撞 11:00 余先生的 105（舊版存檔即鎖桌的反向撞桌不再發生）。
 // 4) 覆蓋預配只在用餐區間重疊時解除；帶位「復原」把被解除的預配還回去（驗收問題 3）。
 // 時間用 page.clock 固定、時區固定 Asia/Taipei，結果不隨跑測試的時刻變動。
 // 後台本機模式以 localStorage 為後端；攔截 admin* 雲端端點（同 admin-assign.spec.js）。
@@ -62,7 +63,8 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌」→ 現場地圖改到 107', async ({ page }) => {
-  await page.clock.setFixedTime(at('09:00'))
+  // 10:40 新增 11:00：離用餐 ≤ 30 分 → 存檔即鎖桌（本條驗鎖桌型；預配型見下方 09:00 新增 13:30）
+  await page.clock.setFixedTime(at('10:40'))
   await page.addInitScript(() => {
     localStorage.setItem('chicken_bookings_v1', JSON.stringify([]))
     localStorage.removeItem('chicken_tables_v3')
@@ -130,9 +132,9 @@ test('建議桌看時段：11:00 余先生已預配 105 → 11:30 陳小姐不�
   await expect(page.getByText('建議桌 105')).toHaveCount(0)
 })
 
-// 驗收問題 1 的重現情境：09:00 時余先生 11:00 預配 105；新增陳小姐 13:30 → 表單存檔即鎖桌，
-// 105 從 09:00 起就被鎖，會撞到 11:00 的余先生 → 不得預選、也不得列出 105。
-test('反向撞桌：09:00 新增 13:30 的訂位，不得預選／列出 11:00 已預配的 105', async ({ page }) => {
+// 驗收問題 1 的情境改由鎖桌時機解掉：09:00 時余先生 11:00 預配 105；新增陳小姐 13:30 離用餐還早 →
+// 只預配（桌況不鎖），佔用區間 [13:30, 15:10) 與余先生 [11:00, 12:40) 不重疊 → 105 可預配、兩筆並存。
+test('09:00 新增 13:30 → 只預配 105（桌況仍空），不撞 11:00 已預配 105 的余先生', async ({ page }) => {
   await page.clock.setFixedTime(at('09:00'))
   await seedYu(page, '11:00')
   await login(page)
@@ -141,12 +143,15 @@ test('反向撞桌：09:00 新增 13:30 的訂位，不得預選／列出 11:00 
   await page.getByPlaceholder('王小姐').fill('陳小姐')
   await page.getByRole('button', { name: /^13:30/ }).click()
 
-  await expect(page.getByRole('button', { name: /^106 · 4人/ })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('button', { name: /^105 · 4人/ })).toHaveCount(0)
-  await page.getByRole('button', { name: /確認新增 · .*13:30 · 2 位 · 桌 106/ }).click()
-  await expect(page.getByText(/陳小姐 2 位 · .*13:30 · 已指派 106/)).toBeVisible()
-  const yu = (await readBookings(page)).find(b => b.id === 'E2E-YU')
-  expect(yu.assignedTableId).toBe('105')
+  await expect(page.getByRole('button', { name: /^105 · 4人/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText(/先預配 105：桌子先不鎖/)).toBeVisible()
+  await page.getByRole('button', { name: /確認新增 · .*13:30 · 2 位 · 預配 105/ }).click()
+  await expect(page.getByText(/陳小姐 2 位 · .*13:30 · 已預配 105/)).toBeVisible()
+  const bookings = await readBookings(page)
+  expect(bookings.find(b => b.id === 'E2E-YU').assignedTableId).toBe('105')
+  expect(bookings.find(b => b.name === '陳小姐').assignedTableId).toBe('105')
+  const tables = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_tables_v3') || '[]'))
+  expect(tables.find(t => t.number === '105').status).toBe('vacant')
 })
 
 // 驗收問題 3：12:20 帶位覆蓋 20:30 的預配（用餐區間不重疊）→ 警示寫「會保留」、帶位後預配仍在

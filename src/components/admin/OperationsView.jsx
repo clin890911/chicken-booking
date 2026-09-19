@@ -13,7 +13,7 @@ import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
-import { findPreassignedBooking, preassignConflicts, assignmentWindow } from '../../utils/capacity'
+import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor } from '../../utils/capacity'
 import { assignmentKind } from '../../utils/tableStatus'
 import { conflictLine, releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } from '../../utils/preassignOverride'
 import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
@@ -92,7 +92,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
     cancelBooking, seatBooking, setStatus, setTableStatus,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
-    findSuitableTables, suggestTable, suggestTableCombo,
+    findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    preassignBookingTable,
   } = useBooking()
   const toast = useToast()
   const { can, user } = useAuth()
@@ -159,16 +160,23 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const showSummary = !mode && view === 'summary'
 
   // 進入指派桌模式（含自動建議）。無單桌容納（大組）→ 改走多桌指派（併桌）。
+  // 單桌指派依鎖桌時機（capacity.lockKindFor，店主 2026-09 拍板「接近時段才鎖」）：
+  //   hold      離用餐 ≤ 30 分（含已過）→ 指派並鎖桌（assignBookingToTable → reserved）
+  //   preassign 更早 → 只預配（booking.assignedTableId，桌況仍空、現場帶位照樣可用、會被警示）
+  // 大組併桌維持鎖桌：seatBooking 只把主桌設成用餐中，預配型併桌的額外桌到店時不會被佔起來。
   const startAssign = (booking) => {
     const guests = Number(booking.guests) || 0
-    const suitable = findSuitableTables(guests).map(t => t.number)
+    const date = booking.date || todayStr()
+    const lockKind = lockKindFor({ date, timeSlot: booking.timeSlot })
+    const reserveOpts = { bookingId: booking.id, date, timeSlot: booking.timeSlot }
+    // 可點選集合（suitable）不因他筆預配／團保縮小（那些走警示＋「將解除／會保留」）：
+    //   hold＝此刻空桌；preassign＝桌子不必此刻空著，只要此刻的佔用不延續進預配區間
+    const suitable = (lockKind === 'preassign' ? preassignableTables(guests, reserveOpts) : findSuitableTables(guests))
+      .map(t => t.number)
     if (suitable.length > 0) {
-      // 有單桌容納 → 既有單桌指派流程。可點選集合（suitable）不縮小；
-      // 只有「建議桌」看佔用區間（指派＝現在就鎖桌 → 'hold'），避開他筆預配重疊的桌與團保桌。
-      const suggestion = suggestTable(guests, {
-        bookingId: booking.id, date: booking.date || todayStr(), timeSlot: booking.timeSlot, mode: 'hold',
-      })
-      setMode({ type: 'assign', booking, suitable, suggestion: suggestion?.number })
+      // 建議桌看佔用區間（依 lockKind），避開他筆預配重疊的桌與團保桌
+      const suggestion = findReserveCandidates(guests, reserveOpts).tables[0]
+      setMode({ type: 'assign', booking, lockKind, suitable, suggestion: suggestion?.number })
       setSelectedTable(null)
       setPendingConfirm(null)
       if (suggestion) setFloor(suggestion.floor)
@@ -281,7 +289,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (!m) return null
     if (m.type === 'seat-waitlist') return assignmentWindow({ mode: 'now' }, settings)
     const b = m.booking
-    const kind = m.type === 'move' ? (m.moveKind || 'hold') : 'hold'
+    const kind = m.type === 'move' ? (m.moveKind || 'hold') : (m.lockKind || 'hold')
     return assignmentWindow({ mode: kind, timeSlot: b?.timeSlot, date: b?.date || todayStr() }, settings)
   }
 
@@ -347,7 +355,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         return toast.info(`${number} 是 ${mode.booking.name} 目前的桌，請點要換過去的桌`)
       }
       if (!mode.suitable.includes(number)) {
-        return toast.error(mode.type === 'group-reseat' ? '此桌非空桌或已被其他團體保留' : '此桌不符合容量或非空桌')
+        return toast.error(mode.type === 'group-reseat' ? '此桌非空桌或已被其他團體保留'
+          : mode.lockKind === 'preassign' ? '此桌容量不足、停用，或到那個時段仍有客'
+          : '此桌不符合容量或非空桌')
       }
       if (pendingConfirm === number) { executeAssign(number); return }
       setPendingConfirm(number)
@@ -363,10 +373,18 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const releaseOpts = { releaseOverriddenAssignment, toast }
     if (mode.type === 'assign') {
       const booking = mode.booking
-      const r = assignBookingToTable(booking.id, number)
-      if (!r.ok) return toast.error('指派失敗：' + r.error)
+      const preassign = mode.lockKind === 'preassign'
+      if (preassign) {
+        // 預配：只寫 booking.assignedTableId（Context 包裝含 refresh／同步），桌況不動
+        if (!preassignBookingTable(booking.id, number)) return toast.error('指派失敗：訂位不存在')
+      } else {
+        const r = assignBookingToTable(booking.id, number)
+        if (!r.ok) return toast.error('指派失敗：' + r.error)
+      }
       const released = releaseOverlappingPreassigns(overridden, releaseOpts)
-      const msg = `${booking.name}（${booking.guests} 位）指派至 ${number} · 可指派下一組`
+      const msg = preassign
+        ? `${booking.name}（${booking.guests} 位）指派至 ${number}（預配：桌子現在仍可帶位）· 可指派下一組`
+        : `${booking.name}（${booking.guests} 位）指派至 ${number} · 可指派下一組`
       if (released.length) {
         // 解除了別人的預配 → 給復原：撤回這次指派（只清不搶），並把被解除的預配寫回
         toast.action(msg, { label: '↩ 復原', onClick: () => {
