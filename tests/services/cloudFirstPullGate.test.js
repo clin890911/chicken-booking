@@ -298,3 +298,69 @@ describe('⑧ 舊裝置升級後首拉失敗期間的本機刪除：回線首拉
     expect(persisted().pendingDeletes.groupReservations).toEqual([]) // 後端確認後清掉
   })
 })
+
+describe('⑨ 配額邊緣：「尚未首拉」標記寫得進、首拉後完整狀態寫不進', () => {
+  const quotaFullForSyncState = () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const original = localStorage.setItem.bind(localStorage)
+    const setSpy = vi.spyOn(localStorage, 'setItem').mockImplementation((k, v) => {
+      if (k === SYNC_STATE_KEY) throw new Error('QuotaExceededError（模擬配額滿）')
+      return original(k, v)
+    })
+    return () => { setSpy.mockRestore(); errSpy.mockRestore() }
+  }
+
+  it('移除舊標記 → 重新整理退回降級路徑；別台刪掉的團單 gX 不會被當成「首拉前新建」推回雲端', async () => {
+    tableService.listAll()
+    expect(await cloud.pushChangedData()).toEqual(DEFERRED) // 首拉前的推送嘗試寫下標記（小，寫得進）
+    expect(persisted()).toMatchObject({ initialized: false, cloudPulled: false })
+
+    const restore = quotaFullForSyncState()
+    const gX = { id: 'gX', agencyName: '甲旅行社' }
+    cloud.applyCloudSnapshot(cloudSnapshot({ groupReservations: [gX] })) // 首拉成功，但完整狀態落地失敗
+    expect(cloud.isSyncPersistDegraded()).toBe(true)                     // 降級旗標照舊翻起
+    expect(localStorage.getItem(SYNC_STATE_KEY)).toBeNull()             // 舊標記被移除（removeItem 不需配額）
+
+    // 別台把 gX 刪了；這台（配額仍滿）整頁重新整理後回線拉取
+    await loadModules()
+    cloud.applyCloudSnapshot(cloudSnapshot({ groupReservations: [] }))
+    await cloud.pushChangedData()
+    restore()
+
+    expect(JSON.parse(localStorage.getItem(KEY.groups))).toEqual([])
+    const pushedBack = calls.filter(c => (c.body?.dataset?.groupReservations || []).some(g => g.id === 'gX'))
+    expect(pushedBack).toEqual([])
+    expect(leaks).toEqual([])
+  })
+
+  it('落地的是較舊的「完整」狀態（initialized:true）→ 寫入失敗時維持原樣，不移除（PR #109 既有降級行為）', async () => {
+    const legacy = { initialized: true, cloudPulled: true, lastSynced: { bookings: { b1: stable({ id: 'b1' }) } }, pendingDeletes: {} }
+    localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(legacy))
+    localStorage.setItem(KEY.bookings, JSON.stringify([{ id: 'b1' }]))
+    await loadModules()
+
+    const restore = quotaFullForSyncState()
+    cloud.applyCloudSnapshot(cloudSnapshot({ bookings: [{ id: 'b1' }, { id: 'b2' }] }))
+    restore()
+
+    expect(cloud.isSyncPersistDegraded()).toBe(true)
+    expect(persisted()).toEqual(legacy)
+  })
+})
+
+describe('⑩ 多分頁：另一個分頁已首拉並落地完整狀態', () => {
+  it('這個分頁（記憶體仍未初始化）被閘門擋下時，不可把落地的完整狀態蓋回「尚未首拉」標記', async () => {
+    const tabB = cloud // beforeEach 在空 localStorage 下載入：記憶體 initialized=false
+    vi.resetModules()
+    const tabA = await import('../../src/services/cloudDataService') // 同裝置另一個分頁
+    tabA.applyCloudSnapshot(cloudSnapshot())
+    expect(persisted()).toMatchObject({ initialized: true, cloudPulled: true })
+
+    expect(await tabB.pushChangedData()).toEqual(DEFERRED)
+    expect(calls).toEqual([])
+    expect(persisted()).toMatchObject({ initialized: true, cloudPulled: true })
+
+    await loadModules() // 之後重新整理：閘門仍開、走 diff-merge
+    expect(cloud.hasPulledCloud()).toBe(true)
+  })
+})

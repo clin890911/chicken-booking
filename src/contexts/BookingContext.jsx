@@ -160,7 +160,8 @@ export function BookingProvider({ children }) {
   const flushCloudNow = useCallback(async () => {
     if (!isStaffRef.current) return { ok: false, error: 'not-staff' }
     // 首拉閘門未開：這台還沒成功拉過雲端，推送一律延後。要誠實回報「沒上雲」（不可回 ok），
-    // 也不動同步狀態（不顯示成同步中／已同步／失敗）；本機已存，首拉成功後會自動補推。
+    // 也不動同步狀態（不顯示成同步中／已同步／失敗）。取得雲端資料後：本機訂位／候位等會補送；
+    // 桌位與設定以雲端為準，首拉前的修改不會保留（呼叫端據 deferred 顯示對應文案）。
     if (!cloudData.hasPulledCloud()) return { ok: false, deferred: true, error: PUSH_DEFERRED_MESSAGE }
     window.clearTimeout(syncTimerRef.current) // 取消待送的節流推送，改為立即送出
     setCloudStatus(s => ({ ...s, state: 'syncing' }))

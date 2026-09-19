@@ -136,7 +136,20 @@ function persistSyncState() {
       '整頁重新整理後可能重演佈局被雲端覆蓋的問題。常見原因：裝置儲存空間不足，或瀏覽器處於無痕/私密瀏覽模式。',
       err
     )
+    // 🔴 配額邊緣：「尚未首拉」標記（小）寫得進、首拉後的完整狀態（大）寫不進。若放著不管，落地的
+    // 永遠是舊標記 → 之後每次重新整理都走首拉分支 → 本機有、雲端已被別台刪掉的文件會被當成
+    // 「首拉前新建」推回雲端（刪除復活）。記憶體已 initialized 而落地仍是標記時，移除它
+    // （removeItem 不需配額），讓重新整理退回既有的 hasAnyLocalData seed＋diff-merge 降級路徑。
+    // 只移除標記：落地若是較舊的完整狀態就維持原樣（PR #109 既有的降級行為不變）。
+    if (initialized && isAwaitingFirstPullMarker(loadPersistedSyncState())) {
+      try { localStorage.removeItem(SYNC_STATE_KEY) } catch { /* 連移除都不行就只剩降級旗標 */ }
+    }
   }
+}
+
+// 落地的是「尚未首拉」標記（全新裝置在首拉前寫下的），而不是完整的同步狀態。
+function isAwaitingFirstPullMarker(state) {
+  return !!state && state.initialized !== true
 }
 
 function loadPersistedSyncState() {
@@ -366,10 +379,16 @@ export async function pushChangedData() {
     // 已 initialized 的舊裝置（升級後尚未成功拉取，例如開機就離線）：本機刪除仍要記進
     // pendingDeletes，否則回線首拉走 diff-merge 時會把它們從雲端復活（修補前離線刪除本來就受保護）。
     // 全新裝置（未 initialized）基準線是空的，沒有刪除可記。
-    if (initialized) recordLocalDeletes(localDataset())
-    // 一併落地：全新裝置寫下「尚未首拉」標記（首拉前整頁重新整理時，restoreSyncStateFromStorage
-    // 才不會把首拉前新建的資料 seed 成已同步）；舊裝置則讓待刪保護撐過重新整理。
-    persistSyncState()
+    if (initialized) {
+      recordLocalDeletes(localDataset())
+      persistSyncState() // 讓待刪保護撐過重新整理
+    } else {
+      // 全新裝置寫下「尚未首拉」標記（首拉前整頁重新整理時，restoreSyncStateFromStorage 才不會把
+      // 首拉前新建的資料 seed 成已同步）。🔴 多分頁：同裝置另一個分頁可能已經首拉、落地了完整狀態；
+      // 這個分頁的記憶體還停在未初始化，不可把它蓋回標記。只有「沒有落地」或「本身就是標記」才寫。
+      const persistedNow = loadPersistedSyncState()
+      if (!persistedNow || isAwaitingFirstPullMarker(persistedNow)) persistSyncState()
+    }
     return awaitingFirstPullResult()
   }
   const ds = localDataset()
