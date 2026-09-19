@@ -9,12 +9,14 @@ import OpsHintBar from './ops/OpsHintBar'
 import OpsLogModal from './ops/OpsLogModal'
 import TableScheduleView from './ops/TableScheduleView'
 import TableSummaryView from './ops/TableSummaryView'
+import { nextBookableSlot } from './ops/QuickReservePanel'
 import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
 import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor } from '../../utils/capacity'
-import { assignmentKind } from '../../utils/tableStatus'
+import { assignmentKind, statusZh } from '../../utils/tableStatus'
+import { isTableUsableOnDate } from '../../utils/tableAvailability'
 import { conflictLine, releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } from '../../utils/preassignOverride'
 import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
 import { buildTableTurns } from '../../utils/tableTurns'
@@ -80,6 +82,41 @@ export function seatedToWalkin(tableNumber, msg, { setSelectedTable, setMode, se
   toast.action(msg, { label: '查看', onClick: () => setSelectedTable(tableNumber) })
 }
 
+// 現場內嵌「新增今日訂位」的存檔（純函式，注入 context 動作與 toast 方便單測；同 handleArriveNow 手法）。
+// 寫入語意依面板當下顯示的鎖桌時機（kind，capacity.lockKindFor）——按鈕上寫什麼就做什麼：
+//   hold      → addBooking ＋ assignBookingToTable（鎖桌，含同步／Telegram）
+//   preassign → addBooking ＋ preassignBookingTable（只記在訂位上，桌況不動）
+// 訂位建不起來（例外／無回傳）→ 回 { ok:false }，面板保留全部欄位；
+// 訂位已建、只有鎖桌失敗（桌剛被別台帶走）→ 仍算成功（不可留在面板，否則重按會重複建單），
+//   toast 帶「指派桌位」出口。
+export function saveQuickReserve(payload, { date, kind, table, needsCombo, createdBy, addBooking, assignBookingToTable, preassignBookingTable, toast, onAssignLater }) {
+  let b
+  try {
+    b = addBooking({ ...payload, date, status: 'confirmed', createdBy })
+  } catch (e) {
+    toast.error('新增失敗：' + (e?.message || '未知錯誤'))
+    return { ok: false }
+  }
+  if (!b?.id) { toast.error('新增失敗：未知錯誤'); return { ok: false } }
+  let tail = ''
+  let assigned = null
+  if (table) {
+    if (kind === 'preassign') {
+      if (preassignBookingTable(b.id, table.number)) { tail = ` · 預配 ${table.number}`; assigned = table.number }
+    } else {
+      const r = assignBookingToTable(b.id, table.number)
+      if (r?.ok) { tail = ` · 桌 ${table.number}`; assigned = table.number }
+      else {
+        toast.action(`已新增 ${b.name} ${b.timeSlot}，但鎖桌 ${table.number} 失敗：${r?.error || '未知錯誤'}`,
+          { label: '指派桌位', onClick: () => onAssignLater?.(b) }, { type: 'error', duration: 8000 })
+      }
+    }
+  }
+  toast.success(`已新增 ${b.name} ${b.timeSlot}${tail}`)
+  if (needsCombo) toast.info('大組請接近時段再到今日訂位指派併桌', { duration: 8000 })
+  return { ok: true, booking: b, tableNumber: assigned }
+}
+
 // 「現場營運」主畫面
 // 模式：normal | assign-booking | seat-waitlist | move-table | group-reseat
 // ★ 現場帶位（walk-in）v3 不再是「模式」：帶位籤常駐左欄，點桌／選人數順序不拘，
@@ -93,7 +130,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     cancelBooking, seatBooking, setStatus, setTableStatus,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
-    preassignBookingTable,
+    preassignBookingTable, addBooking,
   } = useBooking()
   const toast = useToast()
   const { can, user } = useAuth()
@@ -107,6 +144,17 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const [pendingConfirm, setPendingConfirm] = useState(null) // 指派/候位/換桌：待確認的桌號（二步確認）
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
   const [showOpsLog, setShowOpsLog] = useState(false) // 系統自動處理紀錄（自動清檯留痕）
+
+  // === 現場內嵌「新增今日訂位」面板 ===
+  // 人數／時段／選的桌放這裡（不放面板內）：桌況圖點桌與面板共用同一份，與帶位面板同一套做法。
+  // tablePick：'auto'＝跟著建議（候選第一張）｜'none'＝先不指派｜桌號＝在桌況圖點選的桌。
+  const [reserveOpen, setReserveOpen] = useState(false)
+  const [reserveGuests, setReserveGuests] = useState(2)
+  const [reserveSlot, setReserveSlot] = useState('')
+  const [reserveTablePick, setReserveTablePick] = useState('auto')
+  const [reserveNotice, setReserveNotice] = useState('')
+  const [reserveNow, setReserveNow] = useState(() => Date.now()) // 30 秒 tick：跨過「前 30 分」門檻時語意跟著換
+  const [flashBookingId, setFlashBookingId] = useState(null)   // 剛新增的那筆（今日訂位籤閃一下）
 
   // === 現場帶位 v3（順序不拘）===
   // 系統只需要「桌」和「人數」：先點桌或先選人數都行，兩者到齊由面板的滑動手勢入座。
@@ -156,8 +204,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   )
 
   // 帶位/指派等模式一律在 SVG 桌況圖操作；排程視圖為總覽用途，模式進行中強制切回地圖。
-  const showSchedule = !mode && view === 'schedule'
-  const showSummary = !mode && view === 'summary'
+  // 內嵌新增面板開著時也強制地圖（選桌要點地圖）。
+  const showSchedule = !mode && !reserveOpen && view === 'schedule'
+  const showSummary = !mode && !reserveOpen && view === 'summary'
 
   // 進入指派桌模式（含自動建議）。無單桌容納（大組）→ 改走多桌指派（併桌）。
   // 單桌指派依鎖桌時機（capacity.lockKindFor，店主 2026-09 拍板「接近時段才鎖」）：
@@ -307,8 +356,124 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const finishWaitlistSeat = (tableNumber, msg) =>
     seatedToWalkin(tableNumber, msg, { setSelectedTable, setMode, setPendingConfirm, setRailTab, toast })
 
+  // === 內嵌新增面板：開／關、候選、選桌 ===
+  const canReserveAssign = can('booking.update') && can('table.update')
+  const openReserve = () => {
+    const now = new Date()
+    setReserveNow(now.getTime())
+    setReserveGuests(2)
+    setReserveSlot(nextBookableSlot({ settings, tables, bookings, groupReservations, date: todayStr(), guests: 2, now }))
+    setReserveTablePick('auto')
+    setReserveNotice('')
+    setSelectedTable(null)
+    cancelMode()
+    setReserveOpen(true)
+  }
+  const closeReserve = () => {
+    setReserveOpen(false)
+    setRailTab('upcoming')
+  }
+  useEffect(() => {
+    if (!reserveOpen) return
+    const id = setInterval(() => setReserveNow(Date.now()), 30000)
+    return () => clearInterval(id)
+  }, [reserveOpen])
+
+  // 候選＋鎖桌時機（findReserveCandidates：hold＝此刻空桌不撞鎖桌區間；preassign＝屆時會空、不撞預配區間）
+  const reserveCalc = useMemo(() => {
+    if (!reserveOpen || !reserveSlot || !(reserveGuests > 0)) return { kind: null, tables: [] }
+    return findReserveCandidates(reserveGuests, { date: todayStr(), timeSlot: reserveSlot, now: new Date(reserveNow) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reserveOpen, reserveSlot, reserveGuests, reserveNow, tables, bookings, groupReservations])
+  const reserveCandidateNums = useMemo(() => reserveCalc.tables.map(t => t.number), [reserveCalc])
+  // 沒有任何今日可用單桌坐得下（大組）→ 不選桌（面板說明、存檔後再到今日訂位指派併桌）
+  const reserveNeedsCombo = reserveOpen && reserveGuests > 0
+    && !tables.some(t => isTableUsableOnDate(t, todayStr()) && (Number(t.capacity) || 0) >= reserveGuests)
+  const reserveTable = useMemo(() => {
+    if (!reserveOpen || !reserveSlot || !canReserveAssign || reserveTablePick === 'none') return null
+    if (reserveTablePick !== 'auto') return reserveCalc.tables.find(t => t.number === reserveTablePick) || null
+    return reserveCalc.tables[0] || null
+  }, [reserveOpen, reserveSlot, canReserveAssign, reserveTablePick, reserveCalc])
+
+  // 人數／時段／桌況變了、點選的桌不再是候選 → 改回建議並明講（不讓桌號悄悄變掉）
+  useEffect(() => {
+    if (!reserveOpen || !reserveSlot || ['auto', 'none'].includes(reserveTablePick)) return
+    if (reserveCandidateNums.includes(reserveTablePick)) return
+    const next = reserveCalc.tables[0]
+    setReserveNotice(next
+      ? `${reserveTablePick} 不適用目前的人數／時段，已改回建議桌 ${next.number}`
+      : `${reserveTablePick} 不適用目前的人數／時段，已改為先不指派`)
+    setReserveTablePick(next ? 'auto' : 'none')
+  }, [reserveOpen, reserveSlot, reserveTablePick, reserveCandidateNums, reserveCalc])
+
+  // 跟著建議走時，建議桌換到另一層 → 地圖跟過去（店員才看得到選的是哪張）
+  useEffect(() => {
+    if (reserveOpen && reserveTablePick === 'auto' && reserveTable?.floor) setFloor(reserveTable.floor)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reserveOpen, reserveTable?.number])
+
+  // 點到非候選桌：講清楚為什麼不能選（不選取）
+  const reserveBlockReason = (number) => {
+    const t = tables.find(x => x.number === number)
+    if (!t) return `${number} 不存在`
+    const today = todayStr()
+    if (!isTableUsableOnDate(t, today)) return `${number} 今日停用／維修中`
+    if ((Number(t.capacity) || 0) < reserveGuests) return `${number} 只有 ${t.capacity} 席，坐不下 ${reserveGuests} 位`
+    const kind = reserveCalc.kind
+    const now = new Date(reserveNow)
+    if (kind === 'hold' && t.status !== 'vacant') {
+      return `${number} 目前${statusZh(t.status)}；離用餐 30 分內要現在鎖桌，只能選空桌`
+    }
+    if (kind === 'preassign' && t.status !== 'vacant'
+      && !preassignableTables(reserveGuests, { date: today, timeSlot: reserveSlot, now }).some(x => x.number === number)) {
+      return `${number} 目前${statusZh(t.status)}，到 ${reserveSlot} 可能還沒空出來`
+    }
+    const window = assignmentWindow({ mode: kind || 'hold', timeSlot: reserveSlot, date: today, now }, settings)
+    const c = preassignConflicts(bookings, number, { date: today, window }, settings).find(x => x.overlaps)
+    if (c) return `${number} 已預留給 ${c.booking.name}（${c.booking.timeSlot}），用餐時段重疊`
+    const hold = groupHoldTables[number]
+    if (hold?.holds?.length) return `${number} 為今日團體 ${hold.agencyName || '旅行社'} 預留`
+    return `${number} 這個時段不能用`
+  }
+
+  const handleReserveTableClick = (number) => {
+    if (!canReserveAssign) return toast.info('這個帳號不能指派桌位，存檔後由店長指派')
+    if (!reserveSlot) return toast.info('請先選時段，再點桌況圖選桌')
+    if (reserveNeedsCombo) return toast.info('大組請接近時段再到今日訂位指派併桌')
+    if (!reserveCandidateNums.includes(number)) return toast.error(reserveBlockReason(number))
+    // 一律「選這張」（不做點第二下取消）：iPad 觸控同一 tick 可能送兩次 click，toggle 會自己抵銷
+    setReserveTablePick(number)
+    setReserveNotice('')
+  }
+
+  const handleReserveSave = (payload) => {
+    const r = saveQuickReserve(payload, {
+      date: todayStr(),
+      kind: reserveCalc.kind,
+      table: reserveTable,
+      needsCombo: reserveNeedsCombo && canReserveAssign,
+      createdBy: user?.email || 'staff',
+      addBooking, assignBookingToTable, preassignBookingTable, toast,
+      onAssignLater: (b) => startAssign(bookingsRef.current.find(x => x.id === b.id) || b),
+    })
+    if (!r.ok) return false
+    closeReserve()
+    setFlashBookingId(r.booking.id)
+    if (r.tableNumber) flashAssigned(r.tableNumber)
+    return true
+  }
+
+  // 剛新增那筆的醒目框約 2 秒後收掉
+  useEffect(() => {
+    if (!flashBookingId) return
+    const id = setTimeout(() => setFlashBookingId(null), 2200)
+    return () => clearTimeout(id)
+  }, [flashBookingId])
+
   // 桌位點選 — 依模式分流
   const handleTableClick = (number) => {
+    // 內嵌新增面板開著：點桌＝為這筆選桌（不開抽屜、不進 mode）
+    if (reserveOpen) return handleReserveTableClick(number)
     if (!mode) {
       // 帶位 v3：帶位籤上點「今日可入座的空桌」＝加入/移出帶位面板（不開抽屜、不進 mode）。
       // 一桌＝單桌帶位、多桌＝併桌，同一條路徑，人數與桌到齊後由面板滑動入座。
@@ -710,14 +875,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           value={floor} onChange={setFloor} ariaLabel="樓層" />
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
-        {!mode && (
+        {!mode && !reserveOpen && (
           <SegmentedControl
             className="flex-none"
             options={[{ key: 'map', label: '地圖' }, { key: 'summary', label: '摘要' }, { key: 'schedule', label: '排程' }]}
             value={view} onChange={setView} ariaLabel="現場視圖" />
         )}
 
-        {!mode && can('table.config') && (
+        {!mode && !reserveOpen && can('table.config') && (
           <button
             onClick={() => setShowLayoutEditor(true)}
             className="tap flex-none h-8 px-3 rounded-[9px] text-xs font-semibold bg-white border border-chicken-brown/15 text-chicken-brown"
@@ -789,7 +954,26 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               onMoveTable={can('booking.update') && can('table.update') ? startMove : null}
               onSeatWaitlist={startSeatWaitlist}
               onReseatBatch={startGroupReseat}
-              onAddBooking={onAddBooking && can('booking.create') ? onAddBooking : null}
+              onAddBooking={can('booking.create') ? openReserve : null}
+              flashBookingId={flashBookingId}
+              reserve={reserveOpen ? {
+                guests: reserveGuests,
+                onGuestsChange: (g) => { setReserveGuests(g); setReserveNotice('') },
+                timeSlot: reserveSlot,
+                onTimeSlotChange: (t) => { setReserveSlot(t); setReserveNotice('') },
+                lockKind: reserveCalc.kind,
+                table: reserveTable,
+                tablePick: reserveTablePick,
+                onTablePickChange: (v) => { setReserveTablePick(v); setReserveNotice('') },
+                suggestedNumber: reserveCalc.tables[0]?.number || null,
+                notice: reserveNotice,
+                needsCombo: reserveNeedsCombo,
+                canAssign: canReserveAssign,
+                onSave: handleReserveSave,
+                onBack: closeReserve,
+                // 其他日期／完整表單：沿用 AdminPage 既有的「訂位 → 新增」入口（名冊開單等也走它）
+                onOpenFullForm: onAddBooking || null,
+              } : null}
               onFocusTable={(n) => {
                 const t = tables.find(x => x.number === n)
                 if (t) setFloor(t.floor)
@@ -840,11 +1024,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 bookings={bookings}
                 settings={settings}
                 selectedTableNumber={selectedTable}
-                selectedTableNumbers={walkinTableNumbers}
+                selectedTableNumbers={reserveOpen ? (reserveTable ? [reserveTable.number] : []) : walkinTableNumbers}
                 onSelectTable={handleTableClick}
-                assignMode={['assign', 'seat-waitlist', 'move', 'group-reseat', 'assign-multi'].includes(mode?.type)}
+                // 內嵌新增面板：選好時段後，候選高亮、其餘淡化（大組／無權限時不進選桌呈現）
+                assignMode={['assign', 'seat-waitlist', 'move', 'group-reseat', 'assign-multi'].includes(mode?.type)
+                  || (reserveOpen && !!reserveSlot && canReserveAssign && !reserveNeedsCombo)}
                 highlightTables={
-                  mode?.type === 'assign-multi' ? mode.selected   // 多桌：已選桌高亮（其餘空桌 dimmed 但可點加入）
+                  reserveOpen ? reserveCandidateNums
+                    : mode?.type === 'assign-multi' ? mode.selected   // 多桌：已選桌高亮（其餘空桌 dimmed 但可點加入）
                     : ['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable
                     : []
                 }
@@ -860,7 +1047,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               {/* 報到列：地圖下方 in-flow（不是疊在地圖上），無符合條件的訂位時完全不佔高度。
                   模式進行中（指派/換桌/候位/團體改派）或無 table.update 權限時不顯示——
                   這些情境下桌況圖的點擊語意已被模式接管，疊加一條會觸發別的動作的列是額外誤觸風險。 */}
-              {!mode && can('table.update') && (
+              {!mode && !reserveOpen && can('table.update') && (
                 <ArrivalStrip
                   tables={tables}
                   bookings={bookings}
@@ -879,7 +1066,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       </div>
 
       <div className="flex-shrink-0 hidden sm:block text-center text-[11px] text-chicken-brown/45 mt-2">
-        帶位籤點空桌＝選位（可多桌併桌）· 其他情況點桌位看詳情 · 紅色超時桌可禮貌詢問結帳 · ESC 取消
+        {reserveOpen
+          ? '新增今日訂位中：點桌況圖為這筆選桌（綠框＝可用）· ESC 返回今日訂位'
+          : '帶位籤點空桌＝選位（可多桌併桌）· 其他情況點桌位看詳情 · 紅色超時桌可禮貌詢問結帳 · ESC 取消'}
       </div>
 
       {/* 桌位佈局編輯器 */}

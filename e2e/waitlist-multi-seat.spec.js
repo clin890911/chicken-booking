@@ -113,7 +113,9 @@ test('併桌模式下把桌減到席數不足 → 確認鈕鎖住並提示還差
 
 // 現場「今日訂位」籤的「＋ 新增今日訂位」按鈕（2026-08 店主需求）：
 // 現場接到電話要加今天的訂位時，原本得自己跳去「訂位 → 新增」子分頁才找得到入口。
-test('今日訂位籤的「＋ 新增今日訂位」→ 直接開到訂位新增表單，日期預設今天', async ({ page }) => {
+// 2026-09 店主改選「留在現場頁新增」：按鈕改成左欄原地的內嵌面板（桌況圖一直看得到，
+// 完整流程見 onsite-inline-reserve.spec.js）；面板上的「其他日期」仍通往完整新增表單。
+test('今日訂位籤的「＋ 新增今日訂位」→ 留在現場開內嵌面板；「其他日期」才到完整新增表單', async ({ page }) => {
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
   await page.getByRole('button', { name: /模擬登入/ }).click()
@@ -123,7 +125,12 @@ test('今日訂位籤的「＋ 新增今日訂位」→ 直接開到訂位新增
   await page.getByRole('button', { name: /^今日訂位/ }).click()
   await page.getByRole('button', { name: '＋ 新增今日訂位' }).click()
 
-  // 落在訂位頁的「新增」子分頁，且日期快選停在「今天」
+  // 不跳頁：左欄換成內嵌面板，桌況圖仍在
+  await expect(page.getByTestId('quick-reserve-panel')).toBeVisible()
+  await expect(page.locator('svg').first()).toBeVisible()
+
+  // 「其他日期」→ 訂位頁的「新增」子分頁，日期快選停在「今天」
+  await page.getByRole('button', { name: '其他日期' }).click()
   await expect(page.getByPlaceholder('0912345678')).toBeVisible()
   await expect(page.getByRole('button', { name: /今天/ })).toBeVisible()
 })
