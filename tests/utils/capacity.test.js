@@ -20,6 +20,8 @@ import {
   resolveSlotOccupancy,
   overlappingBookedTables,
   rangesOverlap,
+  assignmentWindow,
+  preassignConflicts,
 } from '../../src/utils/capacity'
 
 // ---- 假資料工廠 ----
@@ -735,18 +737,46 @@ describe('resolveSlotOccupancy — 大組併桌（extraTableIds）', () => {
   })
 })
 
-// 建議桌看時段（2026-09 撞桌止血 S3）：同日其他訂位已預配/持有、且用餐窗重疊的桌
+// 佔用區間與依區間的桌位衝突（2026-09 撞桌止血 S3；驗收後改為依動作語意算區間）
+describe('assignmentWindow（佔用區間唯一口徑）', () => {
+  const at = (h, m = 0) => new Date(2026, 5, 15, h, m)   // 本地時間（vitest 固定 TZ=Asia/Taipei）
+  const D = '2026-06-15'
+
+  it("'hold'（會鎖桌）：起點＝min(現在, 時段)，終點＝時段＋佔位", () => {
+    expect(assignmentWindow({ mode: 'hold', timeSlot: '13:30', date: D, now: at(9) })).toEqual({ start: 540, end: 910 })
+  })
+  it("'hold' 時段已過（遲到客才鎖）：客人最早現在才坐 → 終點＝現在＋佔位", () => {
+    expect(assignmentWindow({ mode: 'hold', timeSlot: '11:00', date: D, now: at(14) })).toEqual({ start: 660, end: 940 })
+  })
+  it("'hold' 非今天 → 退回預配語意", () => {
+    expect(assignmentWindow({ mode: 'hold', timeSlot: '13:30', date: '2026-06-16', now: at(9) })).toEqual({ start: 810, end: 910 })
+  })
+  it("'preassign'：[時段, 時段＋佔位)；'now'：[現在, 現在＋佔位)", () => {
+    expect(assignmentWindow({ mode: 'preassign', timeSlot: '13:30', date: D, now: at(9) })).toEqual({ start: 810, end: 910 })
+    expect(assignmentWindow({ mode: 'now', now: at(12, 20) })).toEqual({ start: 740, end: 840 })
+  })
+  it('吃 settings 的用餐時長；非 now 缺時段 → null', () => {
+    expect(assignmentWindow({ mode: 'now', now: at(12) }, { diningDurationMin: 150 })).toEqual({ start: 720, end: 880 })
+    expect(assignmentWindow({ mode: 'hold', date: D, now: at(9) })).toBeNull()
+  })
+})
+
 describe('overlappingBookedTables', () => {
   const pre = (over = {}) => mkBooking({ id: 'Y', timeSlot: '11:00', assignedTableId: '105', ...over })
+  const win = (start, end) => ({ start, end })
 
-  it('11:00 預配 105：11:30 重疊、13:30 不重疊（預設 90＋10 分）', () => {
+  it('11:00 預配 105（11:00–12:40）：與 11:30 起的區間重疊、與 13:30 起的不重疊', () => {
     const list = [pre()]
-    expect([...overlappingBookedTables(list, { date: '2026-06-15', timeSlot: '11:30' })]).toEqual(['105'])
-    expect([...overlappingBookedTables(list, { date: '2026-06-15', timeSlot: '13:30' })]).toEqual([])
+    expect([...overlappingBookedTables(list, { date: '2026-06-15', window: win(690, 790) })]).toEqual(['105'])
+    expect([...overlappingBookedTables(list, { date: '2026-06-15', window: win(810, 910) })]).toEqual([])
+  })
+
+  it('反向撞桌：09:00 鎖 13:30 的區間 [09:00, 15:10) 會撞到 11:00 的預配', () => {
+    expect([...overlappingBookedTables([pre()], { date: '2026-06-15', window: win(540, 910) })]).toEqual(['105'])
   })
 
   it('吃 settings 的用餐時長：用餐 150 分時 13:30 仍重疊', () => {
-    const r = overlappingBookedTables([pre()], { date: '2026-06-15', timeSlot: '13:30' }, { diningDurationMin: 150 })
+    const r = overlappingBookedTables([pre()], { date: '2026-06-15', window: win(810, 970) }, { diningDurationMin: 150 })
     expect([...r]).toEqual(['105'])
   })
 
@@ -757,16 +787,38 @@ describe('overlappingBookedTables', () => {
       pre({ id: 'CXL', status: 'cancelled', assignedTableId: '107' }),
       pre({ id: 'BIG', assignedTableId: '111', extraTableIds: ['112'] }),
     ]
-    const r = overlappingBookedTables(list, { date: '2026-06-15', timeSlot: '11:30', excludeBookingId: 'SELF' })
+    const r = overlappingBookedTables(list, { date: '2026-06-15', window: win(690, 790), excludeBookingId: 'SELF' })
     expect([...r].sort()).toEqual(['111', '112'])
   })
 
-  it('沒給時段 → 同日任何預配都算（保守）', () => {
-    expect([...overlappingBookedTables([pre({ timeSlot: '18:00' })], { date: '2026-06-15' })]).toEqual(['105'])
+  it('沒有區間（無從比時間）→ 同日任何預配都算（保守）', () => {
+    expect([...overlappingBookedTables([pre({ timeSlot: '18:00' })], { date: '2026-06-15', window: null })]).toEqual(['105'])
   })
 
   it('rangesOverlap 已 export：半開區間，剛好接上不算重疊', () => {
     expect(rangesOverlap(660, 760, 760, 100)).toBe(false)
     expect(rangesOverlap(660, 760, 690, 100)).toBe(true)
+  })
+})
+
+describe('preassignConflicts（覆蓋預配：警示與解除共用）', () => {
+  const b = (over) => mkBooking({ guests: 2, ...over })
+  const list = [
+    b({ id: 'EVE', name: '晚客', timeSlot: '20:30', assignedTableId: '105' }),
+    b({ id: 'NOON', name: '午客', timeSlot: '12:30', assignedTableId: '105' }),
+    b({ id: 'ARR', name: '已到', timeSlot: '12:00', assignedTableId: '105', status: 'arrived' }),
+    b({ id: 'OTHER', name: '別桌', timeSlot: '12:30', assignedTableId: '106' }),
+  ]
+  it('12:20 帶位（[12:20, 14:00)）：12:30 午客重疊→將解除；20:30 晚客→保留；已到店的不解除；依時段排序', () => {
+    const r = preassignConflicts(list, '105', { date: '2026-06-15', window: { start: 740, end: 840 } })
+    expect(r.map(c => [c.booking.id, c.overlaps, c.willRelease])).toEqual([
+      ['ARR', true, false],
+      ['NOON', true, true],
+      ['EVE', false, false],
+    ])
+  })
+  it('排除自己；別桌不算', () => {
+    const r = preassignConflicts(list, '105', { date: '2026-06-15', excludeBookingId: 'NOON', window: { start: 740, end: 840 } })
+    expect(r.map(c => c.booking.id)).toEqual(['ARR', 'EVE'])
   })
 })

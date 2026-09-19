@@ -90,7 +90,8 @@ describe('AddBookingView：今日訂位選桌', () => {
     expect(pickArea().textContent).toContain('2F')
     expect(confirmBtn().textContent).toMatch(/確認新增 · .* 11:00 · 2 位 · 桌 105/)
     // 候選依所選時段查（S3 口徑）
-    expect(ctx.findSuitableTables).toHaveBeenCalledWith(2, expect.objectContaining({ timeSlot: '11:00' }))
+    // 候選依「存檔即鎖桌」的佔用區間查（mode 'hold'：[min(現在, 時段), 時段+佔位)，驗收問題 1）
+    expect(ctx.findSuitableTables).toHaveBeenCalledWith(2, expect.objectContaining({ timeSlot: '11:00', mode: 'hold' }))
     expect(container.querySelector('input[type="checkbox"]')).toBeNull()
     expect(container.textContent).not.toContain('自動指派最佳桌')
   })
@@ -141,11 +142,25 @@ describe('AddBookingView：今日訂位選桌', () => {
     expect(confirmBtn().textContent).toContain('6 位 · 桌 201')
   })
 
-  it('U1：沒有單桌坐得下 → 說明原因並預設「到桌況圖選」', () => {
+  it('U1：有單桌坐得下、只是此刻沒空桌可鎖 → 預設「先不指派」並說明，存檔不跳頁', () => {
     ctx.findSuitableTables = vi.fn(() => [])
     render()
     fillBasics()
-    expect(pickArea().textContent).toContain('目前沒有單桌坐得下 2 位')
+    expect(pickArea().textContent).toContain('此刻沒有空桌可鎖，先存檔、接近用餐時間再到現場頁指派')
+    expect(btn(b => b.textContent.trim() === '先不指派').getAttribute('aria-pressed')).toBe('true')
+    expect(confirmBtn().textContent).toContain('先不指派')
+    click(confirmBtn())
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+    expect(onAssignTable).not.toHaveBeenCalled()
+  })
+
+  it('U1：店裡沒有任何單桌坐得下（需併桌）→ 預設「到桌況圖選（可併桌）」並據實說明', () => {
+    ctx.tables = [T105, T106]                                     // 最大 4 人桌
+    ctx.findSuitableTables = vi.fn(() => [])
+    render()
+    fillBasics()
+    click(container.querySelector('button[aria-label="6 位"]'))
+    expect(pickArea().textContent).toContain('店裡沒有單桌坐得下 6 位，需要併桌')
     expect(btn(b => b.textContent.includes('到桌況圖選')).getAttribute('aria-pressed')).toBe('true')
     expect(confirmBtn().textContent).toContain('到桌況圖選桌')
     click(confirmBtn())

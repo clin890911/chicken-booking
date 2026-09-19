@@ -51,12 +51,12 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
   const noshowCount = useMemo(() => getNoshowCount(booking.phone), [booking.phone, status])
 
   // 建議桌查的是「今日即時空桌」，對未來/過去日無意義且誤導。
-  // 帶上這筆的時段：排除「別筆訂位已預配/持有、用餐時段重疊」的桌與今日團保桌——
-  // 過去只看此刻桌況，11:00 已預配 105 時 11:30 的客人仍被建議 105（撞桌）。
+  // 按「指派桌位」會在現場頁鎖桌（現在就 reserveTable）→ 佔用區間用 'hold'：[min(現在, 時段), 時段+佔位)，
+  // 排除「別筆訂位已預配/持有、用餐區間重疊」的桌與今日團保桌（與新增表單候選同一個 helper）。
   // suggestTable 走 service 讀資料；以 tables/bookings/團體 state 當 key，資料一變才重算。
   const suggestion = useMemo(
     () => (dayKind === 'today' && status === 'confirmed' && !booking.assignedTableId)
-      ? suggestTable(booking.guests, { bookingId: booking.id, date: booking.date, timeSlot: booking.timeSlot })
+      ? suggestTable(booking.guests, { bookingId: booking.id, date: booking.date, timeSlot: booking.timeSlot, mode: 'hold' })
       : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tables, bookings, groupReservations, dayKind, status, booking.id, booking.date, booking.timeSlot, booking.assignedTableId, booking.guests],

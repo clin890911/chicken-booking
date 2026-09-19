@@ -3,6 +3,8 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useToast } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { fmtOverdueMin } from '../../../utils/bookingPulse'
+import { preassignConflicts, assignmentWindow } from '../../../utils/capacity'
+import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
 
 // 點空桌時顯示「可入座」候選名單
 // - 待指派訂位（今日 confirmed + assignedTableId=null + 人數 ≤ 桌容量）
@@ -12,7 +14,7 @@ import { fmtOverdueMin } from '../../../utils/bookingPulse'
 //   - 訂位列：[入座]（指派+客人到了）/ [預訂]（只指派、status reserved）
 //   - 候位列：[入座]
 export default function TableCandidatePanel({ table, onPicked }) {
-  const { bookings, waitlist, assignBookingToTable, seatBooking, seatWaitlist } = useBooking()
+  const { bookings, waitlist, settings, assignBookingToTable, seatBooking, seatWaitlist, releaseOverriddenAssignment } = useBooking()
   const toast = useToast()
 
   const today = todayStr()
@@ -66,10 +68,21 @@ export default function TableCandidatePanel({ table, onPicked }) {
         (a.takenAt || '').localeCompare(b.takenAt || ''))
   }, [waitlist, table.capacity])
 
+  // 這張桌上他筆的預配：依動作的佔用區間（現在入座 'now'／只指派＝現在就鎖桌 'hold'）判定重疊才解除，
+  // 與現場指派／帶位同一個 helper。動手前先查（動作後 bookings 會變）。
+  const conflictsFor = (mode, booking) => preassignConflicts(bookings, table.number, {
+    date: today,
+    excludeBookingId: booking?.id,
+    window: assignmentWindow({ mode, timeSlot: booking?.timeSlot, date: today }, settings),
+  }, settings)
+  const releaseOpts = { releaseOverriddenAssignment, toast }
+
   // === 動作 ===
   const assignAndSeat = (booking) => {
+    const overridden = conflictsFor('now', booking)
     const r1 = assignBookingToTable(booking.id, table.number)
     if (!r1.ok) return toast.error('指派失敗：' + r1.error)
+    releaseOverlappingPreassigns(overridden, releaseOpts)
     const r2 = seatBooking(booking.id)
     if (!r2.ok) {
       toast.warning(`已指派但入座失敗：${r2.error}`)
@@ -81,15 +94,19 @@ export default function TableCandidatePanel({ table, onPicked }) {
   }
 
   const assignOnly = (booking) => {
+    const overridden = conflictsFor('hold', booking)
     const r = assignBookingToTable(booking.id, table.number)
     if (!r.ok) return toast.error('指派失敗：' + r.error)
+    releaseOverlappingPreassigns(overridden, releaseOpts)
     toast.success(`${booking.name} 已預訂 ${table.number}（${booking.timeSlot}）`)
     onPicked?.()
   }
 
   const seatWait = (wait) => {
+    const overridden = conflictsFor('now', null)
     const r = seatWaitlist(wait.id, table.number)
     if (!r.ok) return toast.error('入座失敗：' + r.error)
+    releaseOverlappingPreassigns(overridden, releaseOpts)
     toast.success(`${wait.name}（候位 #${wait.queueNumber}）入座 ${table.number}`)
     onPicked?.()
   }

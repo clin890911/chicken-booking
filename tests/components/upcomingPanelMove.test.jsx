@@ -65,9 +65,15 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
     expect(container.textContent).toContain('✓ 已指派 105')
   })
 
-  it('併桌訂位：不給改桌', () => {
+  it('併桌訂位：改桌呈停用並寫原因，點了只說明、不進改桌（與訂位卡一致）', () => {
     render(roleCan('host'), [{ ...YU, extraTableIds: ['106'] }])
-    expect(btn('改桌')).toBeUndefined()
+    const b = btn('改桌')
+    expect(b.getAttribute('aria-disabled')).toBe('true')
+    expect(b.textContent).toContain('105 + 106')
+    expect(b.textContent).toContain('併桌不支援')
+    act(() => { b.click() })
+    expect(onMoveTable).not.toHaveBeenCalled()
+    expect(toast.info).toHaveBeenCalledWith(expect.stringContaining('併桌訂位不支援單桌改桌'))
   })
 
   it('電話空白的現場客：人數後面不留「 · 」尾巴', () => {

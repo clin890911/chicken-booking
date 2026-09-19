@@ -551,6 +551,18 @@ export function BookingProvider({ children }) {
     if (r?.ok) { refresh(); syncCloudSoon() }
     return r
   }
+  // 上一個動作的復原：把被解除的預配寫回（只在那筆仍未配桌時）。見 seatingService.restoreOverriddenAssignment。
+  const restoreOverriddenAssignment = (snapshot) => {
+    const r = seatingService.restoreOverriddenAssignment(snapshot)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
+  // 現場指派的復原（只清不搶）。見 seatingService.undoAssignBooking。
+  const undoAssignBooking = (bookingId, tableNumber) => {
+    const r = seatingService.undoAssignBooking(bookingId, tableNumber)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
 
   // ============ 候位動作 ============
   const addWaitlist = (data) => {
@@ -707,7 +719,8 @@ export function BookingProvider({ children }) {
     backgroundImages: settings.floorPlan?.backgroundImages,
     assignBookingToTable, assignBookingTablesMulti, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo,
     completeWithoutSeating, undoCompleteWithoutSeating,
-    preassignBookingTable, preassignBookingTables, clearBookingPreassign, releaseOverriddenAssignment,
+    preassignBookingTable, preassignBookingTables, clearBookingPreassign,
+    releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     addWaitlist, callWaitlist, seatWaitlist, seatWaitlistMulti, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,

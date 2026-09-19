@@ -10,6 +10,8 @@ import { STATUS_ZH as STATUS_LABELS } from '../../../utils/tableStatus'
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr } from '../../../utils/timeSlots'
 import { STATUS_COLOR } from './statusColors'
+import { preassignConflicts, assignmentWindow } from '../../../utils/capacity'
+import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -51,8 +53,8 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const {
     blockTable, unblockTable, walkInSeat,
     assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking,
-    setTableOutage, clearTableOutage,
-    settings, groupReservations,
+    setTableOutage, clearTableOutage, releaseOverriddenAssignment,
+    settings, groupReservations, bookings,
   } = useBooking()
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [showBlock, setShowBlock] = useState(false)
@@ -94,11 +96,19 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const canBlock = can('table.block')
   const orphan = isOrphanTable(table, booking, groupRef)
 
+  // 現在直接入座（散客）時，這張空桌上他筆的預配會不會被解除：與 [現在, 現在+佔位) 重疊才解除。
+  // 與現場帶位同一個 helper（preassignConflicts＋releaseOverlappingPreassigns），警示與實際行為一致。
+  const nowConflicts = () => (table && table.status === 'vacant')
+    ? preassignConflicts(bookings, table.number, { date: todayStr(), window: assignmentWindow({ mode: 'now' }, settings) }, settings)
+    : []
+
   const handleWalkIn = () => {
     if (!walkInForm.guests || walkInForm.guests < 1) return toast.error('請填人數')
     if (!walkInForm.name.trim()) return toast.error('請填姓名')
+    const overridden = nowConflicts()
     const r = walkInSeat(table.number, walkInForm)
     if (!r.ok) return toast.error('入座失敗：' + r.error)
+    releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
     toast.success(`${r.booking.name} 已入座 ${table.number}`)
     setShowWalkIn(false)
     onClose?.()
@@ -403,7 +413,11 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           <div className="px-3 py-2 bg-blue-50 border border-dashed border-blue-300 rounded-lg text-xs">
             <span className="font-bold text-blue-800">已預配：</span>
             <span className="text-blue-800/90">排位規劃已預先配給 {preassign.name}（{preassign.guests} 位{preassign.timeSlot ? ` · ${preassign.timeSlot}` : ''}）</span>
-            <p className="text-[11px] text-blue-800/70 mt-0.5">桌況仍是空桌：直接入座或指派他人會覆蓋此預留。</p>
+            <p className="text-[11px] text-blue-800/70 mt-0.5">
+              {nowConflicts().some(c => c.booking.id === preassign.id && c.willRelease)
+                ? '桌況仍是空桌：現在讓別組入座會與其用餐時段重疊，入座後這筆預配將解除（需重新指派）。'
+                : '桌況仍是空桌：現在讓別組入座不會撞到其用餐時段，這筆預配會保留。'}
+            </p>
             {canEdit && (
               <button
                 onClick={handleSeatPreassigned}

@@ -240,26 +240,82 @@ export function findPreassignedBooking(bookings = [], tableNumber, { date, exclu
   }) || null
 }
 
-// === 依時段的桌位衝突（建議桌用）===
-// 回傳「同日其他有效訂位已預配或持有、且用餐時段與目標時段重疊」的桌號集合（含併桌額外桌）。
-// 用途：建議桌／新增表單候選。過去建議桌只看「此刻桌況是不是空桌」，預配不動桌況（桌仍 vacant），
-// 於是 11:00 已預配 105 時，11:30 的訂位仍被建議 105 → 撞桌。這裡補上時間維度。
-// 口徑與容量引擎一致：佔用窗＝timeSlot 起算 occupancyMinutes（用餐＋清桌緩衝），排除 CAPACITY_EXCLUDED_STATUSES。
+// === 指派／入座的「佔用區間」（建議桌、候選、覆蓋預配判定共用的唯一口徑）===
+// 同一張桌會被佔多久，取決於動作的語意，而不是只看訂位時段：
+//   'hold'      會鎖桌（現場指派、新增表單今日存檔、held 訂位改桌）：存檔當下就 reserveTable，
+//               桌從「現在」起就被佔住 → [min(現在, 時段), max(現在, 時段) + 佔位時長)。
+//               只比 [時段, 時段+佔位) 會反向撞桌：09:00 幫 13:30 的陳小姐鎖 105，
+//               11:00 預配 105 的余先生到店時桌已被鎖（2026-09 驗收重現）。
+//               終點取 max(現在, 時段)：時段已過才鎖（遲到客）時，客人最早現在才坐下。
+//   'preassign' 只記在訂位上、不鎖桌（規劃預配、預配訂位改桌）→ [時段, 時段+佔位)
+//   'now'       立即入座（現場帶位、候位入座、散客直接入座）→ [現在, 現在+佔位)
+// 佔位時長＝occupancyMinutes（用餐＋清桌緩衝），與容量引擎同一份。
+// 非今天的 'hold' 退回 'preassign'（今天以外不會有「現在就鎖桌」）。缺時段（非 'now'）→ null＝無從比時間。
+// now 可注入（測試固定時間）；分鐘數一律用本地時間。
+export function assignmentWindow({ mode = 'hold', timeSlot, date, now = new Date() } = {}, settings = {}) {
+  const occ = occupancyMinutes(settings)
+  const nowMin = now.getHours() * 60 + now.getMinutes()
+  if (mode === 'now') return { start: nowMin, end: nowMin + occ }
+  if (!timeSlot) return null
+  const slot = toMinutes(timeSlot)
+  const isToday = !date || date === localDateStr(now)
+  if (mode === 'hold' && isToday) return { start: Math.min(nowMin, slot), end: Math.max(nowMin, slot) + occ }
+  return { start: slot, end: slot + occ }
+}
+
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// 這筆訂位自己的用餐區間（預配語意 [時段, 時段+佔位)）是否與 window 重疊。
+// window 為 null（無從比時間）或訂位缺時段 → 保守視為重疊。
+export function bookingOverlapsWindow(booking, window, settings = {}) {
+  if (!window || !booking?.timeSlot) return true
+  const start = toMinutes(booking.timeSlot)
+  return rangesOverlap(start, start + occupancyMinutes(settings), window.start, window.end - window.start)
+}
+
+function bookingTableList(b) {
+  return [b?.assignedTableId, ...(b?.extraTableIds || [])].filter(n => n != null && n !== '').map(String)
+}
+
+// === 依佔用區間的桌位衝突（建議桌／候選用）===
+// 回傳「同日其他有效訂位已預配或持有、且其用餐區間與 window 重疊」的桌號集合（含併桌額外桌）。
+// 過去建議桌只看「此刻桌況是不是空桌」，預配不動桌況（桌仍 vacant）→ 11:00 已預配 105 時仍建議 105。
+// window 由 assignmentWindow 依動作語意算好（見上）；排除 CAPACITY_EXCLUDED_STATUSES。
 //   - excludeBookingId：正在找桌的這筆自己（改桌時自己的舊桌不算衝突）。
-//   - timeSlot 缺：無從比時間 → 同日任何預配都算衝突（保守）；對方缺 timeSlot 同樣保守視為重疊。
 // ⚠️ 只給「建議／候選」用；現場指派／帶位的可點選集合不可拿它縮小（預配/團保走警示＋勾選解鎖）。
-export function overlappingBookedTables(bookings = [], { date, timeSlot, excludeBookingId } = {}, settings = {}) {
-  const durationMin = occupancyMinutes(settings)
-  const target = timeSlot ? toMinutes(timeSlot) : null
+export function overlappingBookedTables(bookings = [], { date, window, excludeBookingId } = {}, settings = {}) {
   const set = new Set()
   ;(bookings || []).forEach(b => {
     if (!b || (excludeBookingId != null && b.id === excludeBookingId)) return
     if (date != null && b.date !== date) return
     if (CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return
-    const nums = [b.assignedTableId, ...(b.extraTableIds || [])].filter(n => n != null && n !== '').map(String)
+    const nums = bookingTableList(b)
     if (!nums.length) return
-    if (target != null && b.timeSlot && !overlapsSlot(b, target, durationMin)) return
+    if (!bookingOverlapsWindow(b, window, settings)) return
     nums.forEach(n => set.add(n))
   })
   return set
+}
+
+// === 覆蓋預配判定（警示文字與實際解除共用）===
+// 某桌上同日他筆訂位的預配，逐筆標記：
+//   overlaps     其用餐區間是否與「新佔用區間」window 重疊
+//   willRelease  重疊且仍是待到（confirmed/pending）→ 覆蓋後會被解除（seatingService.releaseOverriddenAssignment）
+// 不重疊的預配保留（例：12:20 帶位不影響 20:30 的預配）。依時段排序。
+// 觸發警示的集合與 findPreassignedBooking 相同（非取消/未到/完成），不因時段縮小（M1：警示＋勾選解鎖不變）。
+export function preassignConflicts(bookings = [], tableNumber, { date, excludeBookingId, window } = {}, settings = {}) {
+  if (tableNumber == null) return []
+  const target = String(tableNumber)
+  return (bookings || [])
+    .filter(b => b && (excludeBookingId == null || b.id !== excludeBookingId)
+      && (date == null || b.date === date)
+      && !CAPACITY_EXCLUDED_STATUSES.includes(b.status)
+      && bookingTableList(b).includes(target))
+    .map(b => {
+      const overlaps = bookingOverlapsWindow(b, window, settings)
+      return { booking: b, overlaps, willRelease: overlaps && ['confirmed', 'pending'].includes(b.status) }
+    })
+    .sort((a, b) => String(a.booking.timeSlot || '').localeCompare(String(b.booking.timeSlot || '')))
 }

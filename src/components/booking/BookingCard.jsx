@@ -25,7 +25,11 @@ function BookingCard({ booking, onAssign, onMove }) {
   // 桌號徽章分辨兩種「有桌」（口徑同現場頁 UpcomingPanel／桌況圖，見 utils/tableStatus.assignmentKind）：
   // held＝現場指派已鎖桌（綠「桌 105」）；preassign＝只記在訂位上、桌況仍空（藍「預配 105」，別人坐得進去）。
   // 過去一律綠色，店員看不出 11:00 余先生的 105 其實沒鎖，11:30 陳小姐就被建議同一張桌。
-  const tableKind = booking.status === 'arrived' ? 'dining' : assignmentKind(booking, act.table)
+  // ★ 只有「待到類」（confirmed/pending：還沒到店、還沒結束）才分；已到店／已完成／No-show／取消的桌
+  //   早就不是「鎖給他、等他來」的語意（吃完清桌後桌況回空桌，assignmentKind 會誤判成預配），維持原本徽章。
+  const tableKind = ['confirmed', 'pending'].includes(booking.status)
+    ? assignmentKind(booking, act.table)
+    : 'plain'
 
   const status = STATUS_MAP[booking.status] || STATUS_MAP.pending
 
