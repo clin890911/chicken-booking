@@ -144,4 +144,15 @@ describe('TimeSlotPicker：非今天的日期完全不受影響', () => {
     expect(times).toEqual(['11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30', '19:00'])
     expect(container.textContent).not.toContain('已隱藏')
   })
+  it('打烊後今天時段全過：顯示「今天的時段都已經過了」而不是「已滿」', () => {
+    render({ date: TODAY, now: new Date(2026, 5, 15, 19, 40, 0) })
+    expect(slotTimes()).toEqual([])
+    expect(container.textContent).toContain('今天的時段都已經過了')
+    expect(container.textContent).not.toContain('所有時段已滿')
+  })
+
+  it('isToday 吃注入的 now：系統時鐘在今天，但 now 注入成隔天 → 今天的日期不再算今天、全部顯示', () => {
+    render({ date: TODAY, now: new Date(2026, 5, 16, 13, 51, 0) })
+    expect(slotTimes()).toHaveLength(17)
+  })
 })

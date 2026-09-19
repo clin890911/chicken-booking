@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
-import { generateTimeSlots, todayStr, nowSlot } from '../../utils/timeSlots'
+import { generateTimeSlots, formatDate, nowSlot } from '../../utils/timeSlots'
 import { calcSlotCapacity, isSlotClosed } from '../../utils/capacity'
 import Icon from '../ui/Icon'
 
 // now：目前時間，預設 new Date()——呼叫端／測試可注入固定值，讓「今天」的已過時段判斷可測。
 export default function TimeSlotPicker({ date, value, onChange, settings, tables, bookings, groupReservations = [], guests = 1, hideFull = true, now = new Date() }) {
   // 只在日期＝今天（本地日）才套用「已過時段」判斷；非今天完全不受影響。
-  const isToday = date === todayStr()
+  const isToday = date === formatDate(now)
   // nowSlot 向下取整到 30 分＝目前這個時段本身仍算「還來得及」，要保留顯示；早於它的才算過時。
   const pastThreshold = isToday ? nowSlot(now) : null
 
@@ -30,11 +30,13 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
   const visible = hideFull ? notPast.filter(s => !s.full || s.closed) : notPast
 
   if (visible.length === 0) {
+    // 今天的時段全部已過（打烊後）≠ 全部額滿，文案要分開，不然店員會以為是客滿。
+    const allPast = notPast.length === 0 && hiddenPastCount > 0
     return (
       <div className="empty-panel">
         <div className="mb-2 flex justify-center text-chicken-brown/30"><Icon name="hourglass" size={30} strokeWidth={1.5} /></div>
-        <p className="font-bold text-chicken-brown">該日所有時段已滿</p>
-        <p className="text-sm text-chicken-brown/60 mt-1">請返回選擇其他日期，或來電詢問現場座位。</p>
+        <p className="font-bold text-chicken-brown">{allPast ? '今天的時段都已經過了' : '該日所有時段已滿'}</p>
+        <p className="text-sm text-chicken-brown/60 mt-1">{allPast ? '請改選明天或其他日期。' : '請返回選擇其他日期，或來電詢問現場座位。'}</p>
       </div>
     )
   }
