@@ -40,14 +40,30 @@ describe('nextBookableSlot（預設時段＝下一個還沒開始、可訂的時
 })
 
 describe('pastSlotFix（面板開著跨過時段）', () => {
+  const env = (over = {}) => ({ settings, tables: ctx.tables, bookings: [], groupReservations: [], date: TODAY, guests: 2, ...over })
   it('所選時段早於目前時段 → 改選目前時段＋說明；目前時段本身／之後 → null', () => {
-    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), settings))
+    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), env()))
       .toEqual({ slot: '17:30', notice: '17:00 已經過了，已改選目前時段 17:30' })
-    expect(pastSlotFix('17:30', new Date(2026, 8, 19, 17, 31), settings)).toBeNull()
-    expect(pastSlotFix('18:00', new Date(2026, 8, 19, 17, 31), settings)).toBeNull()
+    expect(pastSlotFix('17:30', new Date(2026, 8, 19, 17, 31), env())).toBeNull()
+    expect(pastSlotFix('18:00', new Date(2026, 8, 19, 17, 31), env())).toBeNull()
   })
-  it('打烊後（目前時段不在營業時段內）→ 清空並說明', () => {
-    expect(pastSlotFix('19:00', new Date(2026, 8, 19, 19, 40), settings))
+  it('間隔 60 分（17:30 不是時段）：選 17:00、17:31 → 改選 18:00，不可清空', () => {
+    const hourly = { ...settings, slotInterval: 60 }
+    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), env({ settings: hourly })))
+      .toEqual({ slot: '18:00', notice: '17:00 已經過了，已改選下一個可訂時段 18:00' })
+  })
+  it('開店非整／半點（11:15 起每 30 分）：選 16:45、17:31 → 改選 17:45', () => {
+    const odd = { ...settings, openTime: '11:15', closeTime: '19:15' }
+    expect(pastSlotFix('16:45', new Date(2026, 8, 19, 17, 31), env({ settings: odd })).slot).toBe('17:45')
+  })
+  it('跳過已關閉／已滿：17:30 關閉 → 改選 18:00；全都滿 → 清空並說明', () => {
+    const closed = { ...settings, closures: { closedSlots: { [TODAY]: ['17:30'] } } }
+    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), env({ settings: closed })).slot).toBe('18:00')
+    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), env({ guests: 15 })))
+      .toEqual({ slot: '', notice: '17:00 已經過了，今天已沒有可訂的時段' })
+  })
+  it('打烊後（沒有 ≥ 目前時段的時段）→ 清空並說明', () => {
+    expect(pastSlotFix('19:00', new Date(2026, 8, 19, 19, 40), env()))
       .toEqual({ slot: '', notice: '19:00 已經過了，今天已沒有可訂的時段' })
   })
 })

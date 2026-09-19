@@ -35,15 +35,23 @@ export function nextBookableSlot({ settings = {}, tables = [], bookings = [], gr
       && calcSlotCapacity(tables, bookings, date, t, settings, groupReservations) >= guests) || ''
 }
 
-// 面板開著跨過時段：所選時段已早於目前這個 30 分時段（nowSlot）→ 改選目前時段（在營業時段內才選得到，
-// 否則清空）並給一行說明；沒過回 null。目前時段本身不算過（與 TimeSlotPicker 同口徑）。純函式，now 可注入。
-export function pastSlotFix(slot, now = new Date(), settings = {}) {
+// 面板開著跨過時段：所選時段已早於目前這個 30 分時段（nowSlot）→ 改選第一個「開始時間 ≥ nowSlot」且
+// 未關閉、剩餘席數夠的時段（與 TimeSlotPicker 的「已過」同口徑：早於 nowSlot 才算過），並給一行說明；
+// 真的都沒有才清空並說「今天已沒有可訂的時段」。沒過回 null。
+// 不可假設 nowSlot 本身在時段列表裡：間隔 60 分或開店非整／半點（如 11:15）時它根本不是一個時段。
+// 純函式，now 可注入。
+export function pastSlotFix(slot, now = new Date(), { settings = {}, tables = [], bookings = [], groupReservations = [], date, guests = 1 } = {}) {
   const cur = nowSlot(now)
   if (!slot || slot >= cur) return null
-  const next = generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval).includes(cur) ? cur : ''
+  const next = generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval)
+    .find(t => t >= cur
+      && !isSlotClosed(settings, date, t)
+      && calcSlotCapacity(tables, bookings, date, t, settings, groupReservations) >= guests) || ''
   return {
     slot: next,
-    notice: next ? `${slot} 已經過了，已改選目前時段 ${next}` : `${slot} 已經過了，今天已沒有可訂的時段`,
+    notice: !next ? `${slot} 已經過了，今天已沒有可訂的時段`
+      : next === cur ? `${slot} 已經過了，已改選目前時段 ${next}`
+      : `${slot} 已經過了，已改選下一個可訂時段 ${next}`,
   }
 }
 

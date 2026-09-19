@@ -121,10 +121,15 @@ function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAll
   const r = isCombo && seatBookingAllTables ? seatBookingAllTables(booking.id) : seatBooking(booking.id)
   if (!r?.ok) {
     const msg = '入座失敗：' + (r?.error || '未知錯誤')
-    if (onMove && !isCombo) {
+    if (isCombo) {
+      // 大組一句講完、不自相矛盾：哪張桌怎麼了＋去今日訂位卡處理（併桌不支援單桌改桌，不給改桌鈕）
+      const detail = String(r?.error || '未知錯誤').replace(/，請先.*$/, '')
+      const what = r?.code === 'table-occupied' ? '有桌被佔' : '有桌不能用'
+      toast.error(`入座失敗：${label.split(' + ').join('+')} ${what}（${detail}），請到今日訂位卡處理`)
+    } else if (onMove) {
       toast.action(msg, { label: '改桌', onClick: () => onMove(booking) }, { type: 'error', duration: 8000 })
     } else {
-      toast.error(isCombo ? `${msg}（併桌訂位不支援單桌改桌，請到今日訂位卡處理）` : msg)
+      toast.error(msg)
     }
     return r
   }
@@ -481,7 +486,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 面板開著跨過時段：所選時段變成已過（早於目前這個 30 分時段）→ 自動改選目前時段並說明
   useEffect(() => {
     if (!reserveOpen || !reserveSlot) return
-    const fix = pastSlotFix(reserveSlot, new Date(reserveNow), settings)
+    const fix = pastSlotFix(reserveSlot, new Date(reserveNow), {
+      settings, tables, bookings, groupReservations, date: todayStr(), guests: reserveGuests,
+    })
     if (!fix) return
     setReserveSlot(fix.slot)
     setReserveSlotNotice(fix.notice)

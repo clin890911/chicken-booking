@@ -204,10 +204,10 @@ describe('handleArriveNow：預配大組', () => {
 
   it('任一張被佔 → 不入座，toast.error 說明（不給改桌）', () => {
     const deps = makeDeps({ onMove: vi.fn(),
-      seatBookingAllTables: vi.fn(() => ({ ok: false, error: '105 目前由 別組 使用，請先改桌' })),
+      seatBookingAllTables: vi.fn(() => ({ ok: false, code: 'table-occupied', error: '105 目前由 別組 使用，請先改桌' })),
       getTable: () => ({ number: '105', status: 'dining', currentBookingId: 'OTHER' }) })
     handleArriveNow(t106, combo, deps)
-    expect(deps.toast.error).toHaveBeenCalledWith('入座失敗：105 目前由 別組 使用，請先改桌（併桌訂位不支援單桌改桌，請到今日訂位卡處理）')
+    expect(deps.toast.error).toHaveBeenCalledWith('入座失敗：106+105 有桌被佔（105 目前由 別組 使用），請到今日訂位卡處理')
     expect(deps.toast.action).not.toHaveBeenCalled()
   })
 })
