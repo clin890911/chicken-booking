@@ -11,8 +11,9 @@ import { findPreassignedBooking } from '../../../utils/capacity'
 import { assignmentKind } from '../../../utils/tableStatus'
 import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
+import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
 
-function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNoshow, onComplete, perms }) {
+function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, perms }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
   const overdue = overdueMin > 15 // 與 classifyTodayPulse graceMin 同口徑
   const assigned = !!b.assignedTableId
@@ -29,6 +30,12 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNo
   const showSeat = assigned && perms.booking && perms.table
   const showNoshow = overdue && perms.booking
   const showComplete = overdue && (assigned ? perms.booking && perms.table : perms.booking)
+  // 改桌：已有桌的待到訂位，把桌號徽章本身變成可點的「改桌」（→ 現場 move 模式）。
+  // 會同時寫 bookings 與 tables → 兩個權限都要；唯讀角色仍看到原本的唯讀徽章。
+  // 併桌訂位（有額外桌）move 只換主桌會留孤兒桌 → 改桌呈停用、點了說明原因（與訂位卡一致）。
+  const isCombo = (b.extraTableIds || []).length > 0
+  const canMove = assigned && !!onMoveTable && perms.booking && perms.table
+  const tableLabel = [b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean).join(' + ')
   // 已指派徽章是唯讀資訊，唯讀角色仍該看得到；整列全空時才不渲染（免留空白 margin）
   const showActions = assigned || showAssign || showNoshow || showComplete
 
@@ -45,7 +52,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNo
             <span className="text-sm font-bold truncate">{b.name}</span>
           </div>
           <div className="text-xs text-chicken-brown/60 mt-0.5 truncate">
-            {b.guests} 位 · {b.phone}
+            {b.guests} 位{b.phone ? ` · ${b.phone}` : ''}
           </div>
         </div>
         <div className="text-right flex-shrink-0">
@@ -63,7 +70,30 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNo
 
       {showActions && (
         <div className="mt-2 flex items-center gap-2 flex-wrap">
-          {assigned && (
+          {assigned && canMove && !isCombo && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onMoveTable(b) }}
+              title={`點選改桌：在桌況圖選新桌（目前 ${b.assignedTableId}${preassigned ? '，預配、桌況仍是空桌' : '，已鎖桌'}）`}
+              className={`inline-flex items-center gap-1 px-2.5 min-h-[44px] rounded-md text-[11px] font-bold border ${
+                preassigned ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-chicken-green/15 text-chicken-green border-chicken-green/40'
+              }`}
+            >
+              <span>{preassigned ? `已預配 ${b.assignedTableId}` : `✓ 已指派 ${b.assignedTableId}`}</span>
+              <span className="opacity-80">· ↔ 改桌</span>
+            </button>
+          )}
+          {assigned && canMove && isCombo && (
+            <button
+              aria-disabled="true"
+              onClick={(e) => { e.stopPropagation(); onMoveBlocked?.() }}
+              title={MOVE_COMBO_REASON}
+              className="inline-flex items-center gap-1 px-2.5 min-h-[44px] rounded-md text-[11px] font-bold border bg-chicken-brown/5 border-chicken-brown/15 text-chicken-brown/45"
+            >
+              <span>{preassigned ? `已預配 ${tableLabel}` : `✓ 已指派 ${tableLabel}`}</span>
+              <span>· 改桌（併桌不支援）</span>
+            </button>
+          )}
+          {assigned && !canMove && (
             <span
               title={preassigned
                 ? `排位規劃已預配 ${b.assignedTableId}，但桌況仍是空桌：地圖上是藍色虛線，別人仍坐得進去。按「客人到了」才會真正佔桌。`
@@ -124,7 +154,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onSeat, onNo
   )
 }
 
-export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
+export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTable }) {
   const { bookings, tables, groupReservations, setStatus, seatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
   const { can } = useAuth() || {}
   const toast = useToast()
@@ -215,7 +245,14 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
       if (!ok) return
     }
     const r = seatBooking(b.id)
-    if (!r?.ok) return toast.error('入座失敗：' + (r?.error || '未知錯誤'))
+    if (!r?.ok) {
+      const msg = '入座失敗：' + (r?.error || '未知錯誤')
+      // 桌被別組佔用／停用 → toast 直接帶「改桌」出口
+      if (onMoveTable && !(b.extraTableIds || []).length) {
+        return toast.action(msg, { label: '改桌', onClick: () => onMoveTable(b) }, { type: 'error', duration: 8000 })
+      }
+      return toast.error(msg)
+    }
     toast.success(`${b.name} 已入座 ${tableNo}`)
   }
 
@@ -234,7 +271,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
           <div className="text-[11px] font-bold text-chicken-red">過時未到（{overdue.length} 組）— 請聯絡或標記</div>
           {overdue.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
+              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
               onComplete={handleComplete} perms={perms} />
           ))}
         </div>
@@ -245,7 +282,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
           <div className="text-[11px] font-bold text-chicken-brown/65">90 分內將到（{soon.length} 組）</div>
           {soon.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
+              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
               onComplete={handleComplete} perms={perms} />
           ))}
         </div>
@@ -264,7 +301,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable }) {
             <div className="mt-2 space-y-2">
               {later.map(b => (
                 <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-                  onClickBooking={onClickBooking} onAssignTable={onAssignTable} onSeat={handleSeat} onNoshow={handleNoshow}
+                  onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
                   onComplete={handleComplete} perms={perms} />
               ))}
             </div>

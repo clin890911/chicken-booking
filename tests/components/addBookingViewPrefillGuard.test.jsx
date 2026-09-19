@@ -14,7 +14,8 @@ const bookingCtx = {
   bookings: [], tables: [], groupReservations: [],
   settings: { openTime: '11:00', closeTime: '21:00', slotInterval: 30 },
   addBooking: vi.fn(),
-  suggestTable: vi.fn(() => null),
+  findSuitableTables: vi.fn(() => []),
+  assignBookingToTable: vi.fn(() => ({ ok: true })),
 }
 vi.mock('../../src/contexts/BookingContext', () => ({ useBooking: () => bookingCtx }))
 vi.mock('../../src/contexts/AuthContext', () => ({ useAuth: () => ({ user: { email: 'staff@test' } }) }))
@@ -23,7 +24,6 @@ vi.mock('../../src/services/customerService', () => ({
   search: () => [],
 }))
 vi.mock('../../src/services/bookingService', () => ({ getNoshowCount: () => 0 }))
-vi.mock('../../src/services/seatingService', () => ({ assignBookingToTable: vi.fn(() => ({ ok: true })) }))
 vi.mock('../../src/components/ui/Toast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), action: vi.fn() }),
 }))
@@ -33,7 +33,8 @@ const AddBookingView = (await import('../../src/components/admin/AddBookingView'
 describe('AddBookingView：prefill 欄位級守門', () => {
   let container, root
 
-  const phoneInput = () => container.querySelector('input[placeholder="0912345678"]')
+  // 用 type=tel 定位：來源＝現場時電話改選填、placeholder 會換成「現場客可不填」
+  const phoneInput = () => container.querySelector('input[type="tel"]')
   const nameInput = () => container.querySelector('input[placeholder="王小姐"]')
 
   const render = (props = {}) => {

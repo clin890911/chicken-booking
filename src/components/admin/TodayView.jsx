@@ -25,7 +25,7 @@ const STATUS_PRIORITY = {
   noshow: 4,
 }
 
-export default function TodayView({ onAssignTable, onOpenGroup }) {
+export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
   const { bookings, groupReservations } = useBooking()
   const today = todayStr()
   const [query, setQuery] = useState('')
@@ -173,7 +173,7 @@ export default function TodayView({ onAssignTable, onOpenGroup }) {
             </div>
             <div className="space-y-2">
               {list.map(b => (
-                <BookingCard key={b.id} booking={b} onAssign={onAssignTable} />
+                <BookingCard key={b.id} booking={b} onAssign={onAssignTable} onMove={onMoveTable} />
               ))}
               {groupBatches.map(({ group, batch }) => (
                 <GroupBatchCard key={`${group.id}:${batch.id || batch.timeSlot}`} group={group} batch={batch} onOpen={onOpenGroup} />

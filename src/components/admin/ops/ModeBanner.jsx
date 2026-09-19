@@ -1,4 +1,5 @@
 import Icon from '../../ui/Icon'
+import { conflictLine } from '../../../utils/preassignOverride'
 // 現場營運的「模式 banner」：指派 / 候位入座 / 立即帶位 / 換桌 / 團體改派桌位
 // 依模式不同底色 + emoji 避免誤判；指派類模式帶二步確認列與預配衝突警告
 const BANNER_STYLE = {
@@ -10,7 +11,9 @@ const BANNER_STYLE = {
 
 const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
 
-export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pendingGroupHold, multiSeats = 0, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
+// pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
+//   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
+export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
   if (!mode) return null
 
   // 多桌指派／候位入座（大組併桌）：累加式選桌，不走二步確認；席數夠才能確認。
@@ -76,9 +79,14 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
     : mode.type === 'group-reseat' ? (mode.group?.agencyName || '團體')
     : ''
 
+  const hasConflict = !!pendingConflicts?.length
+  const willRelease = !!pendingConflicts?.some(c => c.willRelease)
+
   const confirmText = mode.type === 'group-reseat'
     ? `把 ${mode.current} 改派為 ${pendingConfirm} 並整梯入座？（將更新該梯圈桌）`
-    : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
+    : mode.type === 'move'
+      ? `確認把 ${pendingTargetName} 從 ${mode.booking?.assignedTableId} 改到桌 ${pendingConfirm}？`
+      : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
 
   return (
     <div className={`${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
@@ -105,14 +113,14 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
       {/* A6：二步確認 — 待確認列 */}
       {pendingConfirm && CONFIRMABLE.includes(mode.type) && (
         <div className="bg-white/15 rounded-lg px-3 py-2 space-y-2">
-          {/* 防呆：此桌已被別筆 booking 預先配走 → 紅底示警，確認鈕改為「仍要覆蓋」 */}
-          {pendingConflict && (
+          {/* 防呆：此桌已被別筆 booking 預先配走 → 紅底示警（逐筆寫明預配將解除或會保留） */}
+          {pendingConflicts?.length > 0 && (
             <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
               <Icon name="warning" size={16} className="shrink-0 mt-px" />
-              <span>
-                此桌已於排位規劃預留給 <span className="underline">{pendingConflict.name}</span>
-                （{pendingConflict.guests} 位{pendingConflict.timeSlot ? ` · ${pendingConflict.timeSlot}` : ''}）。
-                確認後將覆蓋其預配，{pendingConflict.name} 將變回未配桌。
+              <span className="space-y-0.5">
+                {pendingConflicts.map(c => (
+                  <span key={c.booking.id} className="block">{conflictLine(pendingConfirm, c, '確認')}</span>
+                ))}
               </span>
             </div>
           )}
@@ -140,8 +148,10 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflict, pend
               <button
                 onClick={onConfirm}
                 className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
-                  (pendingConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-              >{(pendingConflict || pendingGroupHold) ? '仍要覆蓋指派' : mode.type === 'group-reseat' ? '✓ 確認改派' : '✓ 確認指派'}</button>
+                  (hasConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
+              >{(willRelease || pendingGroupHold) ? '仍要覆蓋指派'
+                : hasConflict ? '仍要指派（預配保留）'
+                : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'move' ? '✓ 確認改桌' : '✓ 確認指派'}</button>
             </div>
           </div>
         </div>

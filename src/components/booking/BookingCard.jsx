@@ -6,6 +6,8 @@ import { useToast } from '../ui/Toast'
 import { useBookingActions } from './useBookingActions'
 import { STATUS_MAP, SOURCE_MAP, fmtTime } from './bookingLabels'
 import { copyText } from '../../utils/clipboard'
+import { assignmentKind } from '../../utils/tableStatus'
+import { PREASSIGN_COLOR } from '../admin/floormap/statusColors'
 
 // 顯示字典與純函式動作已抽到 ./bookingLabels 與 utils/bookingActions；
 // 這裡 re-export 讓既有 import（CustomerDetailModal / TableDrawer / 測試）不必改。
@@ -16,10 +18,18 @@ export { markNoshow, restoreFromNoshow, cancelWithUndo } from '../../utils/booki
 // 動作按鈕仍留在卡上（外場最常按的那幾顆不必多點一層）；顯示條件與詳情表共用 useBookingActions。
 // React.memo：清單搜尋框每打一個字整張清單都會重繪，卡片 props（booking 物件參考 / onAssign）
 // 沒變就跳過——BookingContext 已保證資料沒變時沿用同一個物件。
-function BookingCard({ booking, onAssign }) {
+function BookingCard({ booking, onAssign, onMove }) {
   const toast = useToast()
-  const act = useBookingActions(booking, { onAssign })
+  const act = useBookingActions(booking, { onAssign, onMove })
   const { dayKind, minutes, stage, noshowCount, suggestion, show } = act
+  // 桌號徽章分辨兩種「有桌」（口徑同現場頁 UpcomingPanel／桌況圖，見 utils/tableStatus.assignmentKind）：
+  // held＝現場指派已鎖桌（綠「桌 105」）；preassign＝只記在訂位上、桌況仍空（藍「預配 105」，別人坐得進去）。
+  // 過去一律綠色，店員看不出 11:00 余先生的 105 其實沒鎖，11:30 陳小姐就被建議同一張桌。
+  // ★ 只有「待到類」（confirmed/pending：還沒到店、還沒結束）才分；已到店／已完成／No-show／取消的桌
+  //   早就不是「鎖給他、等他來」的語意（吃完清桌後桌況回空桌，assignmentKind 會誤判成預配），維持原本徽章。
+  const tableKind = ['confirmed', 'pending'].includes(booking.status)
+    ? assignmentKind(booking, act.table)
+    : 'plain'
 
   const status = STATUS_MAP[booking.status] || STATUS_MAP.pending
 
@@ -56,12 +66,22 @@ function BookingCard({ booking, onAssign }) {
               <span className="text-base font-bold text-chicken-brown">{booking.name}</span>
               <span className="text-sm text-chicken-brown/60">{booking.guests} 位</span>
               {booking.assignedTableId && (
-                <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full
-                  ${booking.status === 'arrived'
-                    ? 'bg-orange-600 text-white'
-                    : 'bg-emerald-600 text-white'}`}>
-                  桌 {booking.assignedTableId}
-                </span>
+                tableKind === 'preassign' ? (
+                  <span data-kind="preassign"
+                    title="只記在訂位上、桌況還沒鎖：別人仍坐得進去（桌況圖上是藍色虛線）"
+                    className="text-xs font-bold px-2.5 py-0.5 rounded-full text-white border border-dashed border-white/70"
+                    style={{ background: PREASSIGN_COLOR.badge }}>
+                    預配 {booking.assignedTableId}
+                  </span>
+                ) : (
+                  <span data-kind={tableKind}
+                    className={`text-xs font-bold px-2.5 py-0.5 rounded-full
+                    ${booking.status === 'arrived'
+                      ? 'bg-orange-600 text-white'
+                      : 'bg-emerald-600 text-white'}`}>
+                    桌 {booking.assignedTableId}
+                  </span>
+                )
               )}
               {booking.status === 'arrived' && (
                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full tabular-nums
@@ -159,6 +179,19 @@ function BookingCard({ booking, onAssign }) {
                 className="tap text-sm px-3.5 min-h-[44px] bg-chicken-green text-white rounded-lg font-bold hover:opacity-90"
               >客人到了</button>
             )}
+            {/* 改桌：今日待到且已有桌 → 現場頁 move 模式（地圖選桌＋二步確認＋預配/團保警示）。
+                併桌訂位呈停用樣式（move 只換主桌，會留下孤兒額外桌）；iPad 沒有 hover 看不到 title，
+                所以仍可點，點了用 toast 說明原因（act.move 內處理），不做任何變更。 */}
+            {show.move && (
+              <button
+                onClick={(e) => { e.stopPropagation(); act.move() }}
+                aria-disabled={act.moveDisabledReason ? 'true' : undefined}
+                title={act.moveDisabledReason || `把 ${booking.name} 從 ${booking.assignedTableId} 改到別桌`}
+                className={`tap text-sm px-3.5 min-h-[44px] rounded-lg font-bold border ${act.moveDisabledReason
+                  ? 'bg-chicken-brown/5 border-chicken-brown/15 text-chicken-brown/40'
+                  : 'bg-white border-indigo-300 text-indigo-700 hover:bg-indigo-50'}`}
+              >↔ 改桌</button>
+            )}
             {show.futureAssignedNote && (
               <span className="text-xs font-bold text-chicken-brown/50 py-2">未來訂位 · 當天才可報到</span>
             )}
@@ -240,7 +273,7 @@ function BookingCard({ booking, onAssign }) {
 
       {editing && <EditBookingModal booking={booking} onClose={() => setEditing(false)} />}
       {detail && (
-        <BookingDetailSheet bookingId={booking.id} onClose={() => setDetail(false)} onAssign={onAssign} />
+        <BookingDetailSheet bookingId={booking.id} onClose={() => setDetail(false)} onAssign={onAssign} onMove={onMove} />
       )}
     </div>
   )

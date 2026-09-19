@@ -41,6 +41,9 @@ export default function AdminPage() {
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式
   // （候位入座已是現場頁內互動，無需跨頁機制）
   const [pendingAssign, setPendingAssign] = useState(null)
+  // pendingMove：訂位卡／詳情／新增後 toast 的「改桌」→ 現場頁 move 模式（比照 pendingAssign 的跨頁機制）。
+  // 帶 seq：同一筆訂位連按兩次改桌（中間取消過）也要能再觸發。
+  const [pendingMove, setPendingMove] = useState(null)
   // pendingPlanAssign：未來日訂位的「指派桌位（預配）」→ 規劃頁排位地圖預配模式
   // （現場頁只呈現今天即時桌況，未來日在那裡指派是錯誤脈絡）
   const [pendingPlanAssign, setPendingPlanAssign] = useState(null)
@@ -50,7 +53,7 @@ export default function AdminPage() {
   const [pendingRosterPhone, setPendingRosterPhone] = useState(null)
   // addPrefill：名冊「新增訂位」帶入的預填（電話/姓名），導到訂位頁新增子分頁
   const [addPrefill, setAddPrefill] = useState(null)
-  const { user, usingFirebase } = useAuth()
+  const { user, usingFirebase, can } = useAuth()
   const { bookings, waitlist, cloudStatus, hydrated } = useBooking()
   const toast = useToast()
 
@@ -113,6 +116,15 @@ export default function AdminPage() {
     }
   }, [setTab])
   const handleAssignDone = () => setPendingAssign(null)
+
+  // 「改桌」：只有今日待到的訂位會出現這顆鈕（useBookingActions.show.move），一律到現場頁地圖選桌
+  const handleMoveTable = useCallback((booking) => {
+    setPendingMove({ booking, seq: Date.now() })
+    setTab('ops')
+  }, [setTab])
+  const handleMoveDone = useCallback(() => setPendingMove(null), [])
+  // 改桌會同時寫 bookings 與 tables：沿用既有口徑（booking.update + table.update 都有才給入口；不新增權限字串）
+  const canMoveTable = !!(can?.('booking.update') && can?.('table.update'))
 
   // 訂位頁團體卡點擊 → 規劃頁開該團單詳情
   const handleOpenGroup = useCallback((group) => {
@@ -192,6 +204,8 @@ export default function AdminPage() {
                 <OperationsView
                   pendingAssign={pendingAssign}
                   onAssignDone={handleAssignDone}
+                  pendingMove={pendingMove}
+                  onMoveDone={handleMoveDone}
                   onAddBooking={() => openAddBooking(null)}
                 />
               )}
@@ -205,7 +219,7 @@ export default function AdminPage() {
                 />
               )}
               {tab === 'bookings' && (
-                <BookingsView onAssignTable={handleAssignTable} onOpenGroup={handleOpenGroup} openAdd={addPrefill} />
+                <BookingsView onAssignTable={handleAssignTable} onMoveTable={canMoveTable ? handleMoveTable : null} onOpenGroup={handleOpenGroup} openAdd={addPrefill} />
               )}
               {tab === 'roster' && (
                 <RosterView
