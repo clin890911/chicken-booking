@@ -42,7 +42,11 @@ function LegendSwatch({ fill, stroke, label, dashed = false }) {
 // 復原必須同時倒回 booking（confirmed）與 table（reserved + seatedAt:null）兩邊，
 // 不能只復原 booking——那是 repo 內其他復原路徑曾經犯過的不完整實作，這裡刻意都做。
 // onMove（可選）：入座被擋（桌被別組佔用／停用）時，toast 直接帶「改桌」出口。
-export function handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, toast, onMove }) {
+// 預配訂位（2026-09 起報到列也列預配：assignmentKind＝'preassign'，桌沒鎖給這筆）的復原另走
+// undoSeatPreassigned：桌倒回空桌、訂位回待到且保留預配，且只在桌仍由這筆用餐中時才倒。
+// 鎖桌（held）那條的復原維持原樣不動（已確認安全的例外，見 undo-paths 記錄）。
+export function handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, undoSeatPreassigned, toast, onMove }) {
+  const preassigned = assignmentKind(booking, table) === 'preassign'   // 入座前判定（入座後就是 held 了）
   const r = seatBooking(booking.id)
   if (!r?.ok) {
     const msg = '入座失敗：' + (r?.error || '未知錯誤')
@@ -57,10 +61,15 @@ export function handleArriveNow(table, booking, { seatBooking, setStatus, setTab
     `${booking.name} 已入座 ${table.number}`,
     {
       label: '↩ 復原',
-      onClick: () => {
-        setStatus(booking.id, 'confirmed')
-        setTableStatus(table.number, 'reserved', { seatedAt: null })
-      },
+      onClick: preassigned
+        ? () => {
+          const u = undoSeatPreassigned?.(booking.id, table.number)
+          if (!u?.ok) toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+        }
+        : () => {
+          setStatus(booking.id, 'confirmed')
+          setTableStatus(table.number, 'reserved', { seatedAt: null })
+        },
     },
     { duration: 5000 },
   )
@@ -127,7 +136,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
     assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
-    cancelBooking, seatBooking, setStatus, setTableStatus,
+    cancelBooking, seatBooking, undoSeatPreassigned, setStatus, setTableStatus,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     preassignBookingTable, addBooking,
@@ -548,7 +557,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       }
       const released = releaseOverlappingPreassigns(overridden, releaseOpts)
       const msg = preassign
-        ? `${booking.name}（${booking.guests} 位）指派至 ${number}（預配：桌子現在仍可帶位）· 可指派下一組`
+        ? `${booking.name}（${booking.guests} 位）已預配 ${number}（桌子現在仍可帶位）· 可指派下一組`
         : `${booking.name}（${booking.guests} 位）指派至 ${number} · 可指派下一組`
       if (released.length) {
         // 解除了別人的預配 → 給復原：撤回這次指派（只清不搶），並把被解除的預配寫回
@@ -1057,7 +1066,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                     if (t) setFloor(t.floor)
                     setSelectedTable(n)
                   }}
-                  onArrive={(table, booking) => handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, toast, onMove: startMove })}
+                  onArrive={(table, booking) => handleArriveNow(table, booking, { seatBooking, setStatus, setTableStatus, undoSeatPreassigned, toast, onMove: startMove })}
                 />
               )}
             </>

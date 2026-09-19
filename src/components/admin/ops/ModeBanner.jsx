@@ -92,7 +92,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
       ? `確認把 ${pendingTargetName} 從 ${mode.booking?.assignedTableId} 改到桌 ${pendingConfirm}？`
       : mode.type === 'assign'
         ? (assignPreassign
-          ? `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm} · 預配（桌子現在仍可帶位）？`
+          ? `確認預配 ${pendingTargetName} 到 ${pendingConfirm}？（桌子現在仍可帶位）`
           : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm} 並鎖桌？`)
         : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
 
@@ -163,10 +163,10 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
                 onClick={onConfirm}
                 className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
                   (hasConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-              >{(willRelease || pendingGroupHold) ? '仍要覆蓋指派'
-                : hasConflict ? '仍要指派（預配保留）'
+              >{(willRelease || pendingGroupHold) ? (assignPreassign ? '仍要覆蓋預配' : '仍要覆蓋指派')
+                : hasConflict ? (assignPreassign ? '仍要預配（他筆預配保留）' : '仍要指派（預配保留）')
                 : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'move' ? '✓ 確認改桌'
-                : assignPreassign ? '✓ 確認指派（預配）' : '✓ 確認指派'}</button>
+                : assignPreassign ? '✓ 確認預配' : '✓ 確認指派'}</button>
             </div>
           </div>
         </div>

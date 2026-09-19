@@ -2,8 +2,9 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import TableShape from './TableShape'
 import { FLOOR_VIEWBOX, FIXTURES } from '../../../data/tables'
 import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
-import { todayStr } from '../../../utils/timeSlots'
+import { todayStr, formatDate } from '../../../utils/timeSlots'
 import { overdueMinOf } from '../../../utils/bookingPulse'
+import { assignmentKind } from '../../../utils/tableStatus'
 import { GROUP_HOLD_COLOR } from './statusColors'
 
 // 「到了」一鍵入座的出現窗：訂位時間前 30 分 ~ 後 60 分。寫成具名常數方便日後調整。
@@ -18,6 +19,21 @@ export const ARRIVE_WINDOW_AFTER_MIN = 60
 export function isArriveEligible(table, booking, now = Date.now()) {
   if (!table || table.status !== 'reserved') return false
   if (!booking || !booking.timeSlot) return false
+  const overdue = overdueMinOf(booking.timeSlot, now)
+  return overdue >= -ARRIVE_WINDOW_BEFORE_MIN && overdue <= ARRIVE_WINDOW_AFTER_MIN
+}
+
+// 「預配」的待到訂位也要能從報到列一下入座（2026-09「接近時段才鎖」之後，早上接的訂位多半只預配、
+// 桌況維持空桌——只看 reserved 桌的話，這些客人到了在報到列上找不到）。
+// 條件：今天、待到（confirmed）、有配桌且是預配（assignmentKind＝'preassign'：桌沒鎖給這筆），
+// 時間窗同上（前 30／後 60 分）。桌此刻被別組佔著也照列——按「到了」時 seatBooking 的佔用守門會擋下，
+// 由呼叫端給「改桌」出口（不在這裡默默藏起來，否則客人到了店員卻找不到入口）。
+export function isPreassignArriveEligible(table, booking, now = Date.now()) {
+  if (!table || !booking || !booking.timeSlot) return false
+  if (booking.status !== 'confirmed') return false
+  if (booking.date !== formatDate(new Date(now))) return false
+  if (String(booking.assignedTableId) !== String(table.number)) return false
+  if (assignmentKind(booking, table) !== 'preassign') return false
   const overdue = overdueMinOf(booking.timeSlot, now)
   return overdue >= -ARRIVE_WINDOW_BEFORE_MIN && overdue <= ARRIVE_WINDOW_AFTER_MIN
 }

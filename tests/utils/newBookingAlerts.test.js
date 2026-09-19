@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts,
+  markCreatedHere, wasCreatedHere,
 } from '../../src/utils/newBookingAlerts'
 
 const TODAY = '2026-08-01'
@@ -86,5 +87,32 @@ describe('buildNewBookingAlerts', () => {
     expect(alerts).toHaveLength(2)
     expect(alerts[0].key).toBe('today-many')
     expect(alerts[1].key).toBe('future-many')
+  })
+})
+
+// 2026-09：本裝置剛建立的訂位不再跳「📋 新訂位」（自己通知自己）；線上客人與其他裝置建的照常通報
+describe('本裝置剛建立的訂位不通報', () => {
+  it('markCreatedHere 記下的 id → wasCreatedHere 為真（字串／數字 id 一致）；未記的為假', () => {
+    markCreatedHere('LOCAL-1')
+    markCreatedHere(42)
+    expect(wasCreatedHere('LOCAL-1')).toBe(true)
+    expect(wasCreatedHere('42')).toBe(true)
+    expect(wasCreatedHere('ONLINE-9')).toBe(false)
+    expect(wasCreatedHere(null)).toBe(false)
+  })
+
+  it('diffNewConfirmed 帶 exclude：本裝置建的排除、線上／其他裝置建的仍算新訂位', () => {
+    markCreatedHere('LOCAL-2')
+    const prev = confirmedIdSet([b('a')])
+    const added = diffNewConfirmed(prev, [b('a'), b('LOCAL-2'), b('ONLINE-3', { createdBy: 'guest' })],
+      { exclude: wasCreatedHere })
+    expect(added.map(x => x.id)).toEqual(['ONLINE-3'])
+    expect(buildNewBookingAlerts(added, TODAY).map(a => a.key)).toEqual(['today'])
+  })
+
+  it('全部都是本裝置建的 → 不推任何 toast', () => {
+    markCreatedHere('LOCAL-3')
+    const added = diffNewConfirmed(confirmedIdSet([]), [b('LOCAL-3')], { exclude: wasCreatedHere })
+    expect(buildNewBookingAlerts(added, TODAY)).toEqual([])
   })
 })

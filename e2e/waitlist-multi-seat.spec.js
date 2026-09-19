@@ -6,7 +6,11 @@ import { test, expect } from '@playwright/test'
 // 即使併兩三張桌明明坐得下。修正後應自動進入併桌模式（預選建議組合，可加減桌後確認）。
 // 種子把全店（含 2F）其餘桌位佔滿，只留 105/106/109 三張空桌逼出「無單桌可容」的分支。
 
-const TODAY = new Date().toISOString().slice(0, 10)
+// 本地日（不可用 toISOString().slice：台灣 00:00–08:00 會拿到 UTC 的前一天）
+const TODAY = (() => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})()
 
 // 全店只留 105 / 106 / 109 為空桌，其餘（含 2F）一律設成用餐中。
 // 沿用佈局本身的容量（105=4、106=4、109=6，與店主截圖一致）：任一單桌都塞不下 9 位，

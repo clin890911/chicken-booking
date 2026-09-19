@@ -12,21 +12,37 @@
 // 點 chip 本體會自動切到該桌所在樓層並開抽屜（沿用 OpsRail 既有的跨樓層 focus 慣例）。
 // 三版加碼：跨樓層的 chip 會在桌號前標樓層（例如「2F 201」），讓「點下去會切樓層、
 // 打斷正在填的表單」變成可預期；同樓層的桌不標，避免視覺噪音。
+// 四版（2026-09）：「預配」的待到訂位也列（isPreassignArriveEligible）——「接近時段才鎖」之後，
+// 早上接的訂位多半只預配、桌況仍空，只看 reserved 桌會讓這些客人到了在報到列找不到。
+// chip 標「預配」；桌此刻被別組佔著另標「桌被佔」（按到了會被擋下並給改桌出口）。
+// 「等報到 N」一律是兩種合計。同一張桌可能同時有鎖桌那筆與預配那筆 → key 改用訂位 id。
 import { useState, useEffect, useRef } from 'react'
 import { overdueMinOf } from '../../../utils/bookingPulse'
-import { isArriveEligible } from './FloorMap'
+import { isArriveEligible, isPreassignArriveEligible } from './FloorMap'
 
 // 遲到判定沿用 UpcomingPanel/BookingCard 既有口徑（graceMin=15，見 utils/bookingPulse.js）。
 const LATE_GRACE_MIN = 15
 
-// ★ 判定與排序邏輯（buildTargets）本版未動——只有下方渲染層加了總數標籤與捲動遮罩。
-function buildTargets(tables, bookings, now) {
+// 判定：鎖桌（桌 reserved、currentBookingId 指向訂位）＋預配（訂位 assignedTableId 指向空桌/他人佔用的桌）。
+// 排序邏輯不變。純函式匯出方便單測。
+export function buildTargets(tables, bookings, now) {
   const bookingMap = {}
   bookings.forEach(b => { if (b.id) bookingMap[b.id] = b })
+  const tableMap = {}
+  tables.forEach(t => { if (t?.number != null) tableMap[String(t.number)] = t })
   const list = []
+  const seen = new Set()
   tables.forEach(t => {
     const booking = t.currentBookingId ? bookingMap[t.currentBookingId] : null
-    if (isArriveEligible(t, booking, now)) list.push({ table: t, booking })
+    if (isArriveEligible(t, booking, now)) {
+      list.push({ table: t, booking, preassigned: false })
+      seen.add(booking.id)
+    }
+  })
+  bookings.forEach(b => {
+    if (!b?.id || seen.has(b.id) || !b.assignedTableId) return
+    const t = tableMap[String(b.assignedTableId)]
+    if (isPreassignArriveEligible(t, b, now)) list.push({ table: t, booking: b, preassigned: true })
   })
   // 排序：遲到（已過訂位時間 >15 分）優先，且越晚到的排越前面；其餘依訂位時段由早到晚。
   return list.sort((a, b) => {
@@ -99,14 +115,17 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
           onScroll={updateEdge}
           className="flex items-center gap-2.5 overflow-x-auto overflow-y-hidden pb-1"
         >
-          {targets.map(({ table, booking }) => {
+          {targets.map(({ table, booking, preassigned }) => {
             const overdueMin = overdueMinOf(booking.timeSlot, effectiveNow)
             const late = overdueMin > LATE_GRACE_MIN
             // 跨樓層標記：只有桌所在樓層跟目前顯示的樓層不同才標，避免同樓層 chip 多一截視覺噪音。
             const crossFloor = currentFloor != null && table.floor !== currentFloor
+            // 預配桌此刻被別組佔著（用餐中／待清／他筆鎖桌）→ 先標出來，按到了會被擋下並給改桌
+            const taken = preassigned && table.status !== 'vacant'
             return (
               <div
-                key={table.number}
+                key={booking.id}
+                data-preassigned={preassigned ? 'true' : undefined}
                 role="listitem"
                 onClick={() => onSelectTable(table.number)}
                 className={`flex items-center gap-2 shrink-0 cursor-pointer rounded-full border-2 pl-3 pr-1.5 py-1 transition-colors
@@ -122,6 +141,13 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                 >
                   {crossFloor ? `${table.floor} ${table.number}` : table.number}
                 </span>
+                {preassigned && (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+                    taken ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}
+                    title={taken ? `${table.number} 此刻有別組，按到了會請你改桌` : '預配：桌子沒鎖，按到了直接入座'}>
+                    {taken ? '預配·桌被佔' : '預配'}
+                  </span>
+                )}
                 {late && (
                   <span className="text-[10px] font-bold text-white bg-chicken-red px-1.5 py-0.5 rounded-full shrink-0">
                     遲到

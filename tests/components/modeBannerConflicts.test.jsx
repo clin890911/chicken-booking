@@ -43,11 +43,20 @@ describe('ModeBanner：預配衝突據實', () => {
     expect(buttons()).toContain('✓ 確認指派')
   })
 
-  it('lockKind preassign →「預配（桌子現在仍可帶位）」＋「✓ 確認指派（預配）」，banner 標出時段預配', () => {
+  it('lockKind preassign →「確認預配 陳小姐 到 105？（桌子現在仍可帶位）」＋「✓ 確認預配」，banner 標出時段預配', () => {
     render(null, { ...mode, lockKind: 'preassign' })
-    expect(container.textContent).toContain('確認指派 陳小姐 至桌 105 · 預配（桌子現在仍可帶位）？')
+    expect(container.textContent).toContain('確認預配 陳小姐 到 105？（桌子現在仍可帶位）')
     expect(container.textContent).toContain('13:30 預配 · 桌子先不鎖')
     expect(container.textContent).not.toContain('並鎖桌')
-    expect(buttons()).toContain('✓ 確認指派（預配）')
+    expect(container.textContent).not.toContain('確認指派')
+    expect(buttons()).toContain('✓ 確認預配')
+  })
+
+  it('lockKind preassign ＋他筆預配衝突 → 按鈕也講「預配」（覆蓋／保留）', () => {
+    render([{ booking: yu('11:00'), overlaps: true, willRelease: true }], { ...mode, lockKind: 'preassign' })
+    expect(buttons()).toContain('仍要覆蓋預配')
+    act(() => root.unmount()); container.remove()
+    render([{ booking: yu('20:30'), overlaps: false, willRelease: false }], { ...mode, lockKind: 'preassign' })
+    expect(buttons()).toContain('仍要預配（他筆預配保留）')
   })
 })

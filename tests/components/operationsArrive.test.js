@@ -80,3 +80,40 @@ describe('handleArriveNow：入座被擋時給改桌出口', () => {
     expect(deps.toast.action).not.toHaveBeenCalled()
   })
 })
+
+// 2026-09：報到列也列「預配」訂位（桌沒鎖給這筆）。入座的 5 秒復原要把桌倒回空桌、訂位回待到且保留預配，
+// 走 undoSeatPreassigned（只在桌仍由這筆用餐中時才倒）；不可沿用鎖桌那條把桌寫回 reserved。
+describe('handleArriveNow：預配訂位的入座與復原', () => {
+  const vacant = { number: '105', status: 'vacant', currentBookingId: null }
+  const pre = { id: 'bkP', name: '余先生', assignedTableId: '105' }
+
+  it('預配桌空著 → 照常 seatBooking；復原走 undoSeatPreassigned，不碰 setStatus/setTableStatus', () => {
+    const undoSeatPreassigned = vi.fn(() => ({ ok: true }))
+    const deps = makeDeps({ undoSeatPreassigned })
+    handleArriveNow(vacant, pre, deps)
+    expect(deps.seatBooking).toHaveBeenCalledWith('bkP')
+    const [msg, action] = deps.toast.action.mock.calls[0]
+    expect(msg).toBe('余先生 已入座 105')
+    action.onClick()
+    expect(undoSeatPreassigned).toHaveBeenCalledWith('bkP', '105')
+    expect(deps.setStatus).not.toHaveBeenCalled()
+    expect(deps.setTableStatus).not.toHaveBeenCalled()
+  })
+
+  it('復原被擋（桌已被更動）→ toast.error 說明，不硬倒', () => {
+    const deps = makeDeps({ undoSeatPreassigned: vi.fn(() => ({ ok: false, error: '這筆訂位或桌位已被更動，無法復原' })) })
+    handleArriveNow(vacant, pre, deps)
+    deps.toast.action.mock.calls[0][1].onClick()
+    expect(deps.toast.error).toHaveBeenCalledWith('復原失敗：這筆訂位或桌位已被更動，無法復原')
+  })
+
+  it('鎖桌（held：桌 reserved 且 currentBookingId＝這筆）→ 復原維持原本那條（setStatus＋setTableStatus reserved）', () => {
+    const undoSeatPreassigned = vi.fn()
+    const deps = makeDeps({ undoSeatPreassigned })
+    handleArriveNow({ number: '105', status: 'reserved', currentBookingId: 'bkP' }, pre, deps)
+    deps.toast.action.mock.calls[0][1].onClick()
+    expect(undoSeatPreassigned).not.toHaveBeenCalled()
+    expect(deps.setStatus).toHaveBeenCalledWith('bkP', 'confirmed')
+    expect(deps.setTableStatus).toHaveBeenCalledWith('105', 'reserved', { seatedAt: null })
+  })
+})

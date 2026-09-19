@@ -3,18 +3,20 @@ import { test, expect } from '@playwright/test'
 // 管理端指派主線：同仁登入 → 後台今日列表看到訂位 → 指派桌位（A6 二步確認）→ 指派成功。
 // 後台在「本機開發模式」(無 Firebase) 以 localStorage 為後端；攔截 admin* 雲端端點，
 // 避免雲端 pull 覆蓋種子資料、也不碰正式後端。
+// 鎖桌時機（「接近時段才鎖」：離用餐 30 分內指派才鎖桌，更早只預配）會讓確認句／toast 隨時刻不同，
+// 故一律用 page.clock 固定時間、時區固定 Asia/Taipei，兩種語意各自 deterministic。
 
-function todayStr() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
+test.use({ timezoneId: 'Asia/Taipei' })
+
+const TODAY = '2026-09-19'
+const at = (hhmm) => new Date(`${TODAY}T${hhmm}:00+08:00`)
 
 const BOOKING = {
   id: 'E2E-ADM-1',
   name: '王大明',
   phone: '0912000111',
   guests: 4,
-  date: todayStr(),
+  date: TODAY,
   timeSlot: '18:00',
   source: 'online',
   status: 'confirmed',
@@ -25,6 +27,8 @@ const BOOKING = {
 }
 
 test.beforeEach(async ({ page }) => {
+  // 預設 17:40：離 18:00 的種子訂位 20 分 → 指派即鎖桌（各條可再覆寫）
+  await page.clock.setFixedTime(at('17:40'))
   // 攔截雲端端點：pull 回 ok:false（會被 catch、保留本機種子資料）、push 回 ok:true（no-op）
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
@@ -39,7 +43,7 @@ test.beforeEach(async ({ page }) => {
   }, BOOKING)
 })
 
-test('管理端：登入 → 指派桌位（二步確認）→ 指派成功', async ({ page }) => {
+test('管理端：登入 → 指派桌位（二步確認）→ 指派成功（17:40 指派 18:00＝鎖桌）', async ({ page }) => {
   // 1) 同仁登入（開發模式 email 表單）
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
@@ -62,11 +66,40 @@ test('管理端：登入 → 指派桌位（二步確認）→ 指派成功', as
 
   // 5) 點該桌（SVG 內 <g> 含桌號文字）→ 進入待確認預覽（A6 二步）
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
-  await expect(page.getByText(new RegExp(`確認指派 王大明 至桌 ${tableNo}`))).toBeVisible()
+  await expect(page.getByText(new RegExp(`確認指派 王大明 至桌 ${tableNo} 並鎖桌？`))).toBeVisible()
 
   // 6) 按「✓ 確認指派」→ 指派成功（成功 toast）
   await page.getByRole('button', { name: /確認指派/ }).click()
   await expect(page.getByText(new RegExp(`指派至 ${tableNo}.*可指派下一組`))).toBeVisible()
+  const tables = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_tables_v3') || '[]'))
+  expect(tables.find(t => t.number === tableNo).status).toBe('reserved')
+})
+
+test('管理端：09:00 指派 18:00 的訂位 → 只預配（確認句／toast 講預配，桌況仍空）', async ({ page }) => {
+  await page.clock.setFixedTime(at('09:00'))
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+
+  await page.getByRole('button', { name: '指派桌位' }).click()
+  await expect(page.getByText(/指派桌位：王大明\s*4\s*位/)).toBeVisible()
+  await expect(page.getByText('18:00 預配 · 桌子先不鎖')).toBeVisible()
+  const chipText = await page.getByText(/^建議\s*\d+/).textContent()
+  const tableNo = (chipText.match(/\d+/) || [])[0]
+
+  await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
+  await expect(page.getByText(`確認預配 王大明 到 ${tableNo}？（桌子現在仍可帶位）`)).toBeVisible()
+  await expect(page.getByText(/確認指派 王大明/)).toHaveCount(0)
+  await page.getByRole('button', { name: '✓ 確認預配' }).click()
+  await expect(page.getByText(new RegExp(`王大明（4 位）已預配 ${tableNo}（桌子現在仍可帶位）`))).toBeVisible()
+
+  const state = await page.evaluate(() => ({
+    bookings: JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]'),
+    tables: JSON.parse(localStorage.getItem('chicken_tables_v3') || '[]'),
+  }))
+  expect(state.bookings.find(b => b.id === 'E2E-ADM-1').assignedTableId).toBe(tableNo)
+  expect(state.tables.find(t => t.number === tableNo).status).toBe('vacant')
 })
 
 // 大組多桌指派（2026-06-12）：散客訂位人數超過任何單桌容量（最大 6 人桌）時，

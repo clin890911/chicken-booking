@@ -329,3 +329,57 @@ describe('ArrivalStrip', () => {
     expect(crossFloorChip.textContent).toContain('2F')
   })
 })
+
+// 2026-09「接近時段才鎖」後：預配（桌沒鎖）的待到訂位也列在報到列，標「預配」；桌被別組佔另標「桌被佔」；
+// 「等報到 N」把預配算進去；同一張桌可能同時有鎖桌與預配兩筆 → 兩個 chip 都在（key 用訂位 id）。
+describe('ArrivalStrip：預配訂位', () => {
+  let container, root
+  const setup = () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+  }
+  afterEach(() => { act(() => root?.unmount()); container?.remove() })
+  const NOW2 = new Date(2026, 8, 19, 11, 40).getTime()
+  const pre = (over = {}) => ({ id: 'P1', name: '余先生', date: '2026-09-19', timeSlot: '12:00', status: 'confirmed', assignedTableId: '105', ...over })
+
+  it('預配 12:00、11:40 → 出現在報到列（標「預配」），等報到總數算進去；點到了交出 (桌, 訂位)', () => {
+    setup()
+    const onArrive = vi.fn()
+    const held = { id: 'H1', name: '王小明', timeSlot: '12:00' }
+    act(() => root.render(
+      <ArrivalStrip
+        tables={[table({ number: '101', currentBookingId: 'H1' }), table({ number: '105', status: 'vacant', currentBookingId: null })]}
+        bookings={[held, pre()]} onSelectTable={() => {}} onArrive={onArrive} now={NOW2} />,
+    ))
+    expect(container.textContent).toContain('等報到 2')
+    const chip = container.querySelector('[data-preassigned="true"]')
+    expect(chip.textContent).toContain('余先生')
+    expect(chip.textContent).toContain('預配')
+    expect(chip.textContent).not.toContain('桌被佔')
+    act(() => chip.querySelector('button[aria-label="余先生 到了，入座 105"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true })))
+    expect(onArrive.mock.calls[0][0].number).toBe('105')
+    expect(onArrive.mock.calls[0][1].id).toBe('P1')
+  })
+
+  it('預配桌此刻被別組佔 → 仍列並標「預配·桌被佔」；同桌的鎖桌那筆與預配那筆各一個 chip', () => {
+    setup()
+    const holder = { id: 'H2', name: '陳小姐', timeSlot: '12:00' }
+    act(() => root.render(
+      <ArrivalStrip tables={[table({ number: '105', status: 'reserved', currentBookingId: 'H2' })]}
+        bookings={[holder, pre()]} onSelectTable={() => {}} onArrive={() => {}} now={NOW2} />,
+    ))
+    expect(container.textContent).toContain('等報到 2')
+    expect(container.querySelector('[data-preassigned="true"]').textContent).toContain('預配·桌被佔')
+    expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(2)
+  })
+
+  it('窗外（11:29 以前）不列', () => {
+    setup()
+    act(() => root.render(
+      <ArrivalStrip tables={[table({ number: '105', status: 'vacant', currentBookingId: null })]}
+        bookings={[pre()]} onSelectTable={() => {}} onArrive={() => {}} now={new Date(2026, 8, 19, 11, 0).getTime()} />,
+    ))
+    expect(container.firstChild).toBeNull()
+  })
+})

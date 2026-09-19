@@ -137,6 +137,25 @@ export function seatBooking(bookingId) {
   return { ok: true, tableNumber: booking.assignedTableId }
 }
 
+// === 報到列「到了」入座「預配」訂位後的 5 秒復原 ===
+// 預配入座前桌是空桌（或別組剛離開後的空桌）→ 復原要把桌倒回空桌、訂位回待到，且保留預配
+// （assignedTableId 不動：客人其實還沒到，預配要留著）。不能沿用鎖桌那條把桌寫回 reserved——
+// 那會把原本沒鎖的桌憑空鎖住。
+// 復原鐵律：只在「這筆仍是用餐中、仍指向這張桌、桌仍由這筆用餐中」時才倒；期間被改桌／清桌／
+// 別組接手就不動（不清別人的桌、不搶桌）。
+export function undoSeatPreassigned(bookingId, tableNumber) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  const t = tableService.getByNumber(tableNumber)
+  if (booking.status !== 'arrived' || String(booking.assignedTableId) !== String(tableNumber)
+    || !t || t.status !== 'dining' || !heldBy(t, bookingId)) {
+    return { ok: false, error: '這筆訂位或桌位已被更動，無法復原' }
+  }
+  bookingService.setStatus(bookingId, 'confirmed')   // 會清掉 actualArrivalTime；assignedTableId 保留
+  tableService.clearTable(tableNumber)
+  return { ok: true }
+}
+
 // === 已離席 → 等待清桌 ===
 // 訂位 status: arrived → completed
 // 桌位 status: dining → cleaning（仍佔位、提醒外場去清）

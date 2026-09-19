@@ -83,6 +83,8 @@ test('現場→今日訂位→＋新增：姓氏/稱謂→人數→時段→電�
   // 回「今日訂位」籤，新卡捲到可見並閃一下；toast 據實
   await expect(page.getByText('已新增 王小姐 14:00 · 預配 106')).toBeVisible()
   await expect(page.getByTestId('quick-reserve-panel')).toHaveCount(0)
+  // 本裝置自己建的不再跳「📋 新訂位」提醒（已有上面的確認 toast）
+  await expect(page.getByText(/📋 新訂位/)).toHaveCount(0)
   const card = page.locator('[data-booking-id][data-flash="true"]')
   await expect(card).toBeVisible()
   await expect(card).toContainText('王小姐')

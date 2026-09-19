@@ -12,7 +12,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
 import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
-import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts } from '../utils/newBookingAlerts'
+import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
 
 const TABS = [
   { key: 'ops',       label: '現場',  icon: 'ops', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
@@ -72,7 +72,8 @@ export default function AdminPage() {
       prevIdsRef.current = ids
       return
     }
-    buildNewBookingAlerts(diffNewConfirmed(prevIdsRef.current, bookings), todayStr())
+    // 本裝置剛建立的不通報（已有「已新增」確認 toast）；線上客人與其他裝置建立的照常通報
+    buildNewBookingAlerts(diffNewConfirmed(prevIdsRef.current, bookings, { exclude: wasCreatedHere }), todayStr())
       .forEach(a => toast.info(a.message, { duration: a.duration }))
     prevIdsRef.current = ids
     // eslint-disable-next-line react-hooks/exhaustive-deps
