@@ -34,20 +34,22 @@ const mk = (number, capacity, floor, x, y) => ({
   number, capacity, floor, x, y, ...tableDims(capacity),
 })
 
-// === 1F：六人桌 101,102,103,108,109,110；四人桌 105,106,107,111,112,113 ===
+// === 1F：依現場「雞王一樓座號圖」照片（2026-10）排列 ===
+// 左壁 103/102/101；中央 107/110、106/109、105/108 左右接邊；右側 113/112/111。
+// 容量沿用既有桌號：六人桌 101,102,103,108,109,110；其餘四人，共60席。
 const FLOOR_1F = [
-  // 左側直排（6P，橫式）
-  mk('103', 6, '1F', 120, 150),
-  mk('102', 6, '1F', 120, 300),
-  mk('101', 6, '1F', 120, 450),
-  // 中央兩列：左 4P、右 6P（6P 已改橫式，與同列 4P 對齊基準）
-  mk('107', 4, '1F', 360, 312), mk('110', 6, '1F', 452, 312),
-  mk('106', 4, '1F', 360, 462), mk('109', 6, '1F', 452, 462),
-  mk('105', 4, '1F', 360, 612), mk('108', 6, '1F', 452, 612),
-  // 右側直排（4P）
-  mk('113', 4, '1F', 640, 330),
-  mk('112', 4, '1F', 640, 480),
-  mk('111', 4, '1F', 640, 622),
+  // 左側直排（6P，橫式），貼左壁。
+  mk('103', 6, '1F', 130, 140),
+  mk('102', 6, '1F', 130, 300),
+  mk('101', 6, '1F', 130, 460),
+  // 中央三組雙桌：左4P與右6P同列接邊。
+  mk('107', 4, '1F', 360, 300), mk('110', 6, '1F', 440, 300),
+  mk('106', 4, '1F', 360, 460), mk('109', 6, '1F', 440, 460),
+  mk('105', 4, '1F', 360, 620), mk('108', 6, '1F', 440, 620),
+  // 右側直排（4P），與中央三組同列。
+  mk('113', 4, '1F', 650, 300),
+  mk('112', 4, '1F', 650, 460),
+  mk('111', 4, '1F', 650, 620),
 ]
 
 // === 2F：依現場「雞王二樓座號圖」照片（2026-10）排列 ===
@@ -80,13 +82,20 @@ const FLOOR_2F = [
 //   實際以 settings.floorPlan.fixtures 為準（後台可編輯），未設定時 fallback 回這裡。
 export const FIXTURES = {
   '1F': [
-    { id: 'f1-sauce', type: 'label', x: 300, y: 235, w: 0, h: 0, text: '醬料台', vtext: false },
-    { id: 'f1-serve', type: 'label', x: 380, y: 150, w: 0, h: 0, text: '出菜口', vtext: false },
-    { id: 'f1-cashier', type: 'label', x: 560, y: 150, w: 0, h: 0, text: '結帳口', vtext: false },
-    { id: 'f1-fridge', type: 'rect', x: 735, y: 300, w: 24, h: 230, text: '冷藏自選冰箱', vtext: true },
-    { id: 'f1-stairs', type: 'stairs', x: 735, y: 560, w: 60, h: 90, text: '上樓 ↑', vtext: false },
-    { id: 'f1-host', type: 'rect', x: 120, y: 610, w: 80, h: 60, text: '領位台', vtext: false },
-    { id: 'f1-door', type: 'label', x: 120, y: 735, w: 0, h: 0, text: '玻璃門入口', vtext: false },
+    { id: 'f1-sauce', type: 'rect', x: 285, y: 100, w: 110, h: 24, text: '醬料台', vtext: false },
+    { id: 'f1-serve', type: 'label', x: 440, y: 130, w: 0, h: 0, text: '出菜口', vtext: false },
+    { id: 'f1-cashier', type: 'label', x: 650, y: 130, w: 0, h: 0, text: '結帳口', vtext: false },
+    { id: 'f1-fridge', type: 'rect', x: 750, y: 235, w: 42, h: 330, text: '自選冰箱', vtext: true },
+    { id: 'f1-stairs', type: 'stairs', x: 800, y: 100, w: 85, h: 465, text: '樓梯', vtext: true },
+    { id: 'f1-stairs-up', type: 'label', x: 810, y: 610, w: 0, h: 0, text: '↑ 上樓', vtext: false },
+    // 照片劃掉的錢櫃台不設領位台；111下方手寫「飲料」作飲料台。
+    { id: 'f1-drinks', type: 'rect', x: 650, y: 725, w: 95, h: 30, text: '飲料台', vtext: false },
+    { id: 'f1-door', type: 'rect', x: 127, y: 650, w: 24, h: 110, text: '玻璃門入口', vtext: true },
+    // 左壁入口處留空；牆面沿用既有rect，不增加設施型別。
+    { id: 'f1-wall-top', type: 'rect', x: 127, y: 97, w: 761, h: 3, text: '', vtext: false },
+    { id: 'f1-wall-left', type: 'rect', x: 127, y: 97, w: 3, h: 553, text: '', vtext: false },
+    { id: 'f1-wall-right', type: 'rect', x: 885, y: 97, w: 3, h: 686, text: '', vtext: false },
+    { id: 'f1-wall-bottom', type: 'rect', x: 127, y: 780, w: 761, h: 3, text: '', vtext: false },
   ],
   '2F': [
     { id: 'f2-fridge', type: 'rect', x: 250, y: 70, w: 350, h: 28, text: '冷藏自選冰箱', vtext: false },

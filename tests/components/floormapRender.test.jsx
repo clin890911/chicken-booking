@@ -131,9 +131,9 @@ describe('computeFloorContentBBox / computeFloorViewBox（自動裁切純函式�
 describe('computeFloorViewBox：夾限下界（不得比原始 FLOOR_VIEWBOX 更差，但不裁掉真實內容）', () => {
   const floorTablesOf = (floor) => INITIAL_TABLES.filter(t => t.floor === floor)
 
-  it('1F 型（內容遠小於畫布）：夾限不生效，裁切正常放大，viewBox 明顯小於 1200×800', () => {
+  it('1F 現場照片型：完整呈現入口、飲料台與縱向樓梯，裁切正常放大', () => {
     const vb = computeFloorViewBox(floorTablesOf('1F'), FIXTURES['1F'])
-    expect(vb).toEqual({ x: 60, y: 90, width: 795, height: 705 })
+    expect(vb).toEqual({ x: 67, y: 37, width: 881, height: 763 })
     expect(vb.width).toBeLessThan(FLOOR_VIEWBOX.width)
     expect(vb.height).toBeLessThan(FLOOR_VIEWBOX.height)
     // 完全落在原始畫布內
