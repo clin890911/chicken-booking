@@ -355,7 +355,7 @@ export default function SettingsView({ onOpenCustomer }) {
               activeKey === c.key ? 'bg-chicken-red/[0.08] text-chicken-red' : 'bg-white border border-chicken-brown/10 text-chicken-brown/70'
             }`}
           >
-            <span aria-hidden>{c.icon}</span> {c.label}
+            <Icon name={c.icon} size={16} className="mr-1 inline-block align-[-3px]" />{c.label}
           </button>
         ))}
       </div>
