@@ -21,6 +21,7 @@ import { conflictLine, releaseOverlappingPreassigns, restoreReleasedPreassigns, 
 import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
 import { buildOpsTablePresentation } from '../../utils/opsTablePresentation'
 import { buildTableTurns } from '../../utils/tableTurns'
+import { seatedMoveWarningSignature } from '../../utils/seatedMoveWarnings'
 import { todayStr, nowSlot } from '../../utils/timeSlots'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
 import SegmentedControl from '../ui/SegmentedControl'
@@ -212,7 +213,7 @@ export function saveQuickReserve(payload, { date, kind, table, needsCombo, creat
 export default function OperationsView({ pendingAssign, onAssignDone, pendingMove, onMoveDone, onMoveConsumed, onAddBooking }) {
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
-    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, reseatGroupBatchTable,
+    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, reseatGroupBatchTable,
     cancelBooking, seatBooking, seatBookingAllTables, undoSeatPreassigned, setStatus, setTableStatus,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
@@ -389,9 +390,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       startMultiMode({ kind: 'booking', booking, need: Number(booking.guests), lockKind, suitable: [...suitable], replacing: true })
       return
     }
-    if ((booking.extraTableIds || []).length) {
-      onMoveDone?.()
-      return toast.error('已入座的併桌客人本輪不支援整組改桌，請保留原訂位與桌位')
+    if (booking.status === 'arrived') {
+      const original = [booking.assignedTableId, ...(booking.extraTableIds || [])].filter(Boolean).map(String)
+      const suitable = new Set(findSuitableTables(1).map(t => t.number))
+      tables.filter(t => original.includes(String(t.number)) && ['dining', 'reserved'].includes(t.status) && String(t.currentBookingId) === String(booking.id) && !t.currentRef && isTableUsableOnDate(t, todayStr())).forEach(t => suitable.add(t.number))
+      startMultiMode({ kind: 'booking', booking, need: Number(booking.guests), lockKind: 'now', suitable: [...suitable], replacing: true })
+      const focus = tables.find(t => String(t.number) === original[0])
+      if (focus) setFloor(focus.floor)
+      return
     }
     if (!booking.assignedTableId) {
       onMoveDone?.()
@@ -742,13 +748,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (hold?.holds?.length) lines.push(`${n} 為今日團體 ${hold.agencyName || '旅行社'} 預留，確認後散客將佔用團體桌`)
     return lines
   }) : []
-  const multiWarningKey = multiWarnings.join('；')
+  const seatedWarningSignature = mode?.type === 'assign-multi' && mode.booking?.status === 'arrived' ? seatedMoveWarningSignature(mode.booking.id, mode.selected, { bookings, groups: groupReservations, tables, settings }) : null
+  const multiWarningKey = multiWarnings.length ? multiWarnings.join('；') + (seatedWarningSignature || '') : ''
   const multiWarningConfirmed = !multiWarningKey || mode?.confirmedWarning === multiWarningKey
 
   const confirmWalkinMulti = () => {
     if (mode?.type !== 'assign-multi') return
     // 選桌期間跨過鎖桌門檻：先更新語意／警示再讓店員確認，不以舊文案直接鎖桌。
-    if (mode.kind === 'booking') {
+    if (mode.kind === 'booking' && mode.booking.status !== 'arrived') {
       const ownsReserved = mode.replacing && tables.some(t => t.status === 'reserved' && String(t.currentBookingId) === String(mode.booking.id))
       const currentKind = ownsReserved ? 'hold' : lockKindFor({ date: mode.booking.date, timeSlot: mode.booking.timeSlot })
       if (currentKind !== mode.lockKind) {
@@ -767,9 +774,15 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (new Set(mode.selected.map(n => tables.find(t => t.number === n)?.floor)).size > 1) return toast.error('併桌需在同一樓層')
     if (mode.replacing) {
       const overridden = mode.selected.flatMap(n => preassignConflictsFor(n))
-      const r = replacePendingBookingTables(mode.booking.id, mode.selected)
+      const r = mode.booking.status === 'arrived'
+        ? replaceSeatedBookingTables(mode.booking.id, mode.selected, {
+          confirmedWarningSignature: seatedWarningSignature,
+          originalTableNumbers: [mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].filter(Boolean).map(String),
+          confirmedConflictTables: multiWarningConfirmed ? mode.selected.filter(n => preassignConflictsFor(n).length || groupHoldTables[n]?.holds?.length) : [],
+        })
+        : replacePendingBookingTables(mode.booking.id, mode.selected)
       if (!r.ok) return toast.error('改桌失敗：' + r.error)
-      releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
+      if (mode.booking.status !== 'arrived') releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
       toast.success(`${mode.booking.name} 已改桌至 ${mode.selected.join(' + ')}（原訂位保留）`)
       flashAssigned(mode.selected[0])
       setSelectedTable(mode.selected[0])
@@ -1098,6 +1111,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
               <p>目標桌：{(mode.selected?.length ? mode.selected.join(' + ') : pendingConfirm) || '尚未選桌'}</p>
               <p className="text-sm text-chicken-brown/60">在地圖選桌，上方確認後才儲存。</p>
+              {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">保留原入座時間；撤出的原桌需清桌。</p>}
               <button type="button" className="tap min-h-[44px] px-4 rounded-lg border" onClick={cancelModeAndNotify}>取消並返回</button>
             </div>
           ) : selectedTableObj ? (

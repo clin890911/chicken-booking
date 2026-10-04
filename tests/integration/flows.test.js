@@ -474,13 +474,13 @@ describe('跨 service 端到端流程', () => {
       }
     })
 
-    it('moveTable：已入座客人換桌 → 舊桌釋放、新桌 dining、指派同步', () => {
+    it('moveTable：已入座客人換桌 → 舊桌待清潔、新桌 dining、指派同步', () => {
       const booking = mkOnlineBooking({ guests: 4 })
       seating.assignBookingToTable(booking.id, '101')
       seating.seatBooking(booking.id) // 101 dining
       const r = seating.moveTable(booking.id, '201')
       expect(r.ok).toBe(true)
-      expect(tableService.getByNumber('101').status).toBe('vacant')
+      expect(tableService.getByNumber('101').status).toBe('cleaning')
       expect(tableService.getByNumber('201').status).toBe('dining')
       expect(tableService.getByNumber('201').currentBookingId).toBe(booking.id)
       expect(bookingService.getById(booking.id).assignedTableId).toBe('201')

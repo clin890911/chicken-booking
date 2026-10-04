@@ -9,6 +9,7 @@
 import { useMemo, useState, useEffect } from 'react'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse } from '../../../utils/bookingPulse'
+import { diningTablePresentation } from '../../../utils/tableStatus'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
@@ -39,7 +40,8 @@ export default function StatusBar({ tables, waitlist, bookings = [], variant = '
   bookings.forEach(b => { if (b.id) bookingById[b.id] = b })
   let occSeats = 0
   const today = todayStr()
-  tables.forEach(t => {
+  tables.forEach(storedTable => {
+    const t = diningTablePresentation(storedTable, bookingById[storedTable.currentBookingId], tables)
     // 維修/停用只剔除「空著的」桌；有客人的桌（跨午夜進維修窗等不一致狀態）必須照常計入，
     // 否則在席人數與用餐桌數會憑空消失。
     const occupied = ['dining', 'reserved', 'cleaning'].includes(t.status) || t.currentBookingId || t.currentRef
