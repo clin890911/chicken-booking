@@ -8,6 +8,7 @@ import * as bookingService from '../../src/services/bookingService'
 import * as waitlistService from '../../src/services/waitlistService'
 import * as groupService from '../../src/services/groupReservationService'
 import { computeOvertimeActions } from '../../src/utils/opsSweep'
+import { INITIAL_TABLES } from '../../src/data/tables'
 
 // === 測試用桌位工廠 ===
 // 直接組出已知 schema 的桌位，透過 tableService.bulkWrite 寫入，狀態完全可控。
@@ -952,7 +953,43 @@ describe('seatingService 整合層', () => {
     afterEach(() => vi.useRealTimers())
 
     describe('suggestTableCombo', () => {
-      it('單桌裝不下 → 同層貪婪湊最少桌（容量大優先）', () => {
+      // 店主 2026-10 回報：1F 全空、9 位，舊版容量大優先推 101+102（6+6=12 席），
+      // 應推 4+6=10 席且兩桌相鄰（如 107/110）。
+      it('9 位、1F 全空 → 推 4+6（10 席）相鄰兩桌，不推 6+6', () => {
+        tableService.bulkWrite(INITIAL_TABLES.filter(t => t.floor === '1F').map(t => ({ ...t, status: 'vacant', isActive: true })))
+        const r = seating.suggestTableCombo(9)
+        expect(r.enough).toBe(true)
+        expect(r.seats).toBe(10)
+        expect(r.tableNumbers).toHaveLength(2)
+        // 1F 中央兩列每列「左 4P + 右 6P」緊鄰：105/108、106/109、107/110 皆可
+        expect([['105', '108'], ['106', '109'], ['107', '110']]).toContainEqual(r.tableNumbers)
+      })
+
+      it('桌數優先於浪費：2 張夠就不推 3 張（即使 3 張浪費更少）', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 6, '1F'), mkTable('103', 4, '1F'), mkTable('105', 4, '1F'), mkTable('106', 4, '1F')])
+        const r = seating.suggestTableCombo(11) // 6+6=12（2 張）優於 4+4+4=12 / 6+4+4=14（3 張）
+        expect([...r.tableNumbers].sort()).toEqual(['101', '102'])
+        expect(r.seats).toBe(12)
+      })
+
+      it('同組成選最緊湊的桌（離得遠的同容量桌不選）', () => {
+        tableService.bulkWrite([
+          mkTable('101', 4, '1F', { x: 0, y: 0, w: 80, h: 75 }),
+          mkTable('102', 6, '1F', { x: 900, y: 600, w: 90, h: 75 }),
+          mkTable('103', 4, '1F', { x: 800, y: 600, w: 80, h: 75 }),
+        ])
+        const r = seating.suggestTableCombo(9)
+        expect(r.tableNumbers).toEqual(['102', '103'])
+      })
+
+      it('浪費少的樓層優先，同分 1F 優先', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 6, '1F'), mkTable('201', 4, '2F'), mkTable('202', 6, '2F')])
+        expect(seating.suggestTableCombo(9).floor).toBe('2F') // 2F 10 席 < 1F 12 席
+        tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('102', 6, '1F'), mkTable('201', 4, '2F'), mkTable('202', 6, '2F')])
+        expect(seating.suggestTableCombo(9).floor).toBe('1F')
+      })
+
+      it('單桌裝不下 → 同層湊最少桌、浪費最少', () => {
         tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 4, '1F'), mkTable('201', 6, '2F')])
         const r = seating.suggestTableCombo(8)
         expect(r.enough).toBe(true)

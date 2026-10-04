@@ -743,9 +743,13 @@ export function undoAssignBooking(bookingId, tableNumber) {
 }
 
 // === 大組多桌組合建議（單桌裝不下時的併桌建議）===
-// 候選 = 今日可用 + vacant 桌。★ 併桌一律「同一樓層」（一組客人不可能分坐兩層）：
-//   在每個樓層內各自貪婪湊（容量大優先 → 最少桌），選浪費最少的樓層。
-//   沒有任何單一樓層能湊夠 → 回該樓層能湊到的最大集合（enough:false），由 UI 提示改候位/分桌。
+// 候選 = 今日可用 + vacant 桌。★ 併桌一律「同一樓層」（一組客人不可能分坐兩層）。
+// 每個樓層內：
+//   1) 桌數最少 → 2) 空位（浪費）最少 → 3) 桌與桌在平面圖上最靠近（真的併得起來）。
+//   過去用「容量大優先」貪婪湊，9 位會給 6+6（12 席、浪費 3），明明 4+6（10 席）就夠、
+//   且隔壁兩桌直接併（店主 2026-10 回報：該推 107/110 卻推 101+102）。
+// 跨樓層：桌數少 → 浪費少 → 1F 優先。
+// 沒有任何單一樓層能湊夠 → 回座位最多的單層（該層全部可用桌，enough:false），由 UI 提示改候位/分桌。
 // 回傳 { tableNumbers, seats, enough, floor }。
 export function suggestTableCombo(partySize) {
   const need = Math.max(0, Number(partySize) || 0)
@@ -753,27 +757,83 @@ export function suggestTableCombo(partySize) {
   const pool = tableService.listAll()
     .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && (Number(t.capacity) || 0) > 0)
 
-  const greedy = (list, floor) => {
-    const sorted = [...list].sort((a, b) =>
-      (Number(b.capacity) || 0) - (Number(a.capacity) || 0) ||   // 容量大優先（最少桌）
-      String(a.number).localeCompare(String(b.number)))
-    const picked = []
-    let seats = 0
-    for (const t of sorted) {
-      if (seats >= need) break
-      picked.push(String(t.number))
-      seats += Number(t.capacity) || 0
-    }
-    return { tableNumbers: picked, seats, enough: seats >= need, floor }
-  }
-
   const floors = [...new Set(pool.map(t => t.floor))]
-  const perFloor = floors.map(f => greedy(pool.filter(t => t.floor === f), f))
-  // 同層湊夠的，選浪費最少（座位最接近 need、桌數最少）；都湊不夠則回座位最多的單層 partial。
+  const perFloor = floors.map(f => bestComboOnFloor(pool.filter(t => t.floor === f), need, f))
   const enoughFloors = perFloor.filter(r => r.enough)
-    .sort((a, b) => a.seats - b.seats || a.tableNumbers.length - b.tableNumbers.length)
+    .sort((a, b) =>
+      a.tableNumbers.length - b.tableNumbers.length ||
+      a.seats - b.seats ||
+      (a.floor === b.floor ? 0 : a.floor === '1F' ? -1 : 1))
   if (enoughFloors.length) return enoughFloors[0]
   return perFloor.sort((a, b) => b.seats - a.seats)[0] || { tableNumbers: [], seats: 0, enough: false, floor: null }
+}
+
+const byTableNumber = (a, b) => String(a.number).localeCompare(String(b.number))
+const tableCenter = (t) => ({
+  x: (Number(t.x) || 0) + (Number(t.w) || 0) / 2,
+  y: (Number(t.y) || 0) + (Number(t.h) || 0) / 2,
+})
+
+// 單一樓層的最佳組合。先在「容量組成」層級列舉（桌型種類很少：4P/6P…，列舉量極小），
+// 一旦座位 ≥ 需求就停止往下加桌（再加只會更浪費），取桌數最少、再浪費最少的組成；
+// 同分的組成再比「挑出來的實際桌子」誰最緊湊。
+function bestComboOnFloor(list, need, floor) {
+  const total = list.reduce((s, t) => s + (Number(t.capacity) || 0), 0)
+  if (total < need || need <= 0) {
+    // 湊不夠：回該層全部可用桌（座位最多的 partial）
+    const all = [...list].sort(byTableNumber)
+    return { tableNumbers: all.map(t => String(t.number)), seats: total, enough: total >= need && all.length > 0, floor }
+  }
+  const groups = new Map()
+  for (const t of list) {
+    const c = Number(t.capacity) || 0
+    if (!groups.has(c)) groups.set(c, [])
+    groups.get(c).push(t)
+  }
+  const caps = [...groups.keys()].sort((a, b) => b - a)
+
+  // 列舉容量組成：counts[i] = 取幾張 caps[i]
+  let best = null // { count, seats, mixes: [counts[]] }
+  const counts = new Array(caps.length).fill(0)
+  const walk = (i, seats, count) => {
+    if (best && count > best.count) return
+    if (seats >= need) {
+      if (!best || count < best.count || (count === best.count && seats < best.seats)) {
+        best = { count, seats, mixes: [[...counts]] }
+      } else if (count === best.count && seats === best.seats) {
+        best.mixes.push([...counts])
+      }
+      return
+    }
+    if (i >= caps.length) return
+    const max = groups.get(caps[i]).length
+    for (let k = max; k >= 0; k--) {
+      counts[i] = k
+      walk(i + 1, seats + k * caps[i], count + k)
+    }
+    counts[i] = 0
+  }
+  walk(0, 0, 0)
+
+  // 依組成挑實際桌：以每張候選桌為錨點，各容量取離錨點最近的 k 張；總距離最小者勝（同分依桌號）。
+  let pick = null // { score, tables }
+  for (const mix of best.mixes) {
+    const anchors = [...list].filter(t => mix[caps.indexOf(Number(t.capacity) || 0)] > 0).sort(byTableNumber)
+    for (const anchor of anchors) {
+      const ac = tableCenter(anchor)
+      const dist = (t) => { const c = tableCenter(t); return Math.hypot(c.x - ac.x, c.y - ac.y) }
+      const chosen = []
+      caps.forEach((cap, i) => {
+        if (!mix[i]) return
+        const near = [...groups.get(cap)].sort((a, b) => dist(a) - dist(b) || byTableNumber(a, b))
+        chosen.push(...near.slice(0, mix[i]))
+      })
+      const score = chosen.reduce((s, t) => s + dist(t), 0)
+      if (!pick || score < pick.score - 1e-9) pick = { score, tables: chosen }
+    }
+  }
+  const tables = pick.tables.sort(byTableNumber)
+  return { tableNumbers: tables.map(t => String(t.number)), seats: best.seats, enough: true, floor }
 }
 
 // === 停用/維修 × 團體圈桌的衝突檢查（integration 層：tableService 看不到團體資料）===
