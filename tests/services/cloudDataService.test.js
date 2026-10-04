@@ -458,3 +458,33 @@ describe('persistSyncState 寫入 localStorage 失敗：不可靜默', () => {
     expect(isSyncPersistDegraded()).toBe(false)
   })
 })
+
+// 平板弱網時 fetch 可能永遠不回：設定頁「儲存」會一直停在「儲存中…」、按鈕被 disabled。
+// 逾時必須轉成失敗（拋錯），且不可推進同步基準線（下次仍會補送）。
+describe('雲端請求逾時', () => {
+  it('fetch 卡住超過逾時 → 拋出逾時錯誤，且變更仍視為未同步', async () => {
+    applyCloudSnapshot({ bookings: [], settings: cloudSettingsPayload() })
+    localStorage.setItem('chicken_settings_v1', JSON.stringify({ ...getSettings(), openTime: '10:00' }))
+
+    vi.useFakeTimers()
+    try {
+      global.fetch = vi.fn((_url, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const e = new Error('aborted'); e.name = 'AbortError'; reject(e)
+        })
+      }))
+      const p = pushChangedData()
+      const assertion = expect(p).rejects.toMatchObject({ code: 'timeout' })
+      await vi.advanceTimersByTimeAsync(20_000)
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
+
+    // 基準線未推進：下一次推送仍夾帶 settings
+    const spy = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true }) }))
+    global.fetch = spy
+    await pushChangedData()
+    expect(JSON.parse(spy.mock.calls[0][1].body).dataset.settings).toBeTruthy()
+  })
+})

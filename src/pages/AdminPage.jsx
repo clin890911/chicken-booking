@@ -7,7 +7,7 @@ import OperationsView from '../components/admin/OperationsView'
 import PlanningView from '../components/admin/planning/PlanningView'
 import BookingsView from '../components/admin/BookingsView'
 import RosterView from '../components/admin/roster/RosterView'
-import SettingsView from '../components/admin/SettingsView'
+import SettingsView, { ADMIN_ACTION_BAR_SLOT } from '../components/admin/SettingsView'
 import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
 import { useToast } from '../components/ui/Toast'
@@ -233,6 +233,10 @@ export default function AdminPage() {
               )}
               {tab === 'settings' && <SettingsView onOpenCustomer={handleOpenCustomer} />}
           </div>
+          {/* 頁面底部固定操作列插槽（例：設定頁「儲存全部變更」）：位於捲動容器之外、BottomNav 之上。
+              不用捲動容器內的 position:sticky——iPad Safari 在 overflow 捲動容器內的 sticky 元素
+              捲動後點擊熱區會停在舊位置，造成「看得到儲存鈕卻按不到」。 */}
+          <div id={ADMIN_ACTION_BAR_SLOT} className="flex-shrink-0 empty:hidden pt-3" />
         </main>
 
         {/* 手機版底部導航 */}

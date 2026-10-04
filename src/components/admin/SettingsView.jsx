@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, createContext, useContext } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { Reorder, useDragControls } from 'framer-motion'
 import { Input, Button, Select } from '../ui'
@@ -53,6 +54,8 @@ const SETTINGS_CATEGORIES = [
   { key: 'data',      label: '資料與權限', icon: 'lock', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
 ]
 const DEFAULT_CATEGORY = 'ops-rules'
+// AdminPage 在捲動容器外、BottomNav 之上留的固定操作列插槽 id（儲存列會 portal 進去）。
+export const ADMIN_ACTION_BAR_SLOT = 'admin-action-bar-slot'
 // 由父層提供「目前分類包含的 sectionKey 清單」；SettingsSection 據此自我隱藏（不屬當前分類則 return null）。
 const CategoryContext = createContext([])
 
@@ -122,6 +125,17 @@ export default function SettingsView({ onOpenCustomer }) {
   const guardSummary = guardOn
     ? `達 ${guardPercent}% 自動關閉${guardCutoff ? ` · 場次前 ${guardCutoff} 分停訂` : ''}`
     : '未啟用線上滿座自動關閉'
+  // 休店/關閉時段摘要：今天起有幾天有關閉設定（收合時就看得到）
+  const upcomingClosureDays = (() => {
+    const c = form.closures || {}
+    const t = todayStr()
+    const days = new Set([
+      ...(c.closedDates || []),
+      ...Object.keys(c.closedSeatings || {}).filter(k => (c.closedSeatings[k] || []).length),
+      ...Object.keys(c.closedSlots || {}).filter(k => (c.closedSlots[k] || []).length),
+    ])
+    return [...days].filter(d => d >= t).length
+  })()
   const autoReleaseOn = form.autoReleaseEnabled !== false
   const autoReleaseHr = (Number(form.autoReleaseAfterMin) || 300) / 60
   const rolloverOn = form.dayRolloverEnabled !== false
@@ -269,6 +283,44 @@ export default function SettingsView({ onOpenCustomer }) {
     }
   }
 
+  // B14：未儲存變更提示 + 統一儲存 CTA（全域，跨分類反映所有未存變更）。
+  // 渲染到 AdminPage 捲動容器外的固定插槽：iPad Safari 對 overflow 捲動容器內的 sticky 元素，
+  // 捲動後點擊熱區會停在舊位置（看得到「儲存」卻按不到）。找不到插槽（例如單獨渲染）時退回原地顯示。
+  const [actionBarSlot, setActionBarSlot] = useState(null)
+  useEffect(() => { setActionBarSlot(document.getElementById(ADMIN_ACTION_BAR_SLOT)) }, [])
+  const saveBar = isDirty ? (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
+      <div className="text-sm font-bold text-amber-800">
+        {canEditSettings ? `有未儲存變更（${dirtyKeys.length} 項）` : `這些變更不會被儲存（${dirtyKeys.length} 項）`}
+        {capacityDirty && affectedBookingCount > 0 && (
+          <span className="ml-2 inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">
+            影響現有訂位
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setForm(settings)}
+          disabled={saving}
+          className="min-h-[44px] rounded-xl border border-amber-400/60 bg-white px-4 py-2 text-sm font-bold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+        >
+          還原
+        </button>
+        {canEditSettings && (
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="btn-primary min-h-[44px] px-5 py-2 disabled:opacity-60"
+          >
+            {saving ? '儲存中…' : '儲存全部變更'}
+          </button>
+        )}
+      </div>
+    </div>
+  ) : null
+
   return (
     <CategoryContext.Provider value={activeCat.sections}>
       <div className="flex gap-4">
@@ -366,37 +418,8 @@ export default function SettingsView({ onOpenCustomer }) {
         </div>
       )}
 
-      {/* B14：未儲存變更 sticky 提示 + 統一儲存 CTA（全域，跨分類反映所有未存變更） */}
-      {isDirty && (
-        <div className="sticky top-0 z-30 -mx-1 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
-          <div className="text-sm font-bold text-amber-800">
-            {canEditSettings ? `有未儲存變更（${dirtyKeys.length} 項）` : `這些變更不會被儲存（${dirtyKeys.length} 項）`}
-            {capacityDirty && affectedBookingCount > 0 && (
-              <span className="ml-2 inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">
-                影響現有訂位
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setForm(settings)}
-              disabled={saving}
-              className="min-h-[44px] rounded-xl border border-amber-400/60 bg-white px-4 py-2 text-sm font-bold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-            >
-              還原
-            </button>
-            {canEditSettings && (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="btn-primary min-h-[44px] px-5 py-2 disabled:opacity-60"
-              >
-                {saving ? '儲存中…' : '儲存全部變更'}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+      {/* B14：未儲存變更提示 + 統一儲存 CTA：有插槽則固定在頁面底部，否則原地顯示 */}
+      {actionBarSlot ? createPortal(saveBar, actionBarSlot) : saveBar}
 
       <SettingsSection sectionKey="hours" title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" summary={hoursSummary}>
         <div className="space-y-3">
@@ -576,8 +599,8 @@ export default function SettingsView({ onOpenCustomer }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection sectionKey="closures" title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。">
-        <ClosuresEditor form={form} setForm={setForm} bookings={bookings} />
+      <SettingsSection sectionKey="closures" title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。" badge={upcomingClosureDays ? `${upcomingClosureDays} 天有關閉` : undefined} summary={upcomingClosureDays ? `近期有 ${upcomingClosureDays} 天設有公休或關閉時段，展開查看` : '近期沒有關閉的日期或時段'}>
+        <ClosuresEditor form={form} setForm={setForm} bookings={bookings} unsaved={dirtyKeys.includes('closures')} />
       </SettingsSection>
 
       <SettingsSection sectionKey="hero" title="首頁廣告輪播" description="新增橫式照片，會顯示在客人首頁第一屏。" defaultOpen>
@@ -1081,7 +1104,8 @@ function SeatingsEditor({ form, setForm }) {
 }
 
 // 關閉時段編輯器：選日期 → 整天公休 / 關閉整場次 / 關閉個別時段。寫回 form.closures。
-function ClosuresEditor({ form, setForm, bookings }) {
+// 視覺原則：「已關閉」一律實心紅底白字＋明確文字，「開放中」白底綠點；不靠刪除線或小勾選框辨識。
+function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
   const [date, setDate] = useState(todayStr())
   const [monthAnchor, setMonthAnchor] = useState(() => todayStr().slice(0, 7)) // 'YYYY-MM'
   const closures = form.closures || { closedDates: [], closedSlots: {}, closedSeatings: {} }
@@ -1103,6 +1127,12 @@ function ClosuresEditor({ form, setForm, bookings }) {
   const toggleDay = () => setClosures({ ...closures, closedDates: toggleArr(closures.closedDates, date) })
   const toggleSeating = (id) => setDateMap('closedSeatings', date, toggleArr(closedSeatingIds, id))
   const toggleSlot = (t) => setDateMap('closedSlots', date, toggleArr(closedSlotList, t))
+  // 一鍵恢復此日全部開放（整天/場次/時段皆清除）
+  const reopenDay = () => {
+    const cs = { ...(closures.closedSeatings || {}) }; delete cs[date]
+    const csl = { ...(closures.closedSlots || {}) }; delete csl[date]
+    setClosures({ ...closures, closedDates: (closures.closedDates || []).filter(d => d !== date), closedSeatings: cs, closedSlots: csl })
+  }
 
   // 不屬於任何場次的時段（午晚餐之間等），歸到「其他時段」
   const orphanSlots = generateTimeSlots(form.openTime, form.closeTime, form.slotInterval)
@@ -1126,6 +1156,7 @@ function ClosuresEditor({ form, setForm, bookings }) {
     const nm = new Date(yy, mm - 1 + delta, 1)
     setMonthAnchor(`${nm.getFullYear()}-${String(nm.getMonth() + 1).padStart(2, '0')}`)
   }
+  const pickDate = (ds) => { setDate(ds); setMonthAnchor(ds.slice(0, 7)) }
 
   // 常用規則複製：把此日的關閉設定（整天/場次/時段）疊加到下週同一天（附加、不清除目標既有關閉）。
   const copyToNextWeek = () => {
@@ -1135,136 +1166,244 @@ function ClosuresEditor({ form, setForm, bookings }) {
     const cs = { ...(closures.closedSeatings || {}) }; if (closedSeatingIds.length) cs[target] = [...new Set([...(cs[target] || []), ...closedSeatingIds])]
     const csl = { ...(closures.closedSlots || {}) }; if (closedSlotList.length) csl[target] = [...new Set([...(csl[target] || []), ...closedSlotList])]
     setClosures({ ...closures, closedDates, closedSeatings: cs, closedSlots: csl })
-    setMonthAnchor(target.slice(0, 7))
-    setDate(target)
+    pickDate(target)
   }
+
+  // 此日關閉摘要（人看得懂的文字），用於日期標頭與近期清單。
+  const describeDay = (ds) => {
+    if (closedDatesSet.has(ds)) return '整天公休'
+    const parts = []
+    const sIds = closures.closedSeatings?.[ds] || []
+    sIds.forEach(id => parts.push(seatings.find(s => s.id === id)?.name || '已刪除的場次'))
+    const slotList = [...(closures.closedSlots?.[ds] || [])].sort()
+    if (slotList.length) parts.push(slotList.join('、'))
+    return parts.join('、')
+  }
+  const hasAnyClosure = dayClosed || closedSeatingIds.length > 0 || closedSlotList.length > 0
+  const dayLabel = (ds) => {
+    const d = new Date(`${ds}T00:00:00`)
+    return `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`
+  }
+
+  // 近期（今天起）所有有關閉的日期：不用逐日點開就能看到哪些時段已關。
+  const upcoming = [...new Set([
+    ...(closures.closedDates || []),
+    ...Object.keys(closures.closedSeatings || {}).filter(k => (closures.closedSeatings[k] || []).length),
+    ...Object.keys(closures.closedSlots || {}).filter(k => (closures.closedSlots[k] || []).length),
+  ])].filter(ds => ds >= today).sort()
+
+  const renderSlot = (t) => {
+    const on = closedSlotList.includes(t)
+    return (
+      <button
+        key={t}
+        type="button"
+        onClick={() => toggleSlot(t)}
+        aria-pressed={on}
+        title={on ? `${t} 已關閉，點一下重新開放` : `${t} 開放中，點一下關閉`}
+        className={`tap flex min-h-[52px] flex-col items-center justify-center rounded-xl border-2 px-2 py-1 font-bold transition-colors ${
+          on
+            ? 'border-chicken-red bg-chicken-red text-white shadow-sm'
+            : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'
+        }`}
+      >
+        <span className="text-sm leading-tight">{t}</span>
+        <span className={`mt-0.5 flex items-center gap-1 text-[11px] leading-tight ${on ? 'text-white' : 'text-emerald-700'}`}>
+          {on ? <>⛔ 已關閉</> : <><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />開放</>}
+        </span>
+      </button>
+    )
+  }
+  const slotGrid = 'grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-6 gap-2'
 
   return (
     <div className="space-y-3">
-      {/* 月曆視覺：一眼看出哪些日子已關閉，點日期即選取 */}
-      <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <button type="button" onClick={() => shiftMonth(-1)} className="rounded-lg px-3 py-1 text-lg font-bold text-chicken-brown/60 hover:bg-chicken-brown/5">‹</button>
-          <span className="text-sm font-bold text-chicken-brown">{yy} 年 {mm} 月</span>
-          <button type="button" onClick={() => shiftMonth(1)} className="rounded-lg px-3 py-1 text-lg font-bold text-chicken-brown/60 hover:bg-chicken-brown/5">›</button>
-        </div>
-        <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-chicken-brown/40">
-          {['日', '一', '二', '三', '四', '五', '六'].map(w => <div key={w}>{w}</div>)}
-        </div>
-        <div className="mt-1 grid grid-cols-7 gap-1">
-          {cells.map((ds, i) => {
-            if (!ds) return <div key={`e${i}`} />
-            const st = dayStatus(ds)
-            const past = ds < today
-            return (
-              <button
-                key={ds}
-                type="button"
-                disabled={past}
-                onClick={() => setDate(ds)}
-                className={`relative aspect-square rounded-lg text-xs font-bold transition disabled:opacity-40 ${
-                  date === ds ? 'ring-2 ring-chicken-red ' : ''
-                }${st === 'full' ? 'bg-chicken-red/15 text-chicken-red' : st === 'partial' ? 'bg-amber-100 text-amber-700' : 'text-chicken-brown hover:bg-chicken-brown/5'}`}
-              >
-                {Number(ds.slice(8))}
-                {ds === today && <span className="absolute inset-x-0 bottom-1 mx-auto h-1 w-1 rounded-full bg-chicken-brown/60" />}
-              </button>
-            )
-          })}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-chicken-brown/50">
-          <span><span className="mr-1 inline-block h-2 w-2 rounded bg-chicken-red/40 align-middle" />整天公休</span>
-          <span><span className="mr-1 inline-block h-2 w-2 rounded bg-amber-300 align-middle" />部分關閉</span>
-          <span><span className="mr-1 inline-block h-1 w-1 rounded-full bg-chicken-brown/60 align-middle" />今天</span>
-        </div>
+      <div className="rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/70">
+        <b className="text-chicken-brown">操作方式：</b>① 在月曆點日期 → ② 點「關閉整場次」或直接點時段（變紅＝已關閉，再點一次恢復開放）→
+        ③ 按頁面下方<b className="text-chicken-red">「儲存全部變更」</b>才會生效。只停止新訂位，既有訂位不受影響。
       </div>
 
-      <div className="flex items-end gap-2 flex-wrap">
-        <div>
-          <span className="label !mb-1 block">選擇日期</span>
-          <input type="date" value={date} min={todayStr()} onChange={e => { setDate(e.target.value); setMonthAnchor(e.target.value.slice(0, 7)) }}
-            className="rounded-xl border border-chicken-brown/10 px-3 py-2 text-sm font-bold text-chicken-brown" />
+      {unsaved && (
+        <div className="flex items-center gap-2 rounded-xl border-2 border-amber-400 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-800">
+          <span aria-hidden>⚠️</span>
+          關閉時段已修改但尚未儲存，請按頁面下方「儲存全部變更」。
         </div>
-        <label className="flex items-center gap-2 min-h-[44px] rounded-xl border-2 px-3 font-bold text-sm cursor-pointer"
-          style={{ borderColor: dayClosed ? '#e11d48' : 'rgba(58,46,38,0.15)', color: dayClosed ? '#be123c' : '#3a2e26', background: dayClosed ? '#fff1f2' : '#fff' }}>
-          <input type="checkbox" checked={dayClosed} onChange={toggleDay} />
-          整天公休
-        </label>
-        {(dayClosed || closedSeatingIds.length > 0 || closedSlotList.length > 0) && (
-          <button type="button" onClick={copyToNextWeek} className="btn-secondary min-h-[44px] whitespace-nowrap text-sm">
-            複製到下週同一天
-          </button>
-        )}
-      </div>
-
-      {affected.length > 0 && (
-        <details className="rounded-xl border border-chicken-red/20 bg-chicken-red/5 px-3 py-2 text-xs leading-5 text-chicken-brown/70">
-          <summary className="cursor-pointer list-none font-bold">
-            此日期已有 <span className="text-chicken-red">{affected.length}</span> 筆已確認訂位（點擊展開名單）
-          </summary>
-          <ul className="mt-2 space-y-1">
-            {affected.map(b => (
-              <li key={b.id} className="flex flex-wrap justify-between gap-x-2 border-t border-chicken-red/10 pt-1">
-                <span className="font-bold text-chicken-brown">{b.timeSlot} · {b.name}</span>
-                <span className="font-mono text-chicken-brown/60">{b.phone} · {b.guests} 位</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 font-bold text-chicken-brown/60">下一步：關閉只停「新訂位」、<b>不會自動取消</b>上列既有訂位；請逐一以電話 / LINE 通知客人改期或取消。</p>
-        </details>
       )}
 
-      {dayClosed ? (
-        <div className="rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-500">本日已設為整天公休，所有場次與時段皆停止新訂位。</div>
-      ) : (
-        <>
-          {seatings.map(s => {
-            const seatingClosed = closedSeatingIds.includes(s.id)
-            const slots = slotsInSeating(form, s)
-            return (
-              <div key={s.id} className="rounded-xl border border-chicken-brown/10 bg-white p-3">
-                <label className="flex items-center justify-between gap-2 cursor-pointer">
-                  <span className="font-bold text-chicken-brown text-sm">{s.name} <span className="text-xs font-normal text-chicken-brown/50">{s.start}–{s.end}</span></span>
-                  <span className="flex items-center gap-1.5 text-xs font-bold" style={{ color: seatingClosed ? '#be123c' : '#3a2e26' }}>
-                    <input type="checkbox" checked={seatingClosed} onChange={() => toggleSeating(s.id)} />
-                    關閉整場次
-                  </span>
-                </label>
-                {!seatingClosed && slots.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {slots.map(t => {
-                      const on = closedSlotList.includes(t)
-                      return (
-                        <button key={t} onClick={() => toggleSlot(t)}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 ${on ? 'border-rose-400 bg-rose-50 text-rose-600 line-through' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-                          {t}{on ? ' ✕' : ''}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-                {seatingClosed && <div className="mt-1 text-xs text-rose-500">整場次已關閉，涵蓋 {slots.join('、') || '—'}</div>}
-              </div>
-            )
-          })}
-          {orphanSlots.length > 0 && (
-            <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
-              <div className="font-bold text-chicken-brown text-sm mb-2">其他時段（不屬任何場次）</div>
-              <div className="flex flex-wrap gap-1.5">
-                {orphanSlots.map(t => {
-                  const on = closedSlotList.includes(t)
-                  return (
-                    <button key={t} onClick={() => toggleSlot(t)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border-2 ${on ? 'border-rose-400 bg-rose-50 text-rose-600 line-through' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-                      {t}{on ? ' ✕' : ''}
-                    </button>
-                  )
-                })}
-              </div>
+      <div className="grid gap-3 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)] md:items-start">
+        {/* 左：月曆 + 近期關閉清單 */}
+        <div className="space-y-3">
+          <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <button type="button" onClick={() => shiftMonth(-1)} aria-label="上個月" className="min-h-[40px] rounded-lg px-3 text-lg font-bold text-chicken-brown/60 hover:bg-chicken-brown/5">‹</button>
+              <span className="text-sm font-bold text-chicken-brown">{yy} 年 {mm} 月</span>
+              <button type="button" onClick={() => shiftMonth(1)} aria-label="下個月" className="min-h-[40px] rounded-lg px-3 text-lg font-bold text-chicken-brown/60 hover:bg-chicken-brown/5">›</button>
             </div>
+            <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-chicken-brown/40">
+              {['日', '一', '二', '三', '四', '五', '六'].map(w => <div key={w}>{w}</div>)}
+            </div>
+            <div className="mt-1 grid grid-cols-7 gap-1">
+              {cells.map((ds, i) => {
+                if (!ds) return <div key={`e${i}`} />
+                const st = dayStatus(ds)
+                const past = ds < today
+                return (
+                  <button
+                    key={ds}
+                    type="button"
+                    disabled={past}
+                    onClick={() => setDate(ds)}
+                    aria-pressed={date === ds}
+                    className={`relative flex h-11 flex-col items-center justify-center rounded-lg text-xs font-bold transition disabled:opacity-40 ${
+                      date === ds ? 'ring-2 ring-chicken-brown ring-offset-1 ' : ''
+                    }${st === 'full' ? 'bg-chicken-red text-white' : st === 'partial' ? 'bg-amber-400 text-white' : 'text-chicken-brown hover:bg-chicken-brown/5'}`}
+                  >
+                    <span>{Number(ds.slice(8))}</span>
+                    {st && <span className="text-[9px] font-bold leading-none">{st === 'full' ? '休' : '部分'}</span>}
+                    {ds === today && !st && <span className="absolute inset-x-0 bottom-1 mx-auto h-1 w-1 rounded-full bg-chicken-brown/60" />}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-3 text-[11px] font-bold text-chicken-brown/60">
+              <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded bg-chicken-red align-middle" />整天公休</span>
+              <span><span className="mr-1 inline-block h-2.5 w-2.5 rounded bg-amber-400 align-middle" />部分關閉</span>
+              <span><span className="mr-1 inline-block h-1 w-1 rounded-full bg-chicken-brown/60 align-middle" />今天</span>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+            <div className="mb-2 text-sm font-bold text-chicken-brown">近期已關閉（{upcoming.length}）</div>
+            {upcoming.length === 0 ? (
+              <p className="text-xs text-chicken-brown/50">目前沒有任何關閉的日期或時段。</p>
+            ) : (
+              <ul className="max-h-60 space-y-1.5 overflow-y-auto">
+                {upcoming.map(ds => (
+                  <li key={ds}>
+                    <button
+                      type="button"
+                      onClick={() => pickDate(ds)}
+                      className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-2 text-left text-xs ${
+                        date === ds ? 'border-chicken-brown/40 bg-chicken-brown/5' : 'border-chicken-brown/10 hover:bg-chicken-brown/5'
+                      }`}
+                    >
+                      <span className="shrink-0 font-bold text-chicken-brown">{dayLabel(ds)}</span>
+                      <span className={`font-bold ${closedDatesSet.has(ds) ? 'text-chicken-red' : 'text-amber-700'}`}>{describeDay(ds)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* 右：選定日期的開關 */}
+        <div className="space-y-3">
+          <div className={`rounded-xl border-2 p-3 ${dayClosed ? 'border-chicken-red bg-red-50' : hasAnyClosure ? 'border-amber-400 bg-amber-50' : 'border-emerald-300 bg-emerald-50'}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-base font-black text-chicken-brown">{dayLabel(date)}</div>
+                <div className={`mt-0.5 text-sm font-bold ${dayClosed ? 'text-chicken-red' : hasAnyClosure ? 'text-amber-800' : 'text-emerald-700'}`}>
+                  {dayClosed ? '⛔ 整天公休' : hasAnyClosure ? `⚠️ 部分關閉：${describeDay(date)}` : '✓ 全天開放訂位'}
+                </div>
+              </div>
+              <input type="date" value={date} min={todayStr()} onChange={e => e.target.value && pickDate(e.target.value)}
+                aria-label="選擇日期"
+                className="min-h-[44px] rounded-xl border border-chicken-brown/15 bg-white px-3 text-sm font-bold text-chicken-brown" />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={toggleDay}
+                aria-pressed={dayClosed}
+                className={`tap min-h-[44px] rounded-xl border-2 px-4 text-sm font-bold ${
+                  dayClosed ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-red/40 bg-white text-chicken-red hover:bg-red-50'
+                }`}
+              >
+                {dayClosed ? '⛔ 整天公休中 · 點此恢復營業' : '設為整天公休'}
+              </button>
+              {hasAnyClosure && !dayClosed && (
+                <button type="button" onClick={reopenDay} className="btn-secondary min-h-[44px] whitespace-nowrap text-sm">
+                  此日全部恢復開放
+                </button>
+              )}
+              {hasAnyClosure && (
+                <button type="button" onClick={copyToNextWeek} className="btn-secondary min-h-[44px] whitespace-nowrap text-sm">
+                  複製到下週同一天
+                </button>
+              )}
+            </div>
+          </div>
+
+          {affected.length > 0 && (
+            <details className="rounded-xl border border-chicken-red/20 bg-chicken-red/5 px-3 py-2 text-xs leading-5 text-chicken-brown/70">
+              <summary className="cursor-pointer list-none font-bold">
+                此日期已有 <span className="text-chicken-red">{affected.length}</span> 筆已確認訂位（點擊展開名單）
+              </summary>
+              <ul className="mt-2 space-y-1">
+                {affected.map(b => (
+                  <li key={b.id} className="flex flex-wrap justify-between gap-x-2 border-t border-chicken-red/10 pt-1">
+                    <span className="font-bold text-chicken-brown">{b.timeSlot} · {b.name}</span>
+                    <span className="font-mono text-chicken-brown/60">{b.phone} · {b.guests} 位</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 font-bold text-chicken-brown/60">下一步：關閉只停「新訂位」、<b>不會自動取消</b>上列既有訂位；請逐一以電話 / LINE 通知客人改期或取消。</p>
+            </details>
           )}
-        </>
-      )}
+
+          {dayClosed ? (
+            <div className="rounded-xl border-2 border-dashed border-chicken-red/40 bg-white px-4 py-6 text-center text-sm font-bold text-chicken-red">
+              本日已設為整天公休，所有場次與時段皆停止新訂位。
+            </div>
+          ) : (
+            <>
+              {seatings.map(s => {
+                const seatingClosed = closedSeatingIds.includes(s.id)
+                const slots = slotsInSeating(form, s)
+                const closedInSeating = slots.filter(t => closedSlotList.includes(t)).length
+                return (
+                  <div key={s.id} className={`rounded-xl border-2 p-3 ${seatingClosed ? 'border-chicken-red bg-red-50' : closedInSeating ? 'border-amber-300 bg-white' : 'border-chicken-brown/10 bg-white'}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-sm font-bold text-chicken-brown">{s.name}</span>
+                        <span className="ml-1.5 text-xs text-chicken-brown/50">{s.start}–{s.end}</span>
+                        <div className={`mt-0.5 text-xs font-bold ${seatingClosed ? 'text-chicken-red' : closedInSeating ? 'text-amber-700' : 'text-emerald-700'}`}>
+                          {seatingClosed ? '⛔ 整場次已關閉' : closedInSeating ? `已關閉 ${closedInSeating} / ${slots.length} 個時段` : '全部開放'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleSeating(s.id)}
+                        aria-pressed={seatingClosed}
+                        className={`tap min-h-[44px] rounded-xl border-2 px-4 text-sm font-bold ${
+                          seatingClosed ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-red/40 bg-white text-chicken-red hover:bg-red-50'
+                        }`}
+                      >
+                        {seatingClosed ? '已關閉 · 點此恢復' : '關閉整場次'}
+                      </button>
+                    </div>
+                    {!seatingClosed && slots.length > 0 && (
+                      <div className={`mt-3 ${slotGrid}`}>
+                        {slots.map(renderSlot)}
+                      </div>
+                    )}
+                    {seatingClosed && <div className="mt-2 text-xs font-bold text-chicken-red/80">停止新訂位的時段：{slots.join('、') || '—'}</div>}
+                  </div>
+                )
+              })}
+              {orphanSlots.length > 0 && (
+                <div className="rounded-xl border-2 border-chicken-brown/10 bg-white p-3">
+                  <div className="mb-3 text-sm font-bold text-chicken-brown">其他時段（不屬任何場次）</div>
+                  <div className={slotGrid}>
+                    {orphanSlots.map(renderSlot)}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
