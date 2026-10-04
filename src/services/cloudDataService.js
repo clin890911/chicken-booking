@@ -317,15 +317,36 @@ export function applyCloudSnapshot(data = {}) {
   persistSyncState()
 }
 
+// 雲端請求逾時：平板在弱網／Wi‑Fi 切換時 fetch 可能永遠不回，呼叫端（設定頁「儲存」）
+// 會一直停在「儲存中…」且按鈕被 disabled，看起來就是「按不了儲存」。逾時改走既有的失敗路徑
+// （本機已存，提示重試同步），不會遺失資料。
+const REQUEST_TIMEOUT_MS = 20_000
+
 async function requestJson(url, options = {}) {
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-  })
-  const data = await res.json().catch(() => ({}))
+  const controller = typeof AbortController === 'function' ? new AbortController() : null
+  const timer = controller ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null
+  let res, data
+  try {
+    res = await fetch(url, {
+      ...options,
+      ...(controller ? { signal: controller.signal } : {}),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+    })
+    // 讀 body 途中逾時也必須視為失敗（不可吞成 {} 而被當成功、推進同步基準線）
+    data = await res.json().catch(e => { if (e?.name === 'AbortError') throw e; return {} })
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      const e = new Error('連線逾時，請檢查網路後重試')
+      e.code = 'timeout'
+      throw e
+    }
+    throw err
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
   if (!res.ok || data.ok === false) {
     const err = new Error(data.error || data.reason || `request-failed-${res.status}`)
     err.status = res.status
