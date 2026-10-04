@@ -96,6 +96,29 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
     vi.useRealTimers()
   })
 
+  it('帶位草稿在桌位抽屜返回與改桌取消後保留，隱藏時不可交互', () => {
+    render(); click(byText('林'))
+    const setInput = (input, value) => act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new Event('input', { bubbles:true })) })
+    setInput(container.querySelector('input[aria-label="電話"]'), '0911222333')
+    const notes = container.querySelector('input[placeholder="例：靠窗、慶生、過敏"]')
+    setInput(notes, '靠窗測試')
+    click(byStart('摘要'))
+    click(container.querySelector('button[aria-label^="105桌"]') || btns().find(b => b.textContent.startsWith('105')))
+    expect(container.querySelector('input[aria-label="電話"]').closest('[hidden]')).toBeTruthy()
+    // Escape 關閉抽屜，回到原本同一份帶位草稿
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape' })))
+    expect(container.querySelector('input[aria-label="電話"]').value).toBe('0911222333')
+    expect(container.querySelector('input[placeholder="例：靠窗、慶生、過敏"]').value).toBe('靠窗測試')
+    expect(byText('林').getAttribute('aria-pressed')).toBe('true')
+    const b = {id:'P',name:'未到測試',guests:4,date:'2026-09-19',timeSlot:'13:30',status:'confirmed',assignedTableId:'106'}
+    act(() => root.render(<OperationsView pendingMove={{booking:b,seq:1}}/>))
+    expect(container.querySelector('input[aria-label="電話"]').closest('[hidden]')).toBeTruthy()
+    click(byText('取消並返回'))
+    expect(container.querySelector('input[aria-label="電話"]').value).toBe('0911222333')
+    expect(container.querySelector('input[placeholder="例：靠窗、慶生、過敏"]').value).toBe('靠窗測試')
+    expect(byText('林').getAttribute('aria-pressed')).toBe('true')
+  })
+
   it('＋新增 → 左欄原地換成面板（不呼叫 AdminPage 的跳頁入口），預設人數 2、下一個時段 13:30、建議桌', () => {
     openPanel()
     expect(panel()).toBeTruthy()

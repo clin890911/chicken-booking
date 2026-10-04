@@ -41,6 +41,7 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
     root = createRoot(container)
     act(() => { root.render(<BookingCard booking={booking} onAssign={onAssign} onMove={move} />) })
   }
+  const openMore = () => act(() => { container.querySelector('summary')?.click() })
   const btn = (text) => [...container.querySelectorAll('button')].find(b => b.textContent.includes(text))
 
   beforeEach(() => { vi.clearAllMocks() })
@@ -53,6 +54,8 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
     const b = mkBooking()
     render(b)
     expect(btn('客人到了')).toBeTruthy()
+    openMore()
+    expect(container.querySelector('details').open).toBe(true)
     act(() => { btn('改桌').click() })
     expect(onMove).toHaveBeenCalledWith(b)
   })
@@ -71,6 +74,7 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
   it('U2：未到併桌訂位可交給 onMove 整組重選，保留原訂位', () => {
     const booking = mkBooking({ extraTableIds: ['106'] })
     render(booking)
+    openMore()
     const b = btn('改桌')
     expect(b.getAttribute('aria-disabled')).not.toBe('true')
     act(() => { b.click() })
@@ -87,6 +91,19 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
     expect(action.label).toBe('改桌')
     action.onClick()
     expect(onMove).toHaveBeenCalledWith(b)
+  })
+
+  it('D8：電話可直接聯絡，高風險操作預設收起，Escape 返回更多入口', () => {
+    render(mkBooking())
+    expect(container.querySelector('a[href="tel:0933111222"]')).toBeTruthy()
+    const details = container.querySelector('details')
+    expect(details.open).toBe(false)
+    expect(btn('標 No-show').closest('details')).toBe(details)
+    expect(btn('取消訂位').closest('details')).toBe(details)
+    openMore()
+    act(() => btn('標 No-show').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(details.open).toBe(false)
+    expect(document.activeElement).toBe(details.querySelector('summary'))
   })
 
   it('U3：現場指派鎖桌（held）→ 綠色「桌 105」', () => {

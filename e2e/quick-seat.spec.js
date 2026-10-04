@@ -7,6 +7,7 @@ import { test, expect } from '@playwright/test'
 // 後台本機模式以 localStorage 為後端；攔截 admin* 雲端端點。
 
 test.beforeEach(async ({ page }) => {
+  await page.route('https://**/*', route => route.abort())
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
   await page.route('**/adminPushData', route =>
@@ -30,25 +31,19 @@ async function loginToOps(page) {
 
 // 拿到一個「可入座」的桌號：從帶位面板的建議文字讀（選好人數後會出現「建議 N」）
 async function readSuggestedTable(page) {
-  const hint = page.getByText(/建議\s*\d+/)
+  const hint = page.getByText(/位 · 建議 (?:1F|2F)・/)
   await expect(hint).toBeVisible()
-  const no = ((await hint.textContent()).match(/建議\s*(\d+)/) || [])[1]
+  const no = ((await hint.textContent()).match(/建議\s*(?:1F|2F)・(\d+)/) || [])[1]
   expect(no).toBeTruthy()
   return no
 }
 
 // 真的滑：對 knob 做 pointer 拖曳（Playwright 的 mouse 會產生真實 pointer 事件）
 async function slideToSeat(page) {
-  const track = page.getByRole('button', { name: '滑動帶位 →' })
-  await expect(track).toBeVisible()
-  const knob = page.locator('[data-slide-knob]')
-  const kb = await knob.boundingBox()
-  const tb = await track.boundingBox()
-  await page.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2)
-  await page.mouse.down()
-  // 拖過去整條軌道（遠超過 60% 門檻）
-  await page.mouse.move(tb.x + tb.width, kb.y + kb.height / 2, { steps: 12 })
-  await page.mouse.up()
+  const confirm = page.getByTestId('walkin-seat')
+  await expect(confirm).toHaveText(/確認入座.*位/)
+  await expect(confirm).toBeEnabled()
+  await confirm.click()
 }
 
 test('現場：點桌 → 選人數 → 滑動帶位 → 入座成功', async ({ page }) => {
@@ -77,7 +72,7 @@ test('現場：先點桌再選人數（反序）也能帶位，且滑桿未湊�
   await loginToOps(page)
 
   // 還沒選人數/桌 → 滑桿是鎖住的（顯示提示文案而非「滑動帶位」）
-  await expect(page.getByRole('button', { name: '滑動帶位 →' })).toHaveAttribute('aria-disabled', 'true')
+  await expect(page.getByTestId('walkin-seat')).toBeDisabled()
 
   // 先選人數拿建議桌號，再重設人數以測試「先點桌」的順序
   await page.getByRole('button', { name: '2 位', exact: true }).click()
@@ -89,7 +84,7 @@ test('現場：先點桌再選人數（反序）也能帶位，且滑桿未湊�
 
   // 再選人數 → 解鎖
   await page.getByRole('button', { name: '3 位', exact: true }).click()
-  await expect(page.getByRole('button', { name: '滑動帶位 →' })).not.toHaveAttribute('aria-disabled', 'true')
+  await expect(page.getByTestId('walkin-seat')).not.toBeDisabled()
 
   await slideToSeat(page)
   await expect(page.getByText(new RegExp(`入座 ${tableNo}\\s*·\\s*可帶下一組`))).toBeVisible()
@@ -136,24 +131,17 @@ test('現場：連點同一張桌不會重複加入（席數不可加倍）', as
   await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toHaveCount(0)
 })
 
-test('現場：滑不到門檻不會入座（防誤觸）', async ({ page }) => {
+test('現場：選桌不會直接入座，Space 確認後才入座', async ({ page }) => {
   await loginToOps(page)
-
   await page.getByRole('button', { name: '2 位', exact: true }).click()
   const tableNo = await readSuggestedTable(page)
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
-
-  // 只拖一小段（遠低於 60%）→ 放手應彈回，不入座
-  const knob = page.locator('[data-slide-knob]')
-  const kb = await knob.boundingBox()
-  await page.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(kb.x + kb.width / 2 + 30, kb.y + kb.height / 2, { steps: 5 })
-  await page.mouse.up()
-
   await expect(page.getByText(/可帶下一組/)).toHaveCount(0)
-  // 桌仍選在面板上，人數也還在，店員可以直接補滑
-  await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toBeVisible()
+  const confirm = page.getByTestId('walkin-seat')
+  await expect(confirm).toHaveText(new RegExp(`確認入座.*2 位.*${tableNo}`))
+  await confirm.focus()
+  await confirm.press('Space')
+  await expect(page.getByText(new RegExp(`入座 ${tableNo}.*可帶下一組`))).toBeVisible()
 })
 
 // M6 沿用上一組：連續同型客人（一直來 4 位）不必每組重選人數。

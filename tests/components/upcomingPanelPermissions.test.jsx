@@ -61,6 +61,9 @@ const ALL_BOOKINGS = [OVERDUE_ASSIGNED, OVERDUE_UNASSIGNED, SOON_UNASSIGNED]
 
 describe('UpcomingPanel 動作鈕的前端權限門', () => {
   let container, root
+  const onAssignTable = vi.fn()
+  const onMoveTable = vi.fn()
+  const onClickBooking = vi.fn()
 
   // tables 影響「已指派」徽章的兩種寫法（見 utils/tableStatus.assignmentKind）：預設不給桌，
   // 等同「查不到桌況」→ 一律當預配（不宣稱桌已鎖），權限測試本身不受影響。
@@ -71,12 +74,12 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
-    act(() => { root.render(<UpcomingPanel onClickBooking={() => {}} onAssignTable={() => {}} />) })
+    act(() => { root.render(<UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} />) })
     return container
   }
   const buttonTexts = () => [...container.querySelectorAll('button')].map(b => b.textContent)
 
-  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW) })
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); vi.clearAllMocks() })
   afterEach(() => {
     act(() => root?.unmount())
     container?.remove()
@@ -167,8 +170,23 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     expect(texts.some(t => t.includes('客人到了'))).toBe(false)
   })
 
-  it('kitchen 且該筆未指派桌：整條動作列不渲染（不留空白 margin）', () => {
-    render(roleCan('kitchen'), [OVERDUE_UNASSIGNED])
-    expect(container.querySelector('.mt-2.flex')).toBeNull()
+  it.each([OVERDUE_UNASSIGNED, OVERDUE_ASSIGNED])('kitchen：$name 可聯絡與看詳情，不能執行任何寫入動作', (b) => {
+    render(roleCan('kitchen'), [b])
+    const texts = buttonTexts()
+    for (const action of ['指派桌位', '客人到了', '標 No-show', '已完成', '改桌']) {
+      expect(texts.some(text => text.includes(action))).toBe(false)
+    }
+    expect(container.querySelector('summary')).toBeNull()
+    const contact = container.querySelector('a[href="tel:0912345678"]')
+    expect(contact).toBeTruthy()
+    const detail = [...container.querySelectorAll('button')].find(button => button.textContent.includes('詳情'))
+    expect(detail).toBeTruthy()
+    act(() => detail.click())
+    expect(onClickBooking).toHaveBeenCalledWith(b)
+    expect(onAssignTable).not.toHaveBeenCalled()
+    expect(onMoveTable).not.toHaveBeenCalled()
+    for (const mutation of ['setStatus', 'seatBooking', 'completeWithoutSeating', 'undoCompleteWithoutSeating']) {
+      expect(bookingCtx[mutation]).not.toHaveBeenCalled()
+    }
   })
 })

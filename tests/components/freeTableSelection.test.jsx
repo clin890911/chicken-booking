@@ -7,7 +7,7 @@ vi.mock('../../src/contexts/BookingContext', () => ({ useBooking: () => harness.
 vi.mock('../../src/contexts/AuthContext', () => ({ useAuth: () => ({ can: () => true, user: { role: 'manager' } }) }))
 vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => harness.toast, useConfirm: () => vi.fn() }))
 vi.mock('../../src/components/admin/floormap/FloorMap', () => ({ default: ({ tables, onSelectTable, selectedTableNumbers = [], scopedFocusTables = [] }) => <div>{tables.map(t => <button key={t.number} data-table={t.number} data-selected={[...selectedTableNumbers, ...scopedFocusTables].includes(t.number)} onClick={() => onSelectTable(t.number)}>{t.number}</button>)}</div> }))
-vi.mock('../../src/components/admin/ops/OpsRail', () => ({ default: ({ onSeatWaitlist }) => <button onClick={() => onSeatWaitlist(harness.ctx.waitlist[0])}>開始候位</button> }))
+vi.mock('../../src/components/admin/ops/OpsRail', () => ({ default: ({ onSeatWaitlist, activeTab, onTabChange, showNextWaitlist, onNextWaitlist }) => <div data-rail={activeTab}><span>散客表單</span><button onClick={() => onTabChange('waitlist')}>查看候位</button><button onClick={() => onSeatWaitlist(harness.ctx.waitlist[0])}>開始候位</button>{showNextWaitlist && <button onClick={onNextWaitlist}>帶下一組候位</button>}</div> }))
 vi.mock('../../src/components/admin/floormap/TableDrawer', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/floormap/ArrivalStrip', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/floormap/StatusBar', () => ({ default: () => null }))
@@ -154,4 +154,33 @@ it('改桌跨過餐前30分鐘門檻：先更新鎖桌文字，不直接儲存�
   expect(container.textContent).toContain('指派即鎖桌')
   expect(container.textContent).toContain('已選 8/8 席')
   click('確認改桌');expect(harness.ctx.replacePendingBookingTables).toHaveBeenCalledWith('B1',['B','C'])
+})
+
+
+it('餐中選桌任務隱藏散客表單，取消恢復候位來源；建議定位不選桌或提交', () => {
+  mount(<OperationsView />); click('查看候位'); click('開始候位')
+  expect(container.querySelector('[data-rail]').parentElement.hidden).toBe(true)
+  expect(container.textContent).toContain('測試候位')
+  expect(container.textContent).toContain('目標桌：尚未選桌')
+  click('定位建議桌')
+  expect(container.textContent).toContain('已選 0/8 席')
+  expect(harness.ctx.seatWaitlist).not.toHaveBeenCalled()
+  click('取消並返回')
+  expect(container.querySelector('[data-rail]').dataset.rail).toBe('waitlist')
+  expect(container.textContent).toContain('散客表單')
+})
+
+it('候位成功維持回帶位並可一鍵到下一組候位', () => {
+  harness.ctx.waitlist[0].status = 'waiting'
+  mount(<OperationsView />); click('開始候位'); pick('A'); act(() => confirm().click())
+  expect(container.querySelector('[data-rail]').dataset.rail).toBe('walkin')
+  click('帶下一組候位')
+  expect(container.querySelector('[data-rail]').dataset.rail).toBe('waitlist')
+})
+
+it('任務 Escape 與取消一致恢復來源，不寫資料', () => {
+  mount(<OperationsView />); click('查看候位'); click('開始候位'); pick('B')
+  act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key:'Escape' })))
+  expect(container.querySelector('[data-rail]').dataset.rail).toBe('waitlist')
+  expect(harness.ctx.seatWaitlist).not.toHaveBeenCalled()
 })

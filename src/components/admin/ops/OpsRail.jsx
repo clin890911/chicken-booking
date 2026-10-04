@@ -16,11 +16,12 @@ import QuickReservePanel from './QuickReservePanel'
 //   props 原樣轉發；籤列不顯示，填到一半不會被誤切籤丟資料（返回鈕在面板頂端）。
 // flashBookingId：剛新增的那筆，今日訂位籤捲到可見並閃一下。
 export default function OpsRail({
+  suspended = false,
   activeTab, onTabChange, onClickBooking, onAssignTable, onMoveTable, onSeatWaitlist, onFocusTable, onReseatBatch,
   onAddBooking, reserve = null, flashBookingId = null,
   // 帶位籤（v3）：桌與人數的真相在 OperationsView，這裡純轉發給 FastWalkInPanel
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
-  walkinWarning, onWalkinSeat, lastParty,
+  walkinWarning, onWalkinSeat, lastParty, onLocateSuggestion, showNextWaitlist, onNextWaitlist,
 }) {
   const { bookings, waitlist, groupReservations } = useBooking()
   const today = todayStr()
@@ -91,6 +92,10 @@ export default function OpsRail({
           其他籤：維持原本內距與整區捲動 */}
       {effective === 'walkin' ? (
         <FastWalkInPanel
+          suspended={suspended}
+          onLocateSuggestion={onLocateSuggestion}
+          showNextWaitlist={showNextWaitlist}
+          onNextWaitlist={onNextWaitlist}
           guests={walkinGuests}
           onGuestsChange={onWalkinGuestsChange}
           tables={walkinTables}
