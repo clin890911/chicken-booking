@@ -496,15 +496,12 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
             <>
               <button onClick={handleSeat} className="btn-primary w-full">客人到了 — 入座</button>
               {/* 改桌：待到的訂位也能換桌（過去只有用餐中分支有「換桌」，鎖了桌就改不了）。
-                  沿用 move 模式（地圖選桌＋二步確認＋預配/團保警示）；併桌訂位不支援單桌改桌 → 停用並寫原因。 */}
+                  未到訂位使用整組人工選桌，原配桌保留至確認成功。 */}
               <button
                 onClick={onStartMove}
-                disabled={isCombo}
-                className="btn-secondary w-full text-sm min-h-[44px] disabled:opacity-45 disabled:cursor-not-allowed"
+                className="btn-secondary w-full text-sm min-h-[44px]"
               >↔ 改桌（{booking.name} 換到別桌）</button>
-              {isCombo && (
-                <p className="text-[11px] text-chicken-brown/55 text-center -mt-1">併桌訂位不支援單桌改桌：請取消後重新指派。</p>
-              )}
+
               <button onClick={handleCancel} className="w-full text-sm rounded-xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
             </>
           )}
@@ -523,9 +520,10 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
                 直接釋出（已清桌完成）
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={onStartMove} className="btn-secondary text-sm">↔ 換桌</button>
+                <button onClick={onStartMove} disabled={isCombo} className="btn-secondary text-sm disabled:opacity-45">↔ 換桌</button>
                 <button onClick={() => toast.info('（v1 預留）訂單明細整合中')} className="btn-secondary text-sm">訂單明細</button>
               </div>
+              {isCombo && <p className="text-[11px] text-chicken-brown/55">已入座併桌本輪不支援整組改桌，請保留原訂位與桌位。</p>}
             </>
           )}
 

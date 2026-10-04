@@ -13,7 +13,7 @@ const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
 
 // pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
 //   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
-export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
+export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiWarnings = [], multiWarningConfirmed = true, onConfirmWarning, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
   if (!mode) return null
 
   // 多桌指派／候位入座（大組併桌）：累加式選桌，不走二步確認；席數夠才能確認。
@@ -23,7 +23,8 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
     const isWaitlist = mode.kind === 'waitlist'
     const need = mode.need || 0
     const selected = mode.selected || []
-    const enough = multiSeats >= need
+    const enough = selected.length > 0 && multiSeats >= need
+    const ready = enough && multiWarningConfirmed
     const name = isWaitlist
       ? `${mode.wait?.name || '候位'}${mode.wait?.queueNumber ? ` #${mode.wait.queueNumber}` : ''}`
       : (mode.booking?.name || '訂位')
@@ -34,11 +35,14 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
             <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
-            <span>{isWaitlist ? '候位入座' : '指派桌位'}（併桌）：{name} {need} 位</span>
+            <span>{isWaitlist ? '候位入座' : mode.replacing ? '重新選桌' : '指派桌位'}：{name} {need} 位</span>
             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
-            <span className="text-xs opacity-90">點桌加 / 減</span>
+            <span className="text-xs opacity-90">點桌加 / 減 · 可選單桌或多桌</span>
+            {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded">原配桌 {[mode.booking?.assignedTableId, ...(mode.booking?.extraTableIds || [])].filter(Boolean).join(' + ')} · 確認成功前保留</span>}
+            {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {mode.suggestion}（自行選桌）</span>}
+            {!isWaitlist && <span className="text-xs opacity-90">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
           </div>
           <button onClick={onCancel} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${cancelBtn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
         </div>
@@ -49,11 +53,16 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
           </div>
           <button
             onClick={onConfirmMulti}
-            disabled={!enough}
+            disabled={!ready}
             className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
-              enough ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-          >✓ {isWaitlist ? '確認併桌入座' : '確認併桌指派'}</button>
+              ready ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
+          >✓ {mode.replacing ? '確認改桌' : isWaitlist ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}</button>
         </div>
+        {!!selected.length && <button onClick={onClearSelection} className="text-xs underline min-h-[44px]">清空已選桌</button>}
+        {!!multiWarnings.length && <div className="bg-rose-600 rounded-lg px-3 py-2 text-xs space-y-2">
+          {multiWarnings.map(line => <div key={line}>{line}</div>)}
+          <label className="flex items-center gap-2 min-h-[44px]"><input type="checkbox" checked={multiWarningConfirmed} onChange={e => onConfirmWarning?.(e.target.checked)} />我已確認上述預配／團體保留，仍要使用所選桌</label>
+        </div>}
       </div>
     )
   }

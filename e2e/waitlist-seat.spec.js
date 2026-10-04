@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
 
 // 管理端候位主線（候位已併入「現場」頁右側欄）：
-// 同仁登入 → 現場分頁 → 右側欄「候位」籤 → 新增取號 → 叫號 → 入座（A6 二步確認）→ 入座成功。
+// 同仁登入 → 現場分頁 → 右側欄「候位」籤 → 新增取號 → 叫號 → 入座（A6 人工選桌確認）→ 入座成功。
 // 後台本機模式以 localStorage 為後端；攔截 admin* 雲端端點，避免雲端 pull 覆蓋、也不碰正式後端。
 
 test.beforeEach(async ({ page }) => {
+  // 未被下方 mock 覆蓋的 HTTPS 一律阻擋，測試不得連正式資料或通知。
+  await page.route('https://**/*', route => route.abort())
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
   await page.route('**/adminPushData', route =>
@@ -18,7 +20,7 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('管理端：現場頁內 取號 → 叫號 → 入座（二步確認）→ 入座成功', async ({ page }) => {
+test('管理端：現場頁內 取號 → 叫號 → 入座（人工選桌確認）→ 入座成功', async ({ page }) => {
   // 登入
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
@@ -46,15 +48,15 @@ test('管理端：現場頁內 取號 → 叫號 → 入座（二步確認）→
   await page.getByRole('button', { name: '入座', exact: true }).click()
   await expect(page.getByText(/候位入座：陳先生/)).toBeVisible()
 
-  // 讀建議桌號 → 點該桌 → 二步確認 → 入座成功
+  // 讀建議桌號 → 點該桌 → 人工選桌確認 → 入座成功
   const suggestChip = page.getByText(/^建議\s*\d+/)
   await expect(suggestChip).toBeVisible()
   const tableNo = ((await suggestChip.textContent()).match(/\d+/) || [])[0]
   expect(tableNo).toBeTruthy()
 
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
-  await expect(page.getByText(new RegExp(`確認指派 陳先生 至桌 ${tableNo}`))).toBeVisible()
-  await page.getByRole('button', { name: /確認指派/ }).click()
+  await expect(page.getByText(`已選：${tableNo}`)).toBeVisible()
+  await page.getByRole('button', { name: /確認入座/ }).click()
   await expect(page.getByText(/入座.*可指派下一組/)).toBeVisible()
 
   // 入座後不開桌況抽屜、直接切回「帶位」籤讓店員接著帶下一組（店主指定 UX：

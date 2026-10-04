@@ -211,11 +211,11 @@ export function saveQuickReserve(payload, { date, kind, table, needsCombo, creat
 export default function OperationsView({ pendingAssign, onAssignDone, pendingMove, onMoveDone, onAddBooking }) {
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
-    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, reseatGroupBatchTable,
+    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, reseatGroupBatchTable,
     cancelBooking, seatBooking, seatBookingAllTables, undoSeatPreassigned, setStatus, setTableStatus,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
-    preassignBookingTable, addBooking,
+    preassignBookingTable, preassignBookingTables, addBooking,
   } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -298,11 +298,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const showSchedule = !mode && !reserveOpen && view === 'schedule'
   const showSummary = !mode && !reserveOpen && view === 'summary'
 
-  // 進入指派桌模式（含自動建議）。無單桌容納（大組）→ 改走多桌指派（併桌）。
-  // 單桌指派依鎖桌時機（capacity.lockKindFor，店主 2026-09 拍板「接近時段才鎖」）：
+  // 進入人工選桌模式：單桌或多桌由店員決定，推薦不自動選取。
+  // 單桌與多桌都依鎖桌時機（capacity.lockKindFor，店主拍板「接近時段才鎖」）：
   //   hold      離用餐 ≤ 30 分（含已過）→ 指派並鎖桌（assignBookingToTable → reserved）
   //   preassign 更早 → 只預配（booking.assignedTableId，桌況仍空、現場帶位照樣可用、會被警示）
-  // 大組併桌維持鎖桌：seatBooking 只把主桌設成用餐中，預配型併桌的額外桌到店時不會被佔起來。
+  // 預配多桌到店走 seatBookingAllTables，主桌與額外桌整組入座；接近時段才整組鎖桌。
   // 面板開著就擋下（回 true）並說明；不卸載面板、不進模式
   const blockedByReserve = () => {
     if (!reserveOpenRef.current) return false
@@ -318,65 +318,27 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const reserveOpts = { bookingId: booking.id, date, timeSlot: booking.timeSlot }
     // 可點選集合（suitable）不因他筆預配／團保縮小（那些走警示＋「將解除／會保留」）：
     //   hold＝此刻空桌；preassign＝桌子不必此刻空著，只要此刻的佔用不延續進預配區間
-    const suitable = (lockKind === 'preassign' ? preassignableTables(guests, reserveOpts) : findSuitableTables(guests))
-      .map(t => t.number)
-    if (suitable.length > 0) {
-      // 建議桌看佔用區間（依 lockKind），避開他筆預配重疊的桌與團保桌
-      const suggestion = findReserveCandidates(guests, reserveOpts).tables[0]
-      setMode({ type: 'assign', booking, lockKind, suitable, suggestion: suggestion?.number })
-      setSelectedTable(null)
-      setPendingConfirm(null)
-      if (suggestion) setFloor(suggestion.floor)
-      return
-    }
-    // 無單桌容納（大組）→ 多桌指派（併桌）：系統建議組合，店員可在地圖加減桌後確認
-    const combo = suggestTableCombo(guests)
-    if (!combo.enough) {
-      return toast.error(`目前沒有單一樓層能容納 ${guests} 位（同層最多 ${combo.seats} 席），可改用候位取號或分成兩組`)
-    }
-    startMultiMode({ kind: 'booking', booking, need: guests, combo })
+    const suitable = (lockKind === 'preassign' ? preassignableTables(1, reserveOpts) : findSuitableTables(1)).map(t => t.number)
+    const suggestion = findReserveCandidates(guests, reserveOpts).tables[0]
+    startMultiMode({ kind: 'booking', booking, need: guests, lockKind, suitable, suggestion: suggestion?.number })
   }
 
-  // 進入併桌模式（訂位指派與候位入座共用）。mode.kind 決定確認時走哪條 service 路徑
-  // 與 banner 文案；選桌／加減／同層守門等互動完全相同，故共用同一個 mode.type。
-  const startMultiMode = ({ kind, booking = null, wait = null, need, combo }) => {
-    const vacantNums = findSuitableTables(1).map(t => t.number) // 所有今日可用空桌（容量≥1）= 可加減的池
-    setMode({
-      type: 'assign-multi',
-      kind,
-      booking,
-      wait,
-      need,
-      selected: combo.tableNumbers, // 預選建議組合
-      suitable: vacantNums,
-    })
+  // 單桌與多桌共用人工選桌；推薦只提示，不自動勾桌。
+  const startMultiMode = ({ kind, booking = null, wait = null, need, lockKind = 'hold', suitable, suggestion, replacing = false }) => {
+    setMode({ type: 'assign-multi', kind, booking, wait, need, lockKind,
+      selected: [], suitable, suggestion, replacing, confirmedWarning: null })
     setSelectedTable(null)
     setPendingConfirm(null)
-    const firstTable = tables.find(t => t.number === combo.tableNumbers[0])
-    if (firstTable) setFloor(firstTable.floor)
+    const suggestedTable = tables.find(t => t.number === suggestion)
+    if (suggestedTable) setFloor(suggestedTable.floor)
   }
 
-  // 候位入座（含自動建議）。與 startAssign 同結構：無單桌容納 → 改走併桌。
-  // 過去這裡沒有併桌 fallback，9 位客人碰上只剩 4 人桌時只會得到「目前無符合容量的空桌」，
-  // 即使併兩三張小桌明明坐得下（店主 2026-08 回報）。
   const startSeatWaitlist = (wait) => {
     if (blockedByReserve()) return
     const guests = Number(wait.partySize) || 0
-    const suitable = findSuitableTables(guests).map(t => t.number)
-    if (suitable.length > 0) {
-      // 候位客人是「現在」入座：佔用區間 [現在, 現在+佔位)，避開其間已被預配的桌與團保桌
-      const suggestion = suggestTable(guests, { date: todayStr(), mode: 'now' })
-      setMode({ type: 'seat-waitlist', wait, suitable, suggestion: suggestion?.number })
-      setSelectedTable(null)
-      setPendingConfirm(null)
-      if (suggestion) setFloor(suggestion.floor)
-      return
-    }
-    const combo = suggestTableCombo(guests)
-    if (!combo.enough) {
-      return toast.error(`目前沒有單一樓層能容納 ${guests} 位（同層最多 ${combo.seats} 席），請等候翻桌或分成兩組`)
-    }
-    startMultiMode({ kind: 'waitlist', wait, need: guests, combo })
+    const suitable = findSuitableTables(1).map(t => t.number)
+    const suggestion = suggestTable(guests, { date: todayStr(), mode: 'now' })
+    startMultiMode({ kind: 'waitlist', wait, need: guests, suitable, suggestion: suggestion?.number })
   }
 
   // 改派桌位模式：團體梯次入座被佔桌卡住 → 逐桌挑替代空桌（queue 依序處理）
@@ -404,9 +366,19 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const startMove = (booking) => {
     if (blockedByReserve()) { onMoveDone?.(); return }
     if (!booking) return
+    if (['confirmed', 'pending'].includes(booking.status)) {
+      const original = [booking.assignedTableId, ...(booking.extraTableIds || [])].filter(Boolean).map(String)
+      const lockKind = original.some(n => tables.some(t => String(t.number) === n && t.status === 'reserved' && String(t.currentBookingId) === String(booking.id)))
+        ? 'hold' : lockKindFor({ date: booking.date, timeSlot: booking.timeSlot })
+      const opts = { bookingId: booking.id, date: booking.date, timeSlot: booking.timeSlot }
+      const suitable = new Set((lockKind === 'preassign' ? preassignableTables(1, opts) : findSuitableTables(1)).map(t => t.number))
+      tables.filter(t => original.includes(String(t.number)) && t.status === 'reserved' && String(t.currentBookingId) === String(booking.id) && isTableUsableOnDate(t, booking.date)).forEach(t => suitable.add(t.number))
+      startMultiMode({ kind: 'booking', booking, need: Number(booking.guests), lockKind, suitable: [...suitable], replacing: true })
+      return
+    }
     if ((booking.extraTableIds || []).length) {
       onMoveDone?.()
-      return toast.error('併桌訂位不支援單桌改桌，請取消後重新指派，或整組清桌後重新帶位')
+      return toast.error('已入座的併桌客人本輪不支援整組改桌，請保留原訂位與桌位')
     }
     if (!booking.assignedTableId) {
       onMoveDone?.()
@@ -437,7 +409,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 目前模式「新佔用區間」：指派＝現在就鎖桌、候位＝現在入座、改桌＝依原本語意
   const modeWindow = (m) => {
     if (!m) return null
-    if (m.type === 'seat-waitlist') return assignmentWindow({ mode: 'now' }, settings)
+    if (m.type === 'seat-waitlist' || (m.type === 'assign-multi' && m.kind === 'waitlist')) return assignmentWindow({ mode: 'now' }, settings)
     const b = m.booking
     const kind = m.type === 'move' ? (m.moveKind || 'hold') : (m.lockKind || 'hold')
     return assignmentWindow({ mode: kind, timeSlot: b?.timeSlot, date: b?.date || todayStr() }, settings)
@@ -445,9 +417,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
   // 某桌上他筆的預配，逐筆標記是否與新佔用區間重疊（重疊才解除）。警示與實際解除共用這一份。
   const preassignConflictsFor = (number, m = mode) => {
-    if (!m || !['assign', 'seat-waitlist', 'move'].includes(m.type)) return []
+    if (!m || !['assign', 'seat-waitlist', 'move', 'assign-multi'].includes(m.type)) return []
     const excludeBookingId = m.booking?.id // seat-waitlist 無 booking（新建 walk-in），任何預配都算他人
-    const date = m.type === 'seat-waitlist' ? todayStr() : (m.booking?.date || todayStr())
+    const date = (m.type === 'seat-waitlist' || m.kind === 'waitlist') ? todayStr() : (m.booking?.date || todayStr())
     return preassignConflicts(bookings, number, { date, excludeBookingId, window: modeWindow(m) }, settings)
   }
 
@@ -616,7 +588,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     }
     // 多桌指派（大組併桌）：點桌加入/移除已選集合，不走二步確認（確認在 banner 按鈕）
     if (mode.type === 'assign-multi') {
-      if (!mode.suitable.includes(number)) return toast.error('此桌目前不可加入（非空桌或維修中）')
+      if (!mode.selected.includes(number) && !mode.suitable.includes(number)) return toast.error('此桌目前不可加入（非空桌或維修中）')
       const isRemove = mode.selected.includes(number)
       // 同樓層守門：切樓層後若想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
       if (!isRemove && mode.selected.length) {
@@ -627,7 +599,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         }
       }
       const selected = isRemove ? mode.selected.filter(n => n !== number) : [...mode.selected, number]
-      setMode({ ...mode, selected })
+      setMode({ ...mode, selected, confirmedWarning: null })
       return
     }
     // 指派 / 候位入座 / 換桌 / 團體改派：二步確認
@@ -648,10 +620,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   }
 
   // 真正執行指派/候位入座/換桌（由二步確認的第二步或確認鈕觸發）
-  const executeAssign = (number) => {
+  const executeAssign = (number, selectionMode = mode) => {
+    const mode = selectionMode
     if (!mode || !number) return
     // 動手前先記下這張桌上的預配與「會不會被解除」（指派後 bookings 會變；警示講什麼就做什麼）
-    const overridden = preassignConflictsFor(number)
+    const overridden = preassignConflictsFor(number, mode)
     const releaseOpts = { releaseOverriddenAssignment, toast }
     if (mode.type === 'assign') {
       const booking = mode.booking
@@ -747,20 +720,69 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // kind='booking' → 指派該訂位（桌況 reserved，客人到了再入座）
   // kind='waitlist' → 候位直接入座（桌況 dining，客人已在現場）
   // （現場帶位併桌是另一條路徑，走 handleWalkinSeat）
+  const multiWarnings = mode?.type === 'assign-multi' ? mode.selected.flatMap(n => {
+    const lines = preassignConflictsFor(n).map(c => conflictLine(n, c, '確認'))
+    const hold = groupHoldTables[n]
+    if (hold?.holds?.length) lines.push(`${n} 為今日團體 ${hold.agencyName || '旅行社'} 預留，確認後散客將佔用團體桌`)
+    return lines
+  }) : []
+  const multiWarningKey = multiWarnings.join('；')
+  const multiWarningConfirmed = !multiWarningKey || mode?.confirmedWarning === multiWarningKey
+
   const confirmWalkinMulti = () => {
     if (mode?.type !== 'assign-multi') return
-    if (walkinMultiSeats < mode.need) return toast.error(`還差 ${mode.need - walkinMultiSeats} 席，請再加桌`)
+    // 選桌期間跨過鎖桌門檻：先更新語意／警示再讓店員確認，不以舊文案直接鎖桌。
+    if (mode.kind === 'booking') {
+      const ownsReserved = mode.replacing && tables.some(t => t.status === 'reserved' && String(t.currentBookingId) === String(mode.booking.id))
+      const currentKind = ownsReserved ? 'hold' : lockKindFor({ date: mode.booking.date, timeSlot: mode.booking.timeSlot })
+      if (currentKind !== mode.lockKind) {
+        const opts = { bookingId: mode.booking.id, date: mode.booking.date, timeSlot: mode.booking.timeSlot }
+        const suitable = (currentKind === 'preassign' ? preassignableTables(1, opts) : findSuitableTables(1)).map(t => t.number)
+        setMode({ ...mode, lockKind: currentKind, suitable, confirmedWarning: null })
+        toast.info('已接近用餐時段，指派將鎖桌；請確認更新後的桌況與警示，再按確認')
+        return
+      }
+    }
+    if (!multiWarningConfirmed) return toast.error('請先確認所選桌的預配／團體保留警示')
+    if (!mode.selected.length || walkinMultiSeats < mode.need) return toast.error(`還差 ${mode.need - walkinMultiSeats} 席，請再加桌`)
+    const opts = { bookingId: mode.booking?.id, date: mode.booking?.date || todayStr(), timeSlot: mode.booking?.timeSlot }
+    const current = (mode.kind === 'booking' && mode.lockKind === 'preassign' ? preassignableTables(1, opts) : findSuitableTables(1)).map(t => t.number)
+    if (!mode.replacing && mode.selected.some(n => !current.includes(n))) return toast.error('所選桌已不可用，請重新選桌')
+    if (new Set(mode.selected.map(n => tables.find(t => t.number === n)?.floor)).size > 1) return toast.error('併桌需在同一樓層')
+    if (mode.replacing) {
+      const overridden = mode.selected.flatMap(n => preassignConflictsFor(n))
+      const r = replacePendingBookingTables(mode.booking.id, mode.selected)
+      if (!r.ok) return toast.error('改桌失敗：' + r.error)
+      releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
+      toast.success(`${mode.booking.name} 已改桌至 ${mode.selected.join(' + ')}（原訂位保留）`)
+      flashAssigned(mode.selected[0])
+      setSelectedTable(mode.selected[0])
+      cancelMode()
+      onMoveDone?.()
+      return
+    }
+    if (mode.selected.length === 1) {
+      executeAssign(mode.selected[0], { ...mode, type: mode.kind === 'waitlist' ? 'seat-waitlist' : 'assign' })
+      return
+    }
+    const overridden = mode.selected.flatMap(n => preassignConflictsFor(n))
     const tablesText = mode.selected.join(' + ')
     if (mode.kind === 'waitlist') {
       const r = seatWaitlistMulti(mode.wait.id, mode.selected)
       if (!r.ok) return toast.error('入座失敗：' + r.error)
+      releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
       flashAssigned(mode.selected[0])
       finishWaitlistSeat(mode.selected[0], `${mode.wait.name}（候位 #${mode.wait.queueNumber}・${mode.need} 位）併桌入座 ${tablesText} · 可指派下一組`)
       return
     }
-    const r = assignBookingTablesMulti(mode.booking.id, mode.selected)
-    if (!r.ok) return toast.error('指派失敗：' + r.error)
-    toast.success(`${mode.booking.name}（${mode.need} 位）併桌指派至 ${tablesText} · 可指派下一組`)
+    if (mode.lockKind === 'preassign') {
+      if (!preassignBookingTables(mode.booking.id, mode.selected)) return toast.error('指派失敗：訂位不存在')
+    } else {
+      const r = assignBookingTablesMulti(mode.booking.id, mode.selected)
+      if (!r.ok) return toast.error('指派失敗：' + r.error)
+    }
+    releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
+    toast.success(`${mode.booking.name}（${mode.need} 位）併桌${mode.lockKind === 'preassign' ? '預配' : '指派'}至 ${tablesText} · 可指派下一組`)
     flashAssigned(mode.selected[0])
     cancelMode()
     setSelectedTable(mode.selected[0])
@@ -956,9 +978,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     // 只有「訂位指派」是跨頁來的（BookingsView 的指派桌 → pendingAssign），取消時要回報消耗掉；
     // 候位併桌是現場頁內互動，沒有待消耗的跨頁請求。
     const isBookingAssign = mode?.type === 'assign'
-      || (mode?.type === 'assign-multi' && mode.kind !== 'waitlist')
+      || (mode?.type === 'assign-multi' && mode.kind !== 'waitlist' && !mode.replacing)
     if (isBookingAssign) onAssignDone?.()
-    if (mode?.type === 'move') onMoveDone?.()
+    if (mode?.type === 'move' || mode?.replacing) onMoveDone?.()
     cancelMode()
   }
 
@@ -1027,6 +1049,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         pendingConflicts={pendingConflicts}
         pendingGroupHold={pendingGroupHold}
         multiSeats={walkinMultiSeats}
+        multiWarnings={multiWarnings}
+        multiWarningConfirmed={multiWarningConfirmed}
+        onConfirmWarning={(checked) => setMode(m => ({ ...m, confirmedWarning: checked ? multiWarningKey : null }))}
+        onClearSelection={() => setMode(m => ({ ...m, selected: [], confirmedWarning: null }))}
         onCancel={cancelModeAndNotify}
         onConfirm={() => executeAssign(pendingConfirm)}
         onConfirmMulti={confirmWalkinMulti}
@@ -1142,14 +1168,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 bookings={bookings}
                 settings={settings}
                 selectedTableNumber={selectedTable}
-                selectedTableNumbers={reserveOpen ? (reserveTable ? [reserveTable.number] : []) : walkinTableNumbers}
+                selectedTableNumbers={reserveOpen ? (reserveTable ? [reserveTable.number] : []) : mode?.type === 'assign-multi' ? mode.selected : walkinTableNumbers}
                 onSelectTable={handleTableClick}
                 // 內嵌新增面板：選好時段後，候選高亮、其餘淡化（大組／無權限時不進選桌呈現）
                 assignMode={['assign', 'seat-waitlist', 'move', 'group-reseat', 'assign-multi'].includes(mode?.type)
                   || (reserveOpen && !!reserveSlot && canReserveAssign && !reserveNeedsCombo)}
                 highlightTables={
                   reserveOpen ? reserveCandidateNums
-                    : mode?.type === 'assign-multi' ? mode.selected   // 多桌：已選桌高亮（其餘空桌 dimmed 但可點加入）
+                    : mode?.type === 'assign-multi' ? mode.suitable   // 所有可選桌高亮，已選桌另加外框
                     : ['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable
                     : []
                 }

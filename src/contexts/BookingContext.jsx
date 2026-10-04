@@ -542,6 +542,11 @@ export function BookingProvider({ children }) {
     if (r.ok) safeNotify(() => tg.notifyWalkInSeated(r.booking))
     return r
   }
+  const replacePendingBookingTables = (bookingId, tableNumbers) => {
+    const r = seatingService.replacePendingBookingTables(bookingId, tableNumbers)
+    if (r.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
   const moveTable = (bookingId, newTableNumber) => {
     const before = bookingService.getById(bookingId)
     const fromTable = before?.assignedTableId
@@ -752,7 +757,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

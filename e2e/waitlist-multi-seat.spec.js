@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 // 候位併桌入座 + 現場快速新增今日訂位（2026-08 店主回報／需求）。
 //
 // 重現截圖情境：候位 9 位、現場只剩幾張小桌 → 按「入座」原本只跳「目前無符合容量的空桌」，
-// 即使併兩三張桌明明坐得下。修正後應自動進入併桌模式（預選建議組合，可加減桌後確認）。
+// 即使併兩三張桌明明坐得下。修正後應自動進入併桌模式（不預選推薦，人工加減桌後確認）。
 // 種子把全店（含 2F）其餘桌位佔滿，只留 105/106/109 三張空桌逼出「無單桌可容」的分支。
 
 // 本地日（不可用 toISOString().slice：台灣 00:00–08:00 會拿到 UTC 的前一天）
@@ -26,6 +26,8 @@ const seedTables = (tables) =>
   })
 
 test.beforeEach(async ({ page }) => {
+  // 未被下方 mock 覆蓋的 HTTPS 一律阻擋，測試不得連正式資料或通知。
+  await page.route('https://**/*', route => route.abort())
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
   await page.route('**/adminPushData', route =>
@@ -76,10 +78,12 @@ test('候位 9 位、無單桌可容 → 自動進併桌模式，確認後入座
   // 入座 → 沒有單桌容納 9 位，應進併桌模式而不是跳「目前無符合容量的空桌」
   await page.getByRole('button', { name: /^入座$/ }).click()
   await expect(page.getByText('目前無符合容量的空桌')).toHaveCount(0)
-  await expect(page.getByText(/候位入座（併桌）：訪客 #3 9 位/)).toBeVisible()
+  await expect(page.getByText(/候位入座：訪客 #3 9 位/)).toBeVisible()
 
-  // 已預選一組建議桌且席數足夠。不寫死是哪幾桌、幾席——那綁死 suggestTableCombo 的挑選
-  // 策略與佈局容量，改任一邊就假紅；要驗的是「有預選、席數夠（沒有『還差』）、確認鈕開得起來」。
+  // 初始不選桌；人工挑109六席與105四席，合計10席可坐9人。
+  await expect(page.getByText(/已選 0\/9 席/)).toBeVisible()
+  await page.locator('svg g:has(:text-is("105"))').first().click()
+  await page.locator('svg g:has(:text-is("109"))').first().click()
   await expect(page.getByText(/^已選：/)).toBeVisible()
   await expect(page.getByText(/還差/)).toHaveCount(0)
 
@@ -105,14 +109,15 @@ test('併桌模式下把桌減到席數不足 → 確認鈕鎖住並提示還差
 
   await page.getByRole('button', { name: /^候位/ }).click()
   await page.getByRole('button', { name: /^入座$/ }).click()
-  await expect(page.getByText(/候位入座（併桌）/)).toBeVisible()
+  await expect(page.getByText(/候位入座/)).toBeVisible()
 
-  // 109 是店內最大的空桌（6 人），建議組合一定包含它——先確認，否則下面那一點會變成「加桌」。
-  await expect(page.getByText(/^已選：/)).toContainText('109')
-  // 點掉它 → 剩下的都是 4 人桌，湊不到 9 席
+  // 人工先選六席109與四席105，再移除109，剩下四席不足9人。
+  await page.locator('svg g:has(:text-is("109"))').first().click()
+  await page.locator('svg g:has(:text-is("105"))').first().click()
+  await expect(page.getByRole('button', { name: /確認併桌入座/ })).toBeEnabled()
   await page.locator('svg g:has(:text-is("109"))').first().click()
   await expect(page.getByText(/還差 \d+ 席/)).toBeVisible()
-  await expect(page.getByRole('button', { name: /確認併桌入座/ })).toBeDisabled()
+  await expect(page.getByRole('button', { name: /確認入座/ })).toBeDisabled()
 })
 
 // 現場「今日訂位」籤的「＋ 新增今日訂位」按鈕（2026-08 店主需求）：
