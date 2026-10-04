@@ -61,9 +61,27 @@ function TableShape({
   outNote = '',                // 維修停用（地圖日期落在維修窗內）：與永久停用同樣置灰，顯示 🛠 標籤
   outClickable = false,        // 僅現場即時圖開啟：點維修桌可開抽屜「結束維修」；規劃/統一視圖維持不可點
   zoneColor = null,            // 分區色（依 zoneId 解析）：只在左上角畫小圓點，不蓋 status 填色
+  presentation = null,
   onClick,
 }) {
   const { x, y, w, h, capacity, status, isActive, number } = table
+  const stateLabel = presentation?.statusLabel || (!isActive ? '已停用' : outNote ||
+    (planState ? ({ selected: '已選', blocked: '已被佔', available: '可選' }[planState]) :
+    occState ? ({ free: '可選', walkin: '散客占用', group: '團體占用' }[occState]) :
+    groupHoldLabel || preassignLabel || ({ vacant: '可入座', reserved: '已預訂', dining: '用餐中', cleaning: '待清桌', blocked: '臨時不可用' }[status]) || '狀態待確認'))
+  const interactive = !!onClick && isActive && (!outNote || outClickable)
+  const semantics = {
+    'data-table-number': number,
+    role: 'button', tabIndex: interactive ? 0 : -1,
+    'aria-disabled': !interactive || undefined,
+    'aria-pressed': isSelected || planState === 'selected',
+    'aria-label': `${number}桌，${capacity}人，${stateLabel}${presentation?.availabilityLabel ? `，${presentation.availabilityLabel}` : ''}${presentation?.unavailableReason ? `，${presentation.unavailableReason}` : ''}`,
+    onKeyDown: (event) => {
+      if (interactive && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault(); onClick(event)
+      }
+    },
+  }
 
   // 旋轉：外層 <g> 繞桌中心轉 rot 度；文字群組再反轉抵銷，保持水平。
   const cx = x + w / 2
@@ -84,7 +102,7 @@ function TableShape({
   if (!isActive || outNote) {
     const clickable = isActive && outNote && outClickable
     return (
-      <g style={{ opacity: 0.35, cursor: clickable ? 'pointer' : 'default' }} onClick={clickable ? onClick : undefined} transform={gTransform}>
+      <g {...semantics} style={{ opacity: 0.35, cursor: clickable ? 'pointer' : 'default' }} onClick={clickable ? onClick : undefined} transform={gTransform}>
         <rect x={x} y={y} width={w} height={h} rx={6}
               fill="#e5e0d8" stroke="#3a2e26" strokeWidth={1} strokeDasharray="3 3"/>
         {zoneDot}
@@ -111,7 +129,7 @@ function TableShape({
     const stroke = isSelected ? '#4f46e5' : P.stroke
     const strokeWidth = isSelected ? 3 : 1.5
     return (
-      <g onClick={onClick} style={{ cursor: planState === 'blocked' ? 'not-allowed' : 'pointer' }} transform={gTransform}>
+      <g {...semantics} onClick={onClick} style={{ cursor: planState === 'blocked' ? 'not-allowed' : 'pointer' }} transform={gTransform}>
         <rect x={x} y={y} width={w} height={h} rx={8}
               fill={P.fill} stroke={stroke} strokeWidth={strokeWidth}
               strokeDasharray={planState === 'blocked' ? '4 3' : null} />
@@ -145,7 +163,7 @@ function TableShape({
     const stroke = isSelected ? '#e60012' : occHighlight ? '#9eb63a' : O.stroke
     const strokeWidth = isSelected ? 3 : occHighlight ? 3 : 1.5
     return (
-      <g onClick={onClick} style={{ cursor: 'pointer', opacity: occDimmed ? 0.5 : 1 }} className={occHighlight ? 'animate-pulse' : ''} transform={gTransform}>
+      <g {...semantics} onClick={onClick} style={{ cursor: 'pointer', opacity: occDimmed ? 0.5 : 1 }} className={occHighlight ? 'animate-pulse' : ''} transform={gTransform}>
         {/* 時間軸點團跳地圖：白圈脈動標示這團坐哪（深靛外暈撐在淺底/靛底都讀得出，白環在其上吸睛） */}
         {focusRing && (
           <>
@@ -214,7 +232,8 @@ function TableShape({
   const opacity = isDimmed ? 0.35 : 1
 
   return (
-    <g onClick={onClick} style={{ cursor: 'pointer', opacity }} className={className} transform={gTransform}>
+    <g {...semantics} onClick={onClick} style={{ cursor: 'pointer', opacity }} className={className} transform={gTransform}>
+      <title>{semantics['aria-label']}</title>
       {/* 即將結束：橘色光暈（還有時間，提醒留意） */}
       {stage === 'late' && (
         <rect x={x - 3} y={y - 3} width={w + 6} height={h + 6} rx={10}
@@ -293,16 +312,16 @@ function TableShape({
                 {(stage === 'overtime' || stage === 'buffer-overtime') ? '! ' : ''}{minutes} 分
               </text>
             )}
-            {status === 'cleaning' && (
+            {(status === 'cleaning' || status === 'blocked') && (
               <text x={cx} y={y + h - 8}
                     fontSize={9} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
-                待清桌
+                {stateLabel}
               </text>
             )}
             {status === 'vacant' && (
               <text x={cx} y={y + h - 8}
                     fontSize={9} fontWeight={groupHoldLabel || preassignLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
-                {groupHoldLabel || preassignLabel || '✓ 可入座'}
+                {presentation?.hasTimeConflict ? '⚠ 時段衝突' : groupHoldLabel || preassignLabel || (presentation?.nextReservation?.timeSlot ? `下組 ${presentation.nextReservation.timeSlot}` : presentation?.statusLabel) || '✓ 可入座'}
               </text>
             )}
           </>

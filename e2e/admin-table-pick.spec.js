@@ -26,15 +26,12 @@ async function toOps(page) {
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
 }
 
-const slider = (page) => page.getByRole('button', { name: '滑動帶位 →' })
+const slider = (page) => page.getByTestId('walkin-seat')
 async function slide(page) {
-  const knob = page.locator('[data-slide-knob]')
-  const kb = await knob.boundingBox()
-  const tb = await slider(page).boundingBox()
-  await page.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(tb.x + tb.width, kb.y + kb.height / 2, { steps: 12 })
-  await page.mouse.up()
+  const confirm = page.getByTestId('walkin-seat')
+  await expect(confirm).toHaveText(/確認入座.*位/)
+  await expect(confirm).toBeEnabled()
+  await confirm.click()
 }
 
 const readBookings = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]'))
@@ -54,6 +51,7 @@ const seedYu = async (page, slot, extra = []) => {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.route('https://**/*', route => route.abort())
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
   await page.route('**/adminPushData', route =>
@@ -90,18 +88,19 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
 
   // 回到今日清單：卡片是綠色「桌 106」（現場指派已鎖桌），有「改桌」
   await expect(page.getByText('桌 106', { exact: true })).toBeVisible()
+  await page.locator('summary[aria-label="余先生 更多操作"]').click()
   await page.getByRole('button', { name: '↔ 改桌' }).click()
 
-  // 跨頁進現場 move 模式。自己目前的 106 點了不進確認（驗收問題 8），直接說明
-  await expect(page.getByText(/換桌：余先生 從 106 → 選新桌/)).toBeVisible()
+  // 未到客人用自由重選整組；原桌可重新選入、取消選取，確認前不更動原安排。
+  await expect(page.getByText(/重新選桌：余先生/)).toBeVisible()
   await page.locator('svg g:has(:text-is("106"))').first().click()
-  await expect(page.getByText('106 是 余先生 目前的桌，請點要換過去的桌')).toBeVisible()
-  await expect(page.getByText(/確認把 余先生 從 106 改到桌/)).toHaveCount(0)
-  // 點 107 → 二步確認 → 改桌成功
+  await expect(page.getByText('已選 4/2 席 · 1 桌')).toBeVisible()
+  await page.locator('svg g:has(:text-is("106"))').first().click()
+  await expect(page.getByText('已選 0/2 席 · 0 桌')).toBeVisible()
   await page.locator('svg g:has(:text-is("107"))').first().click()
-  await expect(page.getByText(/確認把 余先生 從 106 改到桌 107/)).toBeVisible()
+  await expect(page.getByText('已選 4/2 席 · 1 桌')).toBeVisible()
   await page.getByRole('button', { name: /確認改桌/ }).click()
-  await expect(page.getByText(/余先生 已從 106 改到 107/)).toBeVisible()
+  await expect(page.getByText(/余先生 已改桌至 107（原訂位保留）/)).toBeVisible()
 
   const state = await page.evaluate(() => ({
     bookings: JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]'),

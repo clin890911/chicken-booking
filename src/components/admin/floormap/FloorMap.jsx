@@ -211,11 +211,50 @@ export default function FloorMap({
   scopedFocusTables = [],   // 統一佔用視圖：時間軸點團 → 白圈脈動標示該團座位
   mapDate = '',             // 地圖對應日期（規劃/統一視圖傳入；今日即時圖不傳 = 今天）：維修窗判定用
   fixtures = null,          // 設施來源（{ '1F':[], '2F':[] }）；未傳則 fallback 預設 FIXTURES
+  locateTableNumber = null,
+  locateRequestId = 0,
+  tablePresentation = {}, // 以桌號索引的共同狀態／可用時間說明
   zones = [],               // 分區定義 [{id,name,color}]：解析 zoneId→色，桌角畫小圓點
 }) {
   // 用餐計時（分鐘）只在「今日即時圖」需要；規劃／統一佔用視圖沒有計時，不必跑 tick。
   // 以前不分模式每 5 秒 setState 一次、52 張桌全部重繪——規劃頁排位地圖白白每 5 秒重畫一次。
   // 現在：只有即時圖跑、15 秒一次，且 now 只傳給 dining 桌（其餘桌 props 不變 → React.memo 跳過）。
+  const [zoom, setZoom] = useState(1)
+  const [expanded, setExpanded] = useState(false)
+  const mapRef = useRef(null)
+  const viewportRef = useRef(null)
+  const [locatedTable, setLocatedTable] = useState(null)
+  useEffect(() => {
+    if (!expanded) return
+    const previousFocus = document.activeElement
+    const siblings = []
+    let branch = mapRef.current
+    while (branch?.parentElement) {
+      for (const sibling of branch.parentElement.children) {
+        if (sibling !== branch) { siblings.push([sibling, sibling.inert]); sibling.inert = true }
+      }
+      branch = branch.parentElement
+      if (branch === document.body) break
+    }
+    const focusable = () => [...mapRef.current.querySelectorAll('button:not(:disabled), [tabindex="0"]')]
+    focusable()[0]?.focus()
+    const handleKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopPropagation(); setExpanded(false)
+      } else if (event.key === 'Tab') {
+        const items = focusable()
+        const index = items.indexOf(document.activeElement)
+        if (event.shiftKey && index <= 0) { event.preventDefault(); items.at(-1)?.focus() }
+        else if (!event.shiftKey && (index === -1 || index === items.length - 1)) { event.preventDefault(); items[0]?.focus() }
+      }
+    }
+    document.addEventListener('keydown', handleKey, true)
+    return () => {
+      document.removeEventListener('keydown', handleKey, true)
+      siblings.forEach(([node, inert]) => { node.inert = inert })
+      if (previousFocus?.isConnected) previousFocus.focus()
+    }
+  }, [expanded])
   const liveMode = !scopedMode && !planningMode
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -235,7 +274,7 @@ export default function FloorMap({
   onSelectRef.current = onSelectTable
   const clickHandlers = useMemo(() => {
     const m = {}
-    floorTables.forEach(t => { m[t.number] = () => onSelectRef.current?.(t.number) })
+    floorTables.forEach(t => { m[t.number] = () => { setExpanded(false); onSelectRef.current?.(t.number) } })
     return m
   }, [floorTables])
 
@@ -270,12 +309,47 @@ export default function FloorMap({
     [floorTables, fixtureItems]
   )
 
+  useEffect(() => {
+    if (locateTableNumber == null) return
+    const target = [...(mapRef.current?.querySelectorAll('g[data-table-number]') || [])]
+      .find(node => node.dataset.tableNumber === String(locateTableNumber))
+    const viewport = viewportRef.current
+    if (!target || !viewport) return
+    const targetRect = target.getBoundingClientRect()
+    const viewportRect = viewport.getBoundingClientRect()
+    viewport.scrollTo?.({
+      left: viewport.scrollLeft + targetRect.left - viewportRect.left - (viewportRect.width - targetRect.width) / 2,
+      top: viewport.scrollTop + targetRect.top - viewportRect.top - (viewportRect.height - targetRect.height) / 2,
+      behavior: 'smooth',
+    })
+    target.focus?.({ preventScroll: true })
+    setLocatedTable(locateTableNumber)
+    const timer = setTimeout(() => setLocatedTable(null), 2000)
+    return () => clearTimeout(timer)
+  }, [locateTableNumber, locateRequestId, floor])
+
+  // 放大整張實體布局，不擴張單桌熱區；相鄰桌不會互相遮住。
+  const minSide = Math.min(...floorTables.map(t => Math.min(t.w, t.h)).filter(n => n > 0), 75)
+  const scale = Math.max(0.8, 44 / minSide) * zoom
   return (
+    <div ref={mapRef} aria-modal={expanded ? true : undefined} className={expanded ? 'fixed inset-3 z-[80] bg-white rounded-xl shadow-xl flex flex-col p-3' : 'h-full min-h-0 flex flex-col'} role={expanded ? 'dialog' : undefined} aria-label={expanded ? `${floor} 放大桌況圖` : undefined}>
+      <div className="flex items-center gap-2 flex-wrap mb-2 shrink-0">
+        <button type="button" aria-label="縮小地圖" disabled={zoom <= 1} onClick={() => setZoom(v => Math.max(1, v - 0.25))} className="min-h-[44px] min-w-[44px] rounded-lg border">−</button>
+        <span className="text-xs tabular-nums">{Math.round(zoom * 100)}%</span>
+        <button type="button" aria-label="放大地圖" disabled={zoom >= 2} onClick={() => setZoom(v => Math.min(2, v + 0.25))} className="min-h-[44px] min-w-[44px] rounded-lg border">＋</button>
+        <button type="button" onClick={() => { setZoom(1); setExpanded(v => !v) }} className="min-h-[44px] px-3 rounded-lg border text-xs font-bold">{expanded ? '關閉放大視圖' : '放大視圖'}</button>
+        <span className="text-[11px] text-chicken-brown/60">可捲動地圖 · Tab 選桌，Enter／空白鍵開啟</span>
+      </div>
+      <div ref={viewportRef} className="overflow-auto min-h-0 flex-1" style={{ overscrollBehavior: 'contain' }}>
     <svg
       viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
       preserveAspectRatio="xMidYMid meet"
-      className="w-full h-full"
+      style={{ width: `max(100%, ${viewBox.width * scale}px)`, height: `max(100%, ${viewBox.height * scale}px)` }}
+      aria-label={`${floor} 桌況圖`}
+      className="block"
+
     >
+      <style>{`g[role="button"]:focus { outline: none; } g[role="button"]:focus > rect { stroke: #111827; stroke-width: 5; stroke-dasharray: 3 2; }`}</style>
       {/* 樓層標籤：座標跟著 viewBox 原點走（裁切後 viewBox 原點不再固定是 0,0） */}
       <text x={viewBox.x + 20} y={viewBox.y + 36} fontSize={28} fontWeight={800} fill="#3a2e26" opacity={0.15}>
         {floor === '1F' ? '1F · 主用餐區' : '2F · 用餐區'}
@@ -296,6 +370,7 @@ export default function FloorMap({
             <TableShape
               key={t.number}
               table={t}
+              presentation={tablePresentation[t.number]}
               settings={settings}
               isSelected={selectedTableNumber === t.number}
               occState={occState}
@@ -320,6 +395,7 @@ export default function FloorMap({
             <TableShape
               key={t.number}
               table={t}
+              presentation={tablePresentation[t.number]}
               settings={settings}
               isSelected={selectedTableNumber === t.number}
               planState={planState}
@@ -352,10 +428,11 @@ export default function FloorMap({
           <TableShape
             key={t.number}
             table={t}
+            presentation={tablePresentation[t.number]}
             booking={booking}
             settings={settings}
             isSelected={isSelected}
-            isHighlight={isHighlight}
+            isHighlight={isHighlight || String(locatedTable) === String(t.number)}
             isAssignSuggestion={isAssignSuggestion}
             isPendingConfirm={isPendingConfirm}
             isJustAssigned={isJustAssigned}
@@ -389,5 +466,7 @@ export default function FloorMap({
         )
       })}
     </svg>
+      </div>
+    </div>
   )
 }

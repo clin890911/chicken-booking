@@ -12,6 +12,7 @@ test.use({ timezoneId: 'Asia/Taipei' })
 const today = '2026-09-19'
 
 async function stubCloud(page) {
+  await page.route('https://**/*', route => route.abort())
   await page.clock.setFixedTime(new Date(`${today}T12:20:00+08:00`))
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
@@ -29,16 +30,13 @@ async function loginToOps(page) {
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
 }
 
-const slider = (page) => page.getByRole('button', { name: '滑動帶位 →' })
+const slider = (page) => page.getByTestId('walkin-seat')
 
 async function slide(page) {
-  const knob = page.locator('[data-slide-knob]')
-  const kb = await knob.boundingBox()
-  const tb = await slider(page).boundingBox()
-  await page.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2)
-  await page.mouse.down()
-  await page.mouse.move(tb.x + tb.width, kb.y + kb.height / 2, { steps: 12 })
-  await page.mouse.up()
+  const confirm = page.getByTestId('walkin-seat')
+  await expect(confirm).toHaveText(/確認入座.*位/)
+  await expect(confirm).toBeEnabled()
+  await confirm.click()
 }
 
 test('帶位：點到今日團體圈桌 → 警示且滑桿鎖住，勾「仍要帶」後才可入座', async ({ page }) => {
@@ -63,11 +61,11 @@ test('帶位：點到今日團體圈桌 → 警示且滑桿鎖住，勾「仍要
   await expect(page.getByText(/101 為今日團體 防呆旅行社 預留/)).toBeVisible()
 
   // 席數雖然夠，但警示未確認 → 滑桿仍鎖住
-  await expect(slider(page)).toHaveAttribute('aria-disabled', 'true')
+  await expect(slider(page)).toBeDisabled()
 
   // 勾「我知道，仍要帶這桌」→ 解鎖 → 滑動入座
   await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()
-  await expect(slider(page)).not.toHaveAttribute('aria-disabled', 'true')
+  await expect(slider(page)).not.toBeDisabled()
 
   await slide(page)
   await expect(page.getByText(/入座 101\s*·\s*可帶下一組/)).toBeVisible()
@@ -90,18 +88,18 @@ test('併桌：多桌中任一張被預先配走也要擋，且警示指出是�
   // 先點乾淨的 101 → 無警示
   await page.locator('svg g:has(:text-is("101"))').first().click()
   await expect(page.getByRole('button', { name: '移除桌 101' })).toBeVisible()
-  await expect(slider(page)).not.toHaveAttribute('aria-disabled', 'true')
+  await expect(slider(page)).not.toBeDisabled()
 
   // 再併上被預配的 102 → 警示出現且指名 102（不是 101）
   await page.locator('svg g:has(:text-is("102"))').first().click()
   await expect(page.getByRole('button', { name: '移除桌 102' })).toBeVisible()
   await expect(page.getByText(/102 已於排位規劃預留給 預配客/)).toBeVisible()
-  await expect(slider(page)).toHaveAttribute('aria-disabled', 'true')
+  await expect(slider(page)).toBeDisabled()
 
   // 拿掉那張桌 → 警示消失、滑桿恢復
   await page.getByRole('button', { name: '移除桌 102' }).click()
   await expect(page.getByText(/已於排位規劃預留給/)).toHaveCount(0)
-  await expect(slider(page)).not.toHaveAttribute('aria-disabled', 'true')
+  await expect(slider(page)).not.toBeDisabled()
 })
 
 test('短復原：入座後 toast 按「復原」→ 訂位取消、桌回到空桌可重帶', async ({ page }) => {

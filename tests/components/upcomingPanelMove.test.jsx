@@ -17,9 +17,10 @@ const ctx = {
   setStatus: vi.fn(), seatBooking: vi.fn(() => ({ ok: true })),
   completeWithoutSeating: vi.fn(), undoCompleteWithoutSeating: vi.fn(),
 }
+const confirm = vi.fn(async () => true)
 const toast = { success: vi.fn(), error: vi.fn(), action: vi.fn(), info: vi.fn() }
 vi.mock('../../src/contexts/BookingContext', () => ({ useBooking: () => ctx }))
-vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => toast, useConfirm: () => vi.fn(async () => true) }))
+vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => toast, useConfirm: () => confirm }))
 
 const { PERMISSIONS } = await import('../../src/contexts/AuthContext')
 const UpcomingPanel = (await import('../../src/components/admin/floormap/UpcomingPanel')).default
@@ -43,11 +44,13 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
   }
   const btn = (text) => [...container.querySelectorAll('button')].find(b => b.textContent.includes(text))
 
-  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); vi.clearAllMocks() })
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); vi.clearAllMocks(); confirm.mockResolvedValue(true) })
   afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
 
   it('host：「✓ 已指派 105 · ↔ 改桌」是按鈕，點了呼叫 onMoveTable（且不觸發卡片本身的點擊）', () => {
     render(roleCan('host'))
+    act(() => container.querySelector('summary').click())
+    expect(container.querySelector('details').open).toBe(true)
     const b = btn('改桌')
     expect(b.textContent).toContain('✓ 已指派 105')
     act(() => { b.click() })
@@ -65,15 +68,34 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
     expect(container.textContent).toContain('✓ 已指派 105')
   })
 
-  it('併桌訂位：改桌呈停用並寫原因，點了只說明、不進改桌（與訂位卡一致）', () => {
+  it('未到併桌訂位：更多改桌交整組onMoveTable，原安排保留', () => {
     render(roleCan('host'), [{ ...YU, extraTableIds: ['106'] }])
+    act(() => container.querySelector('summary').click())
+    expect(container.querySelector('details').open).toBe(true)
     const b = btn('改桌')
-    expect(b.getAttribute('aria-disabled')).toBe('true')
+    expect(b.getAttribute('aria-disabled')).not.toBe('true')
     expect(b.textContent).toContain('105 + 106')
-    expect(b.textContent).toContain('併桌不支援')
     act(() => { b.click() })
-    expect(onMoveTable).not.toHaveBeenCalled()
-    expect(toast.info).toHaveBeenCalledWith(expect.stringContaining('已入座的併桌客人本輪不支援整組改桌'))
+    expect(onMoveTable).toHaveBeenCalledWith(expect.objectContaining({ extraTableIds: ['106'], assignedTableId: '105' }))
+    // 入口只派工作模式，取消前不改原指派，實際取消由OperationsView整合測試覆蓋。
+    expect(ctx.bookings[0].assignedTableId).toBe('105')
+    expect(ctx.bookings[0].extraTableIds).toEqual(['106'])
+    expect(ctx.setStatus).not.toHaveBeenCalled()
+  })
+
+  it('D8：過時未到先提供電話，No-show 在更多並確認後才寫入', async () => {
+    render(roleCan('host'), [{ ...YU, timeSlot: '10:00', phone: '0933111222' }])
+    expect(container.querySelector('a[href="tel:0933111222"]')).toBeTruthy()
+    const details = container.querySelector('details')
+    expect(details.open).toBe(false)
+    expect(btn('標 No-show').closest('details')).toBe(details)
+    act(() => details.querySelector('summary').click())
+    confirm.mockResolvedValueOnce(false)
+    await act(async () => btn('標 No-show').click())
+    expect(ctx.setStatus).not.toHaveBeenCalled()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('已聯絡'), expect.objectContaining({ danger: true }))
+    await act(async () => btn('標 No-show').click())
+    expect(ctx.setStatus).toHaveBeenCalledWith('Y1', 'noshow')
   })
 
   it('電話空白的現場客：人數後面不留「 · 」尾巴', () => {

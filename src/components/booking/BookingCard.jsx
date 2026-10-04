@@ -33,8 +33,7 @@ function BookingCard({ booking, onAssign, onMove }) {
 
   const status = STATUS_MAP[booking.status] || STATUS_MAP.pending
 
-  // B12：手機上低頻操作收進「⋯ 更多」展開選單
-  const [showMore, setShowMore] = useState(false)
+  // 全尺寸清單使用一個主要動作，其餘收進原生更多選單。
   const [editing, setEditing] = useState(false)
   const [detail, setDetail] = useState(false)
 
@@ -55,7 +54,7 @@ function BookingCard({ booking, onAssign, onMove }) {
     : 'bg-white'
 
   return (
-    <div className={`rounded-xl shadow-sm transition-shadow p-3.5 ${cardBg} ${cardBorder}`}>
+    <div className={`rounded-xl shadow-sm transition-shadow p-3 ${cardBg} ${cardBorder}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           {/* 主資訊 + 副資訊 + 標籤：整塊可點 → 訂位詳情 */}
@@ -134,7 +133,6 @@ function BookingCard({ booking, onAssign, onMove }) {
                 </span>
               )}
               {/* 3. 基礎資訊（灰）在後 */}
-              <span>{booking.phone || '—'}</span>
               {SOURCE_MAP[booking.source] && (
                 <span className="text-chicken-brown/50">{SOURCE_MAP[booking.source]}</span>
               )}
@@ -155,95 +153,29 @@ function BookingCard({ booking, onAssign, onMove }) {
                 {booking.notes?.pet && <Badge color="yellow">寵物</Badge>}
                 {booking.notes?.child && <Badge color="green">兒童</Badge>}
                 {booking.notes?.mobility && <Badge color="brown">行動不便</Badge>}
-                {booking.notes?.text && (
-                  <span className="text-[11px] text-chicken-brown/60 italic truncate max-w-[200px]">
-                    「{booking.notes.text}」
-                  </span>
-                )}
+
               </div>
             )}
           </button>
 
-          {/* 動作按鈕（依狀態 × 日期三態顯示；條件由 useBookingActions.show 統一）：
-              future = 預配/取消（報到類操作當天才開放）；past = 補登（離席/No-show/取消） */}
-          <div className="mt-3 flex gap-2 flex-wrap items-center">
-            {show.assign && (
-              <button
-                onClick={(e) => { e.stopPropagation(); act.assign() }}
-                className="tap text-sm px-3.5 min-h-[44px] bg-chicken-red text-white rounded-lg font-bold hover:opacity-90"
-              >{dayKind === 'future' ? '指派桌位（預配）' : '指派桌位'}</button>
-            )}
-            {show.seat && (
-              <button
-                onClick={(e) => { e.stopPropagation(); act.seat() }}
-                className="tap text-sm px-3.5 min-h-[44px] bg-chicken-green text-white rounded-lg font-bold hover:opacity-90"
-              >客人到了</button>
-            )}
-            {/* 改桌：今日待到且已有桌 → 現場頁 move 模式（地圖選桌＋二步確認＋預配/團保警示）。
-                併桌訂位呈停用樣式（move 只換主桌，會留下孤兒額外桌）；iPad 沒有 hover 看不到 title，
-                所以仍可點，點了用 toast 說明原因（act.move 內處理），不做任何變更。 */}
-            {show.move && (
-              <button
-                onClick={(e) => { e.stopPropagation(); act.move() }}
-                aria-disabled={act.moveDisabledReason ? 'true' : undefined}
-                title={act.moveDisabledReason || `把 ${booking.name} 從 ${booking.assignedTableId} 改到別桌`}
-                className={`tap text-sm px-3.5 min-h-[44px] rounded-lg font-bold border ${act.moveDisabledReason
-                  ? 'bg-chicken-brown/5 border-chicken-brown/15 text-chicken-brown/40'
-                  : 'bg-white border-indigo-300 text-indigo-700 hover:bg-indigo-50'}`}
-              >↔ 改桌</button>
-            )}
-            {show.futureAssignedNote && (
-              <span className="text-xs font-bold text-chicken-brown/50 py-2">未來訂位 · 當天才可報到</span>
-            )}
-            {/* A5：主操作「客人已離席」顯眼、次操作「直接釋出」降權較小，避免誤點 */}
-            {show.checkout && (
-              <>
-                <button
-                  onClick={(e) => { e.stopPropagation(); act.checkout() }}
-                  className="tap text-sm px-4 min-h-[44px] bg-orange-500 text-white rounded-lg font-bold hover:opacity-90"
-                >客人已離席</button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); act.finalize() }}
-                  className="tap text-xs px-3 min-h-[44px] bg-white border border-chicken-green/40 text-chicken-green rounded-lg font-bold hover:bg-chicken-green/5"
-                >直接釋出（已清桌）</button>
-              </>
-            )}
-            {/* B12：低頻操作（標No-show/取消訂位）手機收進「⋯ 更多」，桌面(sm:)直接全列；
-                標 No-show 只在今天/過去日（未來不可能 no-show） */}
-            {show.edit && (
-              <>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setEditing(true) }}
-                  className="tap inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/20 text-chicken-brown rounded-lg font-bold hover:border-chicken-brown/40"
-                >編輯</button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShowMore(s => !s) }}
-                  className="tap sm:hidden text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown/70 rounded-lg font-bold hover:border-chicken-brown/30"
-                  aria-expanded={showMore}
-                >⋯ 更多</button>
-                {show.noshow && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); act.noshow() }}
-                    className={`${showMore ? 'flex' : 'hidden'} tap sm:inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5`}
-                  >標 No-show</button>
-                )}
-                {show.cancel && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); act.cancel() }}
-                    className={`${showMore ? 'flex' : 'hidden'} tap sm:inline-flex items-center text-sm px-3 min-h-[44px] bg-white border border-chicken-red/40 text-chicken-red rounded-lg font-bold hover:bg-chicken-red/5`}
-                  >✕ 取消訂位</button>
-                )}
-              </>
-            )}
-            {show.restore && (
-              <button
-                onClick={(e) => { e.stopPropagation(); act.restore() }}
-                className="tap text-sm px-3 min-h-[44px] bg-white border border-chicken-brown/15 text-chicken-brown rounded-lg font-bold hover:border-chicken-green hover:text-chicken-green"
-              >↩ 恢復為待到</button>
-            )}
-            {show.pastNote && (
-              <span className="text-[11px] font-bold text-chicken-brown/45">過去日期 · 僅可補登</span>
-            )}
+          <div className="mt-2 flex gap-2 flex-wrap items-center">
+            {booking.phone && <a href={`tel:${booking.phone.replace(/[^+\d]/g, '')}`} aria-label={`聯絡 ${booking.name} ${booking.phone}`} className="min-h-[44px] inline-flex items-center px-3 rounded-lg border text-xs font-bold">☎ 聯絡</a>}
+            {show.assign ? <button onClick={act.assign} className="tap text-sm px-3 min-h-[44px] bg-chicken-red text-white rounded-lg font-bold">{dayKind === 'future' ? '指派桌位（預配）' : '指派桌位'}</button>
+              : show.seat ? <button onClick={act.seat} className="tap text-sm px-3 min-h-[44px] bg-chicken-green text-white rounded-lg font-bold">客人到了</button>
+              : show.checkout ? <button onClick={act.checkout} className="tap text-sm px-3 min-h-[44px] bg-orange-500 text-white rounded-lg font-bold">客人已離席</button>
+              : show.restore ? <button onClick={act.restore} className="tap text-sm px-3 min-h-[44px] rounded-lg border font-bold">↩ 恢復為待到</button> : null}
+            {(show.edit || show.move || show.checkout) && <details className="relative">
+              <summary className="tap cursor-pointer list-none px-3 min-h-[44px] flex items-center rounded-lg border text-sm" aria-label={`${booking.name} 更多操作`}>⋯ 更多</summary>
+              <div className="mt-1 min-w-[200px] bg-white border rounded-lg shadow-lg p-1 flex flex-col" onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
+                {show.move && <button onClick={act.move} aria-disabled={act.moveDisabledReason ? 'true' : undefined} title={act.moveDisabledReason || '重新選擇整組桌位'} className="min-h-[44px] px-3 text-left">↔ 改桌</button>}
+                {show.edit && <button onClick={() => setEditing(true)} className="min-h-[44px] px-3 text-left">編輯</button>}
+                {show.checkout && <button onClick={act.finalize} className="min-h-[44px] px-3 text-left">直接釋出（已清桌）</button>}
+                {show.noshow && <><p className="px-3 py-2 text-xs text-chicken-brown/60">未到客人請先聯絡，確認後再標記。</p><button onClick={act.noshow} className="min-h-[44px] px-3 text-left text-chicken-red">標 No-show</button></>}
+                {show.cancel && <button onClick={act.cancel} className="min-h-[44px] px-3 text-left text-chicken-red">✕ 取消訂位</button>}
+              </div>
+            </details>}
+            {show.futureAssignedNote && <span className="text-xs text-chicken-brown/50">未來訂位 · 當天才可報到</span>}
+            {show.pastNote && <span className="text-xs text-chicken-brown/50">過去日期 · 僅可補登</span>}
           </div>
         </div>
 

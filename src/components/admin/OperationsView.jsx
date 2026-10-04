@@ -19,6 +19,7 @@ import { assignmentKind, statusZh } from '../../utils/tableStatus'
 import { isTableUsableOnDate } from '../../utils/tableAvailability'
 import { conflictLine, releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } from '../../utils/preassignOverride'
 import { buildGroupHolds, todayActiveGroups, reseatCandidateTables } from '../../utils/groupLive'
+import { buildOpsTablePresentation } from '../../utils/opsTablePresentation'
 import { buildTableTurns } from '../../utils/tableTurns'
 import { todayStr, nowSlot } from '../../utils/timeSlots'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
@@ -208,7 +209,7 @@ export function saveQuickReserve(payload, { date, kind, table, needsCombo, creat
 //   兩者到齊由面板滑動入座（walkin / walkin-multi 兩個舊 mode 已移除）。
 // 每個模式有對應的 banner、桌位 highlight、確認 toast
 // 候位入座由右側欄（OpsRail > WaitlistPanel）頁內觸發；指派桌仍可由「訂位」分頁跨頁觸發（pendingAssign）
-export default function OperationsView({ pendingAssign, onAssignDone, pendingMove, onMoveDone, onAddBooking }) {
+export default function OperationsView({ pendingAssign, onAssignDone, pendingMove, onMoveDone, onMoveConsumed, onAddBooking }) {
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
     assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, reseatGroupBatchTable,
@@ -226,6 +227,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const [selectedTable, setSelectedTable] = useState(null)
   const [railTab, setRailTab] = useState('walkin') // 左側操作欄籤（預設帶位）；ESC/關閉抽屜不重設
   const [mode, setMode] = useState(null)
+  const modeSource = useRef(null)
+  const [opsNow, setOpsNow] = useState(() => Date.now())
+  const [locateTableRequest, setLocateTableRequest] = useState(null)
+  const [waitlistNext, setWaitlistNext] = useState(false)
+  useEffect(() => { const id = setInterval(() => setOpsNow(Date.now()), 15000); return () => clearInterval(id) }, [])
   const [justAssigned, setJustAssigned] = useState(null) // 剛指派的桌號（綠光）
   const [pendingConfirm, setPendingConfirm] = useState(null) // 指派/候位/換桌：待確認的桌號（二步確認）
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
@@ -267,6 +273,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     () => buildGroupHolds(todayActiveGroups(groupReservations, todayStr()), tables),
     [groupReservations, tables],
   )
+
+  const tablePresentation = useMemo(() => buildOpsTablePresentation({ tables, bookings, groupHoldTables, settings, date: todayStr(), now: opsNow }), [tables, bookings, groupHoldTables, settings, opsNow])
+  const floorSeatCount = tables.filter(t => t.floor === floor && tablePresentation[t.number]?.canSeatNow).length
+  const rememberModeSource = () => { modeSource.current = { railTab, floor, selectedTable, view } }
+  const locateSuggestion = (number) => { const t = tables.find(t => String(t.number) === String(number)); if (t) { setFloor(t.floor); setView('map'); setLocateTableRequest(prev => ({ number: String(t.number), seq: (prev?.seq || 0) + 1 })) } }
 
   // 今日預配標記：被今日訂位「預先配走」的桌號 → { timeSlot }。
   // 預配只記在 booking 上、不動桌況（桌仍 vacant）——地圖上需給視覺線索（📌 時段 預配），
@@ -325,6 +336,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
   // 單桌與多桌共用人工選桌；推薦只提示，不自動勾桌。
   const startMultiMode = ({ kind, booking = null, wait = null, need, lockKind = 'hold', suitable, suggestion, replacing = false }) => {
+    rememberModeSource()
     setMode({ type: 'assign-multi', kind, booking, wait, need, lockKind,
       selected: [], suitable, suggestion, replacing, confirmedWarning: null })
     setSelectedTable(null)
@@ -354,6 +366,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (!suitable.length) {
       return toast.error(`目前沒有可改派的空桌（${current} 被佔）`)
     }
+    rememberModeSource()
     setMode({ type: 'group-reseat', group, batch, queue, current, suitable, suggestion: suitable[0] })
     setSelectedTable(null)
     setPendingConfirm(null)
@@ -392,6 +405,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const suggestion = findSuitableTables(booking.guests, {
       bookingId: booking.id, date: booking.date || todayStr(), timeSlot: booking.timeSlot, mode: moveKind,
     }).find(t => t.number !== booking.assignedTableId)
+    rememberModeSource()
     setMode({ type: 'move', booking, moveKind, suitable, suggestion: suggestion?.number })
     setSelectedTable(null)
     setPendingConfirm(null)
@@ -428,8 +442,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // seatedToWalkin（純函式，見上方）綁上這個畫面的真實 setter——三條候位入座路徑共用
   // toast「查看」開抽屜會把左欄（含新增面板）換掉 → 面板開著時擋下（清空選取 null 不擋）
   const selectTableGuarded = (n) => { if (n != null && blockedByReserve()) return; setSelectedTable(n) }
-  const finishWaitlistSeat = (tableNumber, msg) =>
+  const finishWaitlistSeat = (tableNumber, msg) => {
     seatedToWalkin(tableNumber, msg, { setSelectedTable: selectTableGuarded, setMode, setPendingConfirm, setRailTab, toast })
+    setWaitlistNext(true)
+  }
 
   // === 內嵌新增面板：開／關、候選、選桌 ===
   const canReserveAssign = can('booking.update') && can('table.update')
@@ -950,10 +966,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
   // ESC 取消模式
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') { cancelMode(); setSelectedTable(null) } }
+    const onKey = (e) => { if (e.key === 'Escape') { if (mode) cancelModeAndNotify(); else setSelectedTable(null) } }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [mode])
 
   // 從外部觸發指派模式
   useEffect(() => {
@@ -970,7 +986,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const fresh = bookings.find(b => b.id === pendingMove.booking.id) || pendingMove.booking
     startMove(fresh)
     // 一觸發就消耗掉：ESC 取消模式時不會回報，若留著，下次切回現場頁（元件重掛）會又自動進改桌模式
-    onMoveDone?.()
+    onMoveConsumed?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingMove?.seq])
 
@@ -982,6 +998,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (isBookingAssign) onAssignDone?.()
     if (mode?.type === 'move' || mode?.replacing) onMoveDone?.()
     cancelMode()
+    const source = modeSource.current
+    if (source) { setRailTab(source.railTab); setFloor(source.floor); setSelectedTable(source.selectedTable); setView(source.view) }
+    modeSource.current = null
   }
 
   return (
@@ -995,14 +1014,16 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           ⚠️ compact 單列不可用在窄螢幕——375px 時六格 pill 會被整個擠出可視範圍
           （不是可橫向捲，是直接看不到），店員在手機上永遠讀不到那些數字。 */}
       <div className="lg:hidden">
-        <StatusBar tables={tables} waitlist={waitlist} bookings={bookings} />
+        <span className="text-xs font-bold text-chicken-brown/60">全店</span>
+        <StatusBar tablePresentation={tablePresentation} tables={tables} waitlist={waitlist} bookings={bookings} />
       </div>
 
       {/* lg 以上＝一條頂列（約 44px）：現場・時間 + 六格 pill + 樓層 + 視圖 + 編輯佈局 + 登入者。
           lg 以下＝改版前的樓層/視圖列（大尺寸、可換行），統計已在上面那塊 grid。 */}
       <div className="flex items-center gap-2 flex-wrap lg:flex-nowrap">
         <div className="hidden lg:flex min-w-0">
-          <StatusBar variant="compact" tables={tables} waitlist={waitlist} bookings={bookings} />
+          <span className="text-xs font-bold self-center mr-2 text-chicken-brown/60">全店</span>
+          <StatusBar tablePresentation={tablePresentation} variant="compact" tables={tables} waitlist={waitlist} bookings={bookings} />
         </div>
 
         <div className="hidden lg:block flex-1 min-w-0" />
@@ -1012,6 +1033,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           className="flex-none"
           options={['1F', '2F'].map(f => ({ key: f, label: `${f} · ${tables.filter(t => t.floor === f).length}`, title: f === '1F' ? '1F 主用餐區' : '2F 用餐區' }))}
           value={floor} onChange={setFloor} ariaLabel="樓層" />
+
+        <span className="text-xs font-bold text-chicken-brown/70">本層 {floor} · 現在可坐 {floorSeatCount} 桌</span>
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
         {!mode && !reserveOpen && (
@@ -1045,6 +1068,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       {/* Mode banner — 依模式不同底色 + emoji，避免誤判 */}
       <ModeBanner
         mode={mode}
+        tables={tables}
+        onLocateSuggestion={locateSuggestion}
         pendingConfirm={pendingConfirm}
         pendingConflicts={pendingConflicts}
         pendingGroupHold={pendingGroupHold}
@@ -1066,7 +1091,16 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/今日訂位/候位/團體）
             TableDrawer 是長內容 → 外層捲動；OpsRail 自己管內部捲動與釘底動作列 → 外層只給 flex 容器 */}
         <div className={`h-full min-h-0 ${selectedTableObj ? 'overflow-y-auto space-y-3' : 'flex flex-col'}`}>
-          {selectedTableObj ? (
+          {mode ? (
+            <div role="region" aria-label="目前選桌任務" className="bg-white rounded-xl border border-chicken-brown/15 p-4 space-y-3">
+              <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.type === 'group-reseat' ? '團體改派' : '指派桌位'}</h2>
+              <p className="font-bold">{mode.booking?.name || mode.wait?.name || mode.group?.agencyName} · {mode.need || mode.booking?.guests || mode.wait?.partySize || mode.batch?.guests} 位</p>
+              {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
+              <p>目標桌：{(mode.selected?.length ? mode.selected.join(' + ') : pendingConfirm) || '尚未選桌'}</p>
+              <p className="text-sm text-chicken-brown/60">在地圖選桌，上方確認後才儲存。</p>
+              <button type="button" className="tap min-h-[44px] px-4 rounded-lg border" onClick={cancelModeAndNotify}>取消並返回</button>
+            </div>
+          ) : selectedTableObj ? (
             <TableDrawer
               table={selectedTableObj}
               booking={selectedBooking}
@@ -1078,8 +1112,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               onWaitlistSeated={finishWaitlistSeat}
               mode={{ assigning: mode?.type === 'assign' }}
             />
-          ) : (
+          ) : null}
+          <div hidden={!!mode || !!selectedTableObj} aria-hidden={!!mode || !!selectedTableObj} inert={mode || selectedTableObj ? '' : undefined} style={mode || selectedTableObj ? { display: 'none' } : undefined} className="flex-1 min-h-0 flex flex-col">
             <OpsRail
+              suspended={!!mode || !!selectedTableObj}
               activeTab={railTab}
               onTabChange={setRailTab}
               walkinGuests={walkinGuests}
@@ -1090,6 +1126,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               walkinWarning={walkinWarning}
               onWalkinSeat={handleWalkinSeat}
               lastParty={lastParty}
+              onLocateSuggestion={locateSuggestion}
+              showNextWaitlist={waitlistNext && waitlist.some(w => ['waiting', 'called'].includes(w.status))}
+              onNextWaitlist={() => { setSelectedTable(null); setRailTab('waitlist'); setWaitlistNext(false) }}
               onClickBooking={(b) => {
                 if (b.assignedTableId) setSelectedTable(b.assignedTableId)
               }}
@@ -1124,7 +1163,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 setSelectedTable(n)
               }}
             />
-          )}
+          </div>
         </div>
 
         {/* 右欄：桌況（地圖 SVG／摘要／排程）。高度填滿剩餘空間，SVG 自動縮放 */}
@@ -1135,6 +1174,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               <TableScheduleView
                 tables={tables.filter(t => t.floor === floor)}
                 turnsByTable={turnsByTable}
+                tablePresentation={tablePresentation}
                 selectedTableNumber={selectedTable}
                 onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
               />
@@ -1143,6 +1183,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
             // 摘要視圖＝可坐存量 + 依狀態分組（不估時間）
             <div className="flex-1 min-h-0">
               <TableSummaryView
+                tablePresentation={tablePresentation}
                 tables={tables.filter(t => t.floor === floor)}
                 groupHoldTables={groupHoldTables}
                 settings={settings}
@@ -1163,6 +1204,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               </div>
               <div className="flex-1 min-h-0">
               <FloorMap
+                locateTableNumber={locateTableRequest?.number}
+                locateRequestId={locateTableRequest?.seq || 0}
+                tablePresentation={tablePresentation}
                 floor={floor}
                 tables={tables}
                 bookings={bookings}

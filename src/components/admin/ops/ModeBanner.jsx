@@ -13,8 +13,10 @@ const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
 
 // pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
 //   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
-export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiWarnings = [], multiWarningConfirmed = true, onConfirmWarning, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
+export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiWarnings = [], multiWarningConfirmed = true, onConfirmWarning, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
   if (!mode) return null
+  const suggested = tables.find(t => String(t.number) === String(mode.suggestion))
+  const suggestionLabel = suggested ? `${suggested.floor}・${suggested.number}` : mode.suggestion
 
   // 多桌指派／候位入座（大組併桌）：累加式選桌，不走二步確認；席數夠才能確認。
   // mode.kind 區分兩條路徑——'waitlist' 是客人已在現場、確認即入座（沿用候位模式的綠）；
@@ -41,7 +43,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
             </span>
             <span className="text-xs opacity-90">點桌加 / 減 · 可選單桌或多桌</span>
             {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded">原配桌 {[mode.booking?.assignedTableId, ...(mode.booking?.extraTableIds || [])].filter(Boolean).join(' + ')} · 確認成功前保留</span>}
-            {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {mode.suggestion}（自行選桌）</span>}
+            {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {suggestionLabel}（自行選桌）</span>}
             {!isWaitlist && <span className="text-xs opacity-90">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
           </div>
           <button onClick={onCancel} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${cancelBtn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
@@ -58,6 +60,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
               ready ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
           >✓ {mode.replacing ? '確認改桌' : isWaitlist ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}</button>
         </div>
+        {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs">定位建議桌 {suggestionLabel}</button>}
         {!!selected.length && <button onClick={onClearSelection} className="text-xs underline min-h-[44px]">清空已選桌</button>}
         {!!multiWarnings.length && <div className="bg-rose-600 rounded-lg px-3 py-2 text-xs space-y-2">
           {multiWarnings.map(line => <div key={line}>{line}</div>)}
@@ -121,7 +124,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
           {CONFIRMABLE.includes(mode.type) && (
             mode.suggestion ? (
               <span className="inline-flex items-center gap-1 bg-white/95 text-chicken-brown px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm">
-                建議 {mode.suggestion}
+                建議 {suggestionLabel}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold">
@@ -133,6 +136,7 @@ export default function ModeBanner({ mode, pendingConfirm, pendingConflicts, pen
         <button onClick={onCancel} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${style.btn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
       </div>
 
+      {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs">定位建議桌 {suggestionLabel}</button>}
       {/* A6：二步確認 — 待確認列 */}
       {pendingConfirm && CONFIRMABLE.includes(mode.type) && (
         <div className="bg-white/15 rounded-lg px-3 py-2 space-y-2">

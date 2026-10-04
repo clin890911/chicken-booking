@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Header from '../components/layout/Header'
 import SidebarNav from '../components/layout/SidebarNav'
@@ -40,6 +40,17 @@ export default function AdminPage() {
   }), [setSearchParams]) // push（非 replace）→ 瀏覽器上一頁/下一頁可用
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式
   // （候位入座已是現場頁內互動，無需跨頁機制）
+  const contentRef = useRef(null)
+  const [taskSource, setTaskSource] = useState(null)
+  const returnScroll = useRef(null)
+  const rememberTaskSource = useCallback(() => setTaskSource({ tab, search: searchParams.toString(), scrollTop: contentRef.current?.scrollTop || 0 }), [tab, searchParams])
+  const returnToTaskSource = useCallback(() => {
+    if (!taskSource) return
+    returnScroll.current = taskSource.scrollTop
+    setSearchParams(new URLSearchParams(taskSource.search))
+    setTaskSource(null)
+  }, [taskSource, setSearchParams])
+  useLayoutEffect(() => { if (tab !== 'ops' && returnScroll.current != null && contentRef.current) { contentRef.current.scrollTop = returnScroll.current; returnScroll.current = null } }, [tab])
   const [pendingAssign, setPendingAssign] = useState(null)
   // pendingMove：訂位卡／詳情／新增後 toast 的「改桌」→ 現場頁 move 模式（比照 pendingAssign 的跨頁機制）。
   // 帶 seq：同一筆訂位連按兩次改桌（中間取消過）也要能再觸發。
@@ -109,21 +120,23 @@ export default function AdminPage() {
   // 從 BookingsView 觸發「指派桌」：今天 → 現場頁即時指派；未來日 → 規劃頁排位地圖預配
   const handleAssignTable = useCallback((booking) => {
     if (!booking.date || booking.date === todayStr()) {
+      rememberTaskSource()
       setPendingAssign(booking)
       setTab('ops')
     } else {
       setPendingPlanAssign(booking)
       setTab('planning')
     }
-  }, [setTab])
-  const handleAssignDone = () => setPendingAssign(null)
+  }, [setTab, rememberTaskSource])
+  const handleAssignDone = () => { setPendingAssign(null); returnToTaskSource() }
 
   // 「改桌」：只有今日待到的訂位會出現這顆鈕（useBookingActions.show.move），一律到現場頁地圖選桌
   const handleMoveTable = useCallback((booking) => {
+    rememberTaskSource()
     setPendingMove({ booking, seq: Date.now() })
     setTab('ops')
-  }, [setTab])
-  const handleMoveDone = useCallback(() => setPendingMove(null), [])
+  }, [setTab, rememberTaskSource])
+  const handleMoveDone = () => { setPendingMove(null); returnToTaskSource() }
   // 改桌會同時寫 bookings 與 tables：沿用既有口徑（booking.update + table.update 都有才給入口；不新增權限字串）
   const canMoveTable = !!(can?.('booking.update') && can?.('table.update'))
 
@@ -147,7 +160,7 @@ export default function AdminPage() {
     setTab('bookings')
   }
   // 導覽切頁：離開訂位頁時清掉預填，避免下次再進訂位頁又自動跳到「新增」
-  const navTo = (t) => { if (t !== 'bookings') setAddPrefill(null); setTab(t) }
+  const navTo = (t) => { setTaskSource(null); if (t !== 'bookings') setAddPrefill(null); setTab(t) }
 
   return (
     <div className="h-[100dvh] overflow-hidden bg-chicken-cream flex">
@@ -201,13 +214,14 @@ export default function AdminPage() {
           )}
           {/* 分頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
           {/* 現場分頁＝一面式（不整頁捲動，捲動只發生在右側欄內）；其他分頁＝內容內部捲動、側邊欄固定 */}
-          <div key={tab} className={`animate-soft-enter flex-1 min-h-0 ${tab === 'ops' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto overscroll-y-contain'}`}>
+          <div ref={contentRef} data-testid="admin-content" className={`animate-soft-enter flex-1 min-h-0 ${tab === 'ops' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto overscroll-y-contain'}`}>
               {tab === 'ops' && (
                 <OperationsView
                   pendingAssign={pendingAssign}
                   onAssignDone={handleAssignDone}
                   pendingMove={pendingMove}
                   onMoveDone={handleMoveDone}
+                  onMoveConsumed={() => setPendingMove(null)}
                   onAddBooking={(c) => openAddBooking(c ? { phone: c.phone, name: c.name } : null, { source: c?.source })}
                 />
               )}
@@ -220,8 +234,10 @@ export default function AdminPage() {
                   onGroupOpenConsumed={() => setPendingGroupOpen(null)}
                 />
               )}
-              {tab === 'bookings' && (
+              {(tab === 'bookings' || taskSource?.tab === 'bookings') && (
+                <div hidden={tab !== 'bookings'} aria-hidden={tab !== 'bookings'} inert={tab !== 'bookings' ? '' : undefined} style={tab !== 'bookings' ? { display: 'none' } : undefined}>
                 <BookingsView onAssignTable={handleAssignTable} onMoveTable={canMoveTable ? handleMoveTable : null} onOpenGroup={handleOpenGroup} openAdd={addPrefill} />
+                </div>
               )}
               {tab === 'roster' && (
                 <RosterView

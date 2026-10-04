@@ -33,7 +33,7 @@ function NowLabel() {
   )
 }
 
-export default function StatusBar({ tables, waitlist, bookings = [], variant = 'grid' }) {
+export default function StatusBar({ tables, waitlist, bookings = [], variant = 'grid', tablePresentation = null }) {
   const counts = { vacant: 0, reserved: 0, dining: 0, cleaning: 0, blocked: 0 }
   const bookingById = {}
   bookings.forEach(b => { if (b.id) bookingById[b.id] = b })
@@ -66,7 +66,7 @@ export default function StatusBar({ tables, waitlist, bookings = [], variant = '
   )
 
   const items = [
-    { label: '可入座',   value: counts.vacant,   color: 'text-emerald-700', className: 'status-vacant' },
+    { label: '可入座',   value: tablePresentation ? tables.filter(t => tablePresentation[t.number]?.canSeatNow).length : counts.vacant,   color: 'text-emerald-700', className: 'status-vacant' },
     { label: '90分內將到', value: pulse.soon.length, color: 'text-sky-700', className: 'status-reserved',
       sub: pulse.overdue.length > 0 ? `+${pulse.overdue.length} 過時未到` : null },
     { label: '用餐中',   value: counts.dining,   color: 'text-orange-700', className: 'status-dining' },

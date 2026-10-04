@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { buildOpsTablePresentation } from '../../../utils/opsTablePresentation'
 import { turnInPeriod } from '../../../utils/tableTurns'
 import { STATUS_COLOR } from '../floormap/statusColors'
 import SegmentedControl from '../../ui/SegmentedControl'
@@ -42,7 +43,8 @@ function TurnRow({ turn }) {
   )
 }
 
-export default function TableScheduleView({ tables, turnsByTable, selectedTableNumber, onSelectTable }) {
+export default function TableScheduleView({ tables = [], turnsByTable = {}, bookings = [], groupHoldTables = {}, settings = {}, date, now = Date.now(), tablePresentation, selectedTableNumber, onSelectTable }) {
+  const presentation = useMemo(() => tablePresentation || buildOpsTablePresentation({ tables, bookings, groupHoldTables, settings, date, now }), [tablePresentation, tables, bookings, groupHoldTables, settings, date, now])
   const [period, setPeriod] = useState('all')
   const floorTables = [...(tables || [])].sort((a, b) => String(a.number).localeCompare(String(b.number)))
 
@@ -72,7 +74,8 @@ export default function TableScheduleView({ tables, turnsByTable, selectedTableN
           const all = turnsByTable[t.number] || []
           const turns = all.filter(x => turnInPeriod(x, period))
           const isSel = selectedTableNumber === t.number
-          const blocked = !t.isActive || t.outage
+          const state = presentation[t.number]
+          const blocked = !!state?.unavailableReason
           return (
             <button
               key={t.number}
@@ -82,21 +85,19 @@ export default function TableScheduleView({ tables, turnsByTable, selectedTableN
               }`}
             >
               <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-chicken-brown/10">
-                <i className="h-2 w-2 rounded-full" style={{ background: STATUS_DOT_COLOR[t.status] || STATUS_COLOR.vacant.stroke }} />
+                <i className="h-2 w-2 rounded-full" style={{ background: STATUS_DOT_COLOR[blocked ? 'blocked' : t.status] || STATUS_COLOR.vacant.stroke }} />
                 <span className="text-sm font-bold text-chicken-brown">{t.number}</span>
+                <span className="text-[10px] font-bold text-chicken-brown/60">{state?.statusLabel}</span>
                 <span className="ml-auto text-[10px] font-bold text-chicken-brown/50">{t.capacity} 位 · 今日 {all.filter(x => !x.isExtra).length} 轉</span>
               </div>
               <div className="p-1.5 space-y-1">
-                {blocked ? (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-2.5 text-center text-[11px] font-bold text-slate-400">停用／維修中</div>
-                ) : turns.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-emerald-300 bg-emerald-50/40 py-2.5 text-center text-[11px] font-bold text-emerald-600">本時段可排</div>
-                ) : (
-                  <>
-                    {turns.map((x, i) => <TurnRow key={x.bookingId || `${x.groupId}-${x.batchId}` || i} turn={x} />)}
-                    <div className="rounded-md border border-dashed border-chicken-brown/20 py-1 text-center text-[10px] font-bold text-chicken-brown/35">＋ 可再排</div>
-                  </>
-                )}
+                <div className={`rounded-lg border px-2 py-2 text-[11px] font-bold ${blocked ? 'border-slate-300 bg-slate-50 text-slate-600' : state?.hasTimeConflict ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-chicken-brown/10 bg-chicken-cream text-chicken-brown/65'}`}>
+                  {state?.reservationLabel && <div>{state.reservationLabel}</div>}
+                  <div>{state?.availabilityLabel}</div>
+                  {blocked && <div className="mt-1 text-[10px]">點桌查看原因與恢復操作</div>}
+                </div>
+                {turns.map((x, i) => <TurnRow key={x.bookingId || `${x.groupId}-${x.batchId}` || i} turn={x} />)}
+                {!turns.length && <div className="py-1 text-center text-[10px] text-chicken-brown/45">此篩選無排程 · 即時桌況如上</div>}
               </div>
             </button>
           )
