@@ -108,19 +108,9 @@ export default function SlotMapPanel({
     return (tables || []).filter(t => isTableUsableOnDate(t, date) && !byTable[t.number])
   }, [assignBooking, tables, byTable, date])
 
-  // 有無單桌能容納整團 → 容量足夠的空桌（單桌即點即配）。
-  const singleFitTables = useMemo(
-    () => freeTables.filter(t => (Number(t.capacity) || 0) >= guestsNeeded).map(t => t.number),
-    [freeTables, guestsNeeded],
-  )
-  // 無單桌容納（大組）→ 進入併桌預配：累加選多張同層小桌湊滿席數。
-  const assignMulti = !!assignBooking && singleFitTables.length === 0
-
-  // 地圖高亮：單桌模式只亮容量足夠的桌；多桌模式亮所有可選空桌（含小桌，供併桌）。
-  const highlightTables = useMemo(() => {
-    if (!assignBooking) return []
-    return assignMulti ? freeTables.map(t => t.number) : singleFitTables
-  }, [assignBooking, assignMulti, freeTables, singleFitTables])
+  // 所有人數都由店員選桌；有大桌時也可選多張小桌。
+  const assignMulti = !!assignBooking
+  const highlightTables = freeTables.map(t => t.number)
 
   // 併桌已選席數（合計選中桌的容量）
   const assignSelectedSeats = useMemo(
@@ -143,27 +133,19 @@ export default function SlotMapPanel({
 
   const handleTableClick = (number) => {
     if (assignBooking) {
+      // 已選桌一律可移除，即使同步後已被占用或停用。
+      if (assignSelected.includes(number)) {
+        setAssignSelected(prev => prev.filter(n => n !== number))
+        return
+      }
       if (byTable[number]) return toast.error(`${number} 在此場次已被佔用`)
       const t = tables.find(x => x.number === number)
       if (!t || !isTableUsableOnDate(t, date)) return toast.error(`${number} 停用/維修中`)
-      if (assignMulti) {
-        // 併桌預配：點桌加入/移除（同層守門）；席數夠才在 banner 確認
-        const isRemove = assignSelected.includes(number)
-        if (!isRemove && assignSelected.length) {
-          const selFloor = tables.find(x => x.number === assignSelected[0])?.floor
-          if (selFloor && t.floor && selFloor !== t.floor) {
-            return toast.error('併桌需在同一樓層，請改選同層的桌')
-          }
-        }
-        setAssignSelected(prev => isRemove ? prev.filter(n => n !== number) : [...prev, number])
-        return
+      if (assignSelected.length) {
+        const selFloor = tables.find(x => x.number === assignSelected[0])?.floor
+        if (selFloor && t.floor && selFloor !== t.floor) return toast.error('併桌需在同一樓層，請改選同層的桌')
       }
-      // 單桌：容量足夠即點即配
-      if (t.capacity < guestsNeeded) return toast.error(`${number} 容量不足（${t.capacity} < ${assignBooking.guests}）`)
-      preassignBookingTable(assignBooking.id, number)
-      toast.success(`${assignBooking.name} 已預先配到 ${number}`)
-      setAssignBooking(null)
-      setSelectedTable(number)
+      setAssignSelected(prev => prev.includes(number) ? prev.filter(n => n !== number) : [...prev, number])
       return
     }
     setSelectedTable(prev => prev === number ? null : number)
@@ -174,8 +156,12 @@ export default function SlotMapPanel({
     if (!assignBooking) return
     if (assignSelectedSeats < guestsNeeded) return toast.error(`還差 ${guestsNeeded - assignSelectedSeats} 席，請再加桌`)
     const picked = assignSelected
-    preassignBookingTables(assignBooking.id, picked)
-    toast.success(`${assignBooking.name}（${guestsNeeded} 位）已併桌預配到 ${picked.join(' + ')}`)
+    // 確認前重驗同場次占用與日期可用性，避免選桌後資料被另一台裝置改變。
+    if (!picked.length || picked.some(n => !freeTables.some(t => t.number === n))) return toast.error('所選桌已不可用，請重新選桌')
+    if (new Set(picked.map(n => tables.find(t => t.number === n)?.floor)).size > 1) return toast.error('併桌需在同一樓層')
+    if (picked.length === 1) preassignBookingTable(assignBooking.id, picked[0])
+    else preassignBookingTables(assignBooking.id, picked)
+    toast.success(`${assignBooking.name}（${guestsNeeded} 位）已${picked.length > 1 ? '併桌' : ''}預配到 ${picked.join(' + ')}`)
     setAssignBooking(null)
     setAssignSelected([])
     setSelectedTable(picked[0])
@@ -236,7 +222,7 @@ export default function SlotMapPanel({
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="text-sm font-semibold flex items-center gap-2 flex-wrap">
               <Icon name="chair" size={18} />
-              <span>{assignMulti ? '併桌預配' : '預先配桌'}：{assignBooking.name}（{assignBooking.guests} 位 · {assignBooking.timeSlot}）</span>
+              <span>{'預先配桌'}：{assignBooking.name}（{assignBooking.guests} 位 · {assignBooking.timeSlot}）</span>
               {assignMulti ? (
                 <span className={`inline-flex items-center gap-1 px-2.5 h-7 rounded-lg font-semibold text-sm ${assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
                   已選 {assignSelectedSeats}/{guestsNeeded} 席 · {assignSelected.length} 桌
@@ -259,7 +245,7 @@ export default function SlotMapPanel({
                 disabled={assignSelectedSeats < guestsNeeded}
                 className={`tap text-xs px-4 h-8 rounded-lg font-semibold whitespace-nowrap ${
                   assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-              >✓ 確認併桌預配</button>
+              >✓ {assignSelected.length > 1 ? '確認併桌預配' : '確認預配'}</button>
             </div>
           )}
         </div>

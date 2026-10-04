@@ -19,9 +19,8 @@ export function useDiningMinutes(seatedAt) {
   return Math.max(0, diffMin(seatedAt))
 }
 
-// 併桌（主桌＋額外桌）訂位不支援單桌改桌：現場 move 模式只換主桌，會留下孤兒額外桌
-// （seatingService.moveTable 也會擋）。按鈕照樣顯示但停用，並寫明原因。
-export const MOVE_COMBO_REASON = '併桌訂位不支援單桌改桌，請取消後重新指派，或到現場頁整組處理'
+// 未到訂位可整組重新選桌；已入座併桌不擴充整組改桌。
+export const MOVE_COMBO_REASON = '已入座的併桌客人本輪不支援整組改桌，請保留原訂位與桌位'
 
 // 訂位卡（BookingCard）與訂位詳情（BookingDetailSheet）共用的「衍生資訊 + 動作」。
 // 兩個入口的按鈕顯示條件、確認文案、toast 一律以這裡為準，避免同一筆訂位在兩處行為不一致。
@@ -70,7 +69,7 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
     assign: status === 'confirmed' && !booking.assignedTableId && dayKind !== 'past',
     seat: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'today',
     // 改桌：今日待到、已有桌（現場鎖桌或預配都算）。過去只有「客人到了」，指派後就再也改不了桌。
-    move: !!onMove && status === 'confirmed' && !!booking.assignedTableId && dayKind === 'today',
+    move: !!onMove && isOpen && !!booking.assignedTableId && dayKind === 'today',
     futureAssignedNote: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'future',
     checkout: status === 'arrived',
     edit: isOpen,
@@ -83,13 +82,13 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
     pastNote: dayKind === 'past' && status !== 'completed' && status !== 'cancelled',
   }
 
-  const moveDisabledReason = isCombo ? MOVE_COMBO_REASON : ''
+  const moveDisabledReason = isCombo && !isOpen ? MOVE_COMBO_REASON : ''
 
   // === 動作 ===
   const move = useCallback(() => {
-    if (isCombo) { toast.info(MOVE_COMBO_REASON); return }
+    if (moveDisabledReason) { toast.info(moveDisabledReason); return }
     onMove?.(booking)
-  }, [isCombo, onMove, booking, toast])
+  }, [moveDisabledReason, onMove, booking, toast])
 
   const seat = useCallback(() => {
     if (!booking.assignedTableId) {

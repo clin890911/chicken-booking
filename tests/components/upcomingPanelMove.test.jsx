@@ -73,7 +73,7 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
     expect(b.textContent).toContain('併桌不支援')
     act(() => { b.click() })
     expect(onMoveTable).not.toHaveBeenCalled()
-    expect(toast.info).toHaveBeenCalledWith(expect.stringContaining('併桌訂位不支援單桌改桌'))
+    expect(toast.info).toHaveBeenCalledWith(expect.stringContaining('已入座的併桌客人本輪不支援整組改桌'))
   })
 
   it('電話空白的現場客：人數後面不留「 · 」尾巴', () => {

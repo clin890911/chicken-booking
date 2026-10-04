@@ -16,6 +16,8 @@ test.use({ timezoneId: 'Asia/Taipei' })
 const TODAY = '2026-09-19'
 
 test.beforeEach(async ({ page }) => {
+  // 未被下方 mock 覆蓋的 HTTPS 一律阻擋，測試不得連正式資料或通知。
+  await page.route('https://**/*', route => route.abort())
   await page.clock.setFixedTime(new Date(`${TODAY}T09:00:00+08:00`))
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
@@ -188,7 +190,8 @@ test('規劃：散客名單出現在當日總覽，「→ 配桌」跳排位地�
 
   // 點地圖上的空桌 101（六人桌、容量足夠）完成預配
   await page.locator('svg g:has(:text-is("101"))').first().click()
-  await expect(page.getByText(/已預先配到 101/)).toBeVisible()
+  await page.getByRole('button', { name: '✓ 確認預配' }).click()
+  await expect(page.getByText(/已預配到 101/)).toBeVisible()
 })
 
 test('規劃：抵達時間軸點團 → 跳排位地圖、白圈標示這團座位', async ({ page }) => {

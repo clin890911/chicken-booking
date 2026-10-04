@@ -513,6 +513,57 @@ export function reseatBookingTables(bookingId) {
 //   預配（preassign：只記在 booking 上、桌況沒鎖）→ 只改 booking.assignedTableId，不鎖新桌
 // ★ 舊桌只有「仍由本訂位持有」才清（與 bookingService.releaseTableIfHeldBy 同口徑）：
 //   預配的舊桌此刻可能已被別組帶位，無條件 clearTable 會把那組清掉。
+// 未到訂位整組重選：驗證全部目標後才替換；取消選桌不會提前解除原桌。
+export function replacePendingBookingTables(bookingId, tableNumbers, { now = new Date() } = {}) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking || !['confirmed', 'pending'].includes(booking.status)) return { ok: false, error: '僅未到店訂位可重新選桌；已入座請保留原桌' }
+  const nums = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
+  if (!nums.length) return { ok: false, error: '請至少選一張桌' }
+  const tables = tableService.listAll()
+  const original = bookingTableNumbers(booking)
+  if (tables.some(t => heldBy(t, bookingId) && ['dining', 'cleaning'].includes(t.status))) return { ok: false, error: '此組已入座或離席，無法重新選桌' }
+  const wasHeld = original.some(n => {
+    const t = tables.find(t => String(t.number) === n)
+    return t?.status === 'reserved' && heldBy(t, bookingId)
+  })
+  const kind = wasHeld ? 'hold' : lockKindFor({ date: booking.date, timeSlot: booking.timeSlot, now })
+  const available = kind === 'preassign' ? new Set(preassignableTables(1, { bookingId, date: booking.date, timeSlot: booking.timeSlot, now }).map(t => String(t.number))) : null
+  let seats = 0
+  const floors = new Set()
+  for (const n of nums) {
+    const t = tables.find(t => String(t.number) === n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    if (!isTableUsableOnDate(t, booking.date)) return { ok: false, error: `${n} 停用／維修中` }
+    const ownReserved = t.status === 'reserved' && heldBy(t, bookingId)
+    if (!ownReserved && (kind === 'hold' ? t.status !== 'vacant' : !available.has(n))) return { ok: false, error: occupiedError(n, t) }
+    seats += Number(t.capacity) || 0
+    floors.add(t.floor)
+  }
+  if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
+  if (seats < Number(booking.guests)) return { ok: false, error: `所選桌合計 ${seats} 席，不足 ${booking.guests} 位` }
+  const updatedAt = now.toISOString()
+  const nextTables = tables.map(t => {
+    const n = String(t.number)
+    if (nums.includes(n) && kind === 'hold') return { ...t, status: 'reserved', currentBookingId: bookingId, currentRef: null, seatedAt: null, mergedWith: null, blockReason: null, updatedAt }
+    if (original.includes(n) && !nums.includes(n) && t.status === 'reserved' && heldBy(t, bookingId)) return { ...t, status: 'vacant', currentBookingId: null, currentRef: null, seatedAt: null, mergedWith: null, blockReason: null, updatedAt }
+    return t
+  })
+  // localStorage 兩份資料寫入失敗時還原快照；不留下半組改桌。
+  const keys = ['chicken_tables_v3', 'chicken_bookings_v1']
+  const snapshots = keys.map(key => localStorage.getItem(key))
+  try {
+    const written = tableService.bulkWrite(nextTables)
+    if (!written.ok) return written
+    const changed = bookingService.assignTables(bookingId, nums)
+    if (!changed) throw new Error('訂位不存在')
+    return { ok: true, booking: changed, tableNumbers: nums, kind }
+  } catch {
+    try { keys.forEach((key, i) => snapshots[i] == null ? localStorage.removeItem(key) : localStorage.setItem(key, snapshots[i])) }
+    catch { return { ok: false, error: '裝置儲存異常，請重新整理確認桌況後再操作' } }
+    return { ok: false, error: '改桌儲存失敗，原配桌已保留，請重試' }
+  }
+}
+
 export function moveTable(bookingId, newTableNumber) {
   const booking = bookingService.getById(bookingId)
   if (!booking || !booking.assignedTableId) return { ok: false, error: '訂位無桌位資料' }

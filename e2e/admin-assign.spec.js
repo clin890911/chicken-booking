@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
+import { INITIAL_TABLES } from '../src/data/tables.js'
 
-// 管理端指派主線：同仁登入 → 後台今日列表看到訂位 → 指派桌位（A6 二步確認）→ 指派成功。
+// 管理端指派主線：同仁登入 → 後台今日列表看到訂位 → 指派桌位（A6 人工選桌確認）→ 指派成功。
 // 後台在「本機開發模式」(無 Firebase) 以 localStorage 為後端；攔截 admin* 雲端端點，
 // 避免雲端 pull 覆蓋種子資料、也不碰正式後端。
 // 鎖桌時機（「接近時段才鎖」：離用餐 30 分內指派才鎖桌，更早只預配）會讓確認句／toast 隨時刻不同，
@@ -27,6 +28,8 @@ const BOOKING = {
 }
 
 test.beforeEach(async ({ page }) => {
+  // 未被下方 mock 覆蓋的 HTTPS 一律阻擋，測試不得連正式資料或通知。
+  await page.route('https://**/*', route => route.abort())
   // 預設 17:40：離 18:00 的種子訂位 20 分 → 指派即鎖桌（各條可再覆寫）
   await page.clock.setFixedTime(at('17:40'))
   // 攔截雲端端點：pull 回 ok:false（會被 catch、保留本機種子資料）、push 回 ok:true（no-op）
@@ -43,7 +46,7 @@ test.beforeEach(async ({ page }) => {
   }, BOOKING)
 })
 
-test('管理端：登入 → 指派桌位（二步確認）→ 指派成功（17:40 指派 18:00＝鎖桌）', async ({ page }) => {
+test('管理端：登入 → 指派桌位（人工選桌確認）→ 指派成功（17:40 指派 18:00＝鎖桌）', async ({ page }) => {
   // 1) 同仁登入（開發模式 email 表單）
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
@@ -66,7 +69,7 @@ test('管理端：登入 → 指派桌位（二步確認）→ 指派成功（17
 
   // 5) 點該桌（SVG 內 <g> 含桌號文字）→ 進入待確認預覽（A6 二步）
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
-  await expect(page.getByText(new RegExp(`確認指派 王大明 至桌 ${tableNo} 並鎖桌？`))).toBeVisible()
+  await expect(page.getByText(`已選：${tableNo}`)).toBeVisible()
 
   // 6) 按「✓ 確認指派」→ 指派成功（成功 toast）
   await page.getByRole('button', { name: /確認指派/ }).click()
@@ -84,12 +87,12 @@ test('管理端：09:00 指派 18:00 的訂位 → 只預配（確認句／toast
 
   await page.getByRole('button', { name: '指派桌位' }).click()
   await expect(page.getByText(/指派桌位：王大明\s*4\s*位/)).toBeVisible()
-  await expect(page.getByText('18:00 預配 · 桌子先不鎖')).toBeVisible()
+  await expect(page.getByText('預配 · 桌子先不鎖')).toBeVisible()
   const chipText = await page.getByText(/^建議\s*\d+/).textContent()
   const tableNo = (chipText.match(/\d+/) || [])[0]
 
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
-  await expect(page.getByText(`確認預配 王大明 到 ${tableNo}？（桌子現在仍可帶位）`)).toBeVisible()
+  await expect(page.getByText(`已選：${tableNo}`)).toBeVisible()
   await expect(page.getByText(/確認指派 王大明/)).toHaveCount(0)
   await page.getByRole('button', { name: '✓ 確認預配' }).click()
   await expect(page.getByText(new RegExp(`王大明（4 位）已預配 ${tableNo}（桌子現在仍可帶位）`))).toBeVisible()
@@ -120,9 +123,12 @@ test('管理端：12 人訂位無單桌可容 → 併桌指派（選多張桌）
 
   // 點「指派桌位」→ 無單桌容納 12 人 → 進入「併桌」指派模式
   await page.getByRole('button', { name: '指派桌位' }).click()
-  await expect(page.getByText(/指派桌位（併桌）：李大團\s*12\s*位/)).toBeVisible()
+  await expect(page.getByText(/指派桌位：李大團\s*12\s*位/)).toBeVisible()
 
-  // 系統已預選建議組合，席數湊滿（≥12）→「確認併桌指派」可按
+  // 不自動勾推薦：店員選兩张六人桌，席數湊滿才可確認。
+  await expect(page.getByText(/已選 0\/12 席/)).toBeVisible()
+  await page.locator('svg g:has(:text-is("101"))').first().click()
+  await page.locator('svg g:has(:text-is("103"))').first().click()
   const confirmBtn = page.getByRole('button', { name: /確認併桌指派/ })
   await expect(confirmBtn).toBeEnabled()
 
@@ -156,4 +162,41 @@ test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、�
   // 113 顯示預配標籤（取代「✓ 可入座」），其他空桌不受影響
   await expect(page.getByText('18:00 預配')).toBeVisible()
   await expect(page.locator('svg g:has(:text-is("112"))').getByText('✓ 可入座')).toBeVisible()
+})
+
+for (const { label, original, selected } of [
+  {label:'多桌改多桌4+4',original:['101','107'],selected:['105','106']},
+  {label:'多桌改單桌8',original:['101','107'],selected:['113']},
+  {label:'單桌改多桌6+4',original:['113'],selected:['108','105']},
+]) test(`未到訂位：${label}，取消保留原桌、確認後才替換`, async ({page}) => {
+  const booking={...BOOKING,guests:8,assignedTableId:original[0],extraTableIds:original.slice(1)}
+  const tables=INITIAL_TABLES.map(t=>({...t,capacity:t.number==='113'?8:t.capacity,...(original.includes(t.number)?{status:'reserved',currentBookingId:booking.id}:{})}))
+  await page.addInitScript(({booking,tables})=>{
+    localStorage.setItem('chicken_bookings_v1',JSON.stringify([booking]))
+    localStorage.setItem('chicken_tables_v3',JSON.stringify(tables))
+  },{booking,tables})
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button',{name:/模擬登入/}).click()
+  await page.getByRole('button',{name:'↔ 改桌',exact:true}).click()
+  await expect(page.getByText(`原配桌 ${original.join(' + ')} · 確認成功前保留`)).toBeVisible()
+  await expect(page.getByText(/已選 0\/8 席/)).toBeVisible()
+  for(const n of selected) await page.locator(`svg g:has(:text-is("${n}"))`).first().click()
+  await page.getByRole('button',{name:'取消',exact:true}).click()
+  const read=()=>page.evaluate(()=>({booking:JSON.parse(localStorage.getItem('chicken_bookings_v1'))[0],tables:JSON.parse(localStorage.getItem('chicken_tables_v3'))}))
+  let state=await read()
+  expect([state.booking.assignedTableId,...state.booking.extraTableIds]).toEqual(original)
+  expect(state.booking.status).toBe('confirmed')
+  // 回今日訂位入口重新改桌。
+  await page.locator('aside').getByRole('button',{name:'訂位',exact:true}).click()
+  await page.getByRole('button',{name:'↔ 改桌',exact:true}).click()
+  for(const n of selected) await page.locator(`svg g:has(:text-is("${n}"))`).first().click()
+  await page.getByRole('button',{name:'✓ 確認改桌',exact:true}).click()
+  await expect(page.getByText(/已改桌至.*原訂位保留/)).toBeVisible()
+  state=await read()
+  expect([state.booking.assignedTableId,...state.booking.extraTableIds]).toEqual(selected)
+  expect(state.booking.status).toBe('confirmed')
+  expect(state.booking.id).toBe(booking.id)
+  for(const n of original.filter(n=>!selected.includes(n))) expect(state.tables.find(t=>t.number===n).status).toBe('vacant')
+  for(const n of selected) expect(state.tables.find(t=>t.number===n)).toMatchObject({status:'reserved',currentBookingId:booking.id})
 })

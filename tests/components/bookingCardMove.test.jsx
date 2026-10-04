@@ -68,13 +68,13 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
     expect(btn('改桌')).toBeUndefined()
   })
 
-  it('U2：併桌訂位 → 改桌呈停用並說明原因，不觸發 onMove', () => {
-    render(mkBooking({ extraTableIds: ['106'] }))
+  it('U2：未到併桌訂位可交給 onMove 整組重選，保留原訂位', () => {
+    const booking = mkBooking({ extraTableIds: ['106'] })
+    render(booking)
     const b = btn('改桌')
-    expect(b.getAttribute('aria-disabled')).toBe('true')
+    expect(b.getAttribute('aria-disabled')).not.toBe('true')
     act(() => { b.click() })
-    expect(onMove).not.toHaveBeenCalled()
-    expect(toast.info).toHaveBeenCalledWith(expect.stringContaining('併桌訂位不支援單桌改桌'))
+    expect(onMove).toHaveBeenCalledWith(booking)
   })
 
   it('U2：入座被擋（桌被別組佔用）→ toast 帶「改桌」出口', () => {

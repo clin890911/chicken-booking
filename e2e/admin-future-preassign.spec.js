@@ -32,6 +32,8 @@ const BOOKINGS = [
 ]
 
 test.beforeEach(async ({ page }) => {
+  // 未被下方 mock 覆蓋的 HTTPS 一律阻擋，測試不得連正式資料或通知。
+  await page.route('https://**/*', route => route.abort())
   await page.route('**/adminPullData', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-offline' }) }))
   await page.route('**/adminPushData', route =>
@@ -86,7 +88,8 @@ test('日曆點明天 → 收合週條 → 日期 guard → 預配導到規劃�
 
   // 點空桌 101（6 人桌，容量足夠；102 已被陳已配佔用）完成預配
   await page.locator('svg g:has(:text-is("101"))').first().click()
-  await expect(page.getByText(/林未來 已預先配到 101/)).toBeVisible()
+  await page.getByRole('button', { name: '✓ 確認預配' }).click()
+  await expect(page.getByText(/林未來（4 位）已預配到 101/)).toBeVisible()
 })
 
 // 大組併桌預配（2026-06-12）：未來日 12 人訂位無單桌可容（最大 6 人桌）→ 規劃地圖進「併桌預配」，
@@ -124,7 +127,7 @@ test('未來日 12 人訂位 → 規劃地圖併桌預配（選兩張桌）成�
 
   // 指派桌位（預配）→ 規劃地圖 → 無單桌可容 12 人 → 併桌預配模式
   await page.getByRole('button', { name: '指派桌位（預配）' }).click()
-  await expect(page.getByText(/併桌預配：李大團/)).toBeVisible()
+  await expect(page.getByText(/預先配桌：李大團/)).toBeVisible()
 
   // 累加選兩張 6 人桌（101 + 103）湊滿 12 席（102 此測無人佔，但任選兩張 6 人桌即可）
   await page.locator('svg g:has(:text-is("101"))').first().click()
