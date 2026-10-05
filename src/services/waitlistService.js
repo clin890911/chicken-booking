@@ -1,3 +1,4 @@
+import { formatDate, todayStr } from '../utils/timeSlots'
 // waitlistService：候位記錄管理
 // 使用情境：客人現場到店、桌位已滿，門口取號加入候位
 // schema: { id, takenAt, name, phone, partySize, lineUserId, estimatedMin,
@@ -23,8 +24,8 @@ function uid() {
 
 function nextNumber(list) {
   // 取號：今日已取號數量 + 1
-  const today = new Date().toISOString().slice(0, 10)
-  const todayCount = list.filter(w => (w.takenAt || '').slice(0, 10) === today).length
+  const today = todayStr()
+  const todayCount = list.filter(w => waitlistDay(w) === today).length
   return todayCount + 1
 }
 
@@ -77,12 +78,21 @@ export function remove(id) {
 }
 
 // 叫號（即將上桌）— 推 LINE 通知用
+export function waitlistDay(w) {
+  const at=new Date(w?.takenAt)
+  return Number.isNaN(at.getTime())?'':formatDate(at)
+}
+export function isSeatEligible(w) {
+  return !!w && ['waiting','called'].includes(w.status) && waitlistDay(w)===todayStr()
+}
 export function call(id) {
+  if (!isSeatEligible(getById(id))) return null
   return update(id, { status: 'called', calledAt: new Date().toISOString() })
 }
 
 // 入座（綁桌）— 從候位變成 dining
 export function seat(id, tableNumber) {
+  if (!isSeatEligible(getById(id))) return null
   return update(id, {
     status: 'seated',
     seatedAt: new Date().toISOString(),

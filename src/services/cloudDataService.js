@@ -1,3 +1,4 @@
+import { compareWaitlistOrder } from '../utils/waitlistOrder'
 import { getSettings, saveSettings } from './settingsService'
 
 const DEFAULT_FUNCTION_BASE = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
@@ -454,6 +455,16 @@ export async function pushChangedData() {
       })
     }
   }
+  for (const item of (result.waitlistUpdates || [])) {
+    const sent=(changed.waitlist||[]).find(w=>w.id===item.id)
+    const current=readJson(KEYS.waitlist,[]).find(w=>w.id===item.id)
+    if (sent && stable(sent)===stable(current)) acceptWaitlistRecord(item)
+    else if (current && (current.queueVersion||0)<(item.queueVersion||0)) {
+      // 送出期間又有本機動作：僅推進server版本，不蓋掉該動作；下一輪仍保留dirty。
+      writeJson(KEYS.waitlist,readJson(KEYS.waitlist,[]).map(w=>w.id===item.id?{...w,queueVersion:item.queueVersion}:w))
+      lastSynced.waitlist[item.id]=stable(item)
+    }
+  }
   if (settingsChanged && !rejected.settings) lastSynced.settings = stable(ds.settings)
   persistSyncState()
   return result
@@ -561,4 +572,19 @@ export async function guestCancelBooking(bookingId, token, reason) {
     method: 'POST',
     body: JSON.stringify({ bookingId, token, reason }),
   })
+}
+
+// 操作型API不進整份資料同步；只有server確認的單筆回應才能接受。
+export async function operationalRequest(name, command = null) {
+  return requestJson(endpoint(name), {method:command?'POST':'GET',headers:await authHeader(),...(command?{body:JSON.stringify(command)}:{})})
+}
+export function acceptWaitlistRecord(item) {
+  const list=readJson(KEYS.waitlist,[])
+  const previous=list.find(w=>w.id===item.id)
+  if ((previous?.queueVersion||0)>(item.queueVersion||0)) return
+  const next=list.filter(w=>w.id!==item.id);next.push(item)
+  next.sort(compareWaitlistOrder)
+  writeJson(KEYS.waitlist,next)
+  lastSynced.waitlist[item.id]=stable(item)
+  persistSyncState()
 }

@@ -34,7 +34,7 @@ const h = vi.hoisted(() => ({
   toast: { success: () => {}, error: () => {}, warning: () => {}, info: () => {} },
 }))
 vi.mock('../../src/contexts/AuthContext', () => ({ useAuth: () => h.auth.current }))
-vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => h.toast }))
+vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => h.toast, useConfirm: () => vi.fn(async()=>true) }))
 
 const FAKE_BASE = 'https://fake-functions.invalid'
 const SYNC_COLLECTIONS = ['bookings', 'tables', 'waitlist', 'customers', 'agencies', 'guides', 'groupReservations']
@@ -87,6 +87,7 @@ function createFakeBackend(role, cloud) {
 
   async function fetchImpl(url, options = {}) {
     const name = url.slice(FAKE_BASE.length + 1)
+    if (name === 'adminHandoff' && (!options.method || options.method === 'GET')) return respond(200, {ok:true,items:[]})
     if (name === 'adminPullData') {
       log.pulls.push({ failed: state.pullFails })
       if (state.pullFails) throw new TypeError('Failed to fetch') // 模擬離線／冷啟動逾時

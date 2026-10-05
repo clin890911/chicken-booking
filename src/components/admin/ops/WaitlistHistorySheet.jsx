@@ -11,12 +11,14 @@ import { formatDate, todayStr } from '../../../utils/timeSlots'
 const STATUS_LABELS = {
   waiting: '等待中',
   called: '已叫號',
+  skipped: '暫過號',
   seated: '已入座',
   left: '已離開',
 }
 const STATUS_COLOR = {
   waiting: 'bg-amber-100 text-amber-800',
   called: 'bg-amber-100 text-amber-800',
+  skipped: 'bg-slate-100 text-slate-700',
   seated: 'bg-emerald-100 text-emerald-800',
   left: 'bg-chicken-brown/5 text-chicken-brown/40',
 }

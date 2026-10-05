@@ -1,3 +1,4 @@
+import HandoffPanel from './ops/HandoffPanel'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import FloorMap from './floormap/FloorMap'
 import ArrivalStrip from './floormap/ArrivalStrip'
@@ -1128,6 +1129,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
             />
           ) : null}
           <div hidden={!!mode || !!selectedTableObj} aria-hidden={!!mode || !!selectedTableObj} inert={mode || selectedTableObj ? '' : undefined} style={mode || selectedTableObj ? { display: 'none' } : undefined} className="flex-1 min-h-0 flex flex-col">
+            <HandoffPanel onLocate={n=>{const t=tables.find(t=>String(t.number)===String(n));if(t)setFloor(t.floor);setSelectedTable(n)}}/>
             <OpsRail
               suspended={!!mode || !!selectedTableObj}
               activeTab={railTab}
