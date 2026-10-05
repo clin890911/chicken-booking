@@ -352,6 +352,8 @@ async function requestJson(url, options = {}) {
     const err = new Error(data.error || data.reason || `request-failed-${res.status}`)
     err.status = res.status
     err.code = data.error || data.reason || ''
+    err.bookingOutcome = data.bookingOutcome || ''
+    err.reasonCode = data.reasonCode || ''
     throw err
   }
   return data

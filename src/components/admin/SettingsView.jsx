@@ -14,6 +14,7 @@ import TelegramSettings from './TelegramSettings'
 import StaffAdminSection from './StaffAdminSection'
 import ExportCenter from './ExportCenter'
 import Icon from '../ui/Icon'
+import { validateLineReadiness } from '../../utils/lineReadiness'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -121,10 +122,9 @@ export default function SettingsView({ onOpenCustomer }) {
   const hoursSummary = `${form.openTime || '—'}–${form.closeTime || '—'} · ${form.slotInterval || 30} 分一格 · ${slotCount} 時段`
   const guardOn = form.onlineAutoCloseEnabled === true
   const guardPercent = Number(form.onlineAutoClosePercent) || 80
-  const guardCutoff = Number(form.onlineSessionCutoffMin) || 0
   const guardSummary = guardOn
-    ? `達 ${guardPercent}% 自動關閉${guardCutoff ? ` · 場次前 ${guardCutoff} 分停訂` : ''}`
-    : '未啟用線上滿座自動關閉'
+    ? `達 ${guardPercent}% 自動關閉 · 抵達前 60 分停止線上訂位`
+    : '抵達前 60 分停止線上訂位 · 未啟用滿座自動關閉'
   // 休店/關閉時段摘要：今天起有幾天有關閉設定（收合時就看得到）
   const upcomingClosureDays = (() => {
     const c = form.closures || {}
@@ -249,19 +249,12 @@ export default function SettingsView({ onOpenCustomer }) {
   const handleSearch = () => {
     setSearchResult(searchNoshow(searchPhone.trim()))
   }
-  // C11：驗證設定（stub）— 檢查啟用 LIFF 時必填欄位是否非空
+  const lineReadiness = validateLineReadiness(form)
   const handleValidateLine = () => {
-    const missing = []
-    if (!form.lineOfficialUrl?.trim()) missing.push('LINE 官方帳號加入連結')
-    if (form.lineUseLiff) {
-      if (!form.lineLiffUrl?.trim()) missing.push('LIFF 訂位綁定連結')
-      if (!form.lineLiffId?.trim()) missing.push('LIFF ID')
+    if (!lineReadiness.ready) {
+      return toast.error(`LINE 通知尚未開通：${lineReadiness.issues.map(i => i.label).join('、')}需要補齊或修正`)
     }
-    if (missing.length === 0) {
-      toast.success('LINE 設定檢查通過：必填欄位都有填寫')
-    } else {
-      toast.error(`尚有必填欄位未填：${missing.join('、')}`)
-    }
+    toast.success('LINE 必要欄位與網址格式檢查通過；仍需確認 LINE Console 設定，並以本人帳號驗證登入及通知送達')
   }
   const handleCloudSync = async (type) => {
     // 「上傳本機資料到 Firestore」是全量覆寫（含 settings），對非店長必然 403；
@@ -530,23 +523,9 @@ export default function SettingsView({ onOpenCustomer }) {
             />
           </div>
           <div>
-            <span className="label">場次開始前停止線上訂位</span>
-            <Select
-              className="mt-2"
-              value={Number(form.onlineSessionCutoffMin) || 0}
-              onChange={e => setForm(f => ({ ...f, onlineSessionCutoffMin: Number(e.target.value) }))}
-              options={[
-                { value: 0, label: '不啟用（時段到點才關）' },
-                { value: 30, label: '30 分鐘前' },
-                { value: 60, label: '1 小時前' },
-                { value: 90, label: '1.5 小時前' },
-                { value: 120, label: '2 小時前' },
-                { value: 180, label: '3 小時前' },
-                { value: 240, label: '4 小時前' },
-              ]}
-            />
-            <div className="mt-2 rounded-xl bg-chicken-brown/5 px-4 py-3 text-xs leading-5 text-chicken-brown/60">
-              到截止時間後，該場次（餐期）所有抵達時段都不再開放線上訂位與線上改期；電話與現場不受影響。
+            <span className="label">線上訂位截止時間</span>
+            <div className="mt-2 rounded-xl bg-chicken-brown/5 px-4 py-3 text-sm leading-6 text-chicken-brown/70">
+              線上訂位依預計抵達時間，至少提前 60 分鐘；不足 60 分鐘請來電詢問。線上改期也適用，電話與現場不受影響。
             </div>
           </div>
         </div>
@@ -789,7 +768,7 @@ export default function SettingsView({ onOpenCustomer }) {
             </Field>
             <Field hint="訂位網站的正式網址。LINE 通知卡片的「管理 / 修改訂位」按鈕連結以此組成；未填則卡片不顯示該按鈕。">
               <Input
-                label="訂位網站網址（選填）"
+                label="訂位網站網址"
                 type="url"
                 value={form.publicSiteUrl || ''}
                 onChange={e => setForm(f => ({ ...f, publicSiteUrl: e.target.value.trim() }))}
@@ -803,30 +782,21 @@ export default function SettingsView({ onOpenCustomer }) {
           <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
             <h3 className="mb-2 text-sm font-bold text-chicken-brown">安裝檢查表</h3>
             <ul className="space-y-1.5">
-              {[
-                { label: '官方帳號加入連結', ok: !!form.lineOfficialUrl?.trim(), required: true },
-                { label: 'LINE Login Channel ID', ok: !!form.lineLoginChannelId?.trim(), hint: '綁定 + 我的訂位查詢' },
-                { label: 'LINE Login 回呼網址', ok: !!form.lineLoginCallbackUrl?.trim(), hint: '需填入 channel Callback 白名單' },
-                ...(form.lineUseLiff ? [
-                  { label: 'LIFF 綁定連結', ok: !!form.lineLiffUrl?.trim(), required: true },
-                  { label: 'LIFF ID', ok: !!form.lineLiffId?.trim(), required: true },
-                ] : []),
-                { label: '訂位網站網址', ok: !!form.publicSiteUrl?.trim(), hint: '通知卡「管理訂位」按鈕用' },
-              ].map(item => (
+              {lineReadiness.checks.map(item => (
                 <li key={item.label} className="flex items-start gap-2 text-sm">
-                  <span aria-hidden className={item.ok ? 'text-chicken-green' : item.required ? 'text-chicken-red' : 'text-chicken-brown/35'}>
-                    {item.ok ? '✓' : item.required ? '✕' : '○'}
+                  <span aria-hidden className={item.ok ? 'text-chicken-green' : 'text-chicken-red'}>
+                    {item.ok ? '✓' : '✕'}
                   </span>
                   <span className={item.ok ? 'text-chicken-brown/70' : 'font-bold text-chicken-brown'}>
                     {item.label}
-                    {item.required && !item.ok && <span className="ml-1 text-xs text-chicken-red">必填</span>}
-                    {item.hint && <span className="ml-1 text-xs font-normal text-chicken-brown/45">· {item.hint}</span>}
+                    {!item.ok && <span className="ml-1 text-xs text-chicken-red">需補齊或修正</span>}
+                    {!item.ok && <span className="ml-1 text-xs font-normal text-chicken-brown/45">· {item.message}</span>}
                   </span>
                 </li>
               ))}
             </ul>
             <p className="mt-2 text-xs leading-5 text-chicken-brown/45">
-              API Token / Secret 一律放後端（Cloud Functions），不在此設定；「測試發送」請於 LINE 內以官方帳號實測。
+              Token / Secret 由後端管理，不在此顯示。欄位檢查不代表登入或送達成功；仍需確認 LINE Console 回呼網址與官方帳號連動，並以本人帳號實測。
             </p>
           </div>
 

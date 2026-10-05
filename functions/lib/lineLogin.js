@@ -44,3 +44,17 @@ export function buildBindResultUrl(publicSiteUrl, { bookingId = '', token = '', 
   if (err) url.searchParams.set('err', String(err).slice(0, 40))
   return url.toString()
 }
+
+// 48hex state唯一消耗，expiry缺失/壞值/到期一律failclosed；commit/delete失敗不交換code。
+export async function consumeLineLoginState(db,state,nowMs){
+  if(typeof state!=='string'||!/^[a-f0-9]{48}$/.test(state))throw Object.assign(Error('invalid-state'),{status:400})
+  const ref=db.collection('lineLoginStates').doc(state)
+  return db.runTransaction(async tx=>{
+    const snap=await tx.get(ref)
+    if(!snap.exists)throw Object.assign(Error('expired-state'),{status:400})
+    const data=snap.data()||{},expiry=Date.parse(data.expiresAt||'')
+    if(!Number.isFinite(nowMs)||!Number.isFinite(expiry)||expiry<=nowMs||typeof data.bookingId!=='string'||!data.bookingId||typeof data.manageToken!=='string'||!data.manageToken)throw Object.assign(Error('expired-state'),{status:400})
+    tx.delete(ref)
+    return data
+  })
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, Search, ShieldCheck, Sparkles, Users } from 'lucide-react'
@@ -9,6 +9,7 @@ import { guestGetAvailability, guestCreateBooking } from '../services/cloudDataS
 import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
 import { bookingOccupancyLabel } from '../utils/capacity'
 import { isValidTwPhone } from '../utils/validation'
+import { loadGuestDraft, saveGuestDraft, clearGuestDraft, prepareGuestDraft, isUncertainDraft } from '../utils/guestDraft'
 
 const NOTE_OPTIONS = [
   { key: 'pet', label: '攜帶寵物' },
@@ -24,15 +25,19 @@ export default function BookingPage() {
   // 客人端不再依賴 useBooking 的全量資料（已不同步），settings 僅作為初始顯示預設。
   const { settings: localSettings } = useBooking()
 
-  const [step, setStep] = useState('availability')
-  const [data, setData] = useState({
+  const restored = useRef(loadGuestDraft())
+  const draftRef = useRef(restored.current)
+  const inFlight = useRef(false)
+  const [uncertain, setUncertain] = useState(isUncertainDraft(restored.current))
+  const [step, setStep] = useState(isUncertainDraft(restored.current) ? 'info' : 'availability')
+  const [data, setData] = useState(() => restored.current?.payload || ({
     guests: 2,
     date: todayStr(),
     timeSlot: '',
     name: '',
     phone: '',
     notes: { pet: false, child: false, mobility: false, text: '' },
-  })
+  }))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState({})
 
@@ -48,19 +53,23 @@ export default function BookingPage() {
   const [serverSlots, setServerSlots] = useState([])
   const [slotsLoading, setSlotsLoading] = useState(true)
   const [slotsError, setSlotsError] = useState('')
+  const availabilityRequest = useRef(0)
 
   const loadAvailability = async (date) => {
+    const request = ++availabilityRequest.current
     setSlotsLoading(true)
     setSlotsError('')
     try {
       const res = await guestGetAvailability(date)
+      if (request !== availabilityRequest.current) return
       setServerSlots(Array.isArray(res.slots) ? res.slots : [])
       if (res.settings) setSettings(s => ({ ...s, ...res.settings }))
     } catch (err) {
+      if (request !== availabilityRequest.current) return
       setServerSlots([])
       setSlotsError(err.message || '無法載入可訂時段，請稍後再試')
     } finally {
-      setSlotsLoading(false)
+      if (request === availabilityRequest.current) setSlotsLoading(false)
     }
   }
 
@@ -135,10 +144,23 @@ export default function BookingPage() {
   const selectedReady = data.guests > 0 && data.date && data.timeSlot
   const canSubmit = data.name.trim() && isValidTwPhone(data.phone)
 
-  const set = (key, value) => setData(d => ({ ...d, [key]: value }))
-  const setGuests = (next) => setData(d => ({ ...d, guests: Math.max(1, Math.min(12, next)), timeSlot: '' }))
-  const setDate = (date) => setData(d => ({ ...d, date, timeSlot: '' }))
-  const toggleNote = (key) => setData(d => ({ ...d, notes: { ...d.notes, [key]: !d.notes[key] } }))
+  const updateData = updater => {
+    if (inFlight.current || isUncertainDraft(draftRef.current)) return
+    setData(current => {
+      const next = updater(current)
+      try { draftRef.current = saveGuestDraft(prepareGuestDraft(next, draftRef.current)) } catch { /* Submit requires durable storage before sending. */ }
+      return next
+    })
+  }
+  const set = (key, value) => {
+    if (inFlight.current || isUncertainDraft(draftRef.current)) return
+    updateData(d => ({ ...d, [key]: value }))
+    if (key === 'timeSlot' && value) setError(current => current.slotRejection ? { ...current, submit: undefined, slotRejection: false } : current)
+  }
+  const setGuests = next => updateData(d => ({ ...d, guests: Math.max(1, Math.min(12, next)), timeSlot: '' }))
+  const setDate = date => updateData(d => ({ ...d, date, timeSlot: '' }))
+  const toggleNote = key => updateData(d => ({ ...d, notes: { ...d.notes, [key]: !d.notes[key] } }))
+  const editSelection = () => { if (!inFlight.current && !isUncertainDraft(draftRef.current)) setStep('availability') }
 
   const continueToInfo = () => {
     if (!selectedReady) return
@@ -149,6 +171,7 @@ export default function BookingPage() {
   }
 
   const submit = async () => {
+    if (inFlight.current) return
     const errs = {}
     if (!data.name.trim()) errs.name = '請填姓名'
     if (!data.phone.trim()) errs.phone = '請填電話'
@@ -156,15 +179,16 @@ export default function BookingPage() {
     setError(errs)
     if (Object.keys(errs).length > 0) return
 
+    inFlight.current = true
     setBusy(true)
+    let sent = false
     try {
+      const draft = saveGuestDraft(prepareGuestDraft(data, draftRef.current, 'pending'))
+      draftRef.current = draft
+      sent = true
       const res = await guestCreateBooking({
-        name: data.name.trim(),
-        phone: data.phone.trim(),
-        guests: data.guests,
-        date: data.date,
-        timeSlot: data.timeSlot,
-        notes: data.notes,
+        ...draft.payload,
+        submissionKey: draft.submissionKey,
         // LIFF 內訂位：附帶 LINE 身分（後端驗 idToken 後訂位即綁定＋推播確認卡）
         ...(lineIdentity?.idToken ? {
           line: {
@@ -176,22 +200,40 @@ export default function BookingPage() {
         } : {}),
       })
       const booking = res.booking
+      if (!booking?.id || !booking.manageToken) throw new Error('尚未取得完整訂位結果')
+      clearGuestDraft()
+      draftRef.current = null
+      setUncertain(false)
       // 後端回傳完整訂位（含 manageToken），用 route state 帶到確認頁。
       // 同時把 token 放進網址：重新整理或把連結傳到另一支手機時，確認頁可用 id+token 向後端補抓，
       // 不會再因 route state 消失而「找不到此訂位」。
       const tokenQuery = booking.manageToken ? `?token=${encodeURIComponent(booking.manageToken)}` : ''
       navigate(`/confirm/${booking.id}${tokenQuery}`, { state: { booking, store: res.store || res.settings || null } })
     } catch (err) {
-      // 409：時段剛被訂滿或重複下單 → 退回選時段步驟並重新載入可訂時段
-      if (err.status === 409) {
-        setError({ submit: err.message })
-        setStep('availability')
-        loadAvailability(data.date)
-        window.scrollTo(0, 0)
+      const knownRejected = err.bookingOutcome === 'not-created'
+      if ((sent && !knownRejected) || (!sent && isUncertainDraft(draftRef.current))) {
+        const draft = { ...draftRef.current, phase: 'unknown' }
+        draftRef.current = draft
+        try { saveGuestDraft(draft) } catch { /* The already-saved pending key remains recoverable. */ }
+        setUncertain(true)
+        setError({ submit: '尚未確認訂位結果。請按「確認同一筆訂位」取回結果，請勿重複建立新訂位；也可來電確認。' })
       } else {
-        setError({ submit: err.message || '訂位失敗，請稍後再試' })
+        if (draftRef.current) { draftRef.current = { ...draftRef.current, phase: 'editing' }; try { saveGuestDraft(draftRef.current) } catch {} }
+        setUncertain(false)
+        setError({ submit: err.message || '未能送出訂位，請稍後再試' })
+        const rejectedSlot = knownRejected && ['booking-deadline-passed', 'booking-slot-past'].includes(err.reasonCode)
+        if (rejectedSlot) {
+          const next = { ...data, timeSlot: '' }
+          setData(next)
+          try { draftRef.current = saveGuestDraft(prepareGuestDraft(next, draftRef.current)) } catch {}
+          setStep('availability')
+          loadAvailability(data.date)
+          setError({ slotRejection: true, submit: '此抵達時段已停止線上訂位。已更新可訂時段，請選擇較晚時段；若需較早到店，請來電詢問。' })
+          window.scrollTo(0, 0)
+        } else if (knownRejected && err.status === 409) { setStep('availability'); loadAvailability(data.date); window.scrollTo(0, 0) }
       }
     } finally {
+      inFlight.current = false
       setBusy(false)
     }
   }
@@ -201,7 +243,8 @@ export default function BookingPage() {
       <header className="sticky top-0 z-30 border-b border-chicken-brown/10 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
           <button
-            onClick={() => step === 'info' ? setStep('availability') : navigate('/')}
+            disabled={busy || uncertain}
+            onClick={() => step === 'info' ? editSelection() : navigate('/')}
             className="flex h-10 w-10 items-center justify-center rounded-full bg-chicken-brown/5 text-chicken-brown transition hover:bg-chicken-brown/10"
             aria-label="返回"
           >
@@ -228,6 +271,7 @@ export default function BookingPage() {
       </header>
 
       <main className="mx-auto grid w-full max-w-5xl gap-5 px-4 py-5 lg:grid-cols-[1fr_340px]">
+        {uncertain && <div role="status" className="surface border border-chicken-red/30 p-4 text-sm lg:col-span-2">上一筆訂位結果尚未確認。請按「確認同一筆訂位」取回原訂位結果，資料與時段暫時保留，請勿另建一筆。</div>}
         {/* step 切換刻意不用 AnimatePresence mode="wait"：framer-motion 11.x 有多個
             「exit 完成回呼遺失 → 新畫面永不掛載」的已知 bug（12.x 才修），手機上會整片白屏
             且不拋例外、ErrorBoundary 攔不到。改用 key 重掛 + 純 CSS 進場動畫，
@@ -237,7 +281,7 @@ export default function BookingPage() {
             <HeroPanel />
             <PartyPanel guests={data.guests} onSetGuests={setGuests} />
             <CalendarPicker dates={dates} value={data.date} onChange={setDate} />
-            {error.submit && (
+            {error.submit && !uncertain && (
               <div className="surface border border-chicken-red/30 bg-chicken-red/5 p-4 text-sm font-bold text-chicken-red">
                 {error.submit}
               </div>
@@ -265,7 +309,7 @@ export default function BookingPage() {
               </p>
             </div>
 
-            {error.submit && (
+            {error.submit && !uncertain && (
               <div className="surface border border-chicken-red/30 bg-chicken-red/5 p-4 text-sm font-bold text-chicken-red">
                 {error.submit}
               </div>
@@ -273,6 +317,7 @@ export default function BookingPage() {
 
             <div className="surface space-y-4 p-5">
               <Input
+                disabled={busy || uncertain}
                 label="姓名"
                 value={data.name}
                 onChange={e => { set('name', e.target.value); if (error.name) setError(p => ({ ...p, name: undefined })) }}
@@ -280,6 +325,7 @@ export default function BookingPage() {
                 error={error.name}
               />
               <Input
+                disabled={busy || uncertain}
                 label="電話"
                 type="tel"
                 inputMode="numeric"
@@ -302,6 +348,7 @@ export default function BookingPage() {
                       <button
                         type="button"
                         key={option.key}
+                        disabled={busy || uncertain}
                         onClick={() => toggleNote(option.key)}
                         className={`min-h-[48px] rounded-xl border px-2 text-sm font-bold transition-all ${
                           active
@@ -317,6 +364,7 @@ export default function BookingPage() {
               </div>
 
               <Textarea
+                disabled={busy || uncertain}
                 label="備註（選填）"
                 value={data.notes.text}
                 onChange={e => set('notes', { ...data.notes, text: e.target.value })}
@@ -346,8 +394,9 @@ export default function BookingPage() {
             ready={selectedReady}
             step={step}
             busy={busy}
+            uncertain={uncertain}
             canSubmit={canSubmit}
-            onEdit={() => setStep('availability')}
+            onEdit={editSelection}
             onContinue={continueToInfo}
             onSubmit={submit}
           />
@@ -360,8 +409,9 @@ export default function BookingPage() {
         ready={selectedReady}
         step={step}
         busy={busy}
+        uncertain={uncertain}
         canSubmit={canSubmit}
-        onEdit={() => setStep('availability')}
+        onEdit={editSelection}
         onContinue={continueToInfo}
         onSubmit={submit}
       />
@@ -641,7 +691,7 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
   )
 }
 
-function BookingSummary({ data, settings, ready, step, busy, canSubmit, onEdit, onContinue, onSubmit }) {
+function BookingSummary({ data, settings, ready, step, busy, uncertain, canSubmit, onEdit, onContinue, onSubmit }) {
   return (
     <motion.div layout className="hidden rounded-2xl border border-chicken-brown/10 bg-white p-5 shadow-sm lg:block">
       <div className="mb-4 flex items-center gap-2 text-sm font-black text-chicken-brown">
@@ -660,9 +710,9 @@ function BookingSummary({ data, settings, ready, step, busy, canSubmit, onEdit, 
         ) : (
           <>
             <button disabled={!canSubmit || busy} onClick={onSubmit} className="btn-primary w-full">
-              {busy ? '送出中...' : '完成訂位'}
+              {busy ? '確認中...' : uncertain ? '確認同一筆訂位' : '完成訂位'}
             </button>
-            <button onClick={onEdit} className="btn-secondary w-full">修改人數 / 日期 / 時間</button>
+            <button disabled={busy || uncertain} onClick={onEdit} className="btn-secondary w-full">修改人數 / 日期 / 時間</button>
           </>
         )}
       </div>
@@ -670,7 +720,7 @@ function BookingSummary({ data, settings, ready, step, busy, canSubmit, onEdit, 
   )
 }
 
-function MobileActionBar({ data, ready, step, busy, canSubmit, onEdit, onContinue, onSubmit }) {
+function MobileActionBar({ data, ready, step, busy, uncertain, canSubmit, onEdit, onContinue, onSubmit }) {
   return (
     <div data-testid="mobile-action-bar" className="fixed inset-x-0 bottom-0 z-30 border-t border-chicken-brown/10 bg-white/95 backdrop-blur lg:hidden safe-bottom">
       <div className="mx-auto max-w-md px-4 py-3">
@@ -686,9 +736,9 @@ function MobileActionBar({ data, ready, step, busy, canSubmit, onEdit, onContinu
           </button>
         ) : (
           <div className="flex gap-2">
-            <button onClick={onEdit} className="btn-secondary px-4">修改</button>
+            <button disabled={busy || uncertain} onClick={onEdit} className="btn-secondary px-4">修改</button>
             <button disabled={!canSubmit || busy} onClick={onSubmit} className="btn-primary flex-1">
-              {busy ? '送出中...' : '完成訂位'}
+              {busy ? '確認中...' : uncertain ? '確認同一筆訂位' : '完成訂位'}
             </button>
           </div>
         )}

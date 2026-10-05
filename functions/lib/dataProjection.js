@@ -43,6 +43,7 @@ export function projectForRead(collectionName, doc, role) {
 // === 寫入白名單（adminPushData）===============================================
 // 伺服器權威 / 密鑰欄位：永不取自客戶端。既有單由 merge 省略保留、新單由伺服器鑄造。這是修 item 2 的核心。
 export const BOOKING_SERVER_OWNED_FIELDS = [
+  'notificationVersion','notificationProtocol','notificationHealth','notificationHealthByEvent',
   'manageToken', 'token',
   'phoneDigits',
   'lineUserId', 'linePushBlocked', 'lineLastNotify',
