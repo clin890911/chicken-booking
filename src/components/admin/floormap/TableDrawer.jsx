@@ -1,3 +1,4 @@
+import { useHandoff } from '../../../contexts/HandoffContext'
 import { useState, useEffect } from 'react'
 import { Modal, Input, Select } from '../../ui'
 import { useToast, useConfirm } from '../../ui/Toast'
@@ -47,6 +48,7 @@ function addDaysStr(dateStr, n) {
 }
 
 export default function TableDrawer({ table: storedTable, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, onWaitlistSeated, mode }) {
+  const handoff=useHandoff()
   const { can } = useAuth()
   const toast = useToast()
   const confirmDialog = useConfirm()
@@ -477,6 +479,10 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
 
       </div>
 
+      {handoff.canWrite && <div className="px-5 py-2 flex gap-2">
+        <button className="min-h-[44px] px-3 border rounded-lg text-xs" onClick={()=>handoff.openTask({tableNumber:String(table.number)})}>＋ 桌位交班</button>
+        {booking&&<button className="min-h-[44px] px-3 border rounded-lg text-xs" onClick={()=>handoff.openTask({bookingId:booking.id,tableNumber:String(table.number)})}>＋ 客人交班</button>}
+      </div>}
       {/* Action 按鈕 */}
       {canEdit && (
         <div className="px-5 pb-5 border-t border-chicken-brown/10 pt-3 space-y-2">

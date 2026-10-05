@@ -1,4 +1,9 @@
-import { useState, useMemo } from 'react'
+import { compareWaitlistOrder } from '../../../utils/waitlistOrder'
+import { useAuth } from '../../../contexts/AuthContext'
+import { waitlistDay } from '../../../services/waitlistService'
+import { todayStr } from '../../../utils/timeSlots'
+import { commandId } from '../../../services/handoffService'
+import { useState, useMemo, useRef } from 'react'
 import { Modal, Input } from '../../ui'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
@@ -16,7 +21,7 @@ function diffMin(d) {
 // 現場右側欄「候位」籤：取號 → 叫號 → 入座全程在現場頁完成。
 // 歷史與統計屬低頻查閱，收在 WaitlistHistorySheet（Modal）不佔常駐欄位。
 export default function WaitlistPanel({ onSeatWaitlist }) {
-  const { waitlist, addWaitlist, callWaitlist, leaveWaitlist } = useBooking()
+  const { waitlist, skipWaitlist, returnWaitlist, addWaitlist, callWaitlist, leaveWaitlist } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
   const [showAdd, setShowAdd] = useState(false)
@@ -28,14 +33,30 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
   const [surname, setSurname] = useState(null)
   const [customName, setCustomName] = useState('')
 
-  const active = waitlist.filter(w => w.status === 'waiting' || w.status === 'called')
+  const {can}=useAuth()
+  const canEdit=can('waitlist.update')
+  const [busy,setBusy]=useState(null)
+  const pending=useRef(new Map())
+  const changeQueue=async(w,action)=>{
+    if(busy)return
+    const key=w.id+':'+(w.queueVersion||0)+':'+action
+    if(!pending.current.has(key))pending.current.set(key,commandId())
+    setBusy(w.id)
+    const result=await (action==='skip'?skipWaitlist:returnWaitlist)(w.id,pending.current.get(key))
+    setBusy(null)
+    if(!result.ok)return toast.error(result.error)
+    pending.current.delete(key)
+    toast.success(action==='skip'?`#${w.queueNumber} 暫過號，號碼保留`:`#${w.queueNumber} 已回來，依原順位恢復候位`)
+  }
+  const skipped=waitlist.filter(w=>w.status==='skipped'&&waitlistDay(w)===todayStr()).sort(compareWaitlistOrder)
+  const active = waitlist.filter(w => ['waiting','called'].includes(w.status)&&waitlistDay(w)===todayStr()).sort(compareWaitlistOrder)
 
   // 「前面還有 N 組」：依取號先後排名（越早取號越前面）
   const aheadOf = useMemo(() => {
     const m = {}
     waitlist
       .filter(w => w.status === 'waiting' || w.status === 'called')
-      .sort((a, b) => (a.takenAt || '').localeCompare(b.takenAt || ''))
+      .sort(compareWaitlistOrder)
       .forEach((w, idx) => { m[w.id] = idx })
     return m
   }, [waitlist])
@@ -71,7 +92,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
           onClick={() => setShowHistory(true)}
           className="text-xs px-2.5 py-1.5 min-h-[32px] bg-white border border-chicken-brown/15 text-chicken-brown rounded-md font-bold"
         >歷史</button>
-        <button onClick={() => setShowAdd(true)} className="text-xs px-2.5 py-1.5 min-h-[32px] bg-chicken-red text-white rounded-md font-bold">
+        <button disabled={!canEdit} onClick={() => setShowAdd(true)} className="text-xs px-2.5 py-1.5 min-h-[32px] bg-chicken-red text-white rounded-md font-bold">
           + 新增取號
         </button>
       </div>
@@ -104,35 +125,37 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                   : <span className="font-bold text-chicken-green"> · 輪到了</span>}
                 {w.notes && <span className="italic"> · 「{w.notes}」</span>}
               </div>
-              <div className="flex gap-1 mt-2">
+              {canEdit&&<div className="flex gap-1 mt-2">
                 <button
-                  onClick={() => onSeatWaitlist?.(w)}
+                  disabled={!!busy} onClick={() => onSeatWaitlist?.(w)}
                   className="flex-1 min-h-[44px] text-[11px] py-1 bg-chicken-green text-white rounded-md font-bold"
                 >
                   入座
                 </button>
                 {w.status === 'waiting' && (
                   <button
-                    onClick={() => callWaitlist(w.id)}
+                    disabled={!!busy} onClick={() => callWaitlist(w.id)}
                     className="flex-1 min-h-[44px] text-[11px] py-1 bg-chicken-yellow text-white rounded-md font-bold"
                   >
                     叫號
                   </button>
                 )}
+                <button disabled={!!busy} onClick={()=>changeQueue(w,'skip')} className="min-h-[44px] text-xs px-2 border rounded-md">{busy===w.id?'儲存中…':'暫過號'}</button>
                 <button
-                  onClick={async () => { if (await confirm(`確定讓 ${w.name || `#${w.queueNumber}`} 棄號？此動作會將其移出候位。`, { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
+                  disabled={!!busy} onClick={async () => { if (await confirm(`確定讓 ${w.name || `#${w.queueNumber}`} 棄號？此動作會將其移出候位。`, { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
                   className="min-h-[44px] text-[11px] px-3 py-1 bg-white border border-chicken-red/40 text-chicken-red rounded-md font-bold hover:bg-chicken-red/5"
                   aria-label="棄號"
                   title="棄號"
                 >
                   ✕
                 </button>
-              </div>
+              </div>}
             </div>
           ))}
         </div>
       )}
 
+      {!!skipped.length&&<section aria-label="暫過號候位" className="mt-3 space-y-2"><h3 className="font-bold text-sm">暫過號 · 保留原號</h3>{skipped.map(w=><div key={w.id} className="p-2 border rounded-lg text-sm"><b>#{w.queueNumber} {w.name}</b> · {w.partySize} 位{canEdit&&<div className="flex gap-2"><button disabled={!!busy} onClick={()=>changeQueue(w,'return')} className="min-h-[44px] px-3 border rounded-lg">{busy===w.id?'儲存中…':'回來了'}</button><button disabled={!!busy} onClick={async()=>{if(await confirm(`確定讓 #${w.queueNumber} 棄號？`,{title:'棄號',danger:true}))leaveWaitlist(w.id)}} className="min-h-[44px] px-3 border rounded-lg">棄號</button></div>}</div>)}</section>}
       {/* 取號 Modal */}
       <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title="候位取號" footer={
         <>

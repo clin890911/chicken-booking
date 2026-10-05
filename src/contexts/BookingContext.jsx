@@ -1,3 +1,4 @@
+import { HandoffProvider } from './HandoffContext'
 import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import * as bookingService from '../services/bookingService'
 import * as tableService from '../services/tableService'
@@ -612,7 +613,18 @@ export function BookingProvider({ children }) {
     safeNotify(() => tg.notifyWaitlistCreated(w))
     return w
   }
-  const callWaitlist = (id) => { waitlistService.call(id); refresh(); syncCloudSoon() }
+  const changeWaitlistQueue = async (id, action, commandId) => {
+    if (!can?.('waitlist.update')) return {ok:false,error:'權限不足'}
+    const w=waitlistService.getById(id)
+    if (!w || waitlistService.waitlistDay(w)!==todayStr() || !(action==='skip'?['waiting','called']:['skipped']).includes(w.status)) return {ok:false,error:'候位已更動或不是今天，請重新確認'}
+    try {
+      const data=await cloudData.operationalRequest('adminWaitlistTransition',{id,action,expectedVersion:w.queueVersion||0,commandId})
+      cloudData.acceptWaitlistRecord(data.item);refresh();return {ok:true,item:data.item}
+    }catch(error){return {ok:false,error:error.status===409?'另一台已更動候位，請重新整理確認': '過號操作未儲存，請檢查連線後重試'}}
+  }
+  const skipWaitlist = (id, commandId) => changeWaitlistQueue(id,'skip',commandId)
+  const returnWaitlist = (id, commandId) => changeWaitlistQueue(id,'return',commandId)
+  const callWaitlist = (id) => { const w=waitlistService.call(id); if(w){refresh();syncCloudSoon()} return w }
   const seatWaitlist = (id, tableNumber) => {
     const before = waitlistService.getById(id)
     const r = seatingService.seatWaitlist(id, tableNumber)
@@ -770,7 +782,7 @@ export function BookingProvider({ children }) {
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
-    addWaitlist, callWaitlist, seatWaitlist, seatWaitlistMulti, leaveWaitlist,
+    addWaitlist, callWaitlist, skipWaitlist, returnWaitlist, seatWaitlist, seatWaitlistMulti, leaveWaitlist,
     updateCustomer, setCustomerBlacklist, setCustomerVip,
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
@@ -783,7 +795,7 @@ export function BookingProvider({ children }) {
     refresh, pullCloud, syncCloudSoon, flushCloudNow, discardRejectedChanges,
   ])
 
-  return <BookingContext.Provider value={value}>{children}</BookingContext.Provider>
+  return <BookingContext.Provider value={value}><HandoffProvider>{children}</HandoffProvider></BookingContext.Provider>
 }
 
 export const useBooking = () => useContext(BookingContext)

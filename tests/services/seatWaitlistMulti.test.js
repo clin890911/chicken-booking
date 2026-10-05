@@ -33,7 +33,7 @@ const seedTables = (over = {}) => {
 const seedWait = (over = {}) => {
   const w = {
     id: 'W1', queueNumber: 3, name: '訪客', phone: '0900000000', partySize: 9,
-    status: 'waiting', createdAt: new Date().toISOString(), notes: '', ...over,
+    status: 'waiting', takenAt: new Date().toISOString(), createdAt: new Date().toISOString(), notes: '', ...over,
   }
   localStorage.setItem('chicken_waitlist_v1', JSON.stringify([w]))
   return w

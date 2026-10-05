@@ -342,13 +342,14 @@ export function seatWaitlist(waitId, tableNumber) {
   const wait = waitlistService.getById(waitId)
   const table = tableService.getByNumber(tableNumber)
   if (!wait) return { ok: false, error: '候位記錄不存在' }
+  if (!waitlistService.isSeatEligible(wait)) return { ok: false, error: '此候位已過號、結束或不是今天，請先確認候位狀態' }
   if (!table) return { ok: false, error: '桌位不存在' }
   if (!tableUsableToday(table)) return { ok: false, error: outOfServiceError(tableNumber) }
   if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌` }
   if (wait.partySize > table.capacity) return { ok: false, error: `${tableNumber} 容量不足` }
 
   // 1. 建立一筆 walk-in 訂位（已到店狀態）
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayStr()
   const now = new Date()
   const timeSlot = `${String(now.getHours()).padStart(2, '0')}:${String(Math.floor(now.getMinutes() / 30) * 30).padStart(2, '0')}`
   const booking = bookingService.create({
@@ -388,6 +389,7 @@ export function seatWaitlistMulti(waitId, tableNumbers) {
 
   const wait = waitlistService.getById(waitId)
   if (!wait) return { ok: false, error: '候位記錄不存在' }
+  if (!waitlistService.isSeatEligible(wait)) return { ok: false, error: '此候位已過號、結束或不是今天，請先確認候位狀態' }
 
   let totalCap = 0
   const floors = new Set()
@@ -1251,7 +1253,7 @@ export function executeSweepActions(actions = []) {
       // 重驗：可能已被別的裝置/店員叫號入座、或本來就已經棄號，此時就不重複結一次。
       // 走 waitlistService.leave（純寫入 status:'left' + leftAt），刻意不經任何會發通知的
       // Context wrapper——自動結號絕不能讓客人收到通知。
-      if (w && (w.status === 'waiting' || w.status === 'called')) {
+      if (w && ['waiting','called','skipped'].includes(w.status)) {
         waitlistService.leave(a.waitlistId)
         done.push(a)
       }

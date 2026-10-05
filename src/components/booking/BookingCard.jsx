@@ -1,3 +1,4 @@
+import { useHandoff } from '../../contexts/HandoffContext'
 import { memo, useState } from 'react'
 import { Badge } from '../ui'
 import EditBookingModal from './EditBookingModal'
@@ -20,6 +21,7 @@ export { markNoshow, restoreFromNoshow, cancelWithUndo } from '../../utils/booki
 // 沒變就跳過——BookingContext 已保證資料沒變時沿用同一個物件。
 function BookingCard({ booking, onAssign, onMove }) {
   const toast = useToast()
+  const handoff=useHandoff()
   const act = useBookingActions(booking, { onAssign, onMove })
   const { dayKind, minutes, stage, noshowCount, suggestion, show } = act
   // 桌號徽章分辨兩種「有桌」（口徑同現場頁 UpcomingPanel／桌況圖，見 utils/tableStatus.assignmentKind）：
@@ -164,6 +166,7 @@ function BookingCard({ booking, onAssign, onMove }) {
               : show.seat ? <button onClick={act.seat} className="tap text-sm px-3 min-h-[44px] bg-chicken-green text-white rounded-lg font-bold">客人到了</button>
               : show.checkout ? <button onClick={act.checkout} className="tap text-sm px-3 min-h-[44px] bg-orange-500 text-white rounded-lg font-bold">客人已離席</button>
               : show.restore ? <button onClick={act.restore} className="tap text-sm px-3 min-h-[44px] rounded-lg border font-bold">↩ 恢復為待到</button> : null}
+            {handoff.canWrite&&<button className="tap text-sm px-3 min-h-[44px] border rounded-lg" onClick={()=>handoff.openTask({bookingId:booking.id})}>＋ 交班事項</button>}
             {(show.edit || show.move || show.checkout) && <details className="relative">
               <summary className="tap cursor-pointer list-none px-3 min-h-[44px] flex items-center rounded-lg border text-sm" aria-label={`${booking.name} 更多操作`}>⋯ 更多</summary>
               <div className="mt-1 min-w-[200px] bg-white border rounded-lg shadow-lg p-1 flex flex-col" onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>

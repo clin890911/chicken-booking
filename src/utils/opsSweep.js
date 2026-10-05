@@ -142,7 +142,7 @@ export function computeDayRolloverActions({
   }
 
   for (const w of waitlist) {
-    if (w.status !== 'waiting' && w.status !== 'called') continue
+    if (!['waiting','called','skipped'].includes(w.status)) continue
     const localDate = localDateOf(w.takenAt)
     if (!localDate) continue // 缺 takenAt 或無法解析：無從判斷年齡，不動
     if (localDate < today) {

@@ -1,3 +1,4 @@
+import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
 import crypto from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, FieldValue } from 'firebase-admin/firestore'
@@ -25,6 +26,7 @@ import {
   isPastSessionCutoff,
 } from './lib/onlineGuards.js'
 import {
+  roleCan,
   normalizeStaffEmail,
   resolveStaffRole,
   validateStaffUpsert,
@@ -141,6 +143,41 @@ const SYNC_COLLECTION_IDKEYS = {
   groupReservations: 'id',
 }
 
+// 交班與過號獨立命令：不加入generic collections，保留server actor、版本及重試去重。
+const operationalEndpoint = (kind) => onRequest({cors:PUBLIC_CORS,invoker:'public'},async(req,res)=>{
+  try {
+    const staff=await requireStaff(req)
+    if(req.method==='GET' && kind==='handoff') return res.json({ok:true,items:await listCollection('handoffTasks')})
+    if(req.method!=='POST') return res.status(405).json({ok:false,error:'method-not-allowed'})
+    const command=req.body;checkCommand(command)
+    const requestHash=crypto.createHash('sha256').update(JSON.stringify(command)).digest('hex')
+    const collection=kind==='handoff'?'handoffTasks':'waitlist'
+    const ref=db.collection(collection).doc(command.id)
+    const commandRef=ref.collection('commands').doc(command.commandId)
+    const item=await db.runTransaction(async tx=>{
+      const [record,receipt]=await Promise.all([tx.get(ref),tx.get(commandRef)])
+      // 重試同命令只讀，不重複完成或復原（仍須檢查角色，避免唯讀者猜commandId）。
+      const canWrite=kind==='handoff'?roleCan(staff.role,'table.update'):roleCan(staff.role,'waitlist.update')
+      if(!canWrite) throw errorWithStatus('permission-denied',403)
+      if(receipt.exists) { if(receipt.data().requestHash!==requestHash) throw errorWithStatus('command-reused',409); return record.exists?record.data():receipt.data().item }
+      let references={}
+      if(kind==='handoff' && command.action==='create'){
+        const bookingId=command.bookingId,number=command.tableNumber
+        if((bookingId && (typeof bookingId!=='string'||bookingId.includes('/'))) || (number && (typeof number!=='string'||number.includes('/')))) throw errorWithStatus('invalid-reference',400)
+        const [b,t]=await Promise.all([bookingId?tx.get(db.collection('bookings').doc(bookingId)):null,number?tx.get(db.collection('tables').doc(number)):null])
+        references={bookingExists:!bookingId||b?.exists,tableExists:!number||t?.exists}
+      }
+      const options={role:staff.role,actor:staff.uid,now:new Date().toISOString(),...references}
+      const next=(kind==='handoff'?buildHandoffCommand:buildQueueCommand)(command,record.exists?record.data():null,options)
+      tx.set(ref,next);tx.set(commandRef,{item:next,requestHash,actor:staff.uid,createdAt:options.now})
+      return next
+    })
+    return res.json({ok:true,item})
+  }catch(err){return res.status(err.status||500).json({ok:false,error:err.message||'operation-failed'})}
+})
+export const adminHandoff = operationalEndpoint('handoff')
+export const adminWaitlistTransition = operationalEndpoint('waitlist')
+
 export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   let staff
@@ -191,6 +228,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     //    functions 與前端是分開部署的（functions 先、前端後），中間必然存在新後端＋舊前端的
     //    時間窗，故沿用舊行為當預設，由新前端送 partial:true 才啟用。
     const { dataset = {}, partial = false } = req.body || {}
+    if(dataset.handoffTasks || dataset.deletedIds?.handoffTasks) return res.status(403).json({ok:false,error:'use-handoff-command'})
     // 後端 RBAC：依角色把關每個集合的「寫入/刪除」與「改設定」。
     // 擋的是繞過 UI 直接打 API 的越權（如 kitchen 改設定/刪訂位）。
     const role = staff.role
@@ -210,6 +248,8 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     const beforeBookings = await snapshotBookingsByIds(pushedBookingIds, { strict: true })
     // 泛型遍歷所有同步集合做 merge-upsert（接受「部分資料集」，未帶的集合略過）。
     const ops = []
+    const waitlistUpdates = []
+    let queueRepeated=false
     for (const [name, idKey] of Object.entries(SYNC_COLLECTION_IDKEYS)) {
       if (name === COLLECTIONS.bookings) {
         // bookings 走欄位級白名單：server-owned 欄位（manageToken/history/… ）永不取自客戶端，
@@ -225,6 +265,8 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
             }),
           })
         }
+      } else if (name === COLLECTIONS.waitlist) {
+        // 與其他ops在下方同一transaction提交，任何候位衝突都不留半套帶位。
       } else if (name === COLLECTIONS.customers) {
         // customers：phoneDigits 一律伺服器推導（既有 upsertOps 已覆寫；此處再剝一層防禦）。
         ops.push(...upsertOps(name, (writable[name] || []).map(stripServerOwnedCustomerFields), idKey))
@@ -256,19 +298,46 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       ? await snapshotBookingsByIds(deletedBookingIds)
       : new Map()
     // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
-    await commitInChunks(ops)
-    await notifyAdminBookingChanges(beforeBookings, writable.bookings, notifySettings)
-    await notifyAdminBookingTelegram(beforeBookings, deletedBefore, writable.bookings, deletedBookingIds, notifySettings)
+    const queueItems=writable.waitlist||[]
+    if(queueItems.length){
+      if(new Set(queueItems.map(item=>String(item?.id||'').trim())).size!==queueItems.length) throw errorWithStatus('duplicate-waitlist-id',400)
+      // 含候位時一起原子提交。過大的單批拒絕，不能默默降成部分寫入。
+      if(ops.length+queueItems.length*2>450) throw errorWithStatus('operational-sync-too-large',413)
+      const syncHash=crypto.createHash('sha256').update(JSON.stringify(writable)).digest('hex')
+      await db.runTransaction(async tx=>{
+        const snapshots=await Promise.all(queueItems.map(async item=>{
+          const id=String(item?.id||'').trim()
+          if(!id||id.includes('/')) throw errorWithStatus('invalid-waitlist-id',400)
+          const ref=db.collection('waitlist').doc(id)
+          const receiptRef=ref.collection('commands').doc('sync_'+syncHash)
+          const [previous,receipt]=await Promise.all([tx.get(ref),tx.get(receiptRef)])
+          if(receipt.exists&&(!previous.exists||(previous.data().queueVersion||0)!==(receipt.data().item?.queueVersion||0))) throw errorWithStatus('waitlist-changed',409)
+          return {ref,receiptRef,data:receipt.exists?previous.data():protectQueueUpsert(item,previous.exists?previous.data():null),retry:receipt.exists}
+        }))
+        const repeated=snapshots.every(s=>s.retry)
+        queueRepeated=repeated
+        if(!repeated && snapshots.some(s=>s.retry)) throw errorWithStatus('sync-changed',409)
+        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,{merge:true}) }
+        for(const saved of snapshots){
+          if(!saved.retry){tx.set(saved.ref,saved.data,{merge:true});tx.set(saved.receiptRef,{item:saved.data,createdAt:new Date().toISOString()})}
+        }
+        waitlistUpdates.splice(0,waitlistUpdates.length,...snapshots.map(s=>s.data))
+      })
+    }else await commitInChunks(ops)
+    if(!queueRepeated){
+      await notifyAdminBookingChanges(beforeBookings, writable.bookings, notifySettings)
+      await notifyAdminBookingTelegram(beforeBookings, deletedBefore, writable.bookings, deletedBookingIds, notifySettings)
+    }
     // 有越權時如實回報被拒的部分（僅 partial 客戶端會走到這裡）。ok 仍為 true——
     // 「可寫的已經寫進去了」是事實，前端需要據此推進那些集合的基準線；
     // 被拒的部分由前端隔離、不得標記為已同步。
     if (hasRejection) {
-      return res.json({ ok: true, rejected, rejectedMessage, role })
+      return res.json({ ok: true, rejected, rejectedMessage, role, waitlistUpdates })
     }
-    return res.json({ ok: true })
+    return res.json({ ok: true, waitlistUpdates })
   } catch (err) {
     console.error('adminPushData failed:', err)
-    return res.status(500).json({ ok: false, error: err.message || 'admin-push-failed' })
+    return res.status(err.status || 500).json({ ok: false, error: err.message || 'admin-push-failed' })
   }
 })
 
