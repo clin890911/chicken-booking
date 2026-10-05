@@ -109,6 +109,8 @@ function BookingCard({ booking, onAssign, onMove }) {
                   取消原因：{booking.cancellationReason.reason}
                 </span>
               )}
+              {booking.notificationHealth?.status==='failed'&&<span className="rounded-full bg-chicken-red/10 text-chicken-red px-2 py-0.5 font-bold" title="通知無法送達，但訂位仍保留；請同仁處理">通知失敗，請同仁確認</span>}
+              {booking.notificationHealth?.status==='retrying'&&<span className="rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 font-bold">通知待重試</span>}
               {/* LINE 綁定/送達狀態：被拒（封鎖/非好友）紅、已綁定綠（附最近通知結果）*/}
               {booking.linePushBlocked || booking.lineLastNotify?.status === 'failed' ? (
                 <span className="rounded-full bg-chicken-red/10 px-2 py-0.5 font-bold text-chicken-red" title="LINE 推播被拒或重試用盡，客人需重新加入官方帳號好友">

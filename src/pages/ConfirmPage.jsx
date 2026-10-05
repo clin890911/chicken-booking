@@ -9,6 +9,7 @@ import { useBooking } from '../contexts/BookingContext'
 import { lineLoginStartUrl, lineOfficialUrl } from '../services/lineService'
 import { useLineAuthorizeUrl } from '../hooks/useLineAuthorizeUrl'
 import { guestGetBooking } from '../services/cloudDataService'
+import { isGuestLineReady } from '../utils/lineReadiness'
 
 export default function ConfirmPage() {
   const { id } = useParams()
@@ -78,17 +79,21 @@ export default function ConfirmPage() {
     if (!b?.manageToken) return ''
     return `${window.location.origin}/manage/${b.id}?token=${encodeURIComponent(b.manageToken)}`
   }, [b])
+  const lineReady = isGuestLineReady(guestStoreSettings)
+  const activeBooking = b && ['confirmed', 'pending'].includes(b.status)
+  const statusLabel = ({ confirmed: '已確認', pending: '待確認', arrived: '已到店', completed: '已完成', cancelled: '已取消', noshow: '未到店' })[b?.status] || '訂位紀錄'
   const lineOfficialName = lineSettings.lineOfficialName || 'LINE 官方帳號'
   const lineFriendUrl = lineOfficialUrl(lineSettings)
   // 直達授權預取：CTA href 直指 access.line.me 才能觸發 Universal Link 直跳 LINE app
   // （經後端 302 中轉會掉到帳密網頁表單）。已綁定/待加好友時不預取。
-  const authorizeUrl = useLineAuthorizeUrl(lineSettings, b, !!b && !b.lineUserId && !b.linePushBlocked)
+  const authorizeUrl = useLineAuthorizeUrl(lineSettings, b, lineReady && !!activeBooking && !b.lineUserId && !b.linePushBlocked)
   // 這兩個 URL 在 render 階段計算；任何例外（如異常日期）都不該讓整頁白屏，故 try/catch 後退成空字串。
   // 預取沒回來/失敗 → 退回舊 302 路（lineLoginStart GET），保底不壞。
   const lineReceiveUrl = useMemo(() => {
+    if (!lineReady || !activeBooking) return ''
     if (authorizeUrl) return authorizeUrl
     try { return b ? lineLoginStartUrl(lineSettings, b) : '' } catch { return '' }
-  }, [authorizeUrl, b, lineSettings])
+  }, [authorizeUrl, b, lineSettings, lineReady, activeBooking])
   const calendarUrl = useMemo(() => {
     try { return b ? googleCalendarUrl(b, settings) : '' } catch { return '' }
   }, [b, settings])
@@ -140,7 +145,7 @@ export default function ConfirmPage() {
     <div className="min-h-screen bg-gradient-to-b from-chicken-red/5 via-chicken-cream to-white p-4 flex flex-col relative overflow-hidden">
       {/* 品牌感的成功動畫：彩帶 + 飛舞的雞 */}
       <AnimatePresence>
-        {showConfetti && (
+        {showConfetti && b.status === 'confirmed' && (
           <div className="pointer-events-none absolute inset-0 overflow-hidden z-0" aria-hidden>
             {confettiPieces.map((p, i) => (
               <motion.div
@@ -179,10 +184,10 @@ export default function ConfirmPage() {
               />
             </motion.svg>
           </div>
-          <h1 className="text-2xl font-black text-chicken-brown">訂位成功！</h1>
-          <p className="text-sm text-chicken-brown/70 mt-1">訂位已建立，到店出示訂位編號即可</p>
+          <h1 className="text-2xl font-black text-chicken-brown">{b.status === 'confirmed' ? '訂位成功！' : `訂位${statusLabel}`}</h1>
+          <p className="text-sm text-chicken-brown/70 mt-1">{activeBooking ? '訂位已建立，到店出示訂位編號即可' : '已取回原訂位紀錄，請依目前狀態查閱；不會重新建立訂位。'}</p>
           <p className="mt-1.5 text-xs font-bold leading-5 text-chicken-brown/55">
-            📸 建議截圖保存此頁；或綁定下方 LINE 通知，之後在 LINE 隨時可查詢、修改訂位
+            {lineReady && activeBooking ? '📸 建議截圖保存此頁；或綁定下方 LINE 通知，之後在 LINE 隨時可查詢、修改訂位' : '📸 請保存此頁或管理連結，之後可查閱訂位紀錄。'}
           </p>
         </div>
 
@@ -197,7 +202,7 @@ export default function ConfirmPage() {
                 <div className="font-black text-sm">Master of Chicken</div>
               </div>
             </div>
-            <Badge color="yellow" className="bg-chicken-yellow text-white">已確認</Badge>
+            <Badge color="yellow" className="bg-chicken-yellow text-white">{statusLabel}</Badge>
           </div>
 
           {/* 訂位編號區塊 */}
@@ -251,16 +256,22 @@ export default function ConfirmPage() {
             <div className="flex-1">
               <h2 className="text-base font-black text-chicken-brown">別漏接訂位通知</h2>
               <p className="mt-1 text-xs leading-5 text-chicken-brown/60">
-                訂位卡片、店家定位與任何異動，自動傳到您的 LINE。
+                {lineReady ? '綁定後可在 LINE 接收訂位與異動通知；送達狀態請到 LINE 確認。' : activeBooking ? '訂位已成立，LINE通知尚未開通。請保存訂位編號與管理連結；加入好友不代表已綁定通知。' : `此訂位${statusLabel}，LINE通知尚未開通。請保存原訂位紀錄與管理連結。`}
               </p>
             </div>
           </div>
 
           <div className="mt-3 grid gap-2">
             {/* 已綁定（頁面重新整理走 guestGetBooking 才會有此狀態）→ 顯示綁定成功取代重複的加入流程 */}
-            {b.lineUserId && !b.linePushBlocked ? (
+            {!lineReady ? (
+              <>
+                {lineFriendUrl && <a href={lineFriendUrl} target="_blank" rel="noreferrer" className="btn-secondary text-center">加入 {lineOfficialName} 好友</a>}
+              </>
+            ) : !activeBooking ? (
+              <div className="text-sm">此訂位{statusLabel}，請查閱下方管理連結。</div>
+            ) : b.lineUserId && !b.linePushBlocked ? (
               <div className="rounded-xl bg-white/80 px-3 py-2.5 text-sm font-black text-[#06A848]">
-                ✓ 已綁定 LINE{b.lineDisplayName ? `（${b.lineDisplayName}）` : ''}，訂位卡片與異動會自動傳送
+                ✓ 已綁定 LINE{b.lineDisplayName ? `（${b.lineDisplayName}）` : ''}；{b.lineLastNotify?.status === 'sent' ? '最近通知已送出，請到 LINE 確認' : b.lineLastNotify?.status === 'pending' ? '通知待送出' : b.lineLastNotify?.status === 'failed' ? '最近通知未能送出，請聯絡店家' : '通知是否送達請到 LINE 確認'}
               </div>
             ) : b.linePushBlocked ? (
               <>

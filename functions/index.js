@@ -1,3 +1,6 @@
+import { validateLineReadiness } from './lib/lineReadiness.js'
+import { guestPolicy, isBeforeGuestDeadline, submissionProof, verifyReceipt } from './lib/guestReliability.js'
+import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
 import crypto from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
@@ -48,6 +51,7 @@ import {
 import { sanitizeExportLog } from './lib/exportLog.js'
 import { buildLineBindingRecord } from './lib/lineBinding.js'
 import {
+  consumeLineLoginState,
   buildAuthorizeUrl,
   parseFriendFlag,
   buildBindResultUrl,
@@ -761,7 +765,7 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
             remaining,
             // 已關閉旗標：店休/關閉、場次前截止、滿座門檻任一成立即對線上客人關閉。
             closed: isSlotClosedServer(settings, date, time)
-              || isPastSessionCutoff({ nowMs, slotMs: slotEpochMs(date, time), sessionStartMs: sessionCutoffAnchorMs(settings, date, time), cutoffMin: settings.onlineSessionCutoffMin })
+              || !isBeforeGuestDeadline(nowMs, slotEpochMs(date, time))
               || isOverAutoCloseThreshold({ totalSeats, remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent }),
           }
         })
@@ -779,21 +783,37 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
 // 確保不會超賣（兩組客人同時搶最後座位只會成立到容量上限）。
 export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  let committedBooking=null,replyStore=null,recoveryEnabled=false,wasRecovered=false
   try {
     await enforceRateLimit(req, 'guestCreateBooking')
     const settingsSnap = await db.collection('settings').doc('main').get()
     const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
 
-    const clean = validateNewBooking(req.body || {}, settings)
-    if (!clean.ok) return res.status(400).json({ ok: false, error: clean.error })
-    const data = clean.value
-
+    const proof=submissionProof(req.body||{})
+    recoveryEnabled=!!proof
+    replyStore=publicStoreSettings(settings)
+    const receiptRef=proof?db.collection('guestSubmissionReceipts').doc(proof.id):null
+    let recovered=false
+    let createdIntentId=null
     const bookingId = 'B' + Date.now().toString(36).toUpperCase() + crypto.randomBytes(2).toString('hex').toUpperCase()
     const manageToken = createServerToken()
     const now = new Date().toISOString()
     const bookingsRef = db.collection(COLLECTIONS.bookings)
 
     const booking = await db.runTransaction(async (tx) => {
+      if(receiptRef){
+        const receipt=await tx.get(receiptRef)
+        if(receipt.exists){
+          const originalId=verifyReceipt(receipt.data(),proof)
+          const original=await tx.get(bookingsRef.doc(originalId))
+          if(!original.exists)throw errorWithStatus('submission-recovery-unavailable',410)
+          recovered=true
+          return {id:original.id,...original.data()}
+        }
+      }
+      const clean=validateNewBooking(req.body||{},settings)
+      if(!clean.ok)throw Object.assign(errorWithStatus(clean.error,400),{bookingOutcome:'not-created',reasonCode:clean.reasonCode})
+      const data=clean.value
       // ★ Firestore 交易：所有 read 必須在所有 write 之前。團體佔位讀取與既有兩個 get 並列。
       const [tablesSnap, dateSnap, groupsSnap] = await Promise.all([
         tx.get(db.collection(COLLECTIONS.tables)),
@@ -809,14 +829,14 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         digits(b.phone) === data.phoneDigits &&
         b.timeSlot === data.timeSlot &&
         !['cancelled', 'noshow'].includes(b.status))
-      if (dup) throw errorWithStatus('您已有相同時段的訂位，無需重複預訂', 409)
+      if (dup) throw Object.assign(errorWithStatus('您已有相同時段的訂位，無需重複預訂',409),{bookingOutcome:'not-created'})
 
       const remaining = calcSlotCapacityServer(tables, dayBookings, data.date, data.timeSlot, settings, dayGroups)
       // 滿座門檻自動關閉：已訂達總容量門檻 % 時，線上不再收（剩餘座位留給現場/電話）。
       if (isOverAutoCloseThreshold({ totalSeats: activeTotalSeatsServer(tables, data.date), remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent })) {
-        throw errorWithStatus('此時段線上訂位已截止（接近滿座），歡迎來電洽詢', 409)
+        throw Object.assign(errorWithStatus('此時段線上訂位已截止（接近滿座），歡迎來電洽詢',409),{bookingOutcome:'not-created'})
       }
-      if (remaining < data.guests) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
+      if (remaining < data.guests) throw Object.assign(errorWithStatus('此時段目前已無足夠座位，請改選其他時段',409),{bookingOutcome:'not-created'})
 
       const record = {
         id: bookingId,
@@ -839,11 +859,20 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         createdAt: now,
         updatedAt: now,
         createdBy: 'guest',
+        notificationVersion:1,
       }
+      const intent=notificationIntent({channel:'telegram',event:'created',bookingId:record.id,version:'guest-created-v1',bookingVersion:1,stateHash:notificationStateHash(record),payload:{text:buildTelegramBookingMessage('🆕 <b>新線上訂位</b>',record,{event:'booking_created',booking:record})}},now)
+      createdIntentId=intent.id
+      record.notificationHealthByEvent={[intent.id]:healthEntry(intent,'pending',now)}
+      record.notificationHealth=aggregateNotificationHealth(record.notificationHealthByEvent,now)
+      record.notificationProtocol=1
+      tx.set(db.collection('notificationIntents').doc(intent.id),intent)
+      if(receiptRef)tx.set(receiptRef,{bookingId:record.id,payloadHash:proof.payloadHash,createdAt:now})
       tx.set(bookingsRef.doc(bookingId), record)
       return record
     })
 
+    committedBooking=booking;wasRecovered=recovered
     // 顧客檔 upsert（交易外，best-effort，不影響訂位成立）
     try {
       await db.collection(COLLECTIONS.customers).doc(booking.phoneDigits).set({
@@ -858,19 +887,13 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       console.warn('customer upsert skipped:', e?.message)
     }
 
-    // 內場通知改走 outbox：寫一筆 → 立即試送，失敗由 retryNotifications 自動補送。
-    await enqueueAndTrySend({
-      channel: 'telegram',
-      event: 'created',
-      bookingId: booking.id,
-      payload: { text: buildTelegramBookingMessage('🆕 <b>新線上訂位</b>', booking, { event: 'booking_created', booking }) },
-    })
-
+    // booking/receipt/durable intent已同tx成立；queue/delivery失敗不改成功結果。
+    if(createdIntentId)await processNotificationIntent(createdIntentId).catch(()=>{})
     // LINE-first：LIFF 內訂位時前端附帶 idToken——驗明身分後「建立訂位即綁定＋立即推播確認卡」，
     // 客人零額外動作。全程 best-effort：任何失敗只記 log，絕不影響訂位成功（訂位是主體，綁定是加值）。
     let finalBooking = booking
     const lineInput = req.body?.line
-    if (lineInput?.idToken && settings.lineLoginChannelId) {
+    if (!booking.lineUserId && lineInput?.idToken && settings.lineLoginChannelId) {
       try {
         const claims = await verifyLineIdToken(String(lineInput.idToken), settings.lineLoginChannelId)
         const result = await attachLineBindingAndPush({
@@ -890,11 +913,14 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       }
     }
 
-    return res.json({ ok: true, booking: finalBooking, store: publicStoreSettings(settings) })
+    const latest=await bookingsRef.doc(booking.id).get().catch(()=>null)
+    if(latest?.exists)finalBooking={id:latest.id,...latest.data()}
+    return res.json({ ok: true, booking: finalBooking, store: publicStoreSettings(settings), recovered, recoverySupported:!!proof })
   } catch (err) {
-    const code = err.status || 500
-    if (code >= 500) console.error('guestCreateBooking failed:', err)
-    return res.status(code).json({ ok: false, error: err.message || 'guest-create-failed' })
+    if(committedBooking)return res.json({ok:true,booking:committedBooking,store:replyStore,recovered:wasRecovered,recoverySupported:recoveryEnabled})
+    const code=err.status||500
+    if(code>=500)console.error('guestCreateBooking failed:',err?.message)
+    return res.status(code).json({ok:false,error:err.message||'guest-create-failed',...(err.bookingOutcome?{bookingOutcome:err.bookingOutcome}:{}),...(err.reasonCode?{reasonCode:err.reasonCode}:{})})
   }
 })
 
@@ -904,12 +930,23 @@ export const guestGetBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public' 
     const { bookingId, token } = req.body || {}
     const booking = await getBookingByToken(bookingId, token)
     const settingsSnap = await db.collection('settings').doc('main').get()
-    return res.json({ ok: true, booking, store: normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {}) })
+    return res.json({ ok: true, booking, store: publicStoreSettings(normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})) })
   } catch (err) {
     const code = err.status || 500
     return res.status(code).json({ ok: false, error: err.message || 'guest-get-failed' })
   }
 })
+
+function guestEventIntents(booking,settings,event,binding){
+  const now=new Date().toISOString(),version=String(booking.notificationVersion||1)
+  const title=event==='cancelled'?'❌ <b>客人自助取消訂位</b>':'✏️ <b>客人自助修改訂位</b>'
+  const intents=[notificationIntent({channel:'telegram',event,bookingId:booking.id,version,bookingVersion:booking.notificationVersion,stateHash:notificationStateHash(booking),payload:{text:buildTelegramBookingMessage(title,booking,{event:'guest_'+event,booking})}},now)]
+  if(binding?.lineUserId&&!binding.pushBlocked){
+    const manageUrl=buildManageUrl(settings.publicSiteUrl,booking.id,booking.manageToken)||binding.booking?.manageUrl||''
+    intents.push(notificationIntent({channel:'line',event,bookingId:booking.id,version:version+':'+binding.lineUserId,bookingVersion:booking.notificationVersion,stateHash:notificationStateHash(booking),payload:{to:binding.lineUserId,messages:buildBookingMessages({...booking,manageUrl,dateLabel:dayLabelServer(booking.date)},storeFromSettings(settings),event)}},now))
+  }
+  return intents
+}
 
 export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
@@ -944,65 +981,36 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       updatedAt: now,
     }
 
-    const bookingRef = db.collection(COLLECTIONS.bookings).doc(booking.id)
-    if (structural) {
-      // 改期目標時段須通過與新訂位相同的線上防線。
-      // （補既有缺口：過去只檢查容量，沒擋「已過 / 已關閉 / 場次截止」的目標時段。）
-      if (slotEpochMs(next.date, next.timeSlot) <= Date.now()) {
-        return res.status(409).json({ ok: false, error: '此時段已過，請選擇較晚的時段' })
+    const bookingRef=db.collection(COLLECTIONS.bookings).doc(booking.id)
+    let intentIds=[]
+    const updated=await db.runTransaction(async tx=>{
+      const [saved,bindingSnap]=await Promise.all([tx.get(bookingRef),tx.get(db.collection('lineBookingBindings').doc(booking.id))])
+      if(!saved.exists||!safeTokenEqual(saved.data().manageToken,token))throw errorWithStatus('invalid-booking',403)
+      const current={id:saved.id,...saved.data()}
+      const allowed=guestEditable(current)
+      if(!allowed.ok)throw errorWithStatus(allowed.reason,409) // 原單管理的用餐前2小時規則保留
+      if((current.guestEditCount||0)!==(booking.guestEditCount||0))throw errorWithStatus('訂位資料已更動，請重新整理後再修改',409)
+      if(structural){
+        if(!isBeforeGuestDeadline(Date.now(),slotEpochMs(next.date,next.timeSlot)))throw errorWithStatus('線上改期須至少提前60分鐘，請選擇較晚時段或來電洽詢',409)
+        if(isSlotClosedServer(settings,next.date,next.timeSlot))throw errorWithStatus('此時段已關閉訂位，請改選其他時段',409)
+        const [tablesSnap,dateSnap,groupsSnap]=await Promise.all([tx.get(db.collection(COLLECTIONS.tables)),tx.get(db.collection(COLLECTIONS.bookings).where('date','==',next.date)),tx.get(db.collection(COLLECTIONS.groupReservations).where('date','==',next.date))])
+        const tables=tablesSnap.docs.map(d=>({id:d.id,...d.data()})),others=dateSnap.docs.map(d=>({id:d.id,...d.data()})).filter(b=>b.id!==booking.id),groups=groupsSnap.docs.map(d=>({id:d.id,...d.data()}))
+        const remaining=calcSlotCapacityServer(tables,others,next.date,next.timeSlot,settings,groups)
+        if(isOverAutoCloseThreshold({totalSeats:activeTotalSeatsServer(tables,next.date),remaining,enabled:settings.onlineAutoCloseEnabled,percent:settings.onlineAutoClosePercent})||remaining<Number(next.guests||1))throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段',409)
       }
-      if (isSlotClosedServer(settings, next.date, next.timeSlot)) {
-        return res.status(409).json({ ok: false, error: '此時段已關閉訂位，請改選其他時段' })
-      }
-      if (isPastSessionCutoff({ nowMs: Date.now(), slotMs: slotEpochMs(next.date, next.timeSlot), sessionStartMs: sessionCutoffAnchorMs(settings, next.date, next.timeSlot), cutoffMin: settings.onlineSessionCutoffMin })) {
-        return res.status(409).json({ ok: false, error: '此場次的線上訂位已截止，歡迎來電洽詢' })
-      }
-      // F-E：容量檢查與寫入放進同一交易，與 guestCreateBooking 對齊，避免兩筆並發改期
-      // 同時通過容量檢查造成超賣（TOCTOU）。
-      await db.runTransaction(async (tx) => {
-        const [tablesSnap, dateSnap, groupsSnap] = await Promise.all([
-          tx.get(db.collection(COLLECTIONS.tables)),
-          tx.get(db.collection(COLLECTIONS.bookings).where('date', '==', next.date)),
-          tx.get(db.collection(COLLECTIONS.groupReservations).where('date', '==', next.date)),
-        ])
-        const tables = tablesSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-        const dayBookings = dateSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(b => b.id !== booking.id)
-        const dayGroups = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-        const remaining = calcSlotCapacityServer(tables, dayBookings, next.date, next.timeSlot, settings, dayGroups)
-        // 滿座門檻自動關閉（排除自己後計算）：與 guestCreateBooking 同一道防線。
-        if (isOverAutoCloseThreshold({ totalSeats: activeTotalSeatsServer(tables, next.date), remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent })) {
-          throw errorWithStatus('此時段線上訂位已截止（接近滿座），歡迎來電洽詢', 409)
-        }
-        if (remaining < Number(next.guests || 1)) throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段', 409)
-        tx.set(bookingRef, updatePatch, { merge: true })
-        if (booking.assignedTableId) {
-          tx.set(db.collection(COLLECTIONS.tables).doc(booking.assignedTableId), {
-            status: 'vacant',
-            currentBookingId: null,
-            seatedAt: null,
-            updatedAt: now,
-          }, { merge: true })
-        }
-      })
-    } else {
-      await bookingRef.set(updatePatch, { merge: true })
-    }
-    const updated = { ...booking, ...updatePatch }
-    await enqueueAndTrySend({
-      channel: 'telegram',
-      event: 'updated',
-      bookingId: booking.id,
-      payload: {
-        text: buildTelegramBookingMessage(
-          '✏️ <b>客人自助修改訂位</b>',
-          updated,
-          { event: 'guest_updated', booking: updated, changedKeys },
-          changedKeys.length ? `變動欄位：<code>${escapeTg(changedKeys.join(', '))}</code>` : '',
-        ),
-      },
+      const result={...current,...updatePatch,notificationVersion:(current.notificationVersion||0)+1,notificationHealth:{status:'pending',at:now}}
+      const intents=guestEventIntents(result,settings,'updated',bindingSnap.exists?bindingSnap.data():null)
+      result.notificationHealthByEvent={...(current.notificationHealthByEvent||{}),...Object.fromEntries(intents.map(i=>[i.id,healthEntry(i,'pending',now)]))}
+      result.notificationHealth=aggregateNotificationHealth(result.notificationHealthByEvent,now)
+      intentIds=intents.map(i=>i.id)
+      tx.set(bookingRef,result)
+      intents.forEach(intent=>tx.set(db.collection('notificationIntents').doc(intent.id),intent))
+      const lineIntent=intents.find(i=>i.channel==='line')
+      if(lineIntent)tx.set(db.collection('lineBookingBindings').doc(booking.id),{lastQueuedByEvent:{updated:{stateHash:lineIntent.stateHash,bookingVersion:result.notificationVersion,intentId:lineIntent.id,sequence:(bindingSnap.data()?.lastQueuedByEvent?.updated?.sequence||0)+1}}},{merge:true})
+      if(structural&&current.assignedTableId)tx.set(db.collection(COLLECTIONS.tables).doc(current.assignedTableId),{status:'vacant',currentBookingId:null,seatedAt:null,updatedAt:now},{merge:true})
+      return result
     })
-    // LINE 通知由後端權威送出（過去靠前端 fetch 觸發，客人關頁/斷網就漏發）。
-    await notifyLineBookingChange(booking.id, updated, 'updated', settings)
+    for(const id of intentIds)await processNotificationIntent(id).catch(()=>{})
     return res.json({ ok: true, booking: updated })
   } catch (err) {
     const code = err.status || 500
@@ -1039,33 +1047,26 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       }),
       updatedAt: now,
     }
-    const batch = db.batch()
-    batch.set(db.collection(COLLECTIONS.bookings).doc(booking.id), updatePatch, { merge: true })
-    if (booking.assignedTableId) {
-      batch.set(db.collection(COLLECTIONS.tables).doc(booking.assignedTableId), {
-        status: 'vacant',
-        currentBookingId: null,
-        seatedAt: null,
-        updatedAt: now,
-      }, { merge: true })
-    }
-    await batch.commit()
-    const cancelled = { ...booking, ...updatePatch }
-    await enqueueAndTrySend({
-      channel: 'telegram',
-      event: 'cancelled',
-      bookingId: booking.id,
-      payload: {
-        text: buildTelegramBookingMessage(
-          '❌ <b>客人自助取消訂位</b>',
-          cancelled,
-          { event: 'guest_cancelled', booking: cancelled },
-          `取消原因：${escapeTg(updatePatch.cancellationReason.reason)}`,
-        ),
-      },
+    const settingsSnap=await db.collection('settings').doc('main').get()
+    const settings=normalizeStoreSettings(settingsSnap.exists?settingsSnap.data():{})
+    let intentIds=[]
+    const cancelled=await db.runTransaction(async tx=>{
+      const bookingRef=db.collection(COLLECTIONS.bookings).doc(booking.id)
+      const [saved,bindingSnap]=await Promise.all([tx.get(bookingRef),tx.get(db.collection('lineBookingBindings').doc(booking.id))])
+      if(!saved.exists||!safeTokenEqual(saved.data().manageToken,token))throw errorWithStatus('invalid-booking',403)
+      const current={id:saved.id,...saved.data()},allowed=guestEditable(current)
+      if(!allowed.ok)throw errorWithStatus(allowed.reason,409)
+      const result={...current,...updatePatch,notificationVersion:(current.notificationVersion||0)+1,notificationHealth:{status:'pending',at:now}}
+      const intents=guestEventIntents(result,settings,'cancelled',bindingSnap.exists?bindingSnap.data():null);intentIds=intents.map(i=>i.id)
+      result.notificationHealthByEvent={...(current.notificationHealthByEvent||{}),...Object.fromEntries(intents.map(i=>[i.id,healthEntry(i,'pending',now)]))}
+      result.notificationHealth=aggregateNotificationHealth(result.notificationHealthByEvent,now)
+      tx.set(bookingRef,result);intents.forEach(intent=>tx.set(db.collection('notificationIntents').doc(intent.id),intent))
+      const lineIntent=intents.find(i=>i.channel==='line')
+      if(lineIntent)tx.set(db.collection('lineBookingBindings').doc(booking.id),{lastQueuedByEvent:{cancelled:{stateHash:lineIntent.stateHash,bookingVersion:result.notificationVersion,intentId:lineIntent.id,sequence:(bindingSnap.data()?.lastQueuedByEvent?.cancelled?.sequence||0)+1}}},{merge:true})
+      if(current.assignedTableId)tx.set(db.collection(COLLECTIONS.tables).doc(current.assignedTableId),{status:'vacant',currentBookingId:null,seatedAt:null,updatedAt:now},{merge:true})
+      return result
     })
-    // LINE 通知由後端權威送出（同 guestUpdateBooking，不再依賴前端觸發）。
-    await notifyLineBookingChange(booking.id, cancelled, 'cancelled')
+    for(const id of intentIds)await processNotificationIntent(id).catch(()=>{})
     return res.json({ ok: true, booking: cancelled })
   } catch (err) {
     const code = err.status || 500
@@ -1078,45 +1079,39 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
 // 寫 binding + booking 鏡像（batch 雙寫），未被防重（10 分鐘）/needFriend 擋下時推播確認卡。
 // record 形狀由 lib/lineBinding.buildLineBindingRecord 統一（純函式可測）；
 // 店家資訊一律以當下 settings 為準（不信 client 快照）。
-async function attachLineBindingAndPush({ authBooking, settings, line, existing = null }) {
-  const manageUrl = buildManageUrl(settings.publicSiteUrl, authBooking.id, authBooking.manageToken)
-  const nextStore = storeFromSettings(settings)
-  const now = new Date().toISOString()
-  const { record, bookingPatch, needFriend, skipPush, recentlyPushed } = buildLineBindingRecord({
-    authBooking,
-    manageUrl,
-    store: nextStore,
-    line,
-    existing,
-    now,
-    nowMs: Date.now(),
+async function attachLineBindingAndPush({authBooking,settings,line}){
+  const bookingRef=db.collection(COLLECTIONS.bookings).doc(authBooking.id),bindingRef=db.collection('lineBookingBindings').doc(authBooking.id)
+  let intentId=null
+  const result=await db.runTransaction(async tx=>{
+    const [saved,bindingSnap,legacySnap]=await Promise.all([tx.get(bookingRef),tx.get(bindingRef),tx.get(db.collection('notifications').where('bookingId','==',authBooking.id).limit(100))])
+    if(!saved.exists||!safeTokenEqual(saved.data().manageToken,authBooking.manageToken))throw errorWithStatus('invalid-booking',403)
+    const current={id:saved.id,...saved.data()},existing=bindingSnap.exists?bindingSnap.data():null,now=new Date().toISOString()
+    const manageUrl=buildManageUrl(settings.publicSiteUrl,current.id,current.manageToken)
+    const built=buildLineBindingRecord({authBooking:current,manageUrl,store:storeFromSettings(settings),line,existing,now,nowMs:Date.now()})
+    const bookingPatch={...built.bookingPatch,notificationVersion:current.notificationVersion||1}
+    const doc={channel:'line',event:'confirmed',bookingId:current.id,version:String(bookingPatch.notificationVersion)+':'+line.userId,bookingVersion:bookingPatch.notificationVersion,stateHash:notificationStateHash(current),payload:{to:line.userId,messages:buildBookingMessages({...current,manageUrl,dateLabel:dayLabelServer(current.date)},storeFromSettings(settings),'confirmed')}}
+    const intent=notificationIntent(doc,now),intentRef=db.collection('notificationIntents').doc(intent.id),outboxRef=db.collection('notifications').doc(intent.id)
+    const [priorIntent,priorOutbox]=await Promise.all([tx.get(intentRef),tx.get(outboxRef)])
+    const markerMs=Date.parse(existing?.lastBindPushAt||existing?.lastPushedAt||'')
+    const legacySent=!current.notificationVersion&&built.recentlyPushed&&legacySnap.docs.some(d=>{const n=d.data(),at=Date.parse(n.sentAt||'');return n.status==='sent'&&n.channel==='line'&&['created','confirmed'].includes(n.event)&&n.payload?.to===line.userId&&Number.isFinite(markerMs)&&at>=markerMs&&at-markerMs<10*60_000})
+    // pure builder的舊lastBindPushAt不可在送達之前標成功。
+    const record={...built.record};delete record.lastBindPushAt;delete record.lastPushByEvent
+    tx.set(bindingRef,record,{merge:true});tx.set(bookingRef,bookingPatch,{merge:true})
+    if(!built.needFriend){
+      if(!priorIntent.exists)tx.set(intentRef,{...intent,...(legacySent?{status:'queued',migration:'legacy-sent-proof'}:{})})
+      if(legacySent&&!priorOutbox.exists)tx.set(outboxRef,{...outboxFromIntent(intent,now),status:'sent',sentAt:existing.lastBindPushAt||existing.lastPushedAt,migration:'legacy-sent-proof'})
+      intentId=intent.id
+      const existingStatus=legacySent?'sent':priorOutbox.data()?.status
+      const status=existingStatus==='failed'?'failed':existingStatus==='sent'?'sent':'pending'
+      bookingPatch.notificationHealthByEvent={...(current.notificationHealthByEvent||{}),[intent.id]:healthEntry(intent,status,now)}
+      bookingPatch.notificationHealth=aggregateNotificationHealth(bookingPatch.notificationHealthByEvent,now)
+      tx.set(bookingRef,{notificationHealthByEvent:bookingPatch.notificationHealthByEvent,notificationHealth:bookingPatch.notificationHealth},{merge:true})
+      tx.set(bindingRef,{lastQueuedByEvent:{confirmed:{stateHash:doc.stateHash,bookingVersion:bookingPatch.notificationVersion,intentId:intent.id,sequence:(existing?.lastQueuedByEvent?.confirmed?.sequence||0)+1}}},{merge:true})
+    }
+    return {...built,bookingPatch,skipPush:built.needFriend||legacySent||priorOutbox.data()?.status==='sent',recentlyPushed:legacySent}
   })
-
-  const batch = db.batch()
-  batch.set(db.collection('lineBookingBindings').doc(authBooking.id), {
-    ...record,
-    updatedAt: FieldValue.serverTimestamp(),
-    createdAt: existing?.createdAt || FieldValue.serverTimestamp(),
-  }, { merge: true })
-  batch.set(db.collection(COLLECTIONS.bookings).doc(authBooking.id), bookingPatch, { merge: true })
-  await batch.commit()
-
-  if (!skipPush) {
-    await enqueueAndTrySend({
-      channel: 'line',
-      event: 'created',
-      bookingId: authBooking.id,
-      payload: {
-        to: line.userId,
-        messages: buildBookingMessages(
-          { ...authBooking, manageUrl, dateLabel: dayLabelServer(authBooking.date) },
-          nextStore,
-          'confirmed',
-        ),
-      },
-    })
-  }
-  return { needFriend, skipPush, recentlyPushed, bookingPatch }
+  if(intentId)await processNotificationIntent(intentId).catch(()=>{})
+  return result
 }
 
 export const lineBind = onRequest({ cors: true, invoker: 'public', secrets: [LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
@@ -1222,7 +1217,7 @@ export const lineLoginStart = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }
       const dest = buildBindResultUrl(settings.publicSiteUrl, { bookingId, token, bound: 0, err })
       return dest ? res.redirect(302, dest) : res.status(400).send(`line-login-start: ${err}`)
     }
-    if (!channelId || !callbackUrl) return fail('not-configured')
+    if (!validateLineReadiness(settings).ready) return fail('not-configured')
 
     // 權威驗證 bookingId + manageToken（失敗→導回錯誤頁，不洩漏細節）
     let authBooking
@@ -1271,20 +1266,14 @@ export const lineLoginCallback = onRequest(
       const state = String(req.query.state || '')
       if (!code || !state) return fail('missing-code')
 
-      // 一次性 state：讀出後立即刪除，過期即拒
-      const stateRef = db.collection('lineLoginStates').doc(state)
-      const stateSnap = await stateRef.get()
-      if (!stateSnap.exists) return fail('expired')
-      const stateData = stateSnap.data() || {}
-      await stateRef.delete().catch(() => {})
-      if (stateData.expiresAt && Date.parse(stateData.expiresAt) <= Date.now()) return fail('expired')
+      const stateData=await consumeLineLoginState(db,state,Date.now())
       const bookingId = stateData.bookingId || ''
       const manageToken = stateData.manageToken || ''
 
       const channelId = settings.lineLoginChannelId
       const channelSecret = lineLoginChannelSecret()
       const callbackUrl = settings.lineLoginCallbackUrl
-      if (!channelId || !channelSecret || !callbackUrl) return fail('not-configured', bookingId, manageToken)
+      if (!validateLineReadiness(settings).ready || !channelSecret) return fail('not-configured', bookingId, manageToken)
 
       const tokenData = await exchangeLineLoginCode({ code, redirectUri: callbackUrl, channelId, channelSecret })
       const claims = await verifyLineIdToken(tokenData.id_token, channelId)
@@ -1370,7 +1359,7 @@ export const lineGetBooking = onRequest({ cors: true, invoker: 'public' }, async
       return res.json({
         ok: true,
         booking,
-        store: normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {}),
+        store: publicStoreSettings(normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})),
         line: {},
       })
     }
@@ -1553,54 +1542,35 @@ function storeFromSettings(settings = {}) {
 // - 任何錯誤只記 log，絕不影響主回應（與 outbox 哲學一致）
 // - opts.queueOnly：只入列、不立即試送——adminPushData 熱路徑用（該端點沒綁 LINE secret、
 //   也不該吃 3.5 秒 timeout），由 retryNotifications 排程在 ≤2 分鐘內代送。
-async function notifyLineBookingChange(bookingId, booking, event, providedSettings = null, { queueOnly = false } = {}) {
-  try {
-    const bindingRef = db.collection('lineBookingBindings').doc(bookingId)
-    const snap = await bindingRef.get()
-    if (!snap.exists) return { skipped: 'no-binding' }
-    const binding = snap.data()
-    if (!binding.lineUserId) return { skipped: 'no-line-user' }
-    if (binding.pushBlocked) return { skipped: 'push-blocked' }
-
-    const stateHash = notificationStateHash(booking)
-    if (shouldSkipDuplicatePush(binding.lastPushByEvent, event, stateHash, Date.now())) {
-      return { skipped: 'duplicate-push' }
-    }
-
-    let settings = providedSettings
-    if (!settings) {
-      const settingsSnap = await db.collection('settings').doc('main').get()
-      settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
-    }
-    const manageUrl = buildManageUrl(settings.publicSiteUrl, bookingId, booking.manageToken)
-      || binding.booking?.manageUrl || ''
-
-    const now = new Date().toISOString()
-    await bindingRef.set({
-      booking: manageUrl ? { ...booking, manageUrl } : booking,
-      lastPushByEvent: { ...(binding.lastPushByEvent || {}), [event]: { at: now, stateHash } },
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true })
-    const outboxDoc = {
-      channel: 'line',
-      event,
-      bookingId,
-      payload: {
-        to: binding.lineUserId,
-        messages: buildBookingMessages(
-          { ...booking, manageUrl, dateLabel: dayLabelServer(booking.date) },
-          storeFromSettings(settings),
-          event,
-        ),
-      },
-    }
-    if (queueOnly) await enqueueNotification(outboxDoc)
-    else await enqueueAndTrySend(outboxDoc)
-    return { ok: true }
-  } catch (err) {
-    console.error('notifyLineBookingChange failed:', err?.message)
-    return { ok: false, error: err?.message }
-  }
+async function notifyLineBookingChange(bookingId,booking,event,providedSettings=null,{queueOnly=false}={}){
+  try{
+    const settings=providedSettings||normalizeStoreSettings((await db.collection('settings').doc('main').get()).data()||{})
+    const bindingRef=db.collection('lineBookingBindings').doc(bookingId)
+    const id=await db.runTransaction(async tx=>{
+      const [bindingSnap,legacySnap]=await Promise.all([tx.get(bindingRef),tx.get(db.collection('notifications').where('bookingId','==',bookingId).limit(100))])
+      if(!bindingSnap.exists)return null
+      const binding=bindingSnap.data()
+      if(!binding.lineUserId||binding.pushBlocked)return null
+      const stateHash=notificationStateHash(booking),bookingVersion=Number(booking.notificationVersion)||0,cursor=binding.lastQueuedByEvent?.[event]
+      const repeated=cursor&&cursor.stateHash===stateHash&&cursor.bookingVersion===bookingVersion
+      const sequence=repeated?cursor.sequence:(Number(cursor?.sequence)||0)+1
+      const manageUrl=buildManageUrl(settings.publicSiteUrl,bookingId,booking.manageToken)||binding.booking?.manageUrl||''
+      const doc={channel:'line',event,bookingId,version:'line-event-'+sequence+':'+binding.lineUserId,bookingVersion:bookingVersion||undefined,stateHash,payload:{to:binding.lineUserId,messages:buildBookingMessages({...booking,manageUrl,dateLabel:dayLabelServer(booking.date)},storeFromSettings(settings),event)}}
+      const intent=notificationIntent(doc,new Date().toISOString());if(repeated)intent.id=cursor.intentId
+      const intentRef=db.collection('notificationIntents').doc(intent.id),outboxRef=db.collection('notifications').doc(intent.id)
+      const [priorIntent,priorOutbox]=await Promise.all([tx.get(intentRef),tx.get(outboxRef)])
+      const marker=binding.lastPushByEvent?.[event],markerMs=Date.parse(marker?.at||'')
+      const legacySent=!cursor&&!bookingVersion&&marker?.stateHash===stateHash&&legacySnap.docs.some(d=>{const n=d.data(),at=Date.parse(n.sentAt||'');return n.status==='sent'&&n.channel==='line'&&n.event===event&&n.payload?.to===binding.lineUserId&&Number.isFinite(markerMs)&&at>=markerMs&&at-markerMs<90_000})
+      if(!priorIntent.exists)tx.set(intentRef,{...intent,...(legacySent?{status:'queued',migration:'legacy-sent-proof'}:{})})
+      if(legacySent&&!priorOutbox.exists)tx.set(outboxRef,{...outboxFromIntent(intent,new Date().toISOString()),status:'sent',sentAt:marker.at,migration:'legacy-sent-proof'})
+      tx.set(bindingRef,{lastQueuedByEvent:{[event]:{stateHash,bookingVersion,intentId:intent.id,sequence}}},{merge:true})
+      return intent.id
+    })
+    if(!id)return {skipped:'no-binding-or-push-blocked'}
+    const queued=await queueNotificationIntent(id)
+    if(!queueOnly)await sendOutboxDoc(queued.ref,queued.record)
+    return {ok:true}
+  }catch{return {ok:false,error:'notification-queue-or-delivery-failed'}}
 }
 
 function buildBookingMessages(booking, store, type) {
@@ -1863,6 +1833,7 @@ function normalizeStoreSettings(settings = {}) {
     autoNoshowOnRollover: settings.autoNoshowOnRollover === true,
     // 線上訂位防線：滿座門檻自動關閉 + 場次前截止（與前端 settingsService withDefaults 成對）
     ...normalizeOnlineGuardSettings(settings),
+    ...guestPolicy(),
     heroBanners: Array.isArray(settings.heroBanners) ? settings.heroBanners : [],
     lineOfficialUrl: settings.lineOfficialUrl || 'https://lin.ee/8lECi4S',
     lineOfficialName: settings.lineOfficialName || '雞王涮涮鍋 LINE 官方帳號',
@@ -2124,11 +2095,15 @@ function normalizeDateInput(value) {
 
 // 客人端可見的店家設定子集（不外流任何顧客資料）
 function publicStoreSettings(settings = {}) {
+  const readiness=validateLineReadiness(settings)
   return {
+    lineLoginReady:readiness.ready,
+    lineLoginIssues:readiness.issues.map(issue=>issue.message),
     openTime: settings.openTime,
     closeTime: settings.closeTime,
     slotInterval: settings.slotInterval,
     maxDaysAhead: settings.maxDaysAhead,
+    ...guestPolicy(),
     diningDurationMin: settings.diningDurationMin,
     cleanupBufferMin: settings.cleanupBufferMin,
     // 客人端 TimeSlotPicker 需要 seatings/closures 才能把關閉的時段灰顯為「已關閉」。
@@ -2166,7 +2141,7 @@ function validateNewBooking(body = {}, settings = {}) {
   const date = normalizeDateInput(body.date)
   if (!date) return { ok: false, error: '日期格式不正確' }
   const today = todayServerStr()
-  if (date < today) return { ok: false, error: '無法預訂過去的日期' }
+  if (date < today) return {ok:false,error:'無法預訂過去的日期',reasonCode:'booking-date-past'}
   const maxAhead = Number(settings.maxDaysAhead) || 30
   const maxDate = new Date(`${today}T00:00:00`)
   maxDate.setDate(maxDate.getDate() + maxAhead)
@@ -2177,18 +2152,12 @@ function validateNewBooking(body = {}, settings = {}) {
     return { ok: false, error: '請選擇有效的訂位時段' }
   }
   // 後端硬擋「已過的時段」：避免繞過前端、或在時段剛過的邊界仍下訂今天已過的時間。
-  if (slotEpochMs(date, timeSlot) <= Date.now()) {
-    return { ok: false, error: '此時段已過，請選擇較晚的時段' }
-  }
+  const arrivalMs=slotEpochMs(date,timeSlot)
+  if (!isBeforeGuestDeadline(Date.now(),arrivalMs)) return {ok:false,error:'線上訂位須至少提前60分鐘，請選擇較晚時段或來電洽詢',reasonCode:arrivalMs<=Date.now()?'booking-slot-past':'booking-deadline-passed'}
   // 後端硬擋「已關閉的時段/場次/公休日」：繞過前端也擋得住（權威層）。
   if (isSlotClosedServer(settings, date, timeSlot)) {
     return { ok: false, error: '此時段已關閉訂位，請改選其他時段' }
   }
-  // 線上場次截止：場次開始前 X 分鐘起不再收線上訂位（店員後台不受此限）。
-  if (isPastSessionCutoff({ nowMs: Date.now(), slotMs: slotEpochMs(date, timeSlot), sessionStartMs: sessionCutoffAnchorMs(settings, date, timeSlot), cutoffMin: settings.onlineSessionCutoffMin })) {
-    return { ok: false, error: '此場次的線上訂位已截止，歡迎來電洽詢或現場候位' }
-  }
-
   const notes = {
     pet: !!body.notes?.pet,
     child: !!body.notes?.child,
@@ -2429,59 +2398,103 @@ async function deliverNotification(data) {
 
 // 寫一筆 pending outbox 文件，回 { ref, record }
 async function enqueueNotification(doc) {
-  const now = new Date().toISOString()
-  const ref = db.collection('notifications').doc()
-  const record = {
-    channel: doc.channel,
-    event: doc.event || 'unknown',
-    status: 'pending',
-    payload: doc.payload || {},
-    bookingId: doc.bookingId || null,
-    attempts: 0,
-    maxAttempts: NOTIFICATION_MAX_ATTEMPTS,
-    nextAttemptAt: now,
-    lastError: null,
-    createdAt: now,
-    sentAt: null,
-  }
-  await ref.set(record)
-  return { ref, record }
+  const now=new Date().toISOString()
+  const intent=notificationIntent(doc,now)
+  const intentRef=db.collection('notificationIntents').doc(intent.id)
+  await db.runTransaction(async tx=>{
+    const old=await tx.get(intentRef)
+    if(!old.exists)tx.set(intentRef,intent)
+  })
+  return queueNotificationIntent(intent.id)
 }
 
-// 嘗試送出一筆 outbox 文件並更新狀態（成功→sent；失敗→排程重試或 dead-letter）。
-// retryable === false（LINE 4xx 非 429）不消耗重試額度直接 dead-letter，
-// 並標記綁定 pushBlocked——後續通知不再對已封鎖/非好友的對象入列必死訊息。
-async function sendOutboxDoc(ref, data) {
-  const result = await deliverNotification(data)
-  const now = new Date().toISOString()
-  if (result.ok) {
-    await ref.set({ status: 'sent', sentAt: now, lastError: null, nextAttemptAt: null }, { merge: true })
-    await mirrorLineNotifyStatus(data, { event: data.event || 'unknown', status: 'sent', at: now })
-    return result
-  }
-  const attempts = (Number(data.attempts) || 0) + 1
-  const maxAttempts = Number(data.maxAttempts) || NOTIFICATION_MAX_ATTEMPTS
-  if (attempts >= maxAttempts || result.retryable === false) {
-    await ref.set({
-      status: 'failed',
-      attempts,
-      lastError: result.error,
-      nextAttemptAt: null,
-      failedAt: now,
-      ...(result.retryable === false ? { nonRetryable: true } : {}),
-    }, { merge: true })
-    console.error('NOTIFICATION_DEAD_LETTER', { id: ref.id, channel: data.channel, event: data.event, error: result.error })
-    await mirrorLineNotifyStatus(data, { event: data.event || 'unknown', status: 'failed', at: now, error: String(result.error || '').slice(0, 200) })
-    if (data.channel === 'line' && data.bookingId && Number(result.httpStatus) >= 400 && Number(result.httpStatus) < 500) {
-      await markLinePushBlocked(data.bookingId, result.error, now)
+// intent與outbox同一交易推進；沒有outbox成功就沒有queued/dedupe成功標記。
+async function recordNotificationHealth(id,intent,status,error=null){
+  if(!intent.bookingId)return
+  const ref=db.collection('bookings').doc(intent.bookingId)
+  await db.runTransaction(async tx=>{
+    const saved=await tx.get(ref);if(!saved.exists)return
+    const now=new Date().toISOString(),entries={...(saved.data().notificationHealthByEvent||{}),[id]:healthEntry(intent,status,now,error)}
+    tx.set(ref,{notificationHealthByEvent:entries,notificationHealth:aggregateNotificationHealth(entries,now)},{merge:true})
+  })
+}
+async function queueNotificationIntent(id) {
+  const intentRef=db.collection('notificationIntents').doc(id)
+  const ref=db.collection('notifications').doc(id)
+  try{
+    return await db.runTransaction(async tx=>{
+      const [saved,existing]=await Promise.all([tx.get(intentRef),tx.get(ref)])
+      if(!saved.exists)throw errorWithStatus('notification-intent-missing',404)
+      const intent=saved.data(),now=new Date().toISOString()
+      const record=existing.exists?existing.data():outboxFromIntent(intent,now)
+      if(!existing.exists)tx.set(ref,record)
+      tx.set(intentRef,{status:'queued',outboxId:id,updatedAt:now,lastError:null},{merge:true})
+      return {ref,record}
+    })
+  }catch(err){
+    // 初始intent已同booking成立；queue失敗仍可由scheduler重建，不吞成不可補償的成功。
+    const saved=await intentRef.get().catch(()=>null)
+    if(saved?.exists){
+      const attempts=(Number(saved.data().queueAttempts)||0)+1,now=new Date().toISOString()
+      await intentRef.set({queueAttempts:attempts,status:attempts>=6?'failed':'pending',lastError:'notification-queue-write-failed',nextQueueAttemptAt:new Date(Date.now()+60_000).toISOString(),updatedAt:now},{merge:true}).catch(()=>{})
+      await recordNotificationHealth(id,saved.data(),attempts>=6?'failed':'retrying','notification-queue-write-failed').catch(()=>{})
     }
-  } else {
-    const backoff = NOTIFICATION_BACKOFF_MS[Math.min(attempts - 1, NOTIFICATION_BACKOFF_MS.length - 1)]
-    const nextAttemptAt = new Date(Date.now() + backoff).toISOString()
-    await ref.set({ status: 'pending', attempts, lastError: result.error, nextAttemptAt }, { merge: true })
-    await mirrorLineNotifyStatus(data, { event: data.event || 'unknown', status: 'pending', at: now, error: String(result.error || '').slice(0, 200) })
+    throw err
   }
+}
+async function processNotificationIntent(id){
+  const queued=await queueNotificationIntent(id)
+  return sendOutboxDoc(queued.ref,queued.record)
+}
+
+// 同一outbox的並發worker只有lease擁有者能送/標成功；provider ACK遺失仍非外部exactly-once。
+async function sendOutboxDoc(ref) {
+  const owner=createServerToken(),nowMs=Date.now()
+  const claimed=await db.runTransaction(async tx=>{
+    const saved=await tx.get(ref)
+    if(!saved.exists)return null
+    const data=saved.data(),bookRef=data.bookingId?db.collection('bookings').doc(data.bookingId):null
+    const book=bookRef?await tx.get(bookRef):null
+    if(!['sent','failed','superseded'].includes(data.status)&&notificationIsSuperseded(data,book?.exists?book.data():null,book?.exists?notificationStateHash(book.data()):null)){
+      const now=new Date().toISOString()
+      tx.set(ref,{status:'superseded',supersededAt:now,leaseOwner:null,leaseExpiresAt:null,nextAttemptAt:null},{merge:true})
+      if(data.id)tx.set(db.collection('notificationIntents').doc(data.id),{status:'superseded',updatedAt:now},{merge:true})
+      if(book?.exists){const entries={...(book.data().notificationHealthByEvent||{}),[ref.id]:healthEntry(data,'superseded',now)};tx.set(bookRef,{notificationHealthByEvent:entries,notificationHealth:aggregateNotificationHealth(entries,now)},{merge:true})}
+      return null
+    }
+    const next=claimNotification(data,owner,nowMs)
+    if(next)tx.set(ref,next)
+    return next
+  })
+  if(!claimed)return {ok:true,skipped:'already-sent-or-claimed'}
+  let result
+  try{result=await deliverNotification(claimed)}catch{result={ok:false,error:'notification-delivery-failed'}}
+  const patch=deliveryUpdate(claimed,result,Date.now(),NOTIFICATION_BACKOFF_MS)
+  const applied=await db.runTransaction(async tx=>{
+    const saved=await tx.get(ref)
+    if(!saved.exists||saved.data().leaseOwner!==owner)return false
+    tx.set(ref,patch,{merge:true})
+    if(claimed.channel==='line'&&claimed.bookingId&&result.ok){
+      tx.set(db.collection('lineBookingBindings').doc(claimed.bookingId),{
+        lastBindPushAt:patch.sentAt,lastPushByEvent:{[claimed.event]:{at:patch.sentAt,stateHash:claimed.stateHash||null}},updatedAt:patch.sentAt,
+      },{merge:true})
+    }
+    return true
+  })
+  if(!applied)return {ok:false,error:'notification-lease-lost'}
+  await mirrorLineNotifyStatus(claimed,{event:claimed.event,status:patch.status,at:new Date().toISOString(),...(patch.lastError?{error:patch.lastError}:{})})
+  await recordNotificationHealth(ref.id,claimed,patch.status==='pending'?'retrying':patch.status,patch.lastError).catch(()=>{})
+  if(!result.ok&&claimed.channel==='line'&&result.retryable===false)await markLinePushBlocked(claimed.bookingId,result.error,new Date().toISOString())
   return result
+}
+
+async function reconcileNotificationIntents(){
+  const snap=await db.collection('notificationIntents').where('status','==','pending').limit(100).get()
+  for(const doc of snap.docs){
+    const at=Date.parse(doc.data().nextQueueAttemptAt||'')
+    if(Number.isFinite(at)&&at>Date.now())continue
+    await processNotificationIntent(doc.id).catch(()=>{})
+  }
 }
 
 // 把 LINE 通知的最新送達狀態鏡像到 booking 文件（lineLastNotify），
@@ -2520,8 +2533,10 @@ export const retryNotifications = onSchedule(
     secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN],
   },
   async () => {
+    await reconcileNotificationIntents()
     const nowMs = Date.now()
-    const snap = await db.collection('notifications').where('status', '==', 'pending').limit(100).get()
+    const [pendingSnap,processingSnap]=await Promise.all([db.collection('notifications').where('status','==','pending').limit(100).get(),db.collection('notifications').where('status','==','processing').limit(100).get()])
+    const snap={docs:[...pendingSnap.docs,...processingSnap.docs]}
     const due = snap.docs.filter(d => {
       const at = d.data().nextAttemptAt
       return !at || new Date(at).getTime() <= nowMs
