@@ -31,3 +31,16 @@ export function assignmentKind(booking, table) {
   const heldByThis = bookingId !== '' && holder === bookingId
   return heldByThis && ['reserved', 'dining'].includes(table.status) ? 'held' : 'preassign'
 }
+
+// 唯讀兼容舊資料：整組已到店但附桌仍 reserved，顯示為用餐且繼承既有起點。
+// 必須仍由本訂位持有並在其桌組內；不改儲存、不遮蓋他人／團體／清潔狀態。
+export function diningTablePresentation(table, booking, tables = []) {
+  const numbers = [booking?.assignedTableId, ...(booking?.extraTableIds || [])].filter(Boolean).map(String)
+  if (!table || booking?.status !== 'arrived' || !['reserved', 'dining'].includes(table.status)
+      || table.currentRef || booking.id == null || table.currentBookingId == null
+      || String(table.currentBookingId) !== String(booking.id) || !numbers.includes(String(table.number))) return table
+  const main = tables.find(t => String(t.number) === String(booking.assignedTableId)
+    && String(t.currentBookingId) === String(booking.id) && !t.currentRef && ['reserved', 'dining'].includes(t.status))
+  const seatedAt = table.seatedAt || main?.seatedAt || booking.actualArrivalTime || null
+  return table.status === 'dining' && table.seatedAt === seatedAt ? table : { ...table, status: 'dining', seatedAt }
+}

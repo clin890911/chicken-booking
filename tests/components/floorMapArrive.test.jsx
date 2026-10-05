@@ -16,7 +16,7 @@ const baseTable = (over = {}) => ({
 const NOW = new Date(2026, 6, 1, 18, 0, 0).getTime() // 2026-07-01 18:00
 
 describe('isArriveEligible（純函式：出現窗口判定）', () => {
-  const booking = { id: 'b1', name: '王小明', timeSlot: '18:00' }
+  const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
 
   it('訂位時間前 30 分內：符合', () => {
     const now = NOW - ARRIVE_WINDOW_BEFORE_MIN * 60000

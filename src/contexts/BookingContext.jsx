@@ -438,9 +438,9 @@ export function BookingProvider({ children }) {
   }
   const seatBooking = (bookingId) => {
     const r = seatingService.seatBooking(bookingId)
-    refresh()
-    syncCloudSoon()
     if (r.ok) {
+      refresh()
+      syncCloudSoon()
       const b = bookingService.getById(bookingId)
       if (b) safeNotify(() => tg.notifyBookingArrived(b))
     }
@@ -449,9 +449,9 @@ export function BookingProvider({ children }) {
   // 預配大組到店：整組（主桌＋額外桌）都空才一起入座（見 seatingService.seatBookingAllTables）
   const seatBookingAllTables = (bookingId) => {
     const r = seatingService.seatBookingAllTables(bookingId)
-    refresh()
-    syncCloudSoon()
     if (r.ok) {
+      refresh()
+      syncCloudSoon()
       const b = bookingService.getById(bookingId)
       if (b) safeNotify(() => tg.notifyBookingArrived(b))
     }
@@ -545,6 +545,15 @@ export function BookingProvider({ children }) {
   const replacePendingBookingTables = (bookingId, tableNumbers) => {
     const r = seatingService.replacePendingBookingTables(bookingId, tableNumbers)
     if (r.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
+  const replaceSeatedBookingTables = (bookingId, tableNumbers, opts) => {
+    const before = bookingService.getById(bookingId)
+    const r = seatingService.replaceSeatedBookingTables(bookingId, tableNumbers, opts)
+    if (r.ok) {
+      refresh(); syncCloudSoon()
+      if (before) safeNotify(() => tg.notifyTableMoved(r.booking, seatingService.bookingTableNumbers(before).join(' + '), r.tableNumbers.join(' + ')))
+    }
     return r
   }
   const moveTable = (bookingId, newTableNumber) => {
@@ -757,7 +766,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

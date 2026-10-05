@@ -832,15 +832,15 @@ describe('seatingService 整合層', () => {
       expect(r).toEqual({ ok: false, error: '目標桌容量不足' })
     })
 
-    it('arrived（用餐中）換桌：新桌 dining、舊桌 vacant、booking 改綁新桌', () => {
+    it('arrived（用餐中）換桌：新桌 dining、舊桌 cleaning、booking 改綁新桌', () => {
       const b = mkBooking({ guests: 2 })
       seating.assignBookingToTable(b.id, '101')
       seating.seatBooking(b.id) // status arrived，101 dining
       const r = seating.moveTable(b.id, '108')
-      expect(r).toEqual({ ok: true })
+      expect(r).toMatchObject({ ok: true })
       const oldT = tableService.getByNumber('101')
       const newT = tableService.getByNumber('108')
-      expect(oldT.status).toBe('vacant')
+      expect(oldT.status).toBe('cleaning')
       expect(oldT.currentBookingId).toBeNull()
       expect(newT.status).toBe('dining')
       expect(newT.currentBookingId).toBe(b.id)
@@ -1135,11 +1135,11 @@ describe('seatingService 整合層', () => {
         expect(after.extraTableIds).toEqual([])
       })
 
-      it('moveTable：併桌訂位擋換桌（先清桌再重帶）', () => {
+      it('moveTable：已入座併桌仍拒绝不存在目标，不清原桌', () => {
         const b = seatCombo()
         const r = seating.moveTable(b.id, '999')
         expect(r.ok).toBe(false)
-        expect(r.error).toContain('併桌')
+        expect(r.error).toContain('不存在')
       })
 
       it('超時釋桌掃描：併桌整組釋出（finalizeBooking 冪等，重複 action 自動跳過）', () => {
@@ -2373,6 +2373,7 @@ describe('restoreOverriddenAssignment：桌已被第三組佔在重疊時段 →
     const w = seating.walkInSeat('105', { name: 'W', guests: 2 })
     const snap = { bookingId: L.id, ...seating.releaseOverriddenAssignment(L.id) }
     expect(seating.moveTable(w.booking.id, '106').ok).toBe(true)
+    seating.clearTable('105') // 換桌撤出的原桌需先清潔，才能讓下一組入座
     expect(seating.walkInSeat('105', { name: 'T3', guests: 2 }).ok).toBe(true)
 
     seating.cancelBooking(w.booking.id)                            // 帶位「復原」＝取消 W

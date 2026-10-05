@@ -8,7 +8,8 @@ import * as groupService from './groupReservationService'
 import { getSettings } from './settingsService'
 import { statusZh, assignmentKind } from '../utils/tableStatus'
 import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
-import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor } from '../utils/capacity'
+import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor, preassignConflicts } from '../utils/capacity'
+import { seatedMoveWarningSignature } from '../utils/seatedMoveWarnings'
 import { buildGroupHolds } from '../utils/groupLive'
 import { todayStr, nowSlot, formatDate } from '../utils/timeSlots'
 
@@ -122,13 +123,16 @@ export function assignBookingTablesMulti(bookingId, tableNumbers) {
 export function seatBooking(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
+  if (booking.status === 'arrived') return { ok: false, error: '此組已入座，請使用換桌' }
+  if (bookingTableNumbers(booking).length > 1) return seatBookingAllTables(bookingId)
   if (!booking.assignedTableId) return { ok: false, error: '尚未指派桌位（請先指派）' }
   // 預配後桌子才被設停用/維修：到店入座時擋下並提示改派（而非默默坐上維修桌）。
   const table = tableService.getByNumber(booking.assignedTableId)
+  if (!table) return { ok: false, error: '桌位不存在' }
   if (table && !tableUsableToday(table)) {
     return { ok: false, error: `${booking.assignedTableId} 停用/維修中，請先改派其他桌再入座` }
   }
-  if (table && table.status !== 'vacant' && !heldBy(table, bookingId)) {
+  if (table && (table.currentRef || (table.status !== 'vacant' && !heldBy(table, bookingId)))) {
     return { ok: false, code: 'table-occupied', error: occupiedError(booking.assignedTableId, table) }
   }
 
@@ -145,13 +149,14 @@ export function seatBooking(bookingId) {
 export function seatBookingAllTables(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
+  if (booking.status === 'arrived') return { ok: false, error: '此組已入座，請使用換桌' }
   const nums = bookingTableNumbers(booking)
   if (nums.length <= 1) return seatBooking(bookingId)
   for (const n of nums) {
     const t = tableService.getByNumber(n)
     if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
     if (!tableUsableToday(t)) return { ok: false, error: `${n} 停用/維修中，請先改派其他桌再入座` }
-    if (t.status !== 'vacant' && !heldBy(t, bookingId)) {
+    if (t.currentRef || (t.status !== 'vacant' && !heldBy(t, bookingId))) {
       return { ok: false, code: 'table-occupied', error: occupiedError(n, t) }
     }
   }
@@ -564,9 +569,74 @@ export function replacePendingBookingTables(bookingId, tableNumbers, { now = new
   }
 }
 
+// 已入座整組换桌：保留訂位與原用餐起點，撤出的桌待清潔；不重走 arrival。
+// confirmedConflictTables 僅涵蓋店員已看過並勾選確認的預配／團保桌。
+export function replaceSeatedBookingTables(bookingId, tableNumbers, { now = new Date(), confirmedConflictTables = [], confirmedWarningSignature, originalTableNumbers } = {}) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking || booking.status !== 'arrived') return { ok: false, error: '僅已入座訂位可調整位子' }
+  const original = bookingTableNumbers(booking)
+  if (!original.length) return { ok: false, error: '訂位無桌位資料' }
+  if (originalTableNumbers && JSON.stringify(original) !== JSON.stringify(originalTableNumbers.map(String))) return { ok: false, error: '原配桌已被更動，請重新開啟換桌' }
+  const nums = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
+  if (!nums.length) return { ok: false, error: '請至少選一張桌' }
+  const tables = tableService.listAll()
+  // legacy 同組 reserved 可一起修正，但來源必須仍全部由本訂位持有。
+  const own = t => heldBy(t, bookingId) && !t.currentRef && ['dining', 'reserved'].includes(t.status)
+  if (original.some(n => !own(tables.find(t => String(t.number) === n)))) return { ok: false, error: '原桌已被更動或由其他組使用，請重新確認桌況' }
+  const conflicts = timeConflictTableNumbers({ bookingId, date: formatDate(now), mode: 'now', now })
+  const settings = getSettings()
+  const allBookings = bookingService.listAll()
+  const window = assignmentWindow({ mode: 'now', date: formatDate(now), now }, settings)
+  const overridden = nums.flatMap(n => preassignConflicts(allBookings, n, { date: formatDate(now), excludeBookingId: bookingId, window }, settings)).filter(c => c.willRelease)
+  const hasConflicts = nums.some(n => conflicts.has(n))
+  if (hasConflicts && confirmedWarningSignature !== seatedMoveWarningSignature(bookingId, nums, { bookings: allBookings, groups: groupService.listAll(), tables, settings, now })) return { ok: false, error: '桌位保留已改變，請重新確認警示' }
+  if (allBookings.some(b => String(b.id) !== String(bookingId) && b.status === 'arrived' && b.date === formatDate(now) && bookingTableNumbers(b).some(n => nums.includes(n)))) return { ok: false, error: '目標桌仍屬於另一組已入座客人，請重新確認桌況' }
+  let seats = 0
+  const floors = new Set()
+  for (const n of nums) {
+    const t = tables.find(t => String(t.number) === n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    if (!isTableUsableOnDate(t, formatDate(now))) return { ok: false, error: outOfServiceError(n) }
+    if (!(original.includes(n) && own(t)) && (t.status !== 'vacant' || t.currentBookingId || t.currentRef)) return { ok: false, error: occupiedError(n, t) }
+    if (conflicts.has(n) && !confirmedConflictTables.map(String).includes(n)) return { ok: false, error: `${n} 有其他訂位／團體保留，請重新確認警示` }
+    seats += Number(t.capacity) || 0
+    floors.add(t.floor)
+  }
+  if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
+  if (seats < Number(booking.guests)) return { ok: false, error: `所選桌合計 ${seats} 席，不足 ${booking.guests} 位` }
+  const start = tables.find(t => String(t.number) === original[0])?.seatedAt
+    || original.map(n => tables.find(t => String(t.number) === n)?.seatedAt).find(Boolean)
+    || booking.actualArrivalTime || null
+  const updatedAt = now.toISOString()
+  const next = tables.map(t => {
+    const n = String(t.number)
+    if (nums.includes(n)) return { ...t, status: 'dining', currentBookingId: bookingId, currentRef: null, seatedAt: original.includes(n) ? (t.seatedAt || start) : start, mergedWith: null, blockReason: null, updatedAt }
+    if (original.includes(n)) return { ...t, status: 'cleaning', currentBookingId: null, currentRef: null, seatedAt: null, mergedWith: null, blockReason: null, updatedAt }
+    return t
+  })
+  const keys = ['chicken_tables_v3', 'chicken_bookings_v1']
+  const snapshots = keys.map(key => localStorage.getItem(key))
+  try {
+    const written = tableService.bulkWrite(next)
+    if (!written.ok) return written
+    const changed = bookingService.assignTables(bookingId, nums)
+    if (!changed) throw new Error('訂位不存在')
+    for (const id of new Set(overridden.map(c => c.booking.id))) {
+      const released = releaseOverriddenAssignment(id)
+      if (!released.ok) throw new Error('預配解除失敗')
+    }
+    return { ok: true, booking: changed, tableNumbers: nums }
+  } catch {
+    try { keys.forEach((key, i) => snapshots[i] == null ? localStorage.removeItem(key) : localStorage.setItem(key, snapshots[i])) }
+    catch { return { ok: false, error: '裝置儲存異常，請重新整理確認桌況後再操作' } }
+    return { ok: false, error: '換桌儲存失敗，原配桌已保留，請重試' }
+  }
+}
+
 export function moveTable(bookingId, newTableNumber) {
   const booking = bookingService.getById(bookingId)
   if (!booking || !booking.assignedTableId) return { ok: false, error: '訂位無桌位資料' }
+  if (booking.status === 'arrived') return replaceSeatedBookingTables(bookingId, [newTableNumber])
   // 併桌（大組多桌）暫不支援單桌換位（會留下孤兒額外桌）；請先清桌再重新帶位。
   if ((booking.extraTableIds || []).length) {
     return { ok: false, error: '併桌的大組請先整組清桌，再重新帶位' }

@@ -1,12 +1,13 @@
 import { assignmentWindow, bookingOverlapsWindow, CAPACITY_EXCLUDED_STATUSES, occupancyMinutes, toMinutes } from './capacity'
 import { isTableUsableOnDate, isTableOutOnDate } from './tableAvailability'
-import { statusZh } from './tableStatus'
+import { statusZh, diningTablePresentation } from './tableStatus'
 
 const localDay = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 export const opsTimeLabel = minutes => minutes == null ? '' : `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
 
 // 唯讀呈現：沿用容量引擎的 [開始, 結束) 與用餐＋清桌時長，不取代入座 service 守門。
-export function getOpsTableState(table, { bookings = [], groupHoldTables = {}, settings = {}, date, now = Date.now() } = {}) {
+export function getOpsTableState(table, { bookings = [], tables = [], groupHoldTables = {}, settings = {}, date, now = Date.now() } = {}) {
+  table = diningTablePresentation(table, bookings.find(b => String(b.id) === String(table.currentBookingId)), tables)
   const at = now instanceof Date ? now : new Date(now)
   const day = date || localDay(at)
   const currentWindow = assignmentWindow({ mode: 'now', now: at }, settings)
@@ -45,5 +46,5 @@ export function getOpsTableState(table, { bookings = [], groupHoldTables = {}, s
 }
 
 export function buildOpsTablePresentation({ tables = [], ...options } = {}) {
-  return Object.fromEntries(tables.map(t => [t.number, getOpsTableState(t, options)]))
+  return Object.fromEntries(tables.map(t => [t.number, getOpsTableState(t, { ...options, tables })]))
 }

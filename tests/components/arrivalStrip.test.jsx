@@ -43,7 +43,7 @@ describe('ArrivalStrip', () => {
 
   it('有符合條件的訂位：顯示 chip，含時段／姓名／桌號，鈕帶正確 aria-label', () => {
     setup()
-    const booking = { id: 'b1', name: '王小明', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
     mount(
       <ArrivalStrip tables={[table()]} bookings={[booking]}
         onSelectTable={() => {}} onArrive={() => {}} now={NOW} />
@@ -57,7 +57,7 @@ describe('ArrivalStrip', () => {
 
   it('點「✓ 到了」：呼叫 onArrive(table, booking)，不觸發 onSelectTable', () => {
     setup()
-    const booking = { id: 'b1', name: '王小明', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
     const onArrive = vi.fn()
     const onSelectTable = vi.fn()
     mount(
@@ -74,7 +74,7 @@ describe('ArrivalStrip', () => {
 
   it('點 chip 本體（不是按鈕）：呼叫 onSelectTable(桌號)，選取該桌', () => {
     setup()
-    const booking = { id: 'b1', name: '王小明', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
     const onSelectTable = vi.fn()
     mount(
       <ArrivalStrip tables={[table()]} bookings={[booking]}
@@ -87,7 +87,7 @@ describe('ArrivalStrip', () => {
 
   it('按鈕實體高度樣式 = 44px', () => {
     setup()
-    const booking = { id: 'b1', name: '王小明', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
     mount(
       <ArrivalStrip tables={[table()]} bookings={[booking]}
         onSelectTable={() => {}} onArrive={() => {}} now={NOW} />
@@ -99,8 +99,8 @@ describe('ArrivalStrip', () => {
   it('遲到（已過訂位時間 >15 分）：帶「遲到」標記，且排在未遲到的前面', () => {
     setup()
     const bookings = [
-      { id: 'b1', name: '準時客', timeSlot: '18:00' },       // now=18:00 → 剛好到，不算遲到
-      { id: 'b2', name: '遲到客', timeSlot: '17:30' },       // 已過 30 分 > 15 分寬限 → 遲到
+      { id: 'b1', name: '準時客', status: 'confirmed', timeSlot: '18:00' },       // now=18:00 → 剛好到，不算遲到
+      { id: 'b2', name: '遲到客', status: 'confirmed', timeSlot: '17:30' },       // 已過 30 分 > 15 分寬限 → 遲到
     ]
     const tables = [
       table({ number: '101', currentBookingId: 'b1' }),
@@ -120,8 +120,8 @@ describe('ArrivalStrip', () => {
   it('都遲到時：越晚到的排越前面', () => {
     setup()
     const bookings = [
-      { id: 'b1', name: 'A遲到20分', timeSlot: '17:40' }, // overdue 20 分
-      { id: 'b2', name: 'B遲到40分', timeSlot: '17:20' }, // overdue 40 分（更晚）
+      { id: 'b1', name: 'A遲到20分', status: 'confirmed', timeSlot: '17:40' }, // overdue 20 分
+      { id: 'b2', name: 'B遲到40分', status: 'confirmed', timeSlot: '17:20' }, // overdue 40 分（更晚）
     ]
     const tables = [
       table({ number: '101', currentBookingId: 'b1' }),
@@ -138,8 +138,8 @@ describe('ArrivalStrip', () => {
   it('都未遲到：依訂位時段由早到晚排序', () => {
     setup()
     const bookings = [
-      { id: 'b1', name: '晚一點', timeSlot: '18:30' },
-      { id: 'b2', name: '早一點', timeSlot: '18:00' },
+      { id: 'b1', name: '晚一點', status: 'confirmed', timeSlot: '18:30' },
+      { id: 'b2', name: '早一點', status: 'confirmed', timeSlot: '18:00' },
     ]
     const tables = [
       table({ number: '101', currentBookingId: 'b1' }),
@@ -155,7 +155,7 @@ describe('ArrivalStrip', () => {
 
   it('涵蓋所有樓層：2F 的符合桌也會出現在同一條報到列', () => {
     setup()
-    const booking = { id: 'b1', name: '二樓客', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '二樓客', status: 'confirmed', timeSlot: '18:00' }
     mount(
       <ArrivalStrip tables={[table({ number: '201', floor: '2F' })]} bookings={[booking]}
         onSelectTable={() => {}} onArrive={() => {}} now={NOW} />
@@ -166,7 +166,7 @@ describe('ArrivalStrip', () => {
 
   it('窗外的訂位不出現在報到列', () => {
     setup()
-    const booking = { id: 'b1', name: '太早訂位', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '太早訂位', status: 'confirmed', timeSlot: '18:00' }
     mount(
       <ArrivalStrip tables={[table()]} bookings={[booking]}
         onSelectTable={() => {}} onArrive={() => {}} now={NOW - 90 * 60000} />
@@ -182,7 +182,7 @@ describe('ArrivalStrip', () => {
     const tables = []
     for (let i = 0; i < n; i++) {
       const id = `b${i}`
-      bookings.push({ id, name: `客人${i}`, timeSlot: '18:00' })
+      bookings.push({ id, name: `客人${i}`, status: 'confirmed', timeSlot: '18:00' })
       tables.push(table({ number: `10${i}`, currentBookingId: id }))
     }
     return { tables, bookings }
@@ -199,7 +199,7 @@ describe('ArrivalStrip', () => {
 
   it('標籤只有 1 筆時也顯示正確總數', () => {
     setup()
-    const booking = { id: 'b1', name: '王小明', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
     mount(<ArrivalStrip tables={[table()]} bookings={[booking]} onSelectTable={() => {}} onArrive={() => {}} now={NOW} />)
     expect(container.textContent).toContain('等報到 1')
   })
@@ -249,7 +249,7 @@ describe('ArrivalStrip', () => {
 
   it('內容裝得下（scrollWidth <= clientWidth）：兩緣提示都不出現', () => {
     setup()
-    const booking = { id: 'b1', name: '王小明', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
     mount(<ArrivalStrip tables={[table()]} bookings={[booking]} onSelectTable={() => {}} onArrive={() => {}} now={NOW} />)
     const scrollEl = container.querySelector('[role="list"]')
     stubScrollMetrics(scrollEl, { scrollWidth: 300, clientWidth: 558, scrollLeft: 0 })
@@ -274,7 +274,7 @@ describe('ArrivalStrip', () => {
 
   it('currentFloor 與桌樓層相同：桌號不標樓層', () => {
     setup()
-    const booking = { id: 'b1', name: '王小明', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
     mount(
       <ArrivalStrip tables={[table({ floor: '1F' })]} bookings={[booking]} currentFloor="1F"
         onSelectTable={() => {}} onArrive={() => {}} now={NOW} />
@@ -286,7 +286,7 @@ describe('ArrivalStrip', () => {
 
   it('currentFloor 與桌樓層不同：桌號前標樓層（跨樓層會自動切換，先讓店員知道）', () => {
     setup()
-    const booking = { id: 'b1', name: '二樓客', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '二樓客', status: 'confirmed', timeSlot: '18:00' }
     mount(
       <ArrivalStrip tables={[table({ number: '201', floor: '2F' })]} bookings={[booking]} currentFloor="1F"
         onSelectTable={() => {}} onArrive={() => {}} now={NOW} />
@@ -298,7 +298,7 @@ describe('ArrivalStrip', () => {
 
   it('未傳 currentFloor：不標任何樓層（向後相容，不誤標）', () => {
     setup()
-    const booking = { id: 'b1', name: '二樓客', timeSlot: '18:00' }
+    const booking = { id: 'b1', name: '二樓客', status: 'confirmed', timeSlot: '18:00' }
     mount(
       <ArrivalStrip tables={[table({ number: '201', floor: '2F' })]} bookings={[booking]}
         onSelectTable={() => {}} onArrive={() => {}} now={NOW} />
@@ -311,8 +311,8 @@ describe('ArrivalStrip', () => {
   it('混合樓層：同樓層不標、跨樓層標，兩者互不影響', () => {
     setup()
     const bookings = [
-      { id: 'b1', name: '一樓客', timeSlot: '18:00' },
-      { id: 'b2', name: '二樓客', timeSlot: '18:01' },
+      { id: 'b1', name: '一樓客', status: 'confirmed', timeSlot: '18:00' },
+      { id: 'b2', name: '二樓客', status: 'confirmed', timeSlot: '18:01' },
     ]
     const tables = [
       table({ number: '101', floor: '1F', currentBookingId: 'b1' }),
@@ -346,7 +346,7 @@ describe('ArrivalStrip：預配訂位', () => {
   it('預配 12:00、11:40 → 出現在報到列（標「預配」），等報到總數算進去；點到了交出 (桌, 訂位)', () => {
     setup()
     const onArrive = vi.fn()
-    const held = { id: 'H1', name: '王小明', timeSlot: '12:00' }
+    const held = { id: 'H1', name: '王小明', status: 'confirmed', timeSlot: '12:00' }
     act(() => root.render(
       <ArrivalStrip
         tables={[table({ number: '101', currentBookingId: 'H1' }), table({ number: '105', status: 'vacant', currentBookingId: null })]}
@@ -364,7 +364,7 @@ describe('ArrivalStrip：預配訂位', () => {
 
   it('預配桌此刻被別組佔 → 仍列並標「預配·桌被佔」；同桌的鎖桌那筆與預配那筆各一個 chip', () => {
     setup()
-    const holder = { id: 'H2', name: '陳小姐', timeSlot: '12:00' }
+    const holder = { id: 'H2', name: '陳小姐', status: 'confirmed', timeSlot: '12:00' }
     act(() => root.render(
       <ArrivalStrip tables={[table({ number: '105', status: 'reserved', currentBookingId: 'H2' })]}
         bookings={[holder, pre()]} onSelectTable={() => {}} onArrive={() => {}} now={NOW2} />,

@@ -6,7 +6,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import TableCandidatePanel from './TableCandidatePanel'
 import { cancelWithUndo } from '../../../utils/bookingActions'
 import GroupTableSection from './GroupTableSection'
-import { STATUS_ZH as STATUS_LABELS } from '../../../utils/tableStatus'
+import { STATUS_ZH as STATUS_LABELS, diningTablePresentation } from '../../../utils/tableStatus'
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr } from '../../../utils/timeSlots'
 import { STATUS_COLOR } from './statusColors'
@@ -46,7 +46,7 @@ function addDaysStr(dateStr, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export default function TableDrawer({ table, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, onWaitlistSeated, mode }) {
+export default function TableDrawer({ table: storedTable, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, onWaitlistSeated, mode }) {
   const { can } = useAuth()
   const toast = useToast()
   const confirmDialog = useConfirm()
@@ -54,8 +54,9 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     blockTable, unblockTable, walkInSeat,
     assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking,
     setTableOutage, clearTableOutage, releaseOverriddenAssignment,
-    settings, groupReservations, bookings,
+    settings, groupReservations, bookings, tables,
   } = useBooking()
+  const table = diningTablePresentation(storedTable, booking, tables)
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [showBlock, setShowBlock] = useState(false)
   const [showOutage, setShowOutage] = useState(false)
@@ -92,6 +93,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   const activeHold = table.status === 'vacant' && !outToday && groupHold?.holds?.length ? groupHold : null
   const outHoldConflict = outToday && table.status === 'vacant' && groupHold?.holds?.length ? groupHold : null
 
+  const displayStatus = table.status
   const canEdit = can('table.update')
   const canBlock = can('table.block')
   const orphan = isOrphanTable(table, booking, groupRef)
@@ -119,7 +121,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
     const r = seatBooking(booking.id)
     if (!r.ok) {
       // 入座被擋（佔用／停用）→ 直接給「改桌」出口；併桌訂位不支援單桌改桌
-      if (onStartMove && !isCombo) {
+      if (onStartMove) {
         return toast.action('入座失敗：' + r.error, { label: '改桌', onClick: () => onStartMove() }, { type: 'error', duration: 8000 })
       }
       return toast.error(r.error)
@@ -217,7 +219,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
   // 確認後直接釋出為空桌。不給復原窗——復原只會把桌變回同樣卡死的狀態。
   const handleForceRelease = async () => {
     const ok = await confirmDialog(
-      `${table.number} 目前是「${STATUS_LABELS[table.status]}」，但找不到對應的訂位資料。\n請先確認桌邊確實沒有客人，再釋出為空桌。`,
+      `${table.number} 目前是「${STATUS_LABELS[displayStatus]}」，但找不到對應的訂位資料。\n請先確認桌邊確實沒有客人，再釋出為空桌。`,
       { title: '強制釋出桌位', confirmLabel: '確認沒人，釋出', danger: true })
     if (!ok) return
     clearTable(table.number)
@@ -290,8 +292,8 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           <button onClick={onClose} className="text-chicken-brown/40 hover:text-chicken-brown text-2xl leading-none">×</button>
         </div>
         <span className="inline-block mt-3 px-3 py-1 rounded-full text-xs font-bold text-white"
-              style={{ background: STATUS_PILL_BG[table.status] }}>
-          {STATUS_LABELS[table.status]}
+              style={{ background: STATUS_PILL_BG[displayStatus] }}>
+          {STATUS_LABELS[displayStatus]}
         </span>
         {outToday && (
           <span className="inline-block mt-3 ml-2 px-3 py-1 rounded-full text-xs font-bold text-white bg-amber-700">
@@ -314,17 +316,18 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
                 <div className="text-[11px] font-normal text-amber-700/80 mt-0.5">離席/清桌會一起釋出這幾張桌。</div>
               </div>
             )}
-            {table.status === 'reserved' && (
+            {displayStatus === 'reserved' && (
               <div className="flex justify-between"><span className="text-chicken-brown/60">預訂時間</span><span>{booking.timeSlot}</span></div>
             )}
-            {table.status === 'dining' && table.seatedAt && (() => {
-              const m = diffMin(table.seatedAt)
+            {displayStatus === 'dining' && (table.seatedAt || booking.actualArrivalTime) && (() => {
+              const seatedAt = table.seatedAt || booking.actualArrivalTime
+              const m = diffMin(seatedAt)
               const stage = m >= bufferLimit ? 'buffer-overtime' : m >= diningDuration ? 'overtime' : m >= lateThreshold ? 'late' : 'normal'
               return (
                 <>
                   <div className="flex justify-between">
                     <span className="text-chicken-brown/60">入座</span>
-                    <span>{fmtTime(table.seatedAt)}</span>
+                    <span>{fmtTime(seatedAt)}</span>
                   </div>
                   <div className={`flex items-center justify-between rounded-xl px-3 py-2 mt-2
                     ${stage === 'buffer-overtime' ? 'bg-chicken-red text-white animate-pulse'
@@ -387,7 +390,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
           <div className="px-3 py-2.5 bg-chicken-red/5 border border-chicken-red/30 rounded-lg text-xs space-y-1">
             <div className="font-bold text-chicken-red">找不到這張桌對應的訂位</div>
             <div className="text-chicken-brown/70">
-              桌況顯示「{STATUS_LABELS[table.status]}」，但
+              桌況顯示「{STATUS_LABELS[displayStatus]}」，但
               {table.currentBookingId ? `訂位 #${table.currentBookingId} 已不存在` : '桌上沒有訂位編號'}
               （可能已被刪除或資料清理過）。這張桌會一直佔著可訂容量。
             </div>
@@ -492,7 +495,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
             </>
           )}
 
-          {table.status === 'reserved' && booking && (
+          {displayStatus === 'reserved' && booking && (
             <>
               <button onClick={handleSeat} className="btn-primary w-full">客人到了 — 入座</button>
               {/* 改桌：待到的訂位也能換桌（過去只有用餐中分支有「換桌」，鎖了桌就改不了）。
@@ -506,7 +509,7 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
             </>
           )}
 
-          {table.status === 'dining' && booking && (
+          {displayStatus === 'dining' && booking && (
             <>
               {/* 主要操作：漸進式 — 先進「等待清桌」，避免連點直接釋出髒桌 */}
               <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-xl w-full">
@@ -520,10 +523,9 @@ export default function TableDrawer({ table, booking, preassign, groupHold, onCl
                 直接釋出（已清桌完成）
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={onStartMove} disabled={isCombo} className="btn-secondary text-sm disabled:opacity-45">↔ 換桌</button>
+                <button onClick={onStartMove} className="btn-secondary text-sm disabled:opacity-45">↔ 換桌</button>
                 <button onClick={() => toast.info('（v1 預留）訂單明細整合中')} className="btn-secondary text-sm">訂單明細</button>
               </div>
-              {isCombo && <p className="text-[11px] text-chicken-brown/55">已入座併桌本輪不支援整組改桌，請保留原訂位與桌位。</p>}
             </>
           )}
 

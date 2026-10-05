@@ -4,7 +4,7 @@ import { FLOOR_VIEWBOX, FIXTURES } from '../../../data/tables'
 import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr, formatDate } from '../../../utils/timeSlots'
 import { overdueMinOf } from '../../../utils/bookingPulse'
-import { assignmentKind } from '../../../utils/tableStatus'
+import { assignmentKind, diningTablePresentation } from '../../../utils/tableStatus'
 import { GROUP_HOLD_COLOR } from './statusColors'
 
 // 「到了」一鍵入座的出現窗：訂位時間前 30 分 ~ 後 60 分。寫成具名常數方便日後調整。
@@ -18,7 +18,7 @@ export const ARRIVE_WINDOW_AFTER_MIN = 60
 // 純函式抽出方便單測：桌是否該顯示「到了」入口。
 export function isArriveEligible(table, booking, now = Date.now()) {
   if (!table || table.status !== 'reserved') return false
-  if (!booking || !booking.timeSlot) return false
+  if (!booking || !booking.timeSlot || !['confirmed', 'pending'].includes(booking.status)) return false
   const overdue = overdueMinOf(booking.timeSlot, now)
   return overdue >= -ARRIVE_WINDOW_BEFORE_MIN && overdue <= ARRIVE_WINDOW_AFTER_MIN
 }
@@ -30,7 +30,7 @@ export function isArriveEligible(table, booking, now = Date.now()) {
 // 由呼叫端給「改桌」出口（不在這裡默默藏起來，否則客人到了店員卻找不到入口）。
 export function isPreassignArriveEligible(table, booking, now = Date.now()) {
   if (!table || !booking || !booking.timeSlot) return false
-  if (booking.status !== 'confirmed') return false
+  if (!['confirmed', 'pending'].includes(booking.status)) return false
   if (booking.date !== formatDate(new Date(now))) return false
   if (String(booking.assignedTableId) !== String(table.number)) return false
   if (assignmentKind(booking, table) !== 'preassign') return false
@@ -406,6 +406,7 @@ export default function FloorMap({
           )
         }
         const booking = t.currentBookingId ? bookingMap[t.currentBookingId] : null
+        const displayTable = diningTablePresentation(t, booking, tables)
         const isSelected = selectedTableNumber === t.number || selectedTableNumbers.includes(t.number)
         const isHighlight = assignMode && highlightTables.includes(t.number)
         const isAssignSuggestion = assignMode && suggestionTable === t.number
@@ -427,7 +428,7 @@ export default function FloorMap({
         return (
           <TableShape
             key={t.number}
-            table={t}
+            table={displayTable}
             presentation={tablePresentation[t.number]}
             booking={booking}
             settings={settings}
@@ -442,7 +443,7 @@ export default function FloorMap({
             outNote={isOccupied(t) ? '' : outNoteFor(t)}
             outClickable={!assignMode}
             zoneColor={zoneColorOf(t.zoneId)}
-            now={t.status === 'dining' ? now : 0}
+            now={displayTable.status === 'dining' ? now : 0}
             onClick={clickHandlers[t.number]}
           />
         )

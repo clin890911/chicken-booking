@@ -60,6 +60,19 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
     expect(onMove).toHaveBeenCalledWith(b)
   })
 
+  it.each([[], ['106']])('今日已入座單桌/併桌%s，更多改桌入口可用且只傳原訂位', extraTableIds => {
+    const b=mkBooking({status:'arrived',extraTableIds,actualArrivalTime:'2026-10-04T03:15:00.000Z'})
+    render(b);openMore()
+    const move=btn('改桌');expect(move).toBeTruthy();expect(move.getAttribute('aria-disabled')).not.toBe('true')
+    act(()=>move.click());expect(onMove).toHaveBeenCalledWith(b)
+    expect(ctx.seatBooking).not.toHaveBeenCalled();expect(ctx.setStatus).not.toHaveBeenCalled()
+  })
+  it.each(['cancelled','completed','noshow'])('%s不提供改桌入口', status => {
+    render(mkBooking({status}));openMore();expect(btn('改桌')).toBeUndefined()
+  })
+  it('已入座未來日仍不允許改桌',()=>{
+    render(mkBooking({status:'arrived',date:'2099-12-31'}));openMore();expect(btn('改桌')).toBeUndefined()
+  })
   it('U2：容器沒給 onMove／未來日／未指派 → 不出現改桌', () => {
     render(mkBooking(), { move: null })
     expect(btn('改桌')).toBeUndefined()
