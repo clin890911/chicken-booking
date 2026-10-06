@@ -7,6 +7,7 @@ import { useBooking } from '../../contexts/BookingContext'
 import { todayStr } from '../../utils/timeSlots'
 import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
 import SegmentedControl from '../ui/SegmentedControl'
+import { bookingTableNumbers } from '../../utils/bookingTables'
 
 const SOURCE_FILTERS = [
   { key: 'all',    label: '全部' },
@@ -41,7 +42,7 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
       list = list.filter(b =>
         (b.name || '').toLowerCase().includes(q) ||
         (b.phone || '').includes(q) ||
-        (b.assignedTableId || '').toLowerCase().includes(q) ||
+        bookingTableNumbers(b).some(n => n.toLowerCase().includes(q)) ||
         (b.id || '').toLowerCase().includes(q)
       )
     }

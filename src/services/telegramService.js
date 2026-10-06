@@ -19,6 +19,7 @@ const CHAT_ID_KEY = 'chicken_telegram_chatid'
 const ENABLED_KEY = 'chicken_telegram_enabled'
 
 const TG_BASE = 'https://api.telegram.org'
+import { formatBookingTables } from '../utils/bookingTables'
 
 // ============== Configuration ==============
 export function hasToken() {
@@ -134,7 +135,7 @@ function fmtBookingHeader(b) {
     `👤 ${escapeHTML(b.name)}  ${b.guests} 位`,
     `📱 <code>${escapeHTML(b.phone || '—')}</code>`,   // 現場客可不留電話（空 <code></code> 不好讀）
   ]
-  if (b.assignedTableId) lines.push(`🪑 ${b.assignedTableId}`)
+  if (b.assignedTableId) lines.push(`🪑 ${formatBookingTables(b)}`)
   if (SOURCE_LABEL[b.source]) lines.push(SOURCE_LABEL[b.source])
   if (b.notes?.text) lines.push(`📝 ${escapeHTML(b.notes.text)}`)
   const flags = []
@@ -204,7 +205,7 @@ export function notifyWaitlistSeated(wait, tableNumber) {
 }
 
 export function notifyWalkInSeated(booking) {
-  const head = `🚶 <b>散客直接入座</b> → ${booking.assignedTableId}\n${fmtBookingHeader(booking)}`
+  const head = `🚶 <b>散客直接入座</b> → ${formatBookingTables(booking)}\n${fmtBookingHeader(booking)}`
   return sendMessage(withBackupPayload(head, { event: 'walkin_seated', booking }))
 }
 

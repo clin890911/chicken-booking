@@ -7,6 +7,7 @@ import * as customerService from './customerService'
 import * as groupService from './groupReservationService'
 import { getSettings } from './settingsService'
 import { statusZh, assignmentKind } from '../utils/tableStatus'
+import { bookingTableNumbers } from '../utils/bookingTables'
 import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
 import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor, preassignConflicts } from '../utils/capacity'
 import { seatedMoveWarningSignature } from '../utils/seatedMoveWarnings'
@@ -23,11 +24,7 @@ function tableUsableToday(table) {
 }
 
 // 這筆 booking 佔用的所有桌（主桌 assignedTableId + 大組併桌的 extraTableIds），去重去空。
-export function bookingTableNumbers(booking) {
-  return [...new Set(
-    [booking?.assignedTableId, ...(booking?.extraTableIds || [])].filter(Boolean).map(String),
-  )]
-}
+export { bookingTableNumbers }
 
 // 現在時間的 30 分鐘抵達時段（walk-in 用）
 function nowTimeSlot() {

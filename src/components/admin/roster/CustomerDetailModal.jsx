@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { formatBookingTables } from '../../../utils/bookingTables'
 import { Modal } from '../../ui'
 import { useBooking } from '../../../contexts/BookingContext'
 import { customerBookings } from '../../../utils/customerHistory'
@@ -79,7 +80,7 @@ export default function CustomerDetailModal({ customer, onClose, onAddBooking, o
                       <span className="font-bold tabular-nums w-[92px] shrink-0">{fmtDate(b.date)}</span>
                       <span className="text-chicken-brown/60 w-10 shrink-0">{b.timeSlot || '—'}</span>
                       <span className="font-bold shrink-0">{b.guests} 位</span>
-                      {b.assignedTableId && <span className="text-chicken-brown/60 shrink-0">桌 {b.assignedTableId}</span>}
+                      {b.assignedTableId && <span className="text-chicken-brown/60 shrink-0">桌 {formatBookingTables(b)}</span>}
                       <span className="text-chicken-brown/45 shrink-0">{SOURCE_MAP[b.source] || b.source || ''}</span>
                       <span className={`ml-auto shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
                     </div>

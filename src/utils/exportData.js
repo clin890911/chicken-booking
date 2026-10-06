@@ -4,6 +4,7 @@
 //  - 團體的旅行社/導遊一律用 agencyId/guideId 過濾；Name 欄位只是顯示快照
 //  - 場次（場次=餐期）由 timeSlot 經 settings.seatings 推導，永不持久化
 import { seatingForSlot } from './timeSlots'
+import { formatBookingTables } from './bookingTables'
 
 export const BOOKING_SOURCE_LABELS = {
   online: '線上',
@@ -122,7 +123,7 @@ export function buildBookingsCSV(bookings, settings) {
     b.name, b.phone, b.guests,
     BOOKING_SOURCE_LABELS[b.source] || b.source || '',
     BOOKING_STATUS_LABELS[b.status] || b.status || '',
-    b.assignedTableId || '',
+    formatBookingTables(b),
     b.notes?.pet ? 'Y' : '', b.notes?.child ? 'Y' : '', b.notes?.mobility ? 'Y' : '',
     b.notes?.text || '', b.createdAt || '',
   ])
