@@ -6,8 +6,11 @@ import { nextBatchForTable } from '../../../utils/groupLive'
 // TableDrawer 內的「團體桌」資訊與操作區，三種情境：
 // 1. vacant 但被今日團體 hold（groupHold）→ 顯示團資訊＋「梯次入座」；散客入座降為次按鈕＋confirm
 // 2. dining 且 currentRef 指向團（groupRef）→ 「此梯離席」「整團完成」
+// 權限（perms 來自 utils/seatingPerms.seatingPerms）：每顆鈕依實際寫入的集合各自判定——
+//   梯次入座／整梯釋出／整團完成／接下一梯會寫 groupReservations（需 group.update）；
+//   梯次離席／只清桌只寫 tables；散客覆蓋入座走 walkInSeat 寫 bookings。
 // 3. cleaning 且 currentRef 指向團 → 有下一梯圈此桌時「清桌完成＋接下一梯」，否則「清桌完成」
-export default function GroupTableSection({ table, groupRef, groupBatch, groupHold, canEdit, onWalkInOverride, onReseatBatch, onClose }) {
+export default function GroupTableSection({ table, groupRef, groupBatch, groupHold, perms, onWalkInOverride, onReseatBatch, onClose }) {
   const { tables, seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, seatNextBatchOnTable, clearTable } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -140,20 +143,24 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
       </div>
       {g.allergyText && <div className="text-[11px] text-chicken-red font-bold">過敏：{g.allergyText}</div>}
 
-      {canEdit && (
+      {perms.table && (
         <div className="space-y-2 pt-1">
           {/* 情境 1：vacant + hold → 整梯入座為主、散客覆蓋為次 */}
           {hold && table.status === 'vacant' && (
             <>
-              <button onClick={handleSeatHold} className="btn-primary w-full">
-                {batch.label} 入座（整梯 {(batch.tableNumbers || []).length} 桌）
-              </button>
-              <button
-                onClick={handleWalkInOverride}
-                className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
-              >
-                散客入座（覆蓋團體預留）
-              </button>
+              {perms.group && (
+                <button onClick={handleSeatHold} className="btn-primary w-full">
+                  {batch.label} 入座（整梯 {(batch.tableNumbers || []).length} 桌）
+                </button>
+              )}
+              {perms.walkIn && (
+                <button
+                  onClick={handleWalkInOverride}
+                  className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
+                >
+                  散客入座（覆蓋團體預留）
+                </button>
+              )}
             </>
           )}
 
@@ -163,18 +170,20 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
               <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-xl w-full">
                 此梯離席（整梯）
               </button>
-              <button
-                onClick={handleFinalize}
-                className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
-              >
-                整團完成（釋出全部桌位）
-              </button>
+              {perms.group && (
+                <button
+                  onClick={handleFinalize}
+                  className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
+                >
+                  整團完成（釋出全部桌位）
+                </button>
+              )}
             </>
           )}
 
           {/* 情境 3：cleaning 團體桌 */}
           {groupRef && table.status === 'cleaning' && (
-            nextBatch ? (
+            nextBatch && perms.group ? (
               <>
                 <button onClick={handleClearAndNext} className="btn-primary w-full">
                   清桌完成＋{nextBatch.label} 入座
@@ -194,7 +203,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
                   </button>
                 )}
               </>
-            ) : batchCleaningCount > 1 ? (
+            ) : batchCleaningCount > 1 && perms.group ? (
               <>
                 <button onClick={handleReleaseBatch} className="btn-primary w-full">
                   整梯清桌釋出（{batchCleaningCount} 桌）
