@@ -4,20 +4,21 @@ import Icon from '../../ui/Icon'
 // 純呈現：所有判斷都在 GroupEditorStage 算好傳進來（檢查清單逐條對應
 // groupReservationService.validateGroupForSave 的規則，才不會出現「清單全綠但存檔被擋」）。
 //
-// check 三態：ok（綠勾）／bad（紅點＋原因，填了但不合法）／todo（灰點，還沒填）。
+// check 四態：ok（綠勾）／warn（黃點＋原因，只提醒、不擋存檔）／bad（紅點＋原因，填了但不合法）／todo（灰點，還沒填）。
 export function CheckList({ checks = [], className = '' }) {
   return (
     <ul className={`space-y-1.5 ${className}`}>
       {checks.map(c => {
-        const tone = c.bad ? 'bad' : c.ok ? 'ok' : 'todo'
+        const tone = c.bad ? 'bad' : (c.ok && c.warn) ? 'warn' : c.ok ? 'ok' : 'todo'
         const dot = tone === 'bad'
           ? 'bg-chicken-red text-white'
-          : tone === 'ok' ? 'bg-[#5b8c1f] text-white' : 'bg-chicken-brown/15 text-transparent'
-        const text = tone === 'bad' ? 'text-chicken-red' : tone === 'ok' ? 'text-chicken-brown' : 'text-chicken-brown/50'
+          : tone === 'warn' ? 'bg-amber-500 text-white'
+            : tone === 'ok' ? 'bg-[#5b8c1f] text-white' : 'bg-chicken-brown/15 text-transparent'
+        const text = tone === 'bad' ? 'text-chicken-red' : tone === 'warn' ? 'text-amber-700' : tone === 'ok' ? 'text-chicken-brown' : 'text-chicken-brown/50'
         return (
           <li key={c.key} className={`flex items-start gap-2 text-xs font-semibold ${text}`}>
             <span className={`mt-px inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${dot}`}>
-              {tone === 'bad' ? '!' : tone === 'ok' ? <Icon name="check" size={10} strokeWidth={3.2} /> : '·'}
+              {tone === 'bad' || tone === 'warn' ? '!' : tone === 'ok' ? <Icon name="check" size={10} strokeWidth={3.2} /> : '·'}
             </span>
             <span className="min-w-0">
               {c.label}
@@ -69,10 +70,10 @@ export default function GroupEditorSummary({
         <div className="mt-2.5">
           <div className="flex items-center justify-between text-[11px] font-bold">
             <span className="text-chicken-brown/50">席位（總人數 / 已圈席位）</span>
-            <span className={`tabular-nums ${overSeats ? 'text-chicken-red' : 'text-chicken-brown'}`}>{total} / {heldSeats}</span>
+            <span className={`tabular-nums ${overSeats ? 'text-amber-700' : 'text-chicken-brown'}`}>{total} / {heldSeats}</span>
           </div>
           <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-chicken-brown/10">
-            <div className={`h-2 rounded-full transition-all ${overSeats ? 'bg-chicken-red' : 'bg-[#5b8c1f]'}`} style={{ width: `${pct}%` }} />
+            <div className={`h-2 rounded-full transition-all ${overSeats ? 'bg-amber-500' : 'bg-[#5b8c1f]'}`} style={{ width: `${pct}%` }} />
           </div>
         </div>
       </div>

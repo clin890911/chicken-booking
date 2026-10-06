@@ -16,10 +16,11 @@ import {
   SPECIAL_FIELDS, TOTAL_PRESETS, composeBusInfo, parseBusInfo, overSpecialCounts, specialOverMessage,
 } from './groupEditorFields'
 import { dayLabel, seatingForSlot, arrivalSlotsForSeating } from '../../../utils/timeSlots'
-import { guestTableNumbers, guestBatches, isEscortBatch, remainingTablesForSeating } from '../../../utils/capacity'
+import { guestTableNumbers, guestBatches, isEscortBatch, remainingTablesForSeating, isSlotClosed, isDayClosedForClosures } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import { suggestTablesForBatch } from '../../../utils/suggestTables'
 import * as groupReservationService from '../../../services/groupReservationService'
+import { buildGroupEditorChecks, canSaveGroup, groupSaveErrorMessage, seatingCardState } from './groupEditorChecks'
 
 const BATCH_LABELS = ['一', '二', '三', '四', '五', '六']
 
@@ -41,9 +42,9 @@ function ArrivalTimeSelect({ seating, slots = [], value, onChange, className = '
   )
 }
 
-// 場次卡剩餘色調
+// 場次卡剩餘色調（r 為 ignoreOnlineClosure 口徑：線上已關的場次 remainingSeats 仍是實際剩餘）
 function seatingTone(r) {
-  if (!r || r.closed) return 'closed'
+  if (!r || r.dayClosed) return 'closed'
   if ((r.remainingSeats ?? 0) <= 0) return 'full'
   if ((r.remainingTables ?? 0) <= 2 || (r.totalSeats > 0 && r.remainingSeats < r.totalSeats * 0.15)) return 'tight'
   return 'ok'
@@ -137,13 +138,15 @@ export default function GroupEditorStage({
 
   const total = Number(draft.counts?.total) || 0
 
-  // 各場次剩餘（排除本團自己的保留，避免改舊團時把自己算成滿）
+  // 各場次剩餘（排除本團自己的保留，避免改舊團時把自己算成滿）。
+  // ignoreOnlineClosure：「關閉場次/時段」只擋線上客人，後台建團看實際佔用（closed 旗標照回，用來標「線上已關」）。
   const otherGroups = useMemo(() => groupReservations.filter(g => g.id !== draft.id), [groupReservations, draft.id])
   const seatingRemaining = useMemo(() => {
     const m = {}
-    seatings.forEach(s => { m[s.id] = remainingTablesForSeating(tables, bookings, otherGroups, date, s, settings) })
+    seatings.forEach(s => { m[s.id] = remainingTablesForSeating(tables, bookings, otherGroups, date, s, settings, { ignoreOnlineClosure: true }) })
     return m
   }, [seatings, tables, bookings, otherGroups, date, settings])
+  const dayClosed = isDayClosedForClosures(settings, date)
 
   const primaryBatch = draft.batches?.[0] || null
   const primarySeating = primaryBatch ? seatingForSlot(settings, primaryBatch.timeSlot) : null
@@ -353,56 +356,81 @@ export default function GroupEditorStage({
   }
 
   // === 場次可選性 ===
-  // 剩餘席位 < 總人數 → 灰掉標「不夠這團」。
-  // ⚠️ 安全閥：若「每個場次都不夠」就解除鎖定——那正是兩段用餐輪替（86 人兩台大巴）的情境，
-  //    全部鎖死會讓這種團完全建不了單。
+  // 席位不夠只是提示（不再灰掉）：店家大客滿會請客人擠一擠，也可能拆第二梯。
+  // 只有公休日（closedDates）的場次不可選（維持原狀，後端也擋）；「線上已關」的場次照選。
   const seatingShort = (s) => {
     const r = seatingRemaining[s.id]
     return total > 0 && (r?.remainingSeats ?? 0) > 0 && (r.remainingSeats < total)
   }
   const allSeatingsShort = hasSeatings && total > 0 && seatings.every(s => {
     const r = seatingRemaining[s.id]
-    return r?.closed || (r?.remainingSeats ?? 0) <= 0 || r.remainingSeats < total
+    return r?.dayClosed || (r?.remainingSeats ?? 0) <= 0 || r.remainingSeats < total
   })
 
-  // === 檢查清單（逐條對應 validateGroupForSave，不通過就不給存）===
+  // 席位超坐警示（不擋存檔）：與存檔時同口徑——單一旅客梯次以總人數為準。
+  const seatWarnings = useMemo(() => {
+    const batches = guestBatches(draft).length === 1
+      ? (draft.batches || []).map(b => (b.isEscort ? b : { ...b, guests: total }))
+      : (draft.batches || [])
+    return groupReservationService.groupSeatWarnings({ ...draft, batches }, capByNum)
+  }, [draft, total, capByNum])
+
+  // 本團各梯所在、線上已關閉的場次/時段（公休日不算：那是另一道硬擋）
+  const onlineClosedNames = useMemo(() => {
+    if (dayClosed) return []
+    const names = []
+    ;(draft.batches || []).forEach(b => {
+      if (!b.timeSlot || !isSlotClosed(settings, date, b.timeSlot)) return
+      const name = seatingForSlot(settings, b.timeSlot)?.name || b.timeSlot
+      if (!names.includes(name)) names.push(name)
+    })
+    return names
+  }, [draft.batches, settings, date, dayClosed])
+
+  // 場次總席位超收：散客＋其他團＋本團在該場次圈的桌 > 全店座位（不擋，提示現場要擠）
+  const overbookedSeatings = useMemo(() => {
+    const out = []
+    seatings.forEach(s => {
+      const mine = new Set()
+      ;(draft.batches || []).forEach(b => {
+        if (seatingForSlot(settings, b.timeSlot)?.id !== s.id) return
+        ;(b.tableNumbers || []).forEach(n => mine.add(String(n)))
+      })
+      if (!mine.size) return
+      const r = seatingRemaining[s.id]
+      if (!r || r.dayClosed || !(r.totalSeats > 0)) return
+      const over = (r.usedSeats || 0) + seatsOf([...mine]) - r.totalSeats
+      if (over > 0) out.push({ name: s.name, over })
+    })
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seatings, draft.batches, settings, seatingRemaining, capByNum])
+
+  // === 檢查清單（逐條對應 validateGroupForSave；紅＝擋、黃＝只提醒）===
   const specialOver = overSpecialCounts(draft.counts)
   const specialErr = specialOverMessage(draft.counts)
   const checks = useMemo(() => {
-    const hasAgency = !!(draft.agencyId || (draft.agencyName || '').trim())
     const allBatches = draft.batches || []
-    const seatingPicked = hasSeatings ? !!primarySeating : !!primaryBatch?.timeSlot
-    const r = primarySeating ? seatingRemaining[primarySeating.id] : null
-    const seatingBlocked = !!(primarySeating && (r?.closed || (r?.remainingSeats ?? 0) <= 0))
-    const batchesReady = gBatches.length > 0 && allBatches.every(
-      b => (b.tableNumbers || []).length > 0 && (b.isEscort || batchGuests(b) > 0),
-    )
-    const perBatchEnough = allBatches.every(b => seatsOf(b.tableNumbers) >= batchGuests(b))
-    const seatsOk = total > 0 && heldSeats > 0 && perBatchEnough && (singleGuest ? heldSeats >= total : true)
-    return [
-      { key: 'agency', label: '已選旅行社', ok: hasAgency, bad: false, reason: '請選擇或新增旅行社' },
-      { key: 'total', label: '總人數大於 0', ok: total > 0 && !specialErr, bad: !!specialErr, reason: specialErr || '請填總人數' },
-      {
-        key: 'seating',
-        label: hasSeatings ? '已選場次' : '已選用餐時段',
-        ok: seatingPicked && !seatingBlocked,
-        bad: seatingBlocked,
-        reason: seatingBlocked ? `「${primarySeating.name}」已關閉或客滿，請改選` : '請選擇場次',
-      },
-      { key: 'batches', label: '每梯都已圈桌且有人數', ok: batchesReady, bad: false, reason: '還有梯次沒圈桌或沒填人數' },
-      {
-        key: 'seats',
-        label: `席位夠坐（已圈 ${heldSeats} / 需 ${total} 席）`,
-        ok: seatsOk,
-        bad: heldSeats > 0 && total > 0 && !seatsOk,
-        reason: '保留席不足，請再多圈幾桌',
-      },
-      { key: 'tables', label: '沒有停用/維修中的桌', ok: badTables.length === 0, bad: badTables.length > 0, reason: `${badTables.join('、')} 當日停用/維修中` },
-    ]
+    return buildGroupEditorChecks({
+      hasAgency: !!(draft.agencyId || (draft.agencyName || '').trim()),
+      total,
+      specialErr,
+      hasSeatings,
+      seatingPicked: hasSeatings ? !!primarySeating : !!primaryBatch?.timeSlot,
+      dayClosed,
+      batchesReady: gBatches.length > 0 && allBatches.every(
+        b => (b.tableNumbers || []).length > 0 && (b.isEscort || batchGuests(b) > 0),
+      ),
+      heldSeats,
+      seatWarnings,
+      onlineClosedNames,
+      overbookedSeatings,
+      badTables,
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, total, heldSeats, badTables, specialErr, primarySeating, primaryBatch, hasSeatings, seatingRemaining, singleGuest, gBatches.length, capByNum])
+  }, [draft, total, heldSeats, badTables, specialErr, primarySeating, primaryBatch, hasSeatings, dayClosed, seatWarnings, onlineClosedNames, overbookedSeatings, gBatches.length])
 
-  const canSave = checks.every(c => c.ok && !c.bad)
+  const canSave = canSaveGroup(checks)
   const allTableNumbers = useMemo(
     () => [...new Set(gBatches.flatMap(b => b.tableNumbers || []))],
     [gBatches],
@@ -436,7 +464,7 @@ export default function GroupEditorStage({
       : draft.batches
     const err0 = groupReservationService.validateGroupForSave({ ...draft, date, batches: batchesToSave }, capByNum, tables)
     if (err0) return toast.error(err0)
-    if ((draft.batches || []).length > 1 && total > heldSeats) {
+    if (gBatches.length > 1 && total > heldSeats) {
       toast.info(`提醒：總人數 ${total} 大於保留席數 ${heldSeats}，將以多梯次輪替（請確認梯次安排）`)
     }
     const patch = {
@@ -462,8 +490,7 @@ export default function GroupEditorStage({
       }
       toast.success('團單已儲存')
     } catch (err) {
-      if (err?.status === 409) toast.error('桌位衝突：' + (err.message || '已被其他團或現場訂位佔用，請重新圈桌'))
-      else toast.error('儲存失敗：' + (err?.message || '未知錯誤'))
+      toast.error(groupSaveErrorMessage(err))
     } finally {
       savingRef.current = false
       setBusy(false)
@@ -497,11 +524,11 @@ export default function GroupEditorStage({
       <div className="flex flex-wrap gap-1.5">
         {(hasSeatings ? seatings : []).map(s => {
           const r = seatingRemaining[s.id]
-          const disabled = r?.closed || (r?.remainingSeats ?? 0) <= 0
+          const st = seatingCardState(r)
           return (
-            <button key={s.id} type="button" disabled={disabled} onClick={() => { addBatchForSeating(s); setAddingBatch(false) }}
+            <button key={s.id} type="button" disabled={!st.selectable} onClick={() => { addBatchForSeating(s); setAddingBatch(false) }}
               className="tap h-8 rounded-lg border border-chicken-brown/15 bg-white px-2.5 text-xs font-semibold text-chicken-brown disabled:cursor-not-allowed disabled:opacity-40">
-              {s.name} {s.start}（剩 {r?.remainingSeats ?? '—'} 席）
+              {s.name} {s.start}（{st.dayClosed ? '公休' : `${st.onlineClosed ? '線上已關 · ' : ''}剩 ${r?.remainingSeats ?? '—'} 席`}）
             </button>
           )
         })}
@@ -705,14 +732,20 @@ export default function GroupEditorStage({
                   {seatings.map(s => {
                     const r = seatingRemaining[s.id]
                     const tone = seatingTone(r)
+                    const st = seatingCardState(r)
                     const selected = primarySeating?.id === s.id
                     const short = seatingShort(s)
-                    const disabled = !selected && (tone === 'closed' || tone === 'full' || (short && !allSeatingsShort))
+                    // 只有公休日不可選；線上已關、客滿、不夠這團都只是提示
+                    const disabled = !selected && !st.selectable
                     const boxCls = selected
                       ? 'ring-2 ring-chicken-red bg-chicken-red/[0.04] text-chicken-brown'
                       : disabled ? 'ring-1 ring-inset ring-chicken-brown/[0.08] bg-chicken-brown/[0.03] text-chicken-brown/40'
                         : 'ring-1 ring-inset ring-chicken-brown/[0.1] bg-white text-chicken-brown hover:ring-chicken-brown/25'
-                    const remainCls = tone === 'closed' || tone === 'full' || short ? 'text-chicken-brown/45' : tone === 'tight' ? 'text-amber-700' : 'text-[#5b8c1f]'
+                    const remainCls = tone === 'closed' ? 'text-chicken-brown/45'
+                      : (st.onlineClosed || tone === 'full' || short || tone === 'tight') ? 'text-amber-700' : 'text-[#5b8c1f]'
+                    const remainText = tone === 'full' ? '客滿（仍可選）'
+                      : short ? `不夠這團 · 剩 ${r?.remainingSeats ?? '—'} 席`
+                        : `剩 ${r?.remainingTables ?? '—'} 桌 · ${r?.remainingSeats ?? '—'} 席`
                     return (
                       <button
                         key={s.id}
@@ -728,10 +761,9 @@ export default function GroupEditorStage({
                           {selected && <Icon name="checkCircle" size={16} className="ml-auto text-chicken-red" />}
                         </div>
                         <div className={`mt-1.5 text-xs font-semibold tabular-nums ${remainCls}`}>
-                          {tone === 'closed' ? '已關閉'
-                            : tone === 'full' ? '已客滿'
-                              : short ? `不夠這團 · 剩 ${r?.remainingSeats ?? '—'} 席`
-                                : `剩 ${r?.remainingTables ?? '—'} 桌 · ${r?.remainingSeats ?? '—'} 席`}
+                          {tone === 'closed' ? '公休'
+                            : st.onlineClosed ? `線上已關 · ${remainText}`
+                              : remainText}
                         </div>
                       </button>
                     )
@@ -888,7 +920,7 @@ export default function GroupEditorStage({
       <div className="sticky bottom-0 z-10 -mx-3 flex items-center gap-3 border-t border-chicken-brown/10 bg-chicken-cream/95 px-3 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 md:hidden">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold text-chicken-brown/55">席位（總人數 / 已圈席位）</div>
-          <div className={`text-sm font-bold tabular-nums ${total > 0 && heldSeats < total ? 'text-chicken-red' : 'text-chicken-brown'}`}>{total} / {heldSeats}</div>
+          <div className={`text-sm font-bold tabular-nums ${total > 0 && heldSeats < total ? 'text-amber-700' : 'text-chicken-brown'}`}>{total} / {heldSeats}</div>
         </div>
         <div className="flex-1" />
         <Button onClick={save} disabled={!canSave || busy}>{busy ? '儲存中…' : saveLabel}</Button>
