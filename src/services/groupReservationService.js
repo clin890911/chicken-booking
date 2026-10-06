@@ -201,7 +201,7 @@ export function swapBatchTable(id, batchId, fromTable, toTable) {
 // === 平面圖規劃：桌位衝突偵測（前端即時提示；後端 groupReserveTables 為原子真相）===
 // 回傳 { tableNumber: { type, ... } }，列出在同日、時間窗與 candidateTimeSlot 重疊而不可選的桌號：
 //   - type:'group'   其他團佔用（{ groupId, agencyName, label }）
-//   - type:'booking' 一般訂位已指派桌（{ bookingId, name }）
+//   - type:'booking' 一般訂位已指派桌（{ bookingId, name }）——含大組併桌的副桌 extraTableIds
 // excludeGroupId 為正在編輯的本團；bookings 由呼叫端（含 context）傳入做一般訂位衝突檢查。
 export function tableConflictsForBatch({ date, timeSlot, settings = {}, excludeGroupId = null, bookings = [] }) {
   const durationMin = occupancyMinutes(settings)
@@ -222,12 +222,17 @@ export function tableConflictsForBatch({ date, timeSlot, settings = {}, excludeG
   })
 
   // 2) 一般訂位已指派桌（同日、時間窗重疊、未取消/未到/未完成）
+  // 主桌 assignedTableId 與大組併桌的副桌 extraTableIds 都算佔用：只看主桌會讓團體圈走散客的副桌 → 同桌超賣。
+  // （不 import seatingService.bookingTableNumbers：seatingService 已 import 本檔，避免循環依賴。）
   ;(bookings || []).forEach(b => {
-    if (b.date !== date || !b.assignedTableId || !b.timeSlot) return // 無時段者跳過，避免 0 分窗誤判
+    if (b.date !== date || !b.timeSlot) return // 無時段者跳過，避免 0 分窗誤判
+    const nums = [...new Set([b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean).map(String))]
+    if (!nums.length) return
     if (CAPACITY_EXCLUDED_STATUSES.includes(b.status)) return
     if (!overlaps(toMinutes(b.timeSlot))) return
-    const n = String(b.assignedTableId)
-    if (!conflicts[n]) conflicts[n] = { type: 'booking', bookingId: b.id, name: b.name }
+    nums.forEach(n => {
+      if (!conflicts[n]) conflicts[n] = { type: 'booking', bookingId: b.id, name: b.name }
+    })
   })
 
   return conflicts
