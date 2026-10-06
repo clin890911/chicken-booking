@@ -1,5 +1,6 @@
 import { compareWaitlistOrder } from '../../../utils/waitlistOrder'
 import { useAuth } from '../../../contexts/AuthContext'
+import { seatingPerms } from '../../../utils/seatingPerms'
 import { waitlistDay } from '../../../services/waitlistService'
 import { todayStr } from '../../../utils/timeSlots'
 import { commandId } from '../../../services/handoffService'
@@ -35,6 +36,9 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
 
   const {can}=useAuth()
   const canEdit=can('waitlist.update')
+  // 候位「入座」會連動建 walk-in 訂位並佔桌（寫 waitlist＋bookings＋tables），不只 waitlist.update；
+  // 叫號／棄號／暫過只寫 waitlist，維持 canEdit。見 utils/seatingPerms.js。
+  const canSeat=seatingPerms(can).waitlistSeat
   const [busy,setBusy]=useState(null)
   const pending=useRef(new Map())
   const changeQueue=async(w,action)=>{
@@ -126,12 +130,12 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                 {w.notes && <span className="italic"> · 「{w.notes}」</span>}
               </div>
               {canEdit&&<div className="flex gap-1 mt-2">
-                <button
+                {canSeat && <button
                   disabled={!!busy} onClick={() => onSeatWaitlist?.(w)}
                   className="flex-1 min-h-[44px] text-[11px] py-1 bg-chicken-green text-white rounded-md font-bold"
                 >
                   入座
-                </button>
+                </button>}
                 {w.status === 'waiting' && (
                   <button
                     disabled={!!busy} onClick={() => callWaitlist(w.id)}

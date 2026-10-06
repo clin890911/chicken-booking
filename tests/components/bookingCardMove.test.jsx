@@ -13,6 +13,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const ctx = {}
 const toast = { success: vi.fn(), error: vi.fn(), action: vi.fn(), info: vi.fn() }
 vi.mock('../../src/contexts/BookingContext', () => ({ useBooking: () => ctx }))
+vi.mock('../../src/contexts/AuthContext', () => ({ useAuth: () => ({ can: () => true }) }))
 vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => toast, useConfirm: () => vi.fn(async () => true) }))
 
 const BookingCard = (await import('../../src/components/booking/BookingCard')).default

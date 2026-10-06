@@ -26,6 +26,7 @@ export const ACTION_WRITES = {
   seatBooking: ['bookings', 'tables'],  // 客人到了入座、預配入座、預訂（指派）、改桌、離席、一鍵釋出、取消訂位、復原
   walkIn: ['bookings', 'tables'],       // 散客直接入座（bookingService.create + seatTable）
   seatWaitlist: ['waitlist', 'bookings', 'tables'], // 候位入座（建 walk-in booking + seatTable + waitlist.seat）
+  bookingOnly: ['bookings'],            // 標／恢復 No-show、解除未來日預配（只改 booking，不碰桌）
   groupWrite: ['groupReservations', 'tables'],      // 團體梯次入座／整梯釋出／整團完成／接下一梯（寫團 status／releasedAt）
 }
 
@@ -38,6 +39,7 @@ export function seatingPerms(can) {
     table: all('clearTable'),
     block: all('clearTable') && has('table.block'),
     seat: all('seatBooking'),
+    booking: all('bookingOnly'),
     walkIn: all('walkIn'),
     waitlistSeat: all('seatWaitlist'),
     group: all('groupWrite'),
