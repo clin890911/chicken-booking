@@ -44,6 +44,7 @@ import {
   buildBookingUpsertData,
 } from './lib/dataProjection.js'
 import { isTableUsableOnDate } from './lib/tableUsable.js'
+import { findGroupTableConflicts } from './lib/groupTableConflicts.js'
 import {
   slotEpochMs,
   buildMyBookingsList,
@@ -637,37 +638,10 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         .filter(g => g.id !== group.id && !CAPACITY_EXCLUDED_STATUSES.includes(g.status))
       const assignedBookings = bookingsSnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(b => b.assignedTableId && b.timeSlot && !CAPACITY_EXCLUDED_STATUSES.includes(b.status))
+        .filter(b => b.timeSlot && !CAPACITY_EXCLUDED_STATUSES.includes(b.status))
 
-      const conflicts = []
-      for (const b of group.batches || []) {
-        const s = toMinutes(b.timeSlot)
-        const e = s + durationMin
-        const wanted = new Set((b.tableNumbers || []).map(String))
-        if (!wanted.size) continue
-        // 與其他團衝突
-        for (const og of others) {
-          for (const ob of og.batches || []) {
-            const os = toMinutes(ob.timeSlot)
-            const oe = os + durationMin
-            if (!(s < oe && os < e)) continue // 時間窗不重疊 → 同桌可重用
-            for (const n of ob.tableNumbers || []) {
-              if (wanted.has(String(n))) {
-                conflicts.push({ table: String(n), withGroupId: og.id, withAgency: og.agencyName || '', batch: b.label })
-              }
-            }
-          }
-        }
-        // 與一般訂位已指派桌衝突
-        for (const bk of assignedBookings) {
-          const bs = toMinutes(bk.timeSlot)
-          const be = bs + durationMin
-          if (!(s < be && bs < e)) continue
-          if (wanted.has(String(bk.assignedTableId))) {
-            conflicts.push({ table: String(bk.assignedTableId), withBookingId: bk.id, batch: b.label })
-          }
-        }
-      }
+      // 主桌＋併桌副桌（extraTableIds）都算佔用；邏輯見 lib/groupTableConflicts.js
+      const conflicts = findGroupTableConflicts({ group, otherGroups: others, bookings: assignedBookings, durationMin })
       if (conflicts.length) {
         const tablesList = [...new Set(conflicts.map(c => c.table))].join('、')
         throw errorWithStatus(`桌位衝突：${tablesList} 已被其他團或現場訂位佔用`, 409)
