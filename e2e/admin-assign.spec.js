@@ -214,3 +214,17 @@ for (const { label, original, selected } of [
   for(const n of original.filter(n=>!selected.includes(n))) expect(state.tables.find(t=>t.number===n).status).toBe('vacant')
   for(const n of selected) expect(state.tables.find(t=>t.number===n)).toMatchObject({status:'reserved',currentBookingId:booking.id})
 })
+
+test('併桌訂位（8 位＝101＋107）：今日訂位卡徽章列出所有桌，不只主桌', async ({ page }) => {
+  const booking = { ...BOOKING, guests: 8, assignedTableId: '101', extraTableIds: ['107'] }
+  const tables = INITIAL_TABLES.map(t => (['101', '107'].includes(t.number) ? { ...t, status: 'reserved', currentBookingId: booking.id } : t))
+  await page.addInitScript(({ booking, tables }) => {
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify([booking]))
+    localStorage.setItem('chicken_tables_v3', JSON.stringify(tables))
+  }, { booking, tables })
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+  await expect(page.locator('[data-kind]', { hasText: '桌 101 + 107' }).first()).toBeVisible()
+})
