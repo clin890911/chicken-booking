@@ -7,7 +7,7 @@ import { useToast, useConfirm } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
-import { findPreassignedBooking } from '../../../utils/capacity'
+import { seatTableWarnings } from '../../../utils/capacity'
 import { assignmentKind } from '../../../utils/tableStatus'
 import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
@@ -186,17 +186,21 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
 
   // 客人到了（含遲到後才到）：對已指派的訂位直接入座（status→arrived、桌→用餐中）。
   // 防呆：指派桌若被今日團體保留、或已預先配給別筆訂位，先跳確認再覆蓋（與指派模式同口徑）。
+  //   併桌大組：主桌＋副桌每張都要檢查（只看主桌會讓副桌被團保／別人預配時無聲坐上去）。
   const handleSeat = async (b) => {
-    const tableNo = b.assignedTableId
-    const hold = groupHoldTables[tableNo]
-    const conflict = findPreassignedBooking(bookings, tableNo, { date: today, excludeBookingId: b.id })
-    if (hold?.holds?.length || conflict) {
+    const seatTables = [b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean)
+    const tableNo = seatTables.join('、')
+    const warnings = seatTableWarnings(b, { bookings, groupHolds: groupHoldTables, date: today })
+    if (warnings.length) {
+      const subject = (t) => seatTables.length > 1 ? `${t} ` : '此桌'
       const lines = []
-      if (hold?.holds?.length) {
-        const h = hold.holds[0]
-        lines.push(`此桌為今日團體「${hold.agencyName || '旅行社'}」預留${h?.batch ? `（${h.batch.label} ${h.batch.timeSlot}）` : ''}`)
-      }
-      if (conflict) lines.push(`此桌已預先配給 ${conflict.name}（${conflict.guests} 位${conflict.timeSlot ? ` · ${conflict.timeSlot}` : ''}）`)
+      warnings.forEach(({ table, hold, conflict }) => {
+        if (hold) {
+          const h = hold.holds[0]
+          lines.push(`${subject(table)}為今日團體「${hold.agencyName || '旅行社'}」預留${h?.batch ? `（${h.batch.label} ${h.batch.timeSlot}）` : ''}`)
+        }
+        if (conflict) lines.push(`${subject(table)}已預先配給 ${conflict.name}（${conflict.guests} 位${conflict.timeSlot ? ` · ${conflict.timeSlot}` : ''}）`)
+      })
       const ok = await confirm(`${lines.join('；')}。\n仍要讓 ${b.name} 入座 ${tableNo}？`,
         { title: '桌位有預留', confirmLabel: '仍要入座', danger: true })
       if (!ok) return

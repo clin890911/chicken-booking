@@ -263,6 +263,27 @@ export function clearTable(tableNumber) {
   return tableService.clearTable(tableNumber)
 }
 
+// === 離席後 toast「一鍵釋出」：把這筆的主桌＋併桌副桌從待清桌直接釋成空桌 ===
+// 只清「仍是待清桌、且仍由這筆持有」的桌：toast 按鈕可能幾秒後才按，期間桌可能已被清好、
+// 甚至已帶下一組（clearTable 是無條件覆寫，直接清會把剛入座那組從桌況圖抹掉）。
+// 回傳 { ok, released: [...桌號], skipped: [...桌號] }。
+export function releaseCheckedOutTables(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在', released: [], skipped: [] }
+  const released = []
+  const skipped = []
+  bookingTableNumbers(booking).forEach(n => {
+    const t = tableService.getByNumber(n)
+    if (t && t.status === 'cleaning' && heldBy(t, bookingId)) {
+      tableService.clearTable(n)
+      released.push(n)
+    } else {
+      skipped.push(n)
+    }
+  })
+  return { ok: true, released, skipped }
+}
+
 // clearTable 的反向操作（誤按「✨ 清桌完成」後按「↩ 復原」）：桌況還原成待清桌。
 // ★ 與其他復原同一套口徑：只在桌「仍是空桌」時還原。清桌完成後的那幾秒正是下一組被帶上桌的
 //   高峰（把桌清空本來就是為了讓下一組坐），若已經有人坐下卻硬寫回 cleaning，會把剛入座那組

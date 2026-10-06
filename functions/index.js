@@ -46,7 +46,8 @@ import {
 import { isTableUsableOnDate } from './lib/tableUsable.js'
 import { findGroupClosedDateBatch } from './lib/groupClosure.js'
 import { groupCircledTableNumbers, findUnusableGroupTables, unusableTablesMessage } from './lib/groupUnusableTables.js'
-import { findGroupTableConflicts } from './lib/groupTableConflicts.js'
+import { findGroupTableConflicts, bookingOccupiedTables } from './lib/groupTableConflicts.js'
+import { heldTableIdsToRelease } from './lib/bookingTableRelease.js'
 import {
   slotEpochMs,
   buildMyBookingsList,
@@ -938,6 +939,14 @@ function guestEventIntents(booking,settings,event,binding){
   return intents
 }
 
+// 交易內讀這筆訂位的主桌＋副桌，回傳仍由本筆持有、應釋放的桌 id。
+// ⚠️ Firestore 交易所有 read 必須在任何 write 之前：呼叫端要在 tx.set 前先 await 這支。
+async function readHeldTableIdsForRelease(tx, booking) {
+  const ids = bookingOccupiedTables(booking)
+  const snaps = await Promise.all(ids.map(id => tx.get(db.collection(COLLECTIONS.tables).doc(id))))
+  return heldTableIdsToRelease(booking, snaps.map(s => ({ id: s.id, exists: s.exists, ...(s.exists ? s.data() : {}) })))
+}
+
 export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN] }, async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
   try {
@@ -963,7 +972,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     }
     const updatePatch = {
       ...next,
-      ...(structural ? { assignedTableId: null } : {}),
+      ...(structural ? { assignedTableId: null, extraTableIds: [] } : {}),
       phoneDigits: digits(next.phone),
       lastGuestEditAt: now,
       guestEditCount: (Number(booking.guestEditCount) || 0) + 1,
@@ -988,6 +997,8 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         const remaining=calcSlotCapacityServer(tables,others,next.date,next.timeSlot,settings,groups)
         if(isOverAutoCloseThreshold({totalSeats:activeTotalSeatsServer(tables,next.date),remaining,enabled:settings.onlineAutoCloseEnabled,percent:settings.onlineAutoClosePercent})||remaining<Number(next.guests||1))throw errorWithStatus('此時段目前已無足夠座位，請改選其他時段',409)
       }
+      // 結構性改動解除配桌：主桌＋併桌副桌中仍由本筆持有者才釋放（read 須在 write 前）
+      const releaseTableIds=structural?await readHeldTableIdsForRelease(tx,current):[]
       const result={...current,...updatePatch,notificationVersion:(current.notificationVersion||0)+1,notificationHealth:{status:'pending',at:now}}
       const intents=guestEventIntents(result,settings,'updated',bindingSnap.exists?bindingSnap.data():null)
       result.notificationHealthByEvent={...(current.notificationHealthByEvent||{}),...Object.fromEntries(intents.map(i=>[i.id,healthEntry(i,'pending',now)]))}
@@ -997,7 +1008,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       intents.forEach(intent=>tx.set(db.collection('notificationIntents').doc(intent.id),intent))
       const lineIntent=intents.find(i=>i.channel==='line')
       if(lineIntent)tx.set(db.collection('lineBookingBindings').doc(booking.id),{lastQueuedByEvent:{updated:{stateHash:lineIntent.stateHash,bookingVersion:result.notificationVersion,intentId:lineIntent.id,sequence:(bindingSnap.data()?.lastQueuedByEvent?.updated?.sequence||0)+1}}},{merge:true})
-      if(structural&&current.assignedTableId)tx.set(db.collection(COLLECTIONS.tables).doc(current.assignedTableId),{status:'vacant',currentBookingId:null,seatedAt:null,updatedAt:now},{merge:true})
+      releaseTableIds.forEach(id=>tx.set(db.collection(COLLECTIONS.tables).doc(id),{status:'vacant',currentBookingId:null,seatedAt:null,updatedAt:now},{merge:true}))
       return result
     })
     for(const id of intentIds)await processNotificationIntent(id).catch(()=>{})
@@ -1021,6 +1032,7 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     const updatePatch = {
       status: 'cancelled',
       assignedTableId: null,
+      extraTableIds: [],
       cancellationReason: {
         source: 'guest',
         reason: String(reason || '').trim() || '未提供',
@@ -1046,6 +1058,8 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       if(!saved.exists||!safeTokenEqual(saved.data().manageToken,token))throw errorWithStatus('invalid-booking',403)
       const current={id:saved.id,...saved.data()},allowed=guestEditable(current)
       if(!allowed.ok)throw errorWithStatus(allowed.reason,409)
+      // 取消釋放主桌＋併桌副桌中仍由本筆持有者（read 須在 write 前）
+      const releaseTableIds=await readHeldTableIdsForRelease(tx,current)
       const result={...current,...updatePatch,notificationVersion:(current.notificationVersion||0)+1,notificationHealth:{status:'pending',at:now}}
       const intents=guestEventIntents(result,settings,'cancelled',bindingSnap.exists?bindingSnap.data():null);intentIds=intents.map(i=>i.id)
       result.notificationHealthByEvent={...(current.notificationHealthByEvent||{}),...Object.fromEntries(intents.map(i=>[i.id,healthEntry(i,'pending',now)]))}
@@ -1053,7 +1067,7 @@ export const guestCancelBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       tx.set(bookingRef,result);intents.forEach(intent=>tx.set(db.collection('notificationIntents').doc(intent.id),intent))
       const lineIntent=intents.find(i=>i.channel==='line')
       if(lineIntent)tx.set(db.collection('lineBookingBindings').doc(booking.id),{lastQueuedByEvent:{cancelled:{stateHash:lineIntent.stateHash,bookingVersion:result.notificationVersion,intentId:lineIntent.id,sequence:(bindingSnap.data()?.lastQueuedByEvent?.cancelled?.sequence||0)+1}}},{merge:true})
-      if(current.assignedTableId)tx.set(db.collection(COLLECTIONS.tables).doc(current.assignedTableId),{status:'vacant',currentBookingId:null,seatedAt:null,updatedAt:now},{merge:true})
+      releaseTableIds.forEach(id=>tx.set(db.collection(COLLECTIONS.tables).doc(id),{status:'vacant',currentBookingId:null,seatedAt:null,updatedAt:now},{merge:true}))
       return result
     })
     for(const id of intentIds)await processNotificationIntent(id).catch(()=>{})

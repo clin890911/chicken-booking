@@ -47,3 +47,15 @@ export function cancelWithUndo(booking, { cancelBooking, undoCancelBooking, toas
     } },
     { duration: 8000 })
 }
+
+// 離席後 toast 的「一鍵釋出」：主桌＋併桌副桌一起從待清桌釋成空桌（seatingService.releaseCheckedOutTables，
+// 只清仍由這筆持有的待清桌），toast 列出實際釋出的所有桌號；已被清好／別組接手的桌略過並說明。
+export function releaseAfterCheckout(booking, { releaseCheckedOutTables, toast }) {
+  const r = releaseCheckedOutTables(booking.id)
+  if (!r?.ok) return toast.error('釋出失敗：' + (r?.error || '未知錯誤'))
+  const released = r.released || []
+  const skipped = r.skipped || []
+  const skipMsg = skipped.length ? `（${skipped.join('、')} 已清好或已有下一組，未動）` : ''
+  if (released.length) toast.success(`${released.join('、')} 已釋出${skipMsg}`)
+  else if (skipped.length) toast.info(`${skipped.join('、')} 已清好或已有下一組，無需釋出`)
+}

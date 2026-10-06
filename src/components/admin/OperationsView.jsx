@@ -15,7 +15,7 @@ import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
-import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor } from '../../utils/capacity'
+import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor, buildPreassignTableMap } from '../../utils/capacity'
 import { assignmentKind, statusZh } from '../../utils/tableStatus'
 import { isTableUsableOnDate } from '../../utils/tableAvailability'
 import { conflictLine, releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } from '../../utils/preassignOverride'
@@ -285,20 +285,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 預配只記在 booking 上、不動桌況（桌仍 vacant）——地圖上需給視覺線索（📌 時段 預配），
   // 否則店員要到帶位確認那一步才會被 pendingConflicts 警告撞桌。
   // 只標「還會來」的：pending/confirmed；arrived 桌已 dining、completed/cancelled/noshow 不標。
-  // 同桌多筆預配（午、晚兩輪）取最早時段。
-  const preassignTables = useMemo(() => {
-    const map = {}
-    const today = todayStr()
-    bookings.forEach(b => {
-      if (b.date !== today || !b.assignedTableId) return
-      if (!['pending', 'confirmed'].includes(b.status)) return
-      const key = String(b.assignedTableId)
-      if (!map[key] || String(b.timeSlot || '99:99') < String(map[key].timeSlot || '99:99')) {
-        map[key] = { timeSlot: b.timeSlot || '' }
-      }
-    })
-    return map
-  }, [bookings])
+  // 同桌多筆預配（午、晚兩輪）取最早時段。併桌副桌也要標（見 capacity.buildPreassignTableMap）。
+  const preassignTables = useMemo(() => buildPreassignTableMap(bookings, todayStr()), [bookings])
 
   // 排程視圖資料：每張桌今天的各批用餐（turns）。散客（含預先配桌）+ 團體梯次合併、依時段排序。
   const turnsByTable = useMemo(
