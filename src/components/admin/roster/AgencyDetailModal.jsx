@@ -91,7 +91,7 @@ export default function AgencyDetailModal({ agency, rank, stats, guides = [], on
         </div>
 
         <div className="flex gap-2">
-          <button onClick={() => onGoPlanning?.()} className="btn-primary flex-1 !py-2 text-sm">新增團體預排</button>
+          {onGoPlanning && <button onClick={() => onGoPlanning()} className="btn-primary flex-1 !py-2 text-sm">新增團體預排</button>}
           {onEdit && <button onClick={() => onEdit(a)} className="btn-secondary flex-1 !py-2 text-sm">編輯旅行社</button>}
         </div>
 

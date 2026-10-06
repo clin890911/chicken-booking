@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
+import { isReadOnlyRole } from '../../../utils/seatingPerms'
 import { useToast } from '../../ui/Toast'
 import { Modal, Input, Textarea, Button, EmptyState } from '../../ui'
 import AgencyDetailModal from './AgencyDetailModal'
@@ -174,7 +175,7 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
           stats={statsByAgency[detail.agency.id]}
           guides={guidesByAgency(detail.agency.id)}
           onClose={() => setDetail(null)}
-          onGoPlanning={() => { setDetail(null); onGoPlanning?.() }}
+          onGoPlanning={isReadOnlyRole(can) ? undefined : () => { setDetail(null); onGoPlanning?.() }}
           onEdit={editable ? (a) => { setDetail(null); setAgencyModal({ mode: 'edit', data: { ...a } }) } : undefined}
         />
       )}

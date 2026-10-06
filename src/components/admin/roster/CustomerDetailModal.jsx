@@ -57,10 +57,12 @@ export default function CustomerDetailModal({ customer, onClose, onAddBooking, o
           ))}
         </div>
 
-        <div className="flex gap-2">
-          <button onClick={() => onAddBooking?.(c)} className="btn-primary flex-1 !py-2 text-sm">新增訂位</button>
-          <button onClick={() => onEdit?.(c)} className="btn-secondary flex-1 !py-2 text-sm">編輯備註</button>
-        </div>
+        {(onAddBooking || onEdit) && (
+          <div className="flex gap-2">
+            {onAddBooking && <button onClick={() => onAddBooking(c)} className="btn-primary flex-1 !py-2 text-sm">新增訂位</button>}
+            {onEdit && <button onClick={() => onEdit(c)} className="btn-secondary flex-1 !py-2 text-sm">編輯備註</button>}
+          </div>
+        )}
 
         <div>
           <div className="text-sm font-bold text-chicken-brown mb-1.5">

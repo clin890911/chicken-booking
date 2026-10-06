@@ -118,10 +118,12 @@ function GroupBatchRow({ row, onSelect, onDuplicate }) {
         <Pill cls={st.cls}>{st.label}</Pill>
         <Icon name="chevronRight" size={14} strokeWidth={2.2} className="text-chicken-brown/30" />
       </button>
-      <button type="button" onClick={() => onDuplicate(g.id)} title="複製這團為新草稿" aria-label={`複製 ${g.agencyName || '團單'}`}
-        className="tap w-8 h-8 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]">
-        <Icon name="copy" size={15} />
-      </button>
+      {onDuplicate && (
+        <button type="button" onClick={() => onDuplicate(g.id)} title="複製這團為新草稿" aria-label={`複製 ${g.agencyName || '團單'}`}
+          className="tap w-8 h-8 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]">
+          <Icon name="copy" size={15} />
+        </button>
+      )}
     </div>
   )
 }
@@ -155,10 +157,12 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
           <span className={`text-xs font-semibold tabular-nums ${TONE_TEXT[tone]}`}>
             {closed ? '公休' : tone === 'full' ? '已客滿' : `剩 ${summary.remainingTables} 桌 · ${summary.remaining} 席`}
           </span>
-          <button type="button" onClick={() => onNewGroup(seating.id)} disabled={closed}
-            className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red disabled:text-chicken-brown/30 disabled:cursor-not-allowed">
-            <Icon name="plus" size={12} strokeWidth={2.4} />新增團單
-          </button>
+          {onNewGroup && (
+            <button type="button" onClick={() => onNewGroup(seating.id)} disabled={closed}
+              className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red disabled:text-chicken-brown/30 disabled:cursor-not-allowed">
+              <Icon name="plus" size={12} strokeWidth={2.4} />新增團單
+            </button>
+          )}
         </div>
         <StackedBar summary={summary} />
       </div>
