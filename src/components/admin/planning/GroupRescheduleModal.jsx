@@ -22,12 +22,13 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
   )
   const closedDate = !!newDate && (settings?.closures?.closedDates || []).includes(newDate)
 
-  // 新日各場次剩餘桌/席（與容量引擎同口徑；公休/關閉場次回 closed）
+  // 新日各場次剩餘桌/席（與容量引擎同口徑）。ignoreOnlineClosure：關閉場次只停線上客人，
+  // 後台改期照實際剩餘顯示、標「線上已關」（公休日在上方 closedDate 另外擋）。
   const preview = useMemo(() => {
     if (!newDate || !seatings.length) return []
     return seatings.map(s => ({
       seating: s,
-      r: remainingTablesForSeating(tables, bookings, otherGroups, newDate, s, settings),
+      r: remainingTablesForSeating(tables, bookings, otherGroups, newDate, s, settings, { ignoreOnlineClosure: true }),
     }))
   }, [newDate, seatings, tables, bookings, otherGroups, settings])
 
@@ -77,11 +78,11 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
             ) : seatings.length ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {preview.map(({ seating, r }) => {
-                  const closed = r.closed
-                  const full = !closed && (r.remainingSeats ?? 0) <= 0
-                  const tight = !closed && !full && total > 0 && r.remainingSeats < total
-                  const cls = closed ? 'border-chicken-brown/15 bg-white text-chicken-brown/40'
-                    : full ? 'border-rose-200 bg-rose-50 text-rose-500'
+                  const onlineClosed = r.closed
+                  const full = (r.remainingSeats ?? 0) <= 0
+                  const tight = !full && total > 0 && r.remainingSeats < total
+                  const cls = full ? 'border-rose-200 bg-rose-50 text-rose-500'
+                    : onlineClosed ? 'border-amber-300 bg-amber-50 text-amber-800'
                       : tight ? 'border-amber-300 bg-amber-50 text-amber-800'
                         : 'border-emerald-300 bg-emerald-50 text-emerald-800'
                   return (
@@ -89,9 +90,9 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
                       <div className="text-xs font-bold">{seating.name}</div>
                       <div className="text-[11px] opacity-70">{seating.start}–{seating.end}</div>
                       <div className="mt-1 text-xs font-bold">
-                        {closed ? '已關閉'
-                          : full ? '已客滿'
-                            : `剩 ${r.remainingTables ?? '—'} 桌 / ${r.remainingSeats ?? '—'} 席`}
+                        {onlineClosed && '線上已關 · '}
+                        {full ? '已客滿'
+                          : `剩 ${r.remainingTables ?? '—'} 桌 / ${r.remainingSeats ?? '—'} 席`}
                         {tight && <span className="ml-1">· 需分梯</span>}
                       </div>
                     </div>

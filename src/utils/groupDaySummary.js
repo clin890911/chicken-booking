@@ -268,18 +268,21 @@ export function buildWalkinDaySummary(bookings = [], date, settings = {}) {
 
 // === (d) 各場次散客×團客合併容量 ===
 // 每場次呼叫一次 resolveSlotOccupancy（與容量引擎同口徑）。回傳 [{ seating, summary }]。
+// 後台規劃視角：關閉場次/時段只擋線上客人 → ignoreOnlineClosure，remaining 照實際佔用算
+// （summary.closed 仍回報，給 UI 標「線上已關」；公休日 summary.dayClosed 時 remaining 仍為 0）。
 export function dayCapacityBySeating(tables = [], bookings = [], groupReservations = [], date, settings = {}) {
   const seatings = Array.isArray(settings?.seatings) ? settings.seatings : []
   return seatings.map(seating => ({
     seating,
-    summary: resolveSlotOccupancy(tables, bookings, groupReservations, date, seating, settings).summary,
+    summary: resolveSlotOccupancy(tables, bookings, groupReservations, date, seating, settings, { ignoreOnlineClosure: true }).summary,
   }))
 }
 
 // === 面板一次取用的彙整 ===
 // 回傳 { date, groupCount, guests, heldSeats, heldTableCount, prep, timeline, seatings, walkins, warnings, closed }
 //  warnings：
-//   overcapacity — 某場次 groupHeldSeats + walkinGuests > totalSeats（含散客；僅異常時跳，非常駐儀表）
+//   overcapacity — 某場次 groupHeldSeats + walkinGuests > totalSeats（含散客；僅異常時跳，非常駐儀表；
+//                  線上關閉的場次照算，只有公休日不算）
 //   collision    — 同場次同時段 2+ 團
 //   unscheduled  — 有梯次對不到任何已設定場次（提醒確認帶位；未設定任何場次時不發此警示）
 export function buildGroupDaySummary({ groupReservations = [], bookings = [], tables = [], date, settings = {} }) {
@@ -292,9 +295,10 @@ export function buildGroupDaySummary({ groupReservations = [], bookings = [], ta
 
   const warnings = []
 
-  // 爆量（散客 + 團客 > 全店座位）
+  // 爆量（散客 + 團客 > 全店座位）。
+  // 線上關閉的場次照樣算：關場次正是為了把位子留給後台排的團，那裡最容易排爆。公休日不算（維持原狀）。
   seatings.forEach(({ seating, summary }) => {
-    if (summary.closed) return
+    if (summary.dayClosed) return
     const used = (summary.groupHeldSeats || 0) + (summary.walkinGuests || 0)
     if (summary.totalSeats > 0 && used > summary.totalSeats) {
       warnings.push({

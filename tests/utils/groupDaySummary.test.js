@@ -274,7 +274,7 @@ describe('dayCapacityBySeating', () => {
     const groups = [mkGroup({ batches: [mkBatch({ timeSlot: '11:00', tableNumbers: ['101'], guests: 6 })] })]
     const out = dayCapacityBySeating(TABLES, bookings, groups, DATE, baseSettings())
     expect(out.map(x => x.seating.id)).toEqual(['lunch1', 'lunch2', 'dinner1'])
-    const direct = resolveSlotOccupancy(TABLES, bookings, groups, DATE, SEATINGS[0], baseSettings()).summary
+    const direct = resolveSlotOccupancy(TABLES, bookings, groups, DATE, SEATINGS[0], baseSettings(), { ignoreOnlineClosure: true }).summary
     expect(out[0].summary).toEqual(direct)
   })
 
@@ -333,12 +333,31 @@ describe('buildGroupDaySummary', () => {
     expect(out.warnings.find(w => w.type === 'unscheduled')).toBeUndefined()
   })
 
-  it('關閉場次不觸發 overcapacity', () => {
+  // 2026-10 語意變更：關閉場次只停線上客人；店家關場次正是為了留位給團，那裡最容易排爆 → 照算。
+  it('線上關閉的場次照樣觸發 overcapacity', () => {
     const groups = [mkGroup({ counts: { total: 12 }, batches: [mkBatch({ timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12 })] })]
     const bookings = [mkBooking({ timeSlot: '11:00', guests: 12 })]
     const settings = baseSettings({ closures: { closedDates: [], closedSlots: {}, closedSeatings: { [DATE]: ['lunch1'] } } })
     const out = buildGroupDaySummary({ groupReservations: groups, bookings, tables: TABLES, date: DATE, settings })
+    expect(out.warnings.find(w => w.type === 'overcapacity')).toMatchObject({ seatingId: 'lunch1', used: 24, totalSeats: 22, over: 2 })
+  })
+
+  it('公休日（closedDates）不觸發 overcapacity（維持原狀）', () => {
+    const groups = [mkGroup({ counts: { total: 12 }, batches: [mkBatch({ timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12 })] })]
+    const bookings = [mkBooking({ timeSlot: '11:00', guests: 12 })]
+    const settings = baseSettings({ closures: { closedDates: [DATE], closedSlots: {}, closedSeatings: {} } })
+    const out = buildGroupDaySummary({ groupReservations: groups, bookings, tables: TABLES, date: DATE, settings })
     expect(out.warnings.find(w => w.type === 'overcapacity')).toBeUndefined()
+  })
+
+  it('各場次 summary：線上關閉的場次 remaining 照實際佔用算、closed 旗標仍為 true', () => {
+    const groups = [mkGroup({ counts: { total: 6 }, batches: [mkBatch({ timeSlot: '11:00', tableNumbers: ['101'], guests: 6 })] })]
+    const settings = baseSettings({ closures: { closedDates: [], closedSlots: {}, closedSeatings: { [DATE]: ['lunch1'] } } })
+    const out = buildGroupDaySummary({ groupReservations: groups, bookings: [], tables: TABLES, date: DATE, settings })
+    const lunch1 = out.seatings.find(x => x.seating.id === 'lunch1').summary
+    expect(lunch1.closed).toBe(true)
+    expect(lunch1.dayClosed).toBe(false)
+    expect(lunch1.remaining).toBe(22 - 6)
   })
 })
 

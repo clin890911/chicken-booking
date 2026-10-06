@@ -67,9 +67,10 @@ function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
   )
 }
 
-// 場次剩餘色調（summary 來自 resolveSlotOccupancy：remaining=席、remainingTables=桌）
+// 場次剩餘色調（summary 來自 dayCapacityBySeating＝resolveSlotOccupancy ignoreOnlineClosure 口徑：
+// remaining=實際剩餘席、remainingTables=桌）。只有公休日算 closed；「線上已關」另外標、後台照常可排。
 function seatingTone(summary) {
-  if (!summary || summary.closed) return 'closed'
+  if (!summary || summary.dayClosed) return 'closed'
   if ((summary.remaining ?? 0) <= 0) return 'full'
   if ((summary.remainingTables ?? 0) <= 2 || (summary.totalSeats > 0 && summary.remaining < summary.totalSeats * 0.15)) return 'tight'
   return 'ok'
@@ -140,7 +141,8 @@ function StackedBar({ summary }) {
 
 function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, onSelectGroup, onDuplicate, onAssignWalkin, onOpenWalkin, onFocusTable }) {
   const tone = seatingTone(summary)
-  const closed = tone === 'closed'
+  const closed = tone === 'closed' // 公休日（維持原狀：不從這裡建團/配桌）
+  const onlineClosed = !closed && !!summary?.closed // 線上已關：只停線上客人，後台仍可建團、配桌
   const walkinGuests = walkinRows.reduce((s, r) => s + (r.guests || 0), 0)
   return (
     <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden">
@@ -149,8 +151,9 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
           <span className="text-sm font-semibold text-chicken-brown">{seating.name}</span>
           <span className="text-xs text-chicken-brown/50 tabular-nums">{seating.start}–{seating.end}</span>
           <span className="flex-1" />
+          {onlineClosed && <Pill cls="bg-amber-100 text-amber-700">線上已關</Pill>}
           <span className={`text-xs font-semibold tabular-nums ${TONE_TEXT[tone]}`}>
-            {closed ? '已關閉' : tone === 'full' ? '已客滿' : `剩 ${summary.remainingTables} 桌 · ${summary.remaining} 席`}
+            {closed ? '公休' : tone === 'full' ? '已客滿' : `剩 ${summary.remainingTables} 桌 · ${summary.remaining} 席`}
           </span>
           <button type="button" onClick={() => onNewGroup(seating.id)} disabled={closed}
             className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red disabled:text-chicken-brown/30 disabled:cursor-not-allowed">
@@ -321,7 +324,7 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
         </>
       ) : (
         <EmptyState icon={<Icon name="bus" size={28} className="text-chicken-brown/30" />} title="這天還沒有團單"
-          hint={s.closed ? '本日公休；如需仍可建立團單' : '點右上「新增團單」或各場次的「新增團單」開始預排'} />
+          hint={s.closed ? '本日公休，不開放建立團單' : '點右上「新增團單」或各場次的「新增團單」開始預排'} />
       )}
     </div>
   )
