@@ -97,7 +97,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
 export function LoadingScreen({ label = '載入中...' }) {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-chicken-cream">
-      <div className="w-16 h-16 rounded-xl bg-chicken-red text-white text-3xl font-bold flex items-center justify-center animate-bounce">王</div>
+      <img src="/brand/master-of-chicken-logo-transparent.png" alt="" className="w-20 h-20 object-contain animate-bounce" />
       <p className="mt-4 text-chicken-brown/60 font-bold">{label}</p>
     </div>
   )
