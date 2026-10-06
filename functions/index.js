@@ -45,6 +45,7 @@ import {
 } from './lib/dataProjection.js'
 import { isTableUsableOnDate } from './lib/tableUsable.js'
 import { findGroupClosedDateBatch } from './lib/groupClosure.js'
+import { groupCircledTableNumbers, findUnusableGroupTables, unusableTablesMessage } from './lib/groupUnusableTables.js'
 import { findGroupTableConflicts, bookingOccupiedTables } from './lib/groupTableConflicts.js'
 import { heldTableIdsToRelease } from './lib/bookingTableRelease.js'
 import {
@@ -630,12 +631,25 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     }
 
     const groupsRef = db.collection(COLLECTIONS.groupReservations)
+    // 圈到的桌（tables 文件 id＝桌號）。含 '/' 等非法 doc id 的桌號不可能存在於集合，直接略過（等同查無）。
+    const tableRefs = groupCircledTableNumbers(group)
+      .filter(n => !n.includes('/') && n !== '.' && n !== '..')
+      .map(n => db.collection(COLLECTIONS.tables).doc(n))
     const saved = await db.runTransaction(async (tx) => {
-      // ★ 所有 read 必須在所有 write 之前：同日「其他團」+「一般訂位已指派桌」一起讀。
-      const [daySnap, bookingsSnap] = await Promise.all([
+      // ★ 所有 read 必須在所有 write 之前：同日「其他團」+「一般訂位已指派桌」+「圈到的桌」一起讀。
+      const [daySnap, bookingsSnap, tableSnaps] = await Promise.all([
         tx.get(groupsRef.where('date', '==', group.date)),
         tx.get(db.collection(COLLECTIONS.bookings).where('date', '==', group.date)),
+        tableRefs.length ? tx.getAll(...tableRefs) : Promise.resolve([]),
       ])
+
+      // 圈到當日停用（isActive:false）或維修窗涵蓋該日的桌 → 409。口徑與前端 validateGroupForSave 一致；
+      // 桌號在 tables 查無（已刪除）比照前端不在此擋。邏輯見 lib/groupUnusableTables.js。
+      const circledTables = tableSnaps
+        .filter(d => d.exists)
+        .map(d => ({ ...d.data(), number: d.id })) // 以 doc id（＝查詢用的桌號）為鍵，不受 number 欄位型別影響
+      const unusable = findUnusableGroupTables({ group, tables: circledTables })
+      if (unusable.length) throw errorWithStatus(unusableTablesMessage(unusable, group.date), 409)
       const others = daySnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .filter(g => g.id !== group.id && !CAPACITY_EXCLUDED_STATUSES.includes(g.status))

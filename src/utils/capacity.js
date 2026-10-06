@@ -102,8 +102,10 @@ export function isSeatingClosed(settings = {}, date, seating) {
 // 團體預排：整桌專屬保留，扣「該團相異桌號的座位合計」、佔用窗為合併梯次窗
 //          （兩梯重用同桌只算一次，避免雙扣；圈大桌坐少人也照整桌扣，即「嚴格」口徑）。
 // 已關閉的時段直接回 0（與後端 calcSlotCapacityServer 一致），讓 availability 顯示為不可訂。
-export function calcSlotCapacity(tables, bookings, date, timeSlot, settings = {}, groupReservations = []) {
-  if (isSlotClosed(settings, date, timeSlot)) return 0
+// options.ignoreOnlineClosure（預設 false＝行為不變）：後台員工訂位用。「關閉場次 / 時段」只停線上客人，
+//   員工端要看實際剩餘 → 只有公休日（closedDates）歸零。線上客人路徑一律走預設、不可傳這個旗標。
+export function calcSlotCapacity(tables, bookings, date, timeSlot, settings = {}, groupReservations = [], { ignoreOnlineClosure = false } = {}) {
+  if (ignoreOnlineClosure ? isDayClosedForClosures(settings, date) : isSlotClosed(settings, date, timeSlot)) return 0
   const durationMin = occupancyMinutes(settings)
   const targetMinutes = toMinutes(timeSlot)
   // 可用桌 = 啟用中且該日不在維修窗（與後端 calcSlotCapacityServer 同口徑）。

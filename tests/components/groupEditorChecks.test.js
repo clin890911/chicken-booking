@@ -101,6 +101,10 @@ describe('groupSaveErrorMessage', () => {
     expect(groupSaveErrorMessage({ status: 409, message: '2026-10-10 為公休日，「第一梯」無法圈桌' }))
       .toBe('無法儲存：2026-10-10 為公休日，「第一梯」無法圈桌')
   })
+  it('後端停用/維修桌 409（groupReserveTables）→ 顯示後端原訊息，不標成桌位衝突', () => {
+    expect(groupSaveErrorMessage({ status: 409, message: '桌位 223、225 於 11/21 停用或維修中，無法圈桌' }))
+      .toBe('無法儲存：桌位 223、225 於 11/21 停用或維修中，無法圈桌')
+  })
   it('409 無訊息 → 預設撞桌說明；其他錯誤 → 儲存失敗', () => {
     expect(groupSaveErrorMessage({ status: 409 })).toMatch(/^桌位衝突/)
     expect(groupSaveErrorMessage({ status: 500, message: 'boom' })).toBe('儲存失敗：boom')

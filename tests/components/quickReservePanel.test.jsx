@@ -31,11 +31,23 @@ describe('nextBookableSlot（預設時段＝下一個還沒開始、可訂的時
     expect(nextBookableSlot({ ...base, now: NOW })).toBe('13:30')
     expect(nextBookableSlot({ ...base, now: new Date(2026, 8, 19, 13, 30) })).toBe('14:00')
   })
-  it('跳過已關閉與已滿的時段；今天都過了 → 空字串', () => {
-    const closed = { ...settings, closures: { closedSlots: { [TODAY]: ['13:30'] } } }
-    expect(nextBookableSlot({ ...base, settings: closed, now: NOW })).toBe('14:00')
+  it('跳過已滿的時段；今天都過了 → 空字串', () => {
     expect(nextBookableSlot({ ...base, guests: 15, now: NOW })).toBe('')       // 全店 14 席
     expect(nextBookableSlot({ ...base, now: new Date(2026, 8, 19, 19, 5) })).toBe('')
+  })
+  // 2026-10 店主：關閉場次／時段只停線上客人，員工預設時段不再跳過它們（舊測試斷言「跳過 13:30」已改）。
+  it('僅線上關閉（closedSlots／closedSeatings）的時段不跳過，剩餘照實際佔用算', () => {
+    const closedSlot = { ...settings, closures: { closedSlots: { [TODAY]: ['13:30'] } } }
+    expect(nextBookableSlot({ ...base, settings: closedSlot, now: NOW })).toBe('13:30')
+    const closedSeating = { ...settings, seatings: [{ id: 'L', name: '午餐', start: '11:00', end: '15:00' }], closures: { closedSeatings: { [TODAY]: ['L'] } } }
+    expect(nextBookableSlot({ ...base, settings: closedSeating, now: NOW })).toBe('13:30')
+    // 線上已關但實際客滿 → 仍跳過
+    const full = [{ id: 'x', date: TODAY, timeSlot: '13:30', guests: 14, status: 'confirmed' }]
+    expect(nextBookableSlot({ ...base, settings: closedSlot, bookings: full, now: NOW })).toBe('15:30')
+  })
+  it('公休日（closedDates）仍跳過 → 空字串', () => {
+    const holiday = { ...settings, closures: { closedDates: [TODAY] } }
+    expect(nextBookableSlot({ ...base, settings: holiday, now: NOW })).toBe('')
   })
 })
 
@@ -56,9 +68,11 @@ describe('pastSlotFix（面板開著跨過時段）', () => {
     const odd = { ...settings, openTime: '11:15', closeTime: '19:15' }
     expect(pastSlotFix('16:45', new Date(2026, 8, 19, 17, 31), env({ settings: odd })).slot).toBe('17:45')
   })
-  it('跳過已關閉／已滿：17:30 關閉 → 改選 18:00；全都滿 → 清空並說明', () => {
+  it('線上關閉的時段不跳過（17:30 僅線上關 → 仍改選 17:30）；公休日 → 清空；全都滿 → 清空並說明', () => {
     const closed = { ...settings, closures: { closedSlots: { [TODAY]: ['17:30'] } } }
-    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), env({ settings: closed })).slot).toBe('18:00')
+    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), env({ settings: closed })).slot).toBe('17:30')
+    const holiday = { ...settings, closures: { closedDates: [TODAY] } }
+    expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), env({ settings: holiday })).slot).toBe('')
     expect(pastSlotFix('17:00', new Date(2026, 8, 19, 17, 31), env({ guests: 15 })))
       .toEqual({ slot: '', notice: '17:00 已經過了，今天已沒有可訂的時段' })
   })
@@ -123,6 +137,25 @@ describe('QuickReservePanel', () => {
     expect(t.textContent).toContain('預配 105')
     expect(t.textContent).toContain('建議')
     expect(container.textContent).toContain('預配：桌子先不鎖、現在仍可帶位')
+  })
+
+  it('員工面板：僅線上關閉的時段可選、標「線上已關」；公休日整天「已關閉」', () => {
+    const orig = ctx.settings
+    try {
+      ctx.settings = { ...settings, closures: { closedSlots: { [TODAY]: ['14:30'] } } }
+      render()
+      const s = byLabel('14:30 線上已關')
+      expect(s).not.toBeNull()
+      expect(s.disabled).toBe(false)
+      click(s)
+      expect(byLabel('14:30 線上已關').getAttribute('aria-pressed')).toBe('true')
+      act(() => root.unmount()); container.remove()
+      ctx.settings = { ...settings, closures: { closedDates: [TODAY] } }
+      render()
+      expect(byLabel('14:30 已關閉').disabled).toBe(true)
+    } finally {
+      ctx.settings = orig
+    }
   })
 
   it('鎖桌型（離用餐 30 分內）→「桌 105」＋「存檔後立刻鎖桌」', () => {
