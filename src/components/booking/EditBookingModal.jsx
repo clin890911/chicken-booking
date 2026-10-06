@@ -158,6 +158,7 @@ export default function EditBookingModal({ booking, onClose }) {
             groupReservations={groupReservations}
             guests={guests}
             hideFull={false}
+            ignoreOnlineClosure
           />
         </div>
 
