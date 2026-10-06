@@ -306,6 +306,8 @@ export function purgeBlankGroups() {
 // 儲存前驗證（純函式，供 UI 與測試共用）。回傳錯誤訊息字串；null = 通過。
 // capByNum: { 桌號: 容量 } 用來計算各梯/全團保留席數。
 // tables（選填）：給定時檢查圈到的桌在 group.date 是否停用/維修中（擋住「圈了一張當天不存在的桌」）。
+// ⚠️ 席位不夠（7 人圈一張 6 人桌）**不擋**：大客滿時店家會請客人擠一擠，改由 groupSeatWarnings
+//    回報「超坐 N 人」黃字提醒。硬擋只剩基本欄位、停用/維修桌（撞桌由 tableConflictsForBatch 與後端交易把關）。
 export function validateGroupForSave(group, capByNum = {}, tables = null) {
   if (!group) return '尚未選取團單'
   if (!group.agencyId && !(group.agencyName || '').trim()) return '請選擇或新增旅行社'
@@ -330,15 +332,43 @@ export function validateGroupForSave(group, capByNum = {}, tables = null) {
       })
       if (bad) return `「${b.label}」圈到的 ${bad} 在當日停用/維修中，請改圈其他桌`
     }
-    const seats = seatsOf(b.tableNumbers)
-    if ((Number(b.guests) || 0) > seats) return `「${b.label}」人數 ${b.guests} 超過該梯保留席數 ${seats}，請再多圈桌`
+    // 圈了桌但一席都不算數（桌已刪除／容量 0）→ 等於沒圈，仍擋；席位「不夠」則只警示（見 groupSeatWarnings）。
+    if (!escort && seatsOf(b.tableNumbers) <= 0) return `「${b.label}」圈到的桌沒有可用席位，請改圈其他桌`
   }
-  // 旅客保留席（不含司領桌）
+  // 旅客保留席（不含司領桌）。全是 0 席＝圈到的桌都不算數（容量 0 或當日不可用），仍要擋。
   const held = seatsOf(guestTableNumbers(group))
   if (held <= 0) return '請至少圈一桌'
-  // 單一旅客梯次：總人數不可超過旅客保留席（坐不下）。多梯次（兩段用餐）允許輪替，由 UI 端提示。
-  if (gBatches.length === 1 && total > held) return `總人數 ${total} 超過保留席數 ${held}，請多圈桌或調整人數`
   return null
+}
+
+// 席位超坐警示（純函式；**不擋存檔**，UI 以黃字顯示）。回傳陣列，空陣列＝沒有超坐。
+//   { key, label, guests, seats, over, message }
+//   - 每個旅客梯次：人數 > 該梯圈到的席數 → 超坐。
+//   - 單一旅客梯次時，總人數 > 旅客保留席 → 超坐（多梯次＝兩段輪替，總人數本來就可大於保留席）。
+//   司領桌（isEscort）不計：司機領隊擠一擠是常態，也不在旅客口徑內。
+export function groupSeatWarnings(group, capByNum = {}) {
+  if (!group) return []
+  const seatsOf = (nums) => (nums || []).reduce((s, n) => s + (Number(capByNum[n]) || 0), 0)
+  const gBatches = guestBatches(group)
+  const out = []
+  if (gBatches.length === 1) {
+    const total = Number(group.counts?.total) || 0
+    const held = seatsOf(guestTableNumbers(group))
+    if (total > 0 && held > 0 && total > held) {
+      out.push({ key: 'total', label: gBatches[0].label, guests: total, seats: held, over: total - held,
+        message: `已圈 ${held} 席 / 需 ${total} 席，超坐 ${total - held} 人` })
+    }
+    return out
+  }
+  gBatches.forEach(b => {
+    const guests = Number(b.guests) || 0
+    const seats = seatsOf(b.tableNumbers)
+    if (guests > 0 && seats > 0 && guests > seats) {
+      out.push({ key: b.id || b.label, label: b.label, guests, seats, over: guests - seats,
+        message: `「${b.label}」已圈 ${seats} 席 / 需 ${guests} 席，超坐 ${guests - seats} 人` })
+    }
+  })
+  return out
 }
 
 // 某日已被任何團佔用的桌號集合（給今日疊加顯示用）
