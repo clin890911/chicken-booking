@@ -350,3 +350,91 @@ test('規劃：圈桌側欄即時算「夠不夠坐」，點桌號 chip 可取�
   await page.getByRole('button', { name: /^司領桌（再按移除）/ }).click()
   await expect(page.getByRole('button', { name: /^司領桌/ })).toHaveAttribute('aria-pressed', 'false')
 })
+
+// ── PR #147／#145：線上關閉只擋線上客人、團體超坐改提醒不擋 ─────────────────────────────
+// 店主語意：關閉場次只停「線上客人」，後台建團照選照存；大客滿時請 7 位擠 6 人桌只黃字提醒。
+// 後端 groupReserveTables 由 beforeEach 的 page.route mock 成 ok，不連正式後端
+// （無 Firebase 的本機開發模式下儲存直接落 localStorage，故以落地資料驗證「真的存進去」）。
+
+// 「午餐第一批」（lunch1，預設選中的場次）當天被關閉＝線上已關
+async function closeLunchOnline(page) {
+  await page.addInitScript((today) => {
+    localStorage.setItem('chicken_settings_v1', JSON.stringify({
+      closures: { closedDates: [], closedSlots: {}, closedSeatings: { [today]: ['lunch1'] } },
+    }))
+  }, TODAY)
+}
+
+// 新增團單 → 打字建旅行社（#145：下拉底部「＋ 新增旅行社「X」」一點建檔並選取）
+async function startNewGroup(page, agencyName) {
+  await loginAndOpenPlanning(page)
+  await page.getByRole('button', { name: /新增團單/ }).first().click()
+  await page.getByPlaceholder('輸入名稱或電話，或直接點下面的常客').fill(agencyName)
+  await page.getByRole('button', { name: new RegExp(`新增旅行社「${agencyName}」`) }).click()
+  await expect(page.getByText('已新增旅行社')).toBeVisible()
+}
+
+test('規劃：線上已關的場次後台照選、照圈桌、照存檔（只黃字提醒）', async ({ page }) => {
+  await closeLunchOnline(page)
+  await startNewGroup(page, 'E2E關閉場次團')
+
+  await page.getByLabel('總人數', { exact: true }).fill('12')
+
+  // 場次卡：標「線上已關」但可選（不是 disabled），預設就選在該場次
+  const lunch = page.getByRole('button', { name: /午餐第一批/ }).filter({ hasText: '線上已關' })
+  await expect(lunch).toBeVisible()
+  await expect(lunch).toBeEnabled()
+  await expect(lunch).toHaveAttribute('aria-pressed', 'true')
+  // 檢查清單：黃字提醒「線上已關」，不是紅點擋門
+  await expect(page.getByText('線上已關：午餐第一批')).toBeVisible()
+  await expect(page.getByText('只停線上訂位，後台照樣可存')).toBeVisible()
+
+  // 圈兩張六人桌（12 席）→ 儲存鈕可按 → 存檔成功
+  await page.locator('svg g:has(:text-is("101"))').first().click()
+  await page.locator('svg g:has(:text-is("102"))').first().click()
+  const save = page.getByRole('button', { name: /儲存並保留/ }).first()
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect(page.getByText(/團單已儲存/)).toBeVisible()
+
+  // 真的落地（沒被「場次已關」擋在前端）
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_group_reservations_v1') || '[]'))
+  expect(stored).toHaveLength(1)
+  expect(stored[0].date).toBe(TODAY)
+  expect(stored[0].batches[0].tableNumbers.sort()).toEqual(['101', '102'])
+})
+
+test('規劃：7 人只圈一張 6 人桌 → 顯示超坐 1 人警告，但儲存鈕可按、照樣存', async ({ page }) => {
+  await startNewGroup(page, 'E2E超坐團')
+
+  await page.getByLabel('總人數', { exact: true }).fill('7')
+  await page.locator('svg g:has(:text-is("101"))').first().click()   // 101 = 六人桌
+
+  // 席位檢查項改成黃字「超坐 1 人」，並說明可照存
+  await expect(page.getByText('席位：已圈 6 / 需 7，超坐 1 人')).toBeVisible()
+  await expect(page.getByText('大客滿可請客人擠一擠，照樣可存')).toBeVisible()
+
+  // 儲存鈕不被超坐擋住
+  const save = page.getByRole('button', { name: /儲存並保留/ }).first()
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect(page.getByText(/團單已儲存/)).toBeVisible()
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_group_reservations_v1') || '[]'))
+  expect(stored).toHaveLength(1)
+  expect(stored[0].counts.total).toBe(7)
+  expect(stored[0].batches[0].tableNumbers).toEqual(['101'])
+})
+
+test('規劃：公休日不開放建團（關閉場次放行的邊界：整天公休仍擋）', async ({ page }) => {
+  await page.addInitScript((today) => {
+    localStorage.setItem('chicken_settings_v1', JSON.stringify({
+      closures: { closedDates: [today], closedSlots: {}, closedSeatings: {} },
+    }))
+  }, TODAY)
+  await startNewGroup(page, 'E2E公休團')
+  await page.getByLabel('總人數', { exact: true }).fill('6')
+  await page.locator('svg g:has(:text-is("101"))').first().click()
+
+  await expect(page.getByText('本日公休，無法建團')).toBeVisible()
+  await expect(page.getByRole('button', { name: /儲存並保留/ }).first()).toBeDisabled()
+})

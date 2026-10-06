@@ -77,3 +77,62 @@ test('人數 9+ 自由輸入：逐鍵輸入兩位數不跳掉', async ({ page })
   await input.blur()
   await expect(input).toHaveValue('12')
 })
+
+// PR #149：店主「我們關掉的時段，員工新增的散客訂位要可以選，只擋線上客人；公休日照舊擋」。
+// 後台時段選擇器開 ignoreOnlineClosure：closedSlots 的時段可選並標「線上已關」，公休日仍整天禁用。
+const tomorrowIso = () => {
+  const d = new Date(); d.setDate(d.getDate() + 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+test('新增訂位：線上已關的時段員工照選、標「線上已關」、可建立', async ({ page }) => {
+  await page.addInitScript(() => {
+    const d = new Date(); d.setDate(d.getDate() + 1)
+    const tomorrow = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_settings_v1', JSON.stringify({
+      closures: { closedDates: [], closedSlots: { [tomorrow]: ['18:00'] }, closedSeatings: {} },
+    }))
+  })
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+  await page.getByRole('button', { name: /新增/ }).click()
+  await page.getByPlaceholder('0912345678').fill('0933111222')
+  await page.getByPlaceholder('王小姐').fill('關閉時段客')
+  await page.getByRole('button', { name: /^明天/ }).click()
+
+  const slot = page.getByRole('button', { name: /18:00/ })
+  await expect(slot).toBeVisible()
+  await expect(slot).toBeEnabled()
+  await expect(slot).toContainText('線上已關')
+  await slot.click()
+
+  const confirmBtn = page.getByRole('button', { name: /確認新增 · .*18:00 · 2 位/ })
+  await expect(confirmBtn).toBeEnabled()
+  await confirmBtn.click()
+  await expect(page.getByText(/關閉時段客 2 位 · .*18:00 已建立/)).toBeVisible()
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]'))
+  expect(stored.map(b => [b.name, b.timeSlot, b.date])).toEqual([['關閉時段客', '18:00', tomorrowIso()]])
+})
+
+test('新增訂位：公休日整天仍不可選（線上已關放行不含公休）', async ({ page }) => {
+  await page.addInitScript(() => {
+    const d = new Date(); d.setDate(d.getDate() + 1)
+    const tomorrow = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    localStorage.setItem('chicken_settings_v1', JSON.stringify({
+      closures: { closedDates: [tomorrow], closedSlots: {}, closedSeatings: {} },
+    }))
+  })
+  await page.goto('/login')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+  await page.getByRole('button', { name: /新增/ }).click()
+  await page.getByRole('button', { name: /^明天/ }).click()
+
+  const slot = page.getByRole('button', { name: /18:00/ })
+  await expect(slot).toBeVisible()
+  await expect(slot).toBeDisabled()
+  await expect(slot).toContainText('已關閉')
+})
