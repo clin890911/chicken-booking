@@ -103,7 +103,9 @@ test('預配的桌此刻被別組佔 → 報到列標「預配·桌被佔」，�
 
   // 改桌出口 → 現場換桌模式（預配維持預配語意）
   await page.getByRole('button', { name: '改桌', exact: true }).click()
-  await expect(page.getByText(/換桌：余先生 從 105 → 選新桌/)).toBeVisible()
+  // PR #137：待到／預配訂位的改桌走「重新選桌」多桌模式（原配桌保留到確認成功），不再是舊的「換桌：從 X → 選新桌」橫幅。
+  await expect(page.getByText(/重新選桌：余先生/)).toBeVisible()
+  await expect(page.getByText('原配桌 105 · 確認成功前保留')).toBeVisible()
 })
 
 // 驗收 v4-1：預配的桌被今日團體圈走（12:30 梯）→ 11:50 按到了要先確認（與今日訂位卡同一道防呆）

@@ -36,7 +36,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('chicken_settings_v1', JSON.stringify({ lineUseLiff: true }))
   })
-  await page.route('**/guest*', route =>
+  await page.route(/\/guest[A-Za-z]+(\?.*)?$/, route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-blocked' }) }))
   await page.route('**/guestGetAvailability', route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(AVAILABILITY) }))
@@ -48,6 +48,8 @@ test.beforeEach(async ({ page }) => {
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
+        // PR #142：確認頁需後端回報 lineLoginReady===true 才顯示已綁定／綁定 CTA
+        store: { ...AVAILABILITY.settings, lineLoginReady: true },
         booking: {
           id: 'E2E-LIFF-1', manageToken: 'tok-liff', status: 'confirmed', source: 'online',
           ...createBody,
