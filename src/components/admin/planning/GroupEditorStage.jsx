@@ -329,13 +329,14 @@ export default function GroupEditorStage({
   const setGuideName = (v) => { patchDraft({ guideName: v, guideId: null }); setGuideHint(false) }
   const setGuidePhone = (v) => { patchDraft({ guidePhone: v }); setGuideHint(false) }
   const pickRosterGuide = (g) => { patchDraft({ guideId: g.id, guideName: g.name || '', guidePhone: g.phone || '' }); setGuideHint(false) }
-  const createQuickAgency = () => {
+  const createQuickAgency = (override) => {
     // 寫 agencies 需 agency.manage（外場沒有）。名冊頁的同一操作早已用 can() 擋，
     // 這條 inline 快速新增是漏網的：外場按下去會整包 403，且重整後新增的旅行社會
     // 被雲端資料覆蓋而無聲消失。
     if (!can('agency.manage')) return toast.error('你的角色沒有新增旅行社的權限，請聯絡店長')
-    if (!quickAgency?.name?.trim()) return toast.error('請填旅行社名稱')
-    const a = addAgency(quickAgency)
+    const data = override || quickAgency
+    if (!data?.name?.trim()) return toast.error('請填旅行社名稱')
+    const a = addAgency({ ...data, name: data.name.trim() })
     patchDraft({ agencyId: a.id, agencyName: a.name, guideId: null })
     setQuickAgency(null)
     toast.success('已新增旅行社')
@@ -596,13 +597,14 @@ export default function GroupEditorStage({
               value={draft.agencyId}
               agencyName={draft.agencyName}
               onPick={onPickAgency}
-              onQuickAdd={() => setQuickAgency({ name: '', phone: '' })}
+              onQuickAdd={(name) => setQuickAgency({ name: name || '', phone: '' })}
+              onCreateNamed={can('agency.manage') ? (name) => createQuickAgency({ name, phone: '' }) : undefined}
             />
             {quickAgency && (
               <div className="mt-2 flex items-end gap-2 rounded-lg bg-chicken-cream/50 p-2">
                 <Input label="旅行社名稱" value={quickAgency.name} onChange={e => setQuickAgency(q => ({ ...q, name: e.target.value }))} className="flex-1" />
                 <Input label="電話" value={quickAgency.phone} onChange={e => setQuickAgency(q => ({ ...q, phone: e.target.value }))} className="w-32" />
-                <Button onClick={createQuickAgency}>建立</Button>
+                <Button onClick={() => createQuickAgency()}>建立</Button>
               </div>
             )}
 
