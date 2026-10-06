@@ -10,6 +10,7 @@ import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
 import { bookingOccupancyLabel } from '../utils/capacity'
 import { isValidTwPhone } from '../utils/validation'
 import { loadGuestDraft, saveGuestDraft, clearGuestDraft, prepareGuestDraft, isUncertainDraft } from '../utils/guestDraft'
+import { onlineLeadLabel } from '../utils/guestPolicy'
 
 const NOTE_OPTIONS = [
   { key: 'pet', label: '攜帶寵物' },
@@ -228,7 +229,7 @@ export default function BookingPage() {
           try { draftRef.current = saveGuestDraft(prepareGuestDraft(next, draftRef.current)) } catch {}
           setStep('availability')
           loadAvailability(data.date)
-          setError({ slotRejection: true, submit: '此抵達時段已停止線上訂位。已更新可訂時段，請選擇較晚時段；若需較早到店，請來電詢問。' })
+          setError({ slotRejection: true, submit: `此抵達時段已停止線上訂位（線上須至少提前 ${onlineLeadLabel()}）。已更新可訂時段，請選擇較晚時段；若需較早到店，請來電詢問。` })
           window.scrollTo(0, 0)
         } else if (knownRejected && err.status === 409) { setStep('availability'); loadAvailability(data.date); window.scrollTo(0, 0) }
       }
