@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
+import { useAuth } from '../../../contexts/AuthContext'
+import { seatingPerms } from '../../../utils/seatingPerms'
 import { useToast } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { fmtOverdueMin } from '../../../utils/bookingPulse'
@@ -19,6 +21,12 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
   } = useBooking()
   const toast = useToast()
+  // 這個面板放在抽屜動作區（canEdit 門）之外，過去完全沒有權限檢查——唯讀角色（kitchen）點空桌
+  // 也看得到「入座／預訂」並按得下去（寫 bookings／tables／waitlist，推送時被後端剔除）。
+  // 依動作實際寫入的集合各自判定：訂位入座／預訂需 booking.update＋table.update，
+  // 候位入座再加 waitlist.update（見 utils/seatingPerms.js）。
+  const { can } = useAuth()
+  const perms = seatingPerms(can)
 
   const today = todayStr()
 
@@ -33,6 +41,7 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
 
   // === 候選訂位 ===
   const pendingBookings = useMemo(() => {
+    if (!perms.seat) return []
     return bookings
       .filter(b =>
         b.date === today &&
@@ -41,7 +50,7 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
         b.guests <= table.capacity
       )
       .sort((a, b) => (a.timeSlot || '').localeCompare(b.timeSlot || ''))
-  }, [bookings, today, table.capacity])
+  }, [bookings, today, table.capacity, perms.seat])
 
   // B3：訂位再依「是否已到場（時段已過）未入座」拆兩組
   //  - arrivedBookings：時段已過、應已到場、仍未入座 → 最高優先（過越久越前）
@@ -60,6 +69,7 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
   // === 候選候位 ===
   // B3：候位中（waiting）排在已叫號（called）之前；同組內依取號先後
   const pendingWaitlist = useMemo(() => {
+    if (!perms.waitlistSeat) return []
     const rank = (w) => (w.status === 'waiting' ? 0 : 1)
     return waitlist
       .filter(w =>
@@ -69,7 +79,7 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
       .sort((a, b) =>
         rank(a) - rank(b) ||
         (a.takenAt || '').localeCompare(b.takenAt || ''))
-  }, [waitlist, table.capacity])
+  }, [waitlist, table.capacity, perms.waitlistSeat])
 
   // 這張桌上他筆的預配：依動作的佔用區間（現在入座 'now'／只指派＝現在就鎖桌 'hold'）判定重疊才解除，
   // 與現場指派／帶位同一個 helper。動手前先查（動作後 bookings 會變）。

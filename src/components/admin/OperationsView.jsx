@@ -26,6 +26,7 @@ import { seatedMoveWarningSignature } from '../../utils/seatedMoveWarnings'
 import { todayStr, nowSlot } from '../../utils/timeSlots'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
 import SegmentedControl from '../ui/SegmentedControl'
+import { seatingPerms } from '../../utils/seatingPerms'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
@@ -1237,9 +1238,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               />
               </div>
               {/* 報到列：地圖下方 in-flow（不是疊在地圖上），無符合條件的訂位時完全不佔高度。
-                  模式進行中（指派/換桌/候位/團體改派）或無 table.update 權限時不顯示——
+                  模式進行中（指派/換桌/候位/團體改派）或無 booking.update＋table.update 權限時不顯示（到了＝寫 bookings＋tables）——
                   這些情境下桌況圖的點擊語意已被模式接管，疊加一條會觸發別的動作的列是額外誤觸風險。 */}
-              {!mode && !reserveOpen && can('table.update') && (
+              {!mode && !reserveOpen && seatingPerms(can).seat && (
                 <ArrivalStrip
                   tables={tables}
                   bookings={bookings}

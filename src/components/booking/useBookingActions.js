@@ -1,5 +1,7 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import { useBooking } from '../../contexts/BookingContext'
+import { useAuth } from '../../contexts/AuthContext'
+import { seatingPerms } from '../../utils/seatingPerms'
 import { useToast, useConfirm } from '../ui/Toast'
 import { getNoshowCount, revokeNoshow } from '../../services/bookingService'
 import { bookingDayKind, todayStr } from '../../utils/timeSlots'
@@ -33,6 +35,10 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
   } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
+  // 前端權限門：每顆鈕依「實際寫入的集合」判定（見 utils/seatingPerms.js），與後端 adminPushData 一致。
+  // 沒有權限就不渲染——否則按得下去、寫進本機，推送時被後端剔除，雲端沒有而畫面毫無提示。
+  // useAuth() 無 Provider 時是 null → 一律視為無權（fail-closed）。
+  const perms = seatingPerms(useAuth()?.can)
 
   // 日期三態 guard：未來日不可「客人到了/標No-show」、過去日只可補登（離席/No-show/取消）
   const dayKind = bookingDayKind(booking.date, todayStr())
@@ -65,20 +71,22 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
   // === 按鈕顯示條件（兩個入口共用）===
   const isOpen = status === 'confirmed' || status === 'pending'
   const isCombo = (booking.extraTableIds || []).length > 0
+  // perms.seat＝bookings＋tables（指派／入座／改桌／離席／取消／編輯都會連動桌位）；
+  // perms.booking＝只改 booking（標／恢復 No-show、解除未來預配）。
   const show = {
-    assign: status === 'confirmed' && !booking.assignedTableId && dayKind !== 'past',
-    seat: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'today',
+    assign: perms.seat && status === 'confirmed' && !booking.assignedTableId && dayKind !== 'past',
+    seat: perms.seat && status === 'confirmed' && !!booking.assignedTableId && dayKind === 'today',
     // 改桌：今日待到或已入座、已有桌；單桌與併桌整組重選。
-    move: !!onMove && (isOpen || status === 'arrived') && !!booking.assignedTableId && dayKind === 'today',
+    move: perms.seat && !!onMove && (isOpen || status === 'arrived') && !!booking.assignedTableId && dayKind === 'today',
     futureAssignedNote: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'future',
-    checkout: status === 'arrived',
-    edit: isOpen,
-    noshow: isOpen && dayKind !== 'future',
-    cancel: isOpen,
-    restore: status === 'noshow',
+    checkout: perms.seat && status === 'arrived',
+    edit: perms.seat && isOpen,   // updateByStaff 改日期／時段／人數時會連動釋放桌位
+    noshow: perms.booking && isOpen && dayKind !== 'future',
+    cancel: perms.seat && isOpen,
+    restore: perms.booking && status === 'noshow',
     // 預配（未來日）解除：預配只記在 booking 上、不動桌況，解除不會留下孤兒桌；
     // 今天的「已指派」可能已鎖桌（reserved），解除要走現場抽屜，這裡不提供。
-    unpreassign: isOpen && !!booking.assignedTableId && dayKind === 'future',
+    unpreassign: perms.booking && isOpen && !!booking.assignedTableId && dayKind === 'future',
     pastNote: dayKind === 'past' && status !== 'completed' && status !== 'cancelled',
   }
 

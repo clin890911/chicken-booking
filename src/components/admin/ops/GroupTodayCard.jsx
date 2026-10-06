@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
+import { useAuth } from '../../../contexts/AuthContext'
+import { seatingPerms } from '../../../utils/seatingPerms'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { Badge } from '../../ui'
 import { batchSeated, sortedBatches } from '../../../utils/groupLive'
@@ -20,6 +22,9 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
   const { tables, seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
+  // 權限門（見 utils/seatingPerms.js）：梯次入座／整梯釋出／整團完成／標記已確認會寫 groupReservations（group.update），
+  // 梯次離席只寫 tables。過去整張卡完全沒有權限檢查，唯讀角色（kitchen）也按得下去。
+  const perms = seatingPerms(useAuth()?.can)
   const isDone = g.status === 'completed'
 
   const tableByNumber = useMemo(() => {
@@ -144,11 +149,11 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
                 ) : released ? (
                   <span className="text-[10px] font-bold text-chicken-green">✓ 此梯完成</span>
                 ) : seated ? (
-                  <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
+                  perms.table && <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
                 ) : cleaning ? (
-                  <button onClick={() => onRelease(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-sky-600 text-white">整梯清桌釋出</button>
+                  perms.group && <button onClick={() => onRelease(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-sky-600 text-white">整梯清桌釋出</button>
                 ) : (
-                  <button onClick={() => onSeat(b)} disabled={!(b.tableNumbers || []).length}
+                  perms.group && <button onClick={() => onSeat(b)} disabled={!(b.tableNumbers || []).length}
                     className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-chicken-green text-white disabled:opacity-40">梯次入座</button>
                 )}
               </div>
@@ -157,7 +162,7 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
         })}
       </div>
 
-      {!isDone && (
+      {!isDone && perms.group && (
         <div className="mt-2 flex items-center justify-between gap-2">
           {g.status === 'planned' ? (
             <button onClick={() => setGroupStatus(g.id, 'confirmed')} className="text-[11px] text-chicken-brown/60 underline">標記為已確認</button>

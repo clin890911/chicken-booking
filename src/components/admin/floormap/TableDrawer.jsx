@@ -13,6 +13,7 @@ import { todayStr } from '../../../utils/timeSlots'
 import { STATUS_COLOR } from './statusColors'
 import { preassignConflicts, assignmentWindow } from '../../../utils/capacity'
 import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
+import { seatingPerms } from '../../../utils/seatingPerms'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -96,8 +97,11 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const outHoldConflict = outToday && table.status === 'vacant' && groupHold?.holds?.length ? groupHold : null
 
   const displayStatus = table.status
-  const canEdit = can('table.update')
-  const canBlock = can('table.block')
+  // 按鈕權限依「實際寫入的集合」判定（見 utils/seatingPerms.js），不是只看 table.update：
+  // 入座／取消／離席會同時寫 bookings，團體入座寫 groupReservations，後端按集合各自檢查。
+  const perms = seatingPerms(can)
+  const canEdit = perms.table   // 動作區最小門檻：所有抽屜動作都會寫 tables
+  const canBlock = perms.block
   const orphan = isOrphanTable(table, booking, groupRef)
 
   // 現在直接入座（散客）時，這張空桌上他筆的預配會不會被解除：與 [現在, 現在+佔位) 重疊才解除。
@@ -386,7 +390,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             groupRef={groupRef}
             groupBatch={groupBatch}
             groupHold={activeHold}
-            canEdit={canEdit}
+            perms={perms}
             onWalkInOverride={() => setShowWalkIn(true)}
             onReseatBatch={onReseatBatch}
             onClose={onClose}
@@ -434,7 +438,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             <p className="text-[11px] text-blue-800/70 mt-0.5">
               預訂：會從現在鎖桌到那組用完餐；若會撞到這筆預配，下方候選的「預訂」鈕會標明「將解除」。
             </p>
-            {canEdit && (
+            {perms.seat && (
               <button
                 onClick={handleSeatPreassigned}
                 className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
@@ -497,7 +501,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
           )}
           {table.status === 'vacant' && !activeHold && !outToday && (
             <>
-              <button onClick={() => setShowWalkIn(true)} className="btn-primary w-full">散客直接入座</button>
+              {perms.walkIn && <button onClick={() => setShowWalkIn(true)} className="btn-primary w-full">散客直接入座</button>}
               {canBlock && (
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={() => setShowBlock(true)} className="btn-secondary text-sm">設不可用</button>
@@ -507,7 +511,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             </>
           )}
 
-          {displayStatus === 'reserved' && booking && (
+          {displayStatus === 'reserved' && booking && perms.seat && (
             <>
               <button onClick={handleSeat} className="btn-primary w-full">客人到了 — 入座</button>
               {/* 改桌：待到的訂位也能換桌（過去只有用餐中分支有「換桌」，鎖了桌就改不了）。
@@ -521,7 +525,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             </>
           )}
 
-          {displayStatus === 'dining' && booking && (
+          {displayStatus === 'dining' && booking && perms.seat && (
             <>
               {/* 主要操作：漸進式 — 先進「等待清桌」，避免連點直接釋出髒桌 */}
               <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-xl w-full">
