@@ -324,7 +324,7 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
         </>
       ) : (
         <EmptyState icon={<Icon name="bus" size={28} className="text-chicken-brown/30" />} title="這天還沒有團單"
-          hint={s.closed ? '本日公休；如需仍可建立團單' : '點右上「新增團單」或各場次的「新增團單」開始預排'} />
+          hint={s.closed ? '本日公休，不開放建立團單' : '點右上「新增團單」或各場次的「新增團單」開始預排'} />
       )}
     </div>
   )
