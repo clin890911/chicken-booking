@@ -492,6 +492,7 @@ export function BookingProvider({ children }) {
     return r
   }
   const clearTable = (number) => { seatingService.clearTable(number); refresh(); syncCloudSoon() }
+  const releaseCheckedOutTables = (bookingId) => { const r = seatingService.releaseCheckedOutTables(bookingId); if (r?.released?.length) { refresh(); syncCloudSoon() } return r }
   // 清桌完成的復原：只在桌仍是空桌時還原成待清桌（見 seatingService.undoClearTable）。
   // snapshot 必須是 clearTable 之前的 { bookingId, ref }——清桌已經把兩者清掉，事後查不回來。
   const undoClearTable = (number, snapshot) => {
@@ -778,7 +779,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

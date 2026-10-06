@@ -240,6 +240,37 @@ export function findPreassignedBooking(bookings = [], tableNumber, { date, exclu
   }) || null
 }
 
+// === 「客人到了」入座前的預留警示（UpcomingPanel.handleSeat）===
+// 這筆訂位的每張桌（主桌＋併桌副桌）逐一檢查：被今日團體保留（groupHolds[桌號].holds 非空）、
+// 或已預先配給同日別筆有效訂位 → 列入警示。只看主桌會讓副桌被團保／別人預配時無聲坐上去。
+// groupHolds：buildGroupHolds 的結果（{ 桌號: { agencyName, holds:[...] } }）。
+export function seatTableWarnings(booking, { bookings = [], groupHolds = {}, date } = {}) {
+  return bookingTableList(booking).map(table => {
+    const h = groupHolds?.[table]
+    const hold = h?.holds?.length ? h : null
+    const conflict = findPreassignedBooking(bookings, table, { date, excludeBookingId: booking?.id })
+    return { table, hold, conflict }
+  }).filter(w => w.hold || w.conflict)
+}
+
+// === 今日即時桌況圖的「📌 預配」標記（OperationsView → FloorMap preassignTables）===
+// 預配只記在 booking 上、不動桌況（桌仍 vacant）→ 地圖需視覺線索。主桌＋併桌副桌都要標
+// （只標主桌時副桌看起來是普通空桌，會被帶走）。只標還會來的 pending/confirmed；
+// 同桌多筆（午、晚兩輪）取最早時段。回傳 { 桌號: { timeSlot } }。
+export function buildPreassignTableMap(bookings = [], date) {
+  const map = {}
+  ;(bookings || []).forEach(b => {
+    if (b.date !== date) return
+    if (!['pending', 'confirmed'].includes(b.status)) return
+    bookingTableList(b).forEach(key => {
+      if (!map[key] || String(b.timeSlot || '99:99') < String(map[key].timeSlot || '99:99')) {
+        map[key] = { timeSlot: b.timeSlot || '' }
+      }
+    })
+  })
+  return map
+}
+
 // === 指派／入座的「佔用區間」（建議桌、候選、覆蓋預配判定共用的唯一口徑）===
 // 同一張桌會被佔多久，取決於動作的語意，而不是只看訂位時段：
 //   'hold'      會鎖桌（現場指派、新增表單今日存檔、held 訂位改桌）：存檔當下就 reserveTable，

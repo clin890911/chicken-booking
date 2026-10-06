@@ -21,6 +21,17 @@ function releaseTableIfHeldBy(tableNumber, bookingId) {
   }
 }
 
+// 這筆訂位佔用的所有桌：主桌 assignedTableId＋大組併桌副桌 extraTableIds（去重去空）。
+// 解除/取消時只放主桌會讓副桌永遠 reserved 指向這筆（幽靈佔用、帶不了人）。
+function heldTableNumbers(booking) {
+  const extras = Array.isArray(booking?.extraTableIds) ? booking.extraTableIds : []
+  return [...new Set([booking?.assignedTableId, ...extras].filter(Boolean).map(String))]
+}
+
+function releaseAllTablesIfHeldBy(booking, bookingId) {
+  heldTableNumbers(booking).forEach(n => releaseTableIfHeldBy(n, bookingId))
+}
+
 function read() {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')
@@ -265,14 +276,14 @@ export function updateBookingByGuest(id, token, patch) {
   }
   const cleanPatch = {
     ...patch,
-    ...(shouldUnassign ? { assignedTableId: null } : {}),
+    ...(shouldUnassign ? { assignedTableId: null, extraTableIds: [] } : {}),
     lastGuestEditAt: new Date().toISOString(),
     guestEditCount: (Number(booking.guestEditCount) || 0) + 1,
     guestEditHistory: [...(Array.isArray(booking.guestEditHistory) ? booking.guestEditHistory : []), historyEntry],
   }
   const updated = update(id, cleanPatch)
-  // 結構性改動（日期/時段/人數）會解除桌位 → 一併釋放原桌，避免孤兒 reserved 桌
-  if (shouldUnassign) releaseTableIfHeldBy(booking.assignedTableId, id)
+  // 結構性改動（日期/時段/人數）會解除桌位 → 主桌＋併桌副桌一併釋放（僅限仍由本筆持有），避免孤兒 reserved 桌
+  if (shouldUnassign) releaseAllTablesIfHeldBy(booking, id)
   return { ok: true, booking: updated, changes: cleanPatch }
 }
 
@@ -285,6 +296,7 @@ export function cancelBookingByGuest(id, token, reason = '') {
   const updated = update(id, {
     status: 'cancelled',
     assignedTableId: null,
+    extraTableIds: [],
     cancellationReason: {
       source: 'guest',
       reason: String(reason || '').trim() || '未提供',
@@ -308,8 +320,8 @@ export function cancelBookingByGuest(id, token, reason = '') {
       },
     ],
   })
-  // 客人取消 → 釋放原本佔用的桌（避免孤兒 reserved 桌）
-  releaseTableIfHeldBy(booking.assignedTableId, id)
+  // 客人取消 → 釋放原本佔用的主桌＋併桌副桌（僅限仍由本筆持有，避免孤兒 reserved 桌）
+  releaseAllTablesIfHeldBy(booking, id)
   return { ok: true, booking: updated }
 }
 
@@ -346,8 +358,11 @@ export function cycleStatus(id) {
 }
 
 // === 桌位指派 ===
+// 單桌指派：一律把 extraTableIds 重設為 []。過去只寫主桌，先前併桌預配殘留的副桌會被帶進單桌預配
+// （副桌在地圖/容量/入座仍被當成這筆佔用 → 幽靈佔用；seatBooking 也會把副桌一起坐上去）。
+// 多桌請走 assignTables。
 export function assignTable(bookingId, tableNumber) {
-  return update(bookingId, { assignedTableId: tableNumber })
+  return update(bookingId, { assignedTableId: tableNumber, extraTableIds: [] })
 }
 
 // 多桌指派（大組併桌）：tableNumbers[0]=主桌（assignedTableId），其餘=額外桌（extraTableIds）。

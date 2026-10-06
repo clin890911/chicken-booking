@@ -135,11 +135,17 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   // 補缺口：過去這位客人已有 assignedTableId，反而不會出現在「可入座候選名單」，到場後無入座入口。
   const handleSeatPreassigned = () => {
     if (!preassign) return
-    const r1 = assignBookingToTable(preassign.id, table.number)
+    // 併桌預配（主桌＋副桌）不可走單桌指派：assignTable 會重設 extraTableIds，副桌就掉了。
+    // 直接 seatBooking → seatBookingAllTables 整組守門入座。
+    const isComboPreassign = (preassign.extraTableIds || []).filter(Boolean).length > 0
+    const r1 = isComboPreassign ? { ok: true } : assignBookingToTable(preassign.id, table.number)
     if (!r1.ok) return toast.error('入座失敗：' + r1.error)
     const r2 = seatBooking(preassign.id)
-    if (!r2.ok) { toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return }
-    toast.success(`${preassign.name}（${preassign.guests} 位）入座 ${table.number}`)
+    if (!r2.ok) {
+      if (isComboPreassign) return toast.error('入座失敗：' + r2.error)
+      toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return
+    }
+    toast.success(`${preassign.name}（${preassign.guests} 位）入座 ${(r2.tableNumbers || [table.number]).join('、')}`)
     onClose?.()
   }
 

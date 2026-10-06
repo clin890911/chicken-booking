@@ -1083,3 +1083,77 @@ describe('upsertFromRemote：LINE 欄位 round-trip 保存（repo 已知坑型�
     expect(saved.lineDisplayName).toBe('阿綠')
   })
 })
+
+// === 併桌副桌（extraTableIds）解除／取消／單桌指派：不可只看主桌 ===
+describe('併桌副桌：客人改期/取消釋放全部桌、單桌指派重設副桌', () => {
+  const TABLES_KEY = 'chicken_tables_v3'
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(FIXED_NOW)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+  function seedCombo(overrides = {}) {
+    seedBookings([{
+      id: 'B1', name: '小明', phone: '0912345678', guests: 10,
+      date: '2026-06-20', timeSlot: '18:00',
+      notes: { pet: false, child: false, mobility: false, text: '' },
+      status: 'confirmed', assignedTableId: '101', extraTableIds: ['102', '103'],
+      manageToken: 'good', guestEditCount: 0, guestEditHistory: [],
+      ...overrides,
+    }])
+    localStorage.setItem(TABLES_KEY, JSON.stringify([
+      { number: '101', status: 'reserved', currentBookingId: 'B1', currentRef: null, seatedAt: null, capacity: 4 },
+      { number: '102', status: 'reserved', currentBookingId: 'B1', currentRef: null, seatedAt: null, capacity: 4 },
+      // 103 已被別組接手：不可被這筆的解除／取消清掉
+      { number: '103', status: 'dining', currentBookingId: 'OTHER', currentRef: null, seatedAt: '2026-06-15T11:00:00.000Z', capacity: 4 },
+    ]))
+  }
+  const rawTables = () => JSON.parse(localStorage.getItem(TABLES_KEY) || '[]')
+  const tableOf = (n) => rawTables().find(t => t.number === n)
+
+  it('updateBookingByGuest 結構性改動 → 清 extraTableIds、主桌＋副桌都釋放，別組的桌不動', () => {
+    seedCombo()
+    const r = bookingService.updateBookingByGuest('B1', 'good', { guests: 8 })
+    expect(r.ok).toBe(true)
+    expect(r.booking.assignedTableId).toBeNull()
+    expect(r.booking.extraTableIds).toEqual([])
+    expect(tableOf('101')).toMatchObject({ status: 'vacant', currentBookingId: null })
+    expect(tableOf('102')).toMatchObject({ status: 'vacant', currentBookingId: null })
+    expect(tableOf('103')).toMatchObject({ status: 'dining', currentBookingId: 'OTHER' })
+  })
+
+  it('updateBookingByGuest 非結構性改動 → 副桌保留', () => {
+    seedCombo()
+    const r = bookingService.updateBookingByGuest('B1', 'good', { name: '阿明' })
+    expect(r.booking.extraTableIds).toEqual(['102', '103'])
+    expect(tableOf('102')).toMatchObject({ status: 'reserved', currentBookingId: 'B1' })
+  })
+
+  it('cancelBookingByGuest → 清 extraTableIds、主桌＋副桌都釋放，別組的桌不動', () => {
+    seedCombo()
+    const r = bookingService.cancelBookingByGuest('B1', 'good', '臨時有事')
+    expect(r.ok).toBe(true)
+    expect(r.booking.status).toBe('cancelled')
+    expect(r.booking.assignedTableId).toBeNull()
+    expect(r.booking.extraTableIds).toEqual([])
+    expect(tableOf('101')).toMatchObject({ status: 'vacant', currentBookingId: null })
+    expect(tableOf('102')).toMatchObject({ status: 'vacant', currentBookingId: null })
+    expect(tableOf('103')).toMatchObject({ status: 'dining', currentBookingId: 'OTHER' })
+  })
+
+  it('assignTable（單桌預配）重設殘留的 extraTableIds', () => {
+    seedBookings([{ id: 'B1', assignedTableId: '101', extraTableIds: ['102'] }])
+    const r = bookingService.assignTable('B1', '105')
+    expect(r.assignedTableId).toBe('105')
+    expect(r.extraTableIds).toEqual([])
+  })
+
+  it('assignTables（多桌）仍保留副桌（不被單桌路徑誤傷）', () => {
+    seedBookings([{ id: 'B1' }])
+    const r = bookingService.assignTables('B1', ['101', '102'])
+    expect(r.assignedTableId).toBe('101')
+    expect(r.extraTableIds).toEqual(['102'])
+  })
+})

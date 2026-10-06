@@ -17,6 +17,8 @@ import {
   calcDayBookings,
   totalActiveSeats,
   findPreassignedBooking,
+  seatTableWarnings,
+  buildPreassignTableMap,
   resolveSlotOccupancy,
   overlappingBookedTables,
   rangesOverlap,
@@ -853,5 +855,43 @@ describe('preassignConflicts（覆蓋預配：警示與解除共用）', () => {
   it('排除自己；別桌不算', () => {
     const r = preassignConflicts(list, '105', { date: '2026-06-15', excludeBookingId: 'NOON', window: { start: 740, end: 840 } })
     expect(r.map(c => c.booking.id)).toEqual(['ARR', 'EVE'])
+  })
+})
+
+// === 併桌副桌：入座前預留警示、地圖 📌 預配標記都要涵蓋 extraTableIds ===
+
+describe('seatTableWarnings（客人到了→入座前的團保/預配警示，含副桌）', () => {
+  const me = { id: 'B1', date: '2026-06-15', timeSlot: '18:00', status: 'confirmed', assignedTableId: '101', extraTableIds: ['102'] }
+  it('副桌被今日團體保留 → 警示指名副桌', () => {
+    const w = seatTableWarnings(me, { bookings: [me], groupHolds: { 102: { agencyName: '雄獅', holds: [{ batch: { label: '第一梯', timeSlot: '18:00' } }] } }, date: '2026-06-15' })
+    expect(w).toHaveLength(1)
+    expect(w[0].table).toBe('102')
+    expect(w[0].hold.agencyName).toBe('雄獅')
+  })
+  it('副桌已預先配給同日別筆 → 警示指名副桌與那筆', () => {
+    const other = { id: 'B2', name: '陳小姐', guests: 4, date: '2026-06-15', timeSlot: '19:00', status: 'confirmed', assignedTableId: '102' }
+    const w = seatTableWarnings(me, { bookings: [me, other], groupHolds: {}, date: '2026-06-15' })
+    expect(w.map(x => [x.table, x.conflict?.id])).toEqual([['102', 'B2']])
+  })
+  it('沒有團保／別人預配 → 空陣列；團保 holds 為空不算', () => {
+    expect(seatTableWarnings(me, { bookings: [me], groupHolds: { 101: { holds: [] } }, date: '2026-06-15' })).toEqual([])
+  })
+})
+
+describe('buildPreassignTableMap（今日地圖 📌 預配標記，含副桌）', () => {
+  it('主桌＋副桌都標；只標 pending/confirmed、當日；同桌取最早時段', () => {
+    const map = buildPreassignTableMap([
+      { id: 'B1', date: '2026-06-15', timeSlot: '18:00', status: 'confirmed', assignedTableId: '101', extraTableIds: ['102'] },
+      { id: 'B2', date: '2026-06-15', timeSlot: '12:00', status: 'pending', assignedTableId: '102' },
+      { id: 'B3', date: '2026-06-15', timeSlot: '11:00', status: 'arrived', assignedTableId: '103' },
+      { id: 'B4', date: '2026-06-16', timeSlot: '11:00', status: 'confirmed', assignedTableId: '104' },
+    ], '2026-06-15')
+    expect(map).toEqual({ 101: { timeSlot: '18:00' }, 102: { timeSlot: '12:00' } })
+  })
+  it('只有副桌的預配也會被標（副桌不再像普通空桌）', () => {
+    const map = buildPreassignTableMap([
+      { id: 'B1', date: '2026-06-15', timeSlot: '18:30', status: 'confirmed', assignedTableId: '201', extraTableIds: ['202', '203'] },
+    ], '2026-06-15')
+    expect(Object.keys(map).sort()).toEqual(['201', '202', '203'])
   })
 })

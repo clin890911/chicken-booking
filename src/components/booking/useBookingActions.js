@@ -4,7 +4,7 @@ import { useToast, useConfirm } from '../ui/Toast'
 import { getNoshowCount, revokeNoshow } from '../../services/bookingService'
 import { bookingDayKind, todayStr } from '../../utils/timeSlots'
 import { diffMin, stageOf } from '../../utils/diningStage'
-import { markNoshow, restoreFromNoshow, cancelWithUndo } from '../../utils/bookingActions'
+import { markNoshow, restoreFromNoshow, cancelWithUndo, releaseAfterCheckout } from '../../utils/bookingActions'
 
 // 用餐已坐分鐘數。分鐘級顯示只需要 30 秒 tick——原本每張「用餐中」卡片各自每秒 setState
 // 一次，十張卡就是每秒十次重繪，手機上捲清單會明顯頓（後台卡頓根因之一）。
@@ -29,7 +29,7 @@ export const MOVE_COMBO_REASON = '已入座的併桌客人本輪不支援整組�
 export function useBookingActions(booking, { onAssign, onMove } = {}) {
   const {
     tables, bookings, groupReservations, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking,
-    setStatus, clearTable, findReserveCandidates, clearBookingPreassign,
+    setStatus, releaseCheckedOutTables, findReserveCandidates, clearBookingPreassign,
   } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -114,14 +114,9 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
     const r = checkoutBooking(booking.id)
     if (!r.ok) { toast.error(r.error); return false }
     toast.action(`${booking.name} 已離席（用餐 ${minutes} 分）`,
-      { label: '一鍵釋出', onClick: () => {
-          if (booking.assignedTableId) {
-            clearTable(booking.assignedTableId)
-            toast.success(`${booking.assignedTableId} 已釋出`)
-          }
-      }})
+      { label: '一鍵釋出', onClick: () => releaseAfterCheckout(booking, { releaseCheckedOutTables, toast }) })
     return true
-  }, [booking, confirm, checkoutBooking, clearTable, minutes, toast])
+  }, [booking, confirm, checkoutBooking, releaseCheckedOutTables, minutes, toast])
 
   const finalize = useCallback(async () => {
     const ok = await confirm(`${booking.name} 已離席且桌面已清理？\n桌位將立即可給下一組使用`,

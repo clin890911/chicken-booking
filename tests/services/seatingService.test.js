@@ -2393,3 +2393,41 @@ describe('restoreOverriddenAssignment：桌已被第三組佔在重疊時段 →
     expect(bookingService.getById(L.id).assignedTableId).toBe('105')
   })
 })
+
+// === 離席後「一鍵釋出」：主桌＋併桌副桌都釋出，只清仍由這筆持有的待清桌 ===
+describe('releaseCheckedOutTables（離席後一鍵釋出，含併桌副桌）', () => {
+  beforeEach(() => { seedDefaultTables() })
+
+  it('併桌大組離席 → 主桌＋副桌都從待清桌釋成空桌', () => {
+    const b = mkBooking({ guests: 10 })
+    expect(seating.assignBookingTablesMulti(b.id, ['108', '101']).ok).toBe(true)
+    expect(seating.seatBooking(b.id).ok).toBe(true)
+    expect(seating.checkoutBooking(b.id).ok).toBe(true)
+    const r = seating.releaseCheckedOutTables(b.id)
+    expect(r.ok).toBe(true)
+    expect(r.released).toEqual(['108', '101'])
+    expect(r.skipped).toEqual([])
+    for (const n of ['108', '101']) {
+      expect(tableService.getByNumber(n)).toMatchObject({ status: 'vacant', currentBookingId: null })
+    }
+  })
+
+  it('副桌已被下一組接手 → 不清那張（不可抹掉剛入座的組），只釋出仍屬於這筆的桌', () => {
+    const b = mkBooking({ guests: 10 })
+    seating.assignBookingTablesMulti(b.id, ['108', '101'])
+    seating.seatBooking(b.id)
+    seating.checkoutBooking(b.id)
+    // 101 先被清好、又帶了下一組
+    tableService.clearTable('101')
+    const next = mkBooking({ name: '下一組', guests: 2 })
+    tableService.seatTable('101', next.id)
+    const r = seating.releaseCheckedOutTables(b.id)
+    expect(r.released).toEqual(['108'])
+    expect(r.skipped).toEqual(['101'])
+    expect(tableService.getByNumber('101')).toMatchObject({ status: 'dining', currentBookingId: next.id })
+  })
+
+  it('訂位不存在 → ok:false', () => {
+    expect(seating.releaseCheckedOutTables('NOPE').ok).toBe(false)
+  })
+})
