@@ -214,3 +214,54 @@ describe('remainingTablesForSeating', () => {
     expect(r.remainingSeats).toBe(0)
   })
 })
+
+// 2026-10：「關閉場次 / 時段」只擋線上客人。後台（團單精靈、規劃地圖）用 ignoreOnlineClosure 看實際剩餘；
+// 預設（線上 / 容量引擎）行為不變——下面同時釘住「預設仍歸零」與「calcSlotCapacity 仍歸零」。
+describe('resolveSlotOccupancy / remainingTablesForSeating — ignoreOnlineClosure', () => {
+  const tables = [
+    { number: '101', capacity: 6, isActive: true },
+    { number: '102', capacity: 6, isActive: true },
+    { number: '107', capacity: 4, isActive: true },
+    { number: '201', capacity: 6, isActive: true },
+  ]
+  const bookings = [{ id: 'b1', date: DATE, timeSlot: '11:00', guests: 4, status: 'confirmed', assignedTableId: '107' }]
+  const groups = [{ id: 'g1', date: DATE, status: 'confirmed', batches: [{ id: 'gb1', timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12 }] }]
+  const seatingClosed = baseSettings({ closures: { closedDates: [], closedSlots: {}, closedSeatings: { [DATE]: ['lunch1'] } } })
+  const dayClosed = baseSettings({ closures: { closedDates: [DATE], closedSlots: {}, closedSeatings: {} } })
+
+  it('預設（不傳 option）：關閉場次仍歸零（舊行為不變）', () => {
+    const { summary } = resolveSlotOccupancy(tables, bookings, groups, DATE, SEATINGS[0], seatingClosed)
+    expect(summary.closed).toBe(true)
+    expect(summary.dayClosed).toBe(false)
+    expect(summary.remaining).toBe(0)
+    expect(summary.remainingTables).toBe(0)
+  })
+
+  it('ignoreOnlineClosure：關閉場次照實際佔用算剩餘，closed 旗標照回', () => {
+    const { summary } = resolveSlotOccupancy(tables, bookings, groups, DATE, SEATINGS[0], seatingClosed, { ignoreOnlineClosure: true })
+    expect(summary.closed).toBe(true)
+    expect(summary.remaining).toBe(22 - 4 - 12)
+    expect(summary.remainingTables).toBe(1)
+    const r = remainingTablesForSeating(tables, bookings, groups, DATE, SEATINGS[0], seatingClosed, { ignoreOnlineClosure: true })
+    expect(r).toMatchObject({ closed: true, dayClosed: false, remainingSeats: 6, remainingTables: 1, usedSeats: 16, totalSeats: 22 })
+  })
+
+  it('ignoreOnlineClosure：公休日（closedDates）仍歸零', () => {
+    const r = remainingTablesForSeating(tables, bookings, groups, DATE, SEATINGS[0], dayClosed, { ignoreOnlineClosure: true })
+    expect(r).toMatchObject({ closed: true, dayClosed: true, remainingSeats: 0, remainingTables: 0 })
+  })
+
+  it('未關閉時有無 option 結果相同', () => {
+    const a = resolveSlotOccupancy(tables, bookings, groups, DATE, SEATINGS[0], baseSettings()).summary
+    const b = resolveSlotOccupancy(tables, bookings, groups, DATE, SEATINGS[0], baseSettings(), { ignoreOnlineClosure: true }).summary
+    expect(b).toEqual(a)
+  })
+
+  it('calcSlotCapacity（線上口徑）不受影響：關閉場次 / 時段 / 公休日一律 0', () => {
+    expect(calcSlotCapacity(tables, [], DATE, '11:00', seatingClosed)).toBe(0)
+    expect(calcSlotCapacity(tables, [], DATE, '11:00', dayClosed)).toBe(0)
+    const slotClosed = baseSettings({ closures: { closedDates: [], closedSlots: { [DATE]: ['11:00'] }, closedSeatings: {} } })
+    expect(calcSlotCapacity(tables, [], DATE, '11:00', slotClosed)).toBe(0)
+    expect(calcSlotCapacity(tables, [], DATE, '11:00', baseSettings())).toBe(22)
+  })
+})
