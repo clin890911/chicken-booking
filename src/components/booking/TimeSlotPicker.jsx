@@ -1,12 +1,16 @@
 import { useMemo } from 'react'
 import { generateTimeSlots, formatDate, nowSlot } from '../../utils/timeSlots'
-import { calcSlotCapacity, isSlotClosed } from '../../utils/capacity'
+import { calcSlotCapacity, isSlotClosed, isDayClosedForClosures } from '../../utils/capacity'
 import Icon from '../ui/Icon'
 
 // now：目前時間，預設 new Date()——呼叫端／測試可注入固定值，讓「今天」的已過時段判斷可測。
 // variant：'cards'（預設，所有既有呼叫點）｜'compact'（現場內嵌新增面板：左欄只有 470px 寬、
 //          可視高約 506pt，大卡片一天 17 個時段會吃掉整欄 → 改成 4 欄小晶片，仍標示已滿／已關閉）。
-export default function TimeSlotPicker({ date, value, onChange, settings, tables, bookings, groupReservations = [], guests = 1, hideFull = true, now = new Date(), variant = 'cards' }) {
+// ignoreOnlineClosure：後台員工訂位專用（預設 false＝舊行為：三種關閉都禁用）。
+//   店家「關閉場次 / 時段」（closures.closedSeatings / closedSlots）只停線上客人 → 傳 true 時這些時段
+//   照樣可選、標小字「線上已關」，剩餘席數照實際佔用算（「已滿」行為不變）；公休日（closedDates）仍禁用。
+//   線上客人頁不使用本元件（走 guestGetAvailability），員工呼叫點才傳 true。
+export default function TimeSlotPicker({ date, value, onChange, settings, tables, bookings, groupReservations = [], guests = 1, hideFull = true, now = new Date(), variant = 'cards', ignoreOnlineClosure = false }) {
   // 只在日期＝今天（本地日）才套用「已過時段」判斷；非今天完全不受影響。
   const isToday = date === formatDate(now)
   // nowSlot 向下取整到 30 分＝目前這個時段本身仍算「還來得及」，要保留顯示；早於它的才算過時。
@@ -15,13 +19,16 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
   const slots = useMemo(() => {
     const list = generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval)
     return list.map(t => {
-      const closed = isSlotClosed(settings, date, t)
-      const remaining = calcSlotCapacity(tables, bookings, date, t, settings, groupReservations)
+      const anyClosed = isSlotClosed(settings, date, t)
+      // 員工模式：只有公休日算「已關閉」；僅線上關閉（場次／時段）→ onlineClosed，可選。
+      const closed = ignoreOnlineClosure ? isDayClosedForClosures(settings, date) : anyClosed
+      const onlineClosed = anyClosed && !closed
+      const remaining = calcSlotCapacity(tables, bookings, date, t, settings, groupReservations, { ignoreOnlineClosure })
       const past = pastThreshold !== null && t < pastThreshold
-      return { time: t, remaining, closed, full: remaining < guests, past }
+      return { time: t, remaining, closed, onlineClosed, full: remaining < guests, past }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date, settings, tables, bookings, groupReservations, guests, pastThreshold])
+  }, [date, settings, tables, bookings, groupReservations, guests, pastThreshold, ignoreOnlineClosure])
 
   // 已過時段一律不顯示——唯一例外是呼叫端目前已選的值（例如編輯一筆今天 11:00 的舊訂位，
   // 就算 11:00 已經過了也不能讓它從清單消失，否則畫面上看不出自己選的是哪個時段）。
@@ -65,7 +72,7 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
                 type="button"
                 disabled={disabled}
                 aria-pressed={active}
-                aria-label={`${s.time}${s.closed ? ' 已關閉' : s.full ? ' 已滿' : ''}`}
+                aria-label={`${s.time}${s.closed ? ' 已關閉' : s.full ? ' 已滿' : ''}${s.onlineClosed ? ' 線上已關' : ''}`}
                 onClick={() => onChange(s.time)}
                 className={`h-[52px] rounded-xl border-2 px-1 flex flex-col items-center justify-center transition-all ${
                   active
@@ -78,9 +85,9 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
                 }`}
               >
                 <span className="text-[17px] font-bold leading-none tabular-nums">{s.time}</span>
-                {(disabled || low) && (
-                  <span className={`mt-1 text-[10px] font-bold leading-none ${active ? 'text-white/85' : low ? 'text-chicken-yellow' : ''}`}>
-                    {s.closed ? '已關閉' : s.full ? '已滿' : '少量'}
+                {(disabled || low || s.onlineClosed) && (
+                  <span className={`mt-1 text-[10px] font-bold leading-none ${active ? 'text-white/85' : s.onlineClosed && !disabled ? 'text-amber-700' : low ? 'text-chicken-yellow' : ''}`}>
+                    {s.closed ? '已關閉' : s.full ? '已滿' : s.onlineClosed ? '線上已關' : '少量'}
                   </span>
                 )}
               </button>
@@ -123,6 +130,9 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
               <div className={`mt-0.5 text-[10px] ${active ? 'text-white/70' : 'text-chicken-brown/45'}`}>
                 {s.closed ? '店家暫停此時段訂位' : s.full ? '請改選其他時段' : `符合 ${guests} 位用餐`}
               </div>
+              {s.onlineClosed && (
+                <div className={`mt-0.5 text-[10px] font-bold ${active ? 'text-white/85' : 'text-amber-700'}`}>線上已關</div>
+              )}
             </button>
           )
         })}
