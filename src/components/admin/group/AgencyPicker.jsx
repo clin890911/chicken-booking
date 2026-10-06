@@ -3,11 +3,12 @@ import { frequentAgencies } from '../../../utils/groupDaySummary'
 import { todayStr, addDays, formatDate } from '../../../utils/timeSlots'
 
 // AgencyPicker：旅行社「打字即篩 + 常客快選 + 快速新增」，取代長下拉。
-// 純受控：value=agencyId、agencyName=目前名稱快照；onPick(agency) 由父層落 draft；onQuickAdd 開新增表單。
+// 純受控：value=agencyId、agencyName=目前名稱快照；onPick(agency) 由父層落 draft；onQuickAdd(name) 開新增表單（預填已打的字）；
+// onCreateNamed(name) 讓店員打了字發現沒有時，直接在下拉裡一點就用該名稱建檔並選取（電話事後再補）。
 //
 // 常客 chip 一律在輸入框下方直接可見（不是打字才出現）——櫃檯八成的團來自同幾家旅行社，
 // 一眼點得到才省得打字；chip 上的「上次 M/D · N 人」是認人的線索（近 90 天內來過幾團的分辨點）。
-export default function AgencyPicker({ agencies = [], groupReservations = [], value, agencyName = '', onPick, onQuickAdd }) {
+export default function AgencyPicker({ agencies = [], groupReservations = [], value, agencyName = '', onPick, onQuickAdd, onCreateNamed }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
 
@@ -53,6 +54,10 @@ export default function AgencyPicker({ agencies = [], groupReservations = [], va
     return [md ? `上次 ${md}` : '', v.guests > 0 ? `${v.guests} 人` : ''].filter(Boolean).join(' · ')
   }
 
+  const typed = query.trim()
+  const canCreate = !!typed && !!onCreateNamed &&
+    !(agencies || []).some(a => !a.archived && (a.name || '').trim().toLowerCase() === typed.toLowerCase())
+
   const pick = (a) => { onPick?.(a); setOpen(false); setQuery('') }
 
   return (
@@ -76,9 +81,12 @@ export default function AgencyPicker({ agencies = [], groupReservations = [], va
 
       {open && (
         <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-xl border border-chicken-brown/15 bg-white shadow-lg">
-          {results.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-chicken-brown/50">查無符合，請用下方「快速新增旅行社」</div>
-          ) : results.map(a => (
+          {results.length === 0 && (
+            <div className="px-3 py-2 text-xs text-chicken-brown/50">
+              {typed ? `查無「${typed}」` : '尚無旅行社資料'}
+            </div>
+          )}
+          {results.map(a => (
             <button
               key={a.id}
               type="button"
@@ -91,6 +99,16 @@ export default function AgencyPicker({ agencies = [], groupReservations = [], va
               )}
             </button>
           ))}
+          {canCreate && (
+            <button
+              type="button"
+              onClick={() => { onCreateNamed(typed); setOpen(false); setQuery('') }}
+              className="flex w-full items-center gap-2 border-t border-chicken-brown/10 px-3 py-2.5 text-left text-sm font-bold text-chicken-red hover:bg-chicken-red/[0.06]"
+            >
+              <span aria-hidden>＋</span>
+              <span className="truncate">新增旅行社「{typed}」</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -114,7 +132,7 @@ export default function AgencyPicker({ agencies = [], groupReservations = [], va
         </div>
       )}
 
-      <button type="button" onClick={onQuickAdd} className="mt-1 text-xs font-bold text-chicken-red">＋ 快速新增旅行社</button>
+      <button type="button" onClick={() => { onQuickAdd?.(typed); setOpen(false) }} className="mt-1 text-xs font-bold text-chicken-red">＋ 快速新增旅行社（含電話）</button>
     </div>
   )
 }
