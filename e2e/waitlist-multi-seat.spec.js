@@ -41,7 +41,7 @@ test.beforeEach(async ({ page }) => {
     // 候位：9 位，超過任何單桌容量
     localStorage.setItem('chicken_waitlist_v1', JSON.stringify([
       { id: 'W-BIG', queueNumber: 3, name: '訪客', phone: '0900222333', partySize: 9,
-        status: 'waiting', createdAt: new Date().toISOString(), notes: '' },
+        status: 'waiting', takenAt: new Date().toISOString(), notes: '' },   // PR #141：候位日期由 takenAt 判定（舊種子的 createdAt 會被當成無日期而不顯示）
     ]))
     // 桌位改造在頁面載入後由 app 自己 seed，故先讀既有值再覆寫（key 是 v3）
     const KEY = 'chicken_tables_v3'
@@ -109,7 +109,8 @@ test('併桌模式下把桌減到席數不足 → 確認鈕鎖住並提示還差
 
   await page.getByRole('button', { name: /^候位/ }).click()
   await page.getByRole('button', { name: /^入座$/ }).click()
-  await expect(page.getByText(/候位入座/)).toBeVisible()
+  // 用橫幅專屬文案定位（PR #137/#138 後頁面上另有同名「候位入座」標題，裸 /候位入座/ 會撞 strict mode）
+  await expect(page.getByText(/候位入座：訪客 #3/)).toBeVisible()
 
   // 人工先選六席109與四席105，再移除109，剩下四席不足9人。
   await page.locator('svg g:has(:text-is("109"))').first().click()

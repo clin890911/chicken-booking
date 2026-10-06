@@ -61,10 +61,10 @@ test('管理端：登入 → 指派桌位（人工選桌確認）→ 指派成�
   await expect(page.getByText(/指派桌位：王大明\s*4\s*位/)).toBeVisible()
 
   // 4) 讀出系統建議桌號（💡 建議 N）
-  const suggestChip = page.getByText(/^建議\s*\d+/)
+  const suggestChip = page.getByText(/^建議\s*(?:\d+F・)?\d+/)
   await expect(suggestChip).toBeVisible()
   const chipText = await suggestChip.textContent()
-  const tableNo = (chipText.match(/\d+/) || [])[0]
+  const tableNo = (chipText.match(/建議\s*(?:\d+F・)?(\d+)/) || [])[1]
   expect(tableNo).toBeTruthy()
 
   // 5) 點該桌（SVG 內 <g> 含桌號文字）→ 進入待確認預覽（A6 二步）
@@ -88,8 +88,8 @@ test('管理端：09:00 指派 18:00 的訂位 → 只預配（確認句／toast
   await page.getByRole('button', { name: '指派桌位' }).click()
   await expect(page.getByText(/指派桌位：王大明\s*4\s*位/)).toBeVisible()
   await expect(page.getByText('預配 · 桌子先不鎖')).toBeVisible()
-  const chipText = await page.getByText(/^建議\s*\d+/).textContent()
-  const tableNo = (chipText.match(/\d+/) || [])[0]
+  const chipText = await page.getByText(/^建議\s*(?:\d+F・)?\d+/).textContent()
+  const tableNo = (chipText.match(/建議\s*(?:\d+F・)?(\d+)/) || [])[1]
 
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
   await expect(page.getByText(`已選：${tableNo}`)).toBeVisible()
@@ -142,6 +142,9 @@ test('管理端：12 人訂位無單桌可容 → 併桌指派（選多張桌）
 // 2026-08 更新：預配桌的填色由綠改為訂位藍＋虛線框（桌況資料仍不動），故這裡驗的是
 // 「標籤取代可入座字樣」與「其他空桌不受影響」，不再宣稱預配桌本身是可入座色。
 test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、其他空桌不受影響', async ({ page }) => {
+  // PR #138：帶位面板有預設人數時，離 18:00 不到一個用餐時長的空桌會改標「⚠ 時段衝突」（蓋過預配標籤）。
+  // 本測驗證的是預配標籤本身，故把時鐘移到 09:00（現在入座的預估用餐結束遠早於 18:00，沒有衝突）。
+  await page.clock.setFixedTime(at('09:00'))
   await page.addInitScript(b => {
     localStorage.setItem('chicken_bookings_v1', JSON.stringify([b, {
       ...b,
@@ -159,10 +162,21 @@ test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、�
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
 
-  // 113 顯示預配標籤（取代「✓ 可入座」），其他空桌不受影響
+  // 113 顯示預配標籤（取代空桌字樣），其他空桌不受影響
   await expect(page.getByText('18:00 預配')).toBeVisible()
-  await expect(page.locator('svg g:has(:text-is("112"))').getByText('✓ 可入座')).toBeVisible()
+  // PR #138：空桌桌面文字由「✓ 可入座」改為狀態標籤「空桌」；112 沒有預配 → 不帶預配標籤
+  const t112 = page.locator('svg g:has(:text-is("112"))').first()
+  await expect(t112.getByText('空桌', { exact: true })).toBeVisible()
+  await expect(t112.getByText(/預配/)).toHaveCount(0)
 })
+
+// PR #138：訂位卡的次要動作收進「⋯ 更多」原生選單，改桌要先展開才點得到。
+async function openMove(page) {
+  const move = page.getByRole('button', { name: '↔ 改桌', exact: true })
+  // <details> 的開合狀態可能跨分頁切換保留（已展開時再點 summary 會收起），故先判斷再展開。
+  if (!(await move.isVisible())) await page.locator('summary', { hasText: '更多' }).first().click()
+  await move.click()
+}
 
 for (const { label, original, selected } of [
   {label:'多桌改多桌4+4',original:['101','107'],selected:['105','106']},
@@ -178,7 +192,7 @@ for (const { label, original, selected } of [
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
   await page.getByRole('button',{name:/模擬登入/}).click()
-  await page.getByRole('button',{name:'↔ 改桌',exact:true}).click()
+  await openMove(page)
   await expect(page.getByText(`原配桌 ${original.join(' + ')} · 確認成功前保留`)).toBeVisible()
   await expect(page.getByText(/已選 0\/8 席/)).toBeVisible()
   for(const n of selected) await page.locator(`svg g:has(:text-is("${n}"))`).first().click()
@@ -189,7 +203,7 @@ for (const { label, original, selected } of [
   expect(state.booking.status).toBe('confirmed')
   // 回今日訂位入口重新改桌。
   await page.locator('aside').getByRole('button',{name:'訂位',exact:true}).click()
-  await page.getByRole('button',{name:'↔ 改桌',exact:true}).click()
+  await openMove(page)
   for(const n of selected) await page.locator(`svg g:has(:text-is("${n}"))`).first().click()
   await page.getByRole('button',{name:'✓ 確認改桌',exact:true}).click()
   await expect(page.getByText(/已改桌至.*原訂位保留/)).toBeVisible()

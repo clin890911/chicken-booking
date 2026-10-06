@@ -49,9 +49,9 @@ test('管理端：現場頁內 取號 → 叫號 → 入座（人工選桌確認
   await expect(page.getByText(/候位入座：陳先生/)).toBeVisible()
 
   // 讀建議桌號 → 點該桌 → 人工選桌確認 → 入座成功
-  const suggestChip = page.getByText(/^建議\s*\d+/)
+  const suggestChip = page.getByText(/^建議\s*(?:\d+F・)?\d+/)
   await expect(suggestChip).toBeVisible()
-  const tableNo = ((await suggestChip.textContent()).match(/\d+/) || [])[0]
+  const tableNo = ((await suggestChip.textContent()).match(/建議\s*(?:\d+F・)?(\d+)/) || [])[1]
   expect(tableNo).toBeTruthy()
 
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()

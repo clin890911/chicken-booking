@@ -20,13 +20,15 @@ const AVAILABILITY = {
     lineLoginStartEndpoint: 'https://line-login.example/start',
     lineOfficialUrl: 'https://line.example/friend',
     lineOfficialName: '測試 LINE 官方帳號',
+    // PR #142：確認頁的 LINE 綁定 CTA 以後端公開設定的 lineLoginReady===true 為唯一依據（缺值＝關閉）
+    lineLoginReady: true,
   },
 }
 
 test.beforeEach(async ({ page }) => {
   // 兜底安全網（先註冊 → 最後匹配）：任何未被下方明確攔截的 guest* 端點一律擋下，
   // 確保就算之後頁面多打了新端點，也絕不會送到正式 Cloud Functions。
-  await page.route('**/guest*', route =>
+  await page.route(/\/guest[A-Za-z]+(\?.*)?$/, route =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'e2e-blocked' }) }))
   // 確認頁的直達授權預取（POST lineLoginStartEndpoint）：mock 成功回 authorize URL，
   // 讓 CTA href 直指 access.line.me（跨網域 fetch 需補 CORS 與 preflight）。

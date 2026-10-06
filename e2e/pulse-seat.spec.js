@@ -48,10 +48,14 @@ test('訂位脈動：遲到且已指派的訂位可直接「客人到了」入�
   // 免得訂位卡一律寫已指派、桌況圖卻一藍一綠）。
   await expect(page.getByText('過時未到（1 組）— 請聯絡或標記')).toBeVisible()
   await expect(page.getByText('遲到客')).toBeVisible()
-  await expect(page.getByText('已預配 113')).toBeVisible()
+  // PR #137/#138：脈動卡新增「已預配 113 · ↔ 改桌」鈕（文字含同一句），故要 exact 才不會 strict mode 撞兩個元素
+  await expect(page.getByText('已預配 113', { exact: true })).toBeVisible()
   const seatBtn = page.getByRole('button', { name: /客人到了/ })
   await expect(seatBtn).toBeVisible()
+  // PR #138：次要動作（標 No-show）收進「⋯ 更多」原生選單，展開後才可見
+  await page.locator('summary', { hasText: '更多' }).first().click()
   await expect(page.getByRole('button', { name: /標 No-show/ })).toBeVisible()
+  await page.locator('summary', { hasText: '更多' }).first().click()   // 收起，避免遮到下面的入座鈕
 
   // 點「客人到了」→ 直接入座成功（status→arrived、桌→用餐中），卡片離開脈動
   await seatBtn.click()
