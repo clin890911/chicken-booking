@@ -219,6 +219,25 @@ describe('groupReservationService.tableConflictsForBatch（含一般訂位）', 
     expect(c['103']).toBeUndefined()
   })
 
+  it('散客大組併桌：副桌 extraTableIds 也算佔用（防團體圈走副桌超賣）', () => {
+    const bookings = [{ id: 'B3', date: D, timeSlot: '11:30', assignedTableId: '105', extraTableIds: ['106'], status: 'confirmed' }]
+    const c = group.tableConflictsForBatch({ date: D, timeSlot: '11:00', excludeGroupId: 'OTHER', bookings })
+    expect(c['105']).toMatchObject({ type: 'booking', bookingId: 'B3' })
+    expect(c['106']).toMatchObject({ type: 'booking', bookingId: 'B3' })
+  })
+
+  it('併桌副桌時間窗不重疊（18:00）→ 不衝突', () => {
+    const bookings = [{ id: 'B4', date: D, timeSlot: '11:30', assignedTableId: '105', extraTableIds: ['106'], status: 'confirmed' }]
+    const c = group.tableConflictsForBatch({ date: D, timeSlot: '18:00', excludeGroupId: 'OTHER', bookings })
+    expect(c['106']).toBeUndefined()
+  })
+
+  it('併桌訂位已取消 → 副桌也不算衝突', () => {
+    const bookings = [{ id: 'B5', date: D, timeSlot: '11:30', assignedTableId: '105', extraTableIds: ['106'], status: 'cancelled' }]
+    const c = group.tableConflictsForBatch({ date: D, timeSlot: '11:00', excludeGroupId: 'OTHER', bookings })
+    expect(c['106']).toBeUndefined()
+  })
+
   it('排除本團（excludeGroupId）→ 自己不算衝突', () => {
     const a = group.listByDate(D)[0]
     const c = group.tableConflictsForBatch({ date: D, timeSlot: '11:00', excludeGroupId: a.id })
