@@ -37,14 +37,33 @@ describe('groupReservationService.validateGroupForSave（空白團單不能儲�
     expect(group.validateGroupForSave(g, CAP)).toMatch(/至少圈一桌/)
   })
 
-  it('單梯人數超過該梯保留席數 → 擋下', () => {
+  // 2026-10 語意變更：席位不夠不擋（大客滿請 7 位坐 6 人桌），改由 groupSeatWarnings 黃字提醒。
+  it('單梯人數超過該梯保留席數 → 不擋（回 null），groupSeatWarnings 回超坐', () => {
     const g = validGroup({ counts: { total: 8 }, batches: [{ id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['107'], guests: 8 }] }) // 107=4 席
-    expect(group.validateGroupForSave(g, CAP)).toMatch(/超過該梯保留席數/)
+    expect(group.validateGroupForSave(g, CAP)).toBeNull()
+    expect(group.groupSeatWarnings(g, CAP)).toEqual([
+      expect.objectContaining({ key: 'total', guests: 8, seats: 4, over: 4 }),
+    ])
   })
 
-  it('單梯總人數超過保留席數 → 擋下', () => {
+  it('單梯總人數超過保留席數 → 不擋（回 null），groupSeatWarnings 回超坐', () => {
     const g = validGroup({ counts: { total: 20 }, batches: [{ id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12 }] }) // held=12, total=20
-    expect(group.validateGroupForSave(g, CAP)).toMatch(/超過保留席數/)
+    expect(group.validateGroupForSave(g, CAP)).toBeNull()
+    const w = group.groupSeatWarnings(g, CAP)
+    expect(w).toHaveLength(1)
+    expect(w[0]).toMatchObject({ over: 8, seats: 12, guests: 20 })
+    expect(w[0].message).toMatch(/超坐 8 人/)
+  })
+
+  it('7 人圈一張 6 人桌 → 可存，警示超坐 1 人', () => {
+    const g = validGroup({ counts: { total: 7 }, batches: [{ id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['101'], guests: 7 }] })
+    expect(group.validateGroupForSave(g, CAP)).toBeNull()
+    expect(group.groupSeatWarnings(g, CAP)[0]).toMatchObject({ over: 1 })
+  })
+
+  it('圈到的桌一席都不算數（桌已不存在）→ 仍擋', () => {
+    const g = validGroup({ counts: { total: 6 }, batches: [{ id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['999'], guests: 6 }] })
+    expect(group.validateGroupForSave(g, CAP)).toMatch(/沒有可用席位/)
   })
 
   it('填好的單梯團單 → 通過（回 null）', () => {
@@ -60,6 +79,37 @@ describe('groupReservationService.validateGroupForSave（空白團單不能儲�
       ],
     })
     expect(group.validateGroupForSave(g, CAP)).toBeNull()
+  })
+})
+
+describe('groupReservationService.groupSeatWarnings（超坐只警示）', () => {
+  it('坐得下 → 空陣列', () => {
+    expect(group.groupSeatWarnings(validGroup(), CAP)).toEqual([])
+  })
+  it('多梯：只點名超坐的那一梯；總人數 > 保留席（輪替）不算超坐', () => {
+    const g = validGroup({
+      counts: { total: 20 },
+      batches: [
+        { id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['101'], guests: 8 },          // 6 席坐 8 人
+        { id: 'b2', label: '第二梯', timeSlot: '12:30', tableNumbers: ['101', '102'], guests: 12 },  // 剛好
+      ],
+    })
+    const w = group.groupSeatWarnings(g, CAP)
+    expect(w).toHaveLength(1)
+    expect(w[0]).toMatchObject({ key: 'b1', label: '第一梯', over: 2 })
+    expect(w[0].message).toMatch(/第一梯.*超坐 2 人/)
+  })
+  it('司領桌不計超坐', () => {
+    const g = validGroup({ batches: [
+      { id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['101', '102'], guests: 12 },
+      { id: 'be', label: '司領桌', timeSlot: '11:00', tableNumbers: ['107'], guests: 9, isEscort: true },
+    ] })
+    expect(group.groupSeatWarnings(g, CAP)).toEqual([])
+  })
+  it('超坐時停用/維修桌仍擋（validateGroupForSave 傳 tables）', () => {
+    const g = validGroup({ date: '2026-07-01', counts: { total: 7 }, batches: [{ id: 'b1', label: '第一梯', timeSlot: '11:00', tableNumbers: ['101'], guests: 7 }] })
+    const tables = [{ number: '101', capacity: 6, isActive: false }]
+    expect(group.validateGroupForSave(g, CAP, tables)).toMatch(/停用\/維修/)
   })
 })
 

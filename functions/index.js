@@ -44,6 +44,7 @@ import {
   buildBookingUpsertData,
 } from './lib/dataProjection.js'
 import { isTableUsableOnDate } from './lib/tableUsable.js'
+import { findGroupClosedDateBatch } from './lib/groupClosure.js'
 import { findGroupTableConflicts, bookingOccupiedTables } from './lib/groupTableConflicts.js'
 import { heldTableIdsToRelease } from './lib/bookingTableRelease.js'
 import {
@@ -621,10 +622,11 @@ export const groupReserveTables = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
     const settings = normalizeStoreSettings(settingsSnap.exists ? settingsSnap.data() : {})
     const durationMin = (Number(settings.diningDurationMin) || DEFAULT_DINING_DURATION_MIN) + (Number(settings.cleanupBufferMin) || DEFAULT_CLEANUP_BUFFER_MIN)
 
-    // 關閉的時段/場次/公休日不可圈桌（與散客一致；繞過前端也擋得住）。
-    const closedBatch = (group.batches || []).find(b => (b.tableNumbers || []).length && isSlotClosedServer(settings, group.date, b.timeSlot))
+    // 公休日不可圈桌（繞過前端也擋得住）。「關閉場次/時段」只停線上客人、不擋後台建團
+    // （店家關場次正是為了把位子留給旅行社團）；實際佔用由下方交易內撞桌檢查把關。
+    const closedBatch = findGroupClosedDateBatch(settings, group)
     if (closedBatch) {
-      return res.status(409).json({ ok: false, error: `「${closedBatch.label || closedBatch.timeSlot}」所在時段已關閉訂位，無法圈桌` })
+      return res.status(409).json({ ok: false, error: `${group.date} 為公休日，「${closedBatch.label || closedBatch.timeSlot}」無法圈桌` })
     }
 
     const groupsRef = db.collection(COLLECTIONS.groupReservations)

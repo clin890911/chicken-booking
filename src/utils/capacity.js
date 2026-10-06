@@ -83,6 +83,12 @@ export function isSlotClosed(settings = {}, date, timeSlot) {
   return false
 }
 
+// 某日是否整天公休（closures.closedDates）。與「關閉場次/時段」分開：公休日後台也不建團（後端照擋）。
+export function isDayClosedForClosures(settings = {}, date) {
+  const cd = settings?.closures?.closedDates
+  return Array.isArray(cd) && cd.includes(date)
+}
+
 // 某日某「場次」是否關閉（整天公休或該場次被關）。給統一地圖場次層判定用。
 export function isSeatingClosed(settings = {}, date, seating) {
   const c = settings?.closures || {}
@@ -150,7 +156,15 @@ export function totalActiveSeats(tables) {
 //   - 散客：有 assignedTableId → 落該桌（kind:'walkin'）；未指派 → 只進 summary.unassignedWalkinGuests。
 //   - 團客：該梯各圈定桌號 → 落該桌（kind:'group'），整桌保留；同場次跨梯重用同桌只算一次。
 // 回傳 byTable={ 桌號: { kind, booking?|group?+batch? } } 與 summary。
-export function resolveSlotOccupancy(tables = [], bookings = [], groupReservations = [], date, seating, settings = {}) {
+//
+// options.ignoreOnlineClosure（預設 false）：
+//   店家「關閉場次 / 時段」（closures.closedSeatings / closedSlots）的語意是「停止線上客人訂位、
+//   把位子留給後台手動排的旅行社團」，不是桌子物理上不能用。後台內部（團單精靈、規劃地圖預配既有散客）
+//   要看的是「實際還剩幾桌幾席」→ 傳 true：remaining / remainingTables 照實際佔用計算，
+//   但 summary.closed 旗標照舊回報（給 UI 標「線上已關」）。
+//   ⚠️ 公休日（closedDates → summary.dayClosed）不在此列：傳 true 時公休日仍回 0。
+//   預設 false＝舊行為（關閉即 0），線上 / 容量引擎路徑不受影響。
+export function resolveSlotOccupancy(tables = [], bookings = [], groupReservations = [], date, seating, settings = {}, { ignoreOnlineClosure = false } = {}) {
   const byTable = {}
   // 與 calcSlotCapacity 同口徑：團體保留席只計該日可用的桌（防雙重扣除）。
   const capByNum = {}
@@ -195,11 +209,13 @@ export function resolveSlotOccupancy(tables = [], bookings = [], groupReservatio
   const totalTables = activeTables.length
   const occupiedTables = Object.keys(byTable).length // = walkinAssignedTables + groupTableCount（byTable 已去重）
   const closed = isSeatingClosed(settings, date, seating)
-  const remaining = closed ? 0 : Math.max(0, totalSeats - walkinGuests - groupHeldSeats)
-  const remainingTables = closed ? 0 : Math.max(0, totalTables - occupiedTables)
+  const dayClosed = isDayClosedForClosures(settings, date)
+  const zeroed = ignoreOnlineClosure ? dayClosed : closed
+  const remaining = zeroed ? 0 : Math.max(0, totalSeats - walkinGuests - groupHeldSeats)
+  const remainingTables = zeroed ? 0 : Math.max(0, totalTables - occupiedTables)
   return {
     byTable,
-    summary: { totalSeats, totalTables, occupiedTables, walkinGuests, unassignedWalkinGuests, walkinAssignedTables, groupHeldSeats, groupTableCount, remaining, remainingTables, closed },
+    summary: { totalSeats, totalTables, occupiedTables, walkinGuests, unassignedWalkinGuests, walkinAssignedTables, groupHeldSeats, groupTableCount, remaining, remainingTables, closed, dayClosed },
   }
 }
 
@@ -207,15 +223,19 @@ export function resolveSlotOccupancy(tables = [], bookings = [], groupReservatio
 // 只呼叫一次 resolveSlotOccupancy（與容量引擎同口徑），由其 summary 取焦點欄位。
 // 註：occupiedTables 以「相異被佔桌號」計，一張大桌被 2 人散客佔仍算 1 桌占用，
 //     故 remainingTables 為保守值、remainingSeats 為嚴格席數。
-export function remainingTablesForSeating(tables = [], bookings = [], groupReservations = [], date, seating, settings = {}) {
-  const { summary } = resolveSlotOccupancy(tables, bookings, groupReservations, date, seating, settings)
+// options 同 resolveSlotOccupancy（ignoreOnlineClosure：後台建團看實際剩餘，closed 旗標照回）。
+export function remainingTablesForSeating(tables = [], bookings = [], groupReservations = [], date, seating, settings = {}, options = {}) {
+  const { summary } = resolveSlotOccupancy(tables, bookings, groupReservations, date, seating, settings, options)
   return {
     totalTables: summary.totalTables,
     occupiedTables: summary.occupiedTables,
     remainingTables: summary.remainingTables,
     totalSeats: summary.totalSeats,
     remainingSeats: summary.remaining,
+    // 已被佔走的席（散客逐筆 guests＋團體整桌座位）。給「場次總席位超收」警示用：remainingSeats 會夾在 0。
+    usedSeats: summary.walkinGuests + summary.groupHeldSeats,
     closed: summary.closed,
+    dayClosed: summary.dayClosed,
   }
 }
 

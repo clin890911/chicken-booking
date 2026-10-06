@@ -5,7 +5,7 @@ import BookingDetailSheet from '../../booking/BookingDetailSheet'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useToast } from '../../ui/Toast'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
-import { resolveSlotOccupancy, isSeatingClosed, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
+import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import SegmentedControl from '../../ui/SegmentedControl'
 import Icon from '../../ui/Icon'
@@ -83,10 +83,15 @@ export default function SlotMapPanel({
   }, [focusRequest])
 
   const seating = seatings.find(s => s.id === seatingId) || seatings[0] || null
+  // closed＝線上已關（含公休）；dayClosed＝公休日。
+  // 「關閉場次」只停線上客人：後台仍可替既有散客預配桌，剩餘席照實際佔用算（ignoreOnlineClosure）。
+  // 公休日維持原狀：不配桌、地圖淡化、剩餘 0。
   const closed = seating ? isSeatingClosed(settings, date, seating) : false
+  const dayClosed = isDayClosedForClosures(settings, date)
+  const onlineClosed = closed && !dayClosed
 
   const { byTable, summary } = useMemo(
-    () => resolveSlotOccupancy(tables, bookings, groupReservations, date, seating, settings),
+    () => resolveSlotOccupancy(tables, bookings, groupReservations, date, seating, settings, { ignoreOnlineClosure: true }),
     [tables, bookings, groupReservations, date, seating, settings],
   )
 
@@ -191,11 +196,17 @@ export default function SlotMapPanel({
           options={seatings.map(s => ({ key: s.id, label: s.name, sub: `${s.start}–${s.end}`, muted: isSeatingClosed(settings, date, s) }))} />
       </div>
 
-      {/* 關閉提示 */}
-      {closed && (
+      {/* 關閉提示：公休日（擋）與線上已關（只提醒）分開講 */}
+      {dayClosed && (
         <div className="flex items-start gap-2 rounded-xl bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700">
           <Icon name="ban" size={16} className="shrink-0 mt-px" />
-          <span>此場次已關閉訂位：{dayLabel(date)} · {seating.name}（{seating.start}–{seating.end}），停止接收新散客 / 團體訂位，既有訂位不受影響。</span>
+          <span>本日公休：{dayLabel(date)} · {seating.name}（{seating.start}–{seating.end}），停止接收新散客 / 團體訂位，既有訂位不受影響。</span>
+        </div>
+      )}
+      {onlineClosed && (
+        <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-800">
+          <Icon name="ban" size={16} className="shrink-0 mt-px" />
+          <span>線上訂位已關閉（後台仍可建團、配桌）：{dayLabel(date)} · {seating.name}（{seating.start}–{seating.end}）</span>
         </div>
       )}
 
@@ -271,7 +282,7 @@ export default function SlotMapPanel({
               onSelectTable={handleTableClick}
               scopedMode
               scopedByTable={byTable}
-              scopedClosed={closed}
+              scopedClosed={dayClosed}
               scopedHighlightTables={highlightTables}
               scopedFocusTables={assignMulti ? assignSelected : (focus?.tables || [])}
               mapDate={date}
@@ -334,14 +345,14 @@ export default function SlotMapPanel({
               ) : unassignedWalkins.map(b => {
                 const active = assignBooking?.id === b.id
                 return (
-                  <div key={b.id} className={`flex items-center gap-2 min-h-[48px] pl-3.5 pr-2 ${active ? 'bg-orange-50' : ''} ${closed ? 'opacity-40' : ''}`}>
+                  <div key={b.id} className={`flex items-center gap-2 min-h-[48px] pl-3.5 pr-2 ${active ? 'bg-orange-50' : ''} ${dayClosed ? 'opacity-40' : ''}`}>
                     <button type="button" onClick={() => setDetailBookingId(b.id)} title="看訂位詳情"
                       className="tap flex-1 min-w-0 flex items-center gap-2 text-left py-1">
                       <Icon name="person" size={18} className="text-chicken-yellow" />
                       <span className="text-sm font-semibold text-chicken-brown truncate">{b.name}</span>
                       <span className="text-xs text-chicken-brown/60 tabular-nums shrink-0">{b.timeSlot} · {b.guests} 位</span>
                     </button>
-                    <button type="button" onClick={() => startAssign(b)} disabled={closed}
+                    <button type="button" onClick={() => startAssign(b)} disabled={dayClosed}
                       className={`tap text-xs font-semibold h-8 px-3 rounded-lg shrink-0 ${active ? 'bg-orange-600 text-white' : 'bg-chicken-red text-white'} disabled:cursor-not-allowed`}>
                       {active ? '配桌中' : '配桌'}
                     </button>
@@ -357,7 +368,7 @@ export default function SlotMapPanel({
       <BookingDetailSheet
         bookingId={detailBookingId}
         onClose={() => setDetailBookingId(null)}
-        onAssign={(b) => { if (closed) return toast.error('此場次已關閉訂位'); startAssign(b) }}
+        onAssign={(b) => { if (dayClosed) return toast.error('本日公休，無法配桌'); startAssign(b) }}
         onFocusTable={focusBookingTables}
       />
     </div>

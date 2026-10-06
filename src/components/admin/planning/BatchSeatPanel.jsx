@@ -20,7 +20,7 @@ const LEGEND = [
 const TONE = {
   idle: 'text-chicken-brown/50',
   ok: 'text-emerald-700',
-  short: 'text-chicken-red',
+  short: 'text-amber-700', // 席位不夠只提醒（可超坐存檔），不用紅字
 }
 
 const sortTables = (nums) => [...nums]
