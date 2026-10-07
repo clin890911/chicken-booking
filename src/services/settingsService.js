@@ -32,7 +32,8 @@ const DEFAULT = {
     { id: 'dinner1', name: '晚餐第一批', start: '17:00', end: '19:00' },
   ],
   // 關閉訂位：整天公休 / 特定日特定時段 / 特定日特定場次。
-  closures: { closedDates: [], closedSlots: {}, closedSeatings: {}, weeklySeatings: {}, openSeatings: {} },
+  // weeklySeatings（每週預設關閉）/ openSeatings（單日開放）為選用欄位，空時不輸出（見 normalizeClosures）。
+  closures: { closedDates: [], closedSlots: {}, closedSeatings: {} },
   heroBanners: [],
   lineOfficialUrl: 'https://lin.ee/8lECi4S',
   lineOfficialName: '雞王涮涮鍋 LINE 官方帳號',
@@ -73,7 +74,7 @@ function clampInt(value, min, max, fallback) {
 
 // 正規化「關閉設定」並深拷貝（避免與 DEFAULT.closures 共用參考被 mutate 污染）。
 function normalizeClosures(c = {}) {
-  const out = { closedDates: [], closedSlots: {}, closedSeatings: {}, weeklySeatings: {}, openSeatings: {} }
+  const out = { closedDates: [], closedSlots: {}, closedSeatings: {} }
   if (!c || typeof c !== 'object') return out
   if (Array.isArray(c.closedDates)) {
     out.closedDates = c.closedDates.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).map(String)
@@ -91,18 +92,25 @@ function normalizeClosures(c = {}) {
     return o
   }
   out.closedSlots = cleanMap(c.closedSlots, /^\d{1,2}:\d{2}$/)
-  out.closedSeatings = cleanMap(c.closedSeatings, null)
+  // 場次 id 一律去重＋排序（[B,A] 與 [A,B] 同義，避免被判成「有未儲存變更」卻列不出明細）
+  const cleanIds = (arr) => [...new Set(arr.filter(x => (typeof x === 'string' || typeof x === 'number') && String(x)).map(String))].sort()
+  out.closedSeatings = Object.fromEntries(Object.entries(cleanMap(c.closedSeatings, null)).map(([d, v]) => [d, cleanIds(v)]))
   // 每週預設關閉 / 單日開放（★ 與 functions normalizeClosuresServer 同口徑、同 key 順序）：
-  // key 依序輸出（星期 0→6、日期升冪），場次 id 去重，空陣列丟掉 → 序列化結果穩定。
-  const cleanIds = (arr) => [...new Set(arr.filter(x => (typeof x === 'string' || typeof x === 'number') && String(x)).map(String))]
+  // key 依序輸出（星期 0→6、日期升冪），空陣列丟掉；**整個欄位為空時不輸出該 key**——
+  // 讓沒用到此功能的資料與舊版形狀（只有 closedDates/closedSlots/closedSeatings）完全相同，
+  // 舊版落地的同步基準線不會因新欄位而永久 dirty。
   const ws = (c.weeklySeatings && typeof c.weeklySeatings === 'object') ? c.weeklySeatings : {}
+  const weekly = {}
   for (const k of ['0', '1', '2', '3', '4', '5', '6']) {
-    if (Array.isArray(ws[k])) { const v = cleanIds(ws[k]); if (v.length) out.weeklySeatings[k] = v }
+    if (Array.isArray(ws[k])) { const v = cleanIds(ws[k]); if (v.length) weekly[k] = v }
   }
   const os = (c.openSeatings && typeof c.openSeatings === 'object') ? c.openSeatings : {}
+  const open = {}
   for (const d of Object.keys(os).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort()) {
-    if (Array.isArray(os[d])) { const v = cleanIds(os[d]); if (v.length) out.openSeatings[d] = v }
+    if (Array.isArray(os[d])) { const v = cleanIds(os[d]); if (v.length) open[d] = v }
   }
+  if (Object.keys(weekly).length) out.weeklySeatings = weekly
+  if (Object.keys(open).length) out.openSeatings = open
   return out
 }
 
@@ -138,6 +146,12 @@ function normalizeFloorPlan(fp) {
       : null
   }
   return out
+}
+
+// 對外：把任意 settings 物件轉成本機正規形式（＝getSettings() 會回傳的形狀與 key 順序）。
+// cloudDataService 用它把舊版落地的同步基準線重新正規化，避免 settings 形狀演進後基準線永久 dirty。
+export function normalizeSettingsShape(value) {
+  return withDefaults(value && typeof value === 'object' ? value : {})
 }
 
 function withDefaults(value = {}) {

@@ -1118,7 +1118,7 @@ function SeatingsEditor({ form, setForm }) {
 function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
   const [date, setDate] = useState(todayStr())
   const [monthAnchor, setMonthAnchor] = useState(() => todayStr().slice(0, 7)) // 'YYYY-MM'
-  const closures = form.closures || { closedDates: [], closedSlots: {}, closedSeatings: {}, weeklySeatings: {}, openSeatings: {} }
+  const closures = form.closures || { closedDates: [], closedSlots: {}, closedSeatings: {} }
   const seatings = Array.isArray(form.seatings) ? form.seatings : []
   const dayClosed = (closures.closedDates || []).includes(date)
   const closedSeatingIds = closures.closedSeatings?.[date] || []
@@ -1131,26 +1131,62 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
   // 受影響的未來已確認訂位（僅此日期），供關閉前提醒。
   const affected = (bookings || []).filter(b => b.date === date && b.status === 'confirmed')
 
-  const setClosures = (next) => setForm(f => ({ ...f, closures: next }))
+  // 寫回 closures：weeklySeatings / openSeatings 是選用欄位——空時「不輸出該 key」（與 normalizeClosures 同形狀），
+  // openSeatings 依日期升冪並修剪今天以前的日期（過去的覆寫已無意義；只在 UI 存檔動作修剪，正規化不依賴「今天」，
+  // 確保前後端正規化輸出永遠相同）。否則點開再點回會殘留空物件／順序不同，被判成「有未儲存變更」。
+  const setClosures = (next) => {
+    const out = { ...next }
+    const ws = out.weeklySeatings || {}
+    if (Object.keys(ws).length) out.weeklySeatings = ws; else delete out.weeklySeatings
+    const t = todayStr()
+    const os = out.openSeatings || {}
+    const keys = Object.keys(os).filter(k => k >= t && os[k]?.length).sort()
+    if (keys.length) out.openSeatings = Object.fromEntries(keys.map(k => [k, os[k]])); else delete out.openSeatings
+    setForm(f => ({ ...f, closures: out }))
+  }
   const toggleArr = (arr = [], v) => arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]
-  const sortByDate = (m) => Object.fromEntries(Object.keys(m).sort().map(k => [k, m[k]]))
+  // 場次 id 一律排序後存（與正規化同口徑），[B,A] 與 [A,B] 才不會被判成不同。
+  const toggleIds = (arr = [], v) => toggleArr(arr, v).sort()
+  const unionIds = (...arrs) => [...new Set(arrs.flat())].sort()
   const setDateMap = (mapKey, key, arr) => {
     const m = { ...(closures[mapKey] || {}) }
     if (arr.length) m[key] = arr; else delete m[key]
-    // openSeatings 依日期排序（與正規化輸出同序），避免「點開再點回」仍被判成未儲存變更。
-    setClosures({ ...closures, [mapKey]: mapKey === 'openSeatings' ? sortByDate(m) : m })
+    setClosures({ ...closures, [mapKey]: m })
   }
   // 每週預設關閉：切換某星期幾的某場次（key 為 '0'..'6'，整數鍵 JS 會自動升冪排序）。
+  // 取消規則時，連帶清掉該星期「今天以後」日期對此場次的「本日特別開放」——否則日後重新開啟規則，
+  // 那些日期會莫名維持開放。
   const toggleWeekly = (dow, id) => {
     const ws = { ...(closures.weeklySeatings || {}) }
-    const next = toggleArr(ws[dow] || [], id)
+    const wasOn = (ws[dow] || []).includes(id)
+    const next = toggleIds(ws[dow] || [], id)
     if (next.length) ws[dow] = next; else delete ws[dow]
-    setClosures({ ...closures, weeklySeatings: ws })
+    const os = { ...(closures.openSeatings || {}) }
+    if (wasOn) {
+      const t = todayStr()
+      for (const d of Object.keys(os)) {
+        if (d >= t && closureDayOfWeek(d) === Number(dow)) {
+          const v = (os[d] || []).filter(x => x !== id)
+          if (v.length) os[d] = v; else delete os[d]
+        }
+      }
+    }
+    setClosures({ ...closures, weeklySeatings: ws, openSeatings: os })
   }
   // 本日特別開放（抵銷每週預設）↔ 恢復預設
-  const toggleOpenToday = (id) => setDateMap('openSeatings', date, toggleArr(openIds, id))
+  const toggleOpenToday = (id) => setDateMap('openSeatings', date, toggleIds(openIds, id))
   const toggleDay = () => setClosures({ ...closures, closedDates: toggleArr(closures.closedDates, date) })
-  const toggleSeating = (id) => setDateMap('closedSeatings', date, toggleArr(closedSeatingIds, id))
+  // 明細關閉切換。若該場次「同時」是每週預設關閉，按「恢復」要一併寫入本日特別開放——
+  // 否則只清掉明細，場次仍依每週預設關閉，店員會以為按了沒反應。
+  const toggleSeating = (id) => {
+    const cs = { ...(closures.closedSeatings || {}) }
+    const nextIds = toggleIds(closedSeatingIds, id)
+    if (nextIds.length) cs[date] = nextIds; else delete cs[date]
+    const os = { ...(closures.openSeatings || {}) }
+    const reopening = closedSeatingIds.includes(id)
+    if (reopening && weeklyIds.includes(id) && !openIds.includes(id)) os[date] = unionIds(openIds, [id])
+    setClosures({ ...closures, closedSeatings: cs, openSeatings: os })
+  }
   const toggleSlot = (t) => setDateMap('closedSlots', date, toggleArr(closedSlotList, t))
   // 一鍵恢復此日全部開放（整天/場次/時段皆清除）
   // 每週預設關閉的場次寫入「本日特別開放」，才算真的全部恢復。
@@ -1158,8 +1194,8 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
     const cs = { ...(closures.closedSeatings || {}) }; delete cs[date]
     const csl = { ...(closures.closedSlots || {}) }; delete csl[date]
     const os = { ...(closures.openSeatings || {}) }
-    if (weeklyIds.length) os[date] = [...new Set([...openIds, ...weeklyIds])]
-    setClosures({ ...closures, closedDates: (closures.closedDates || []).filter(d => d !== date), closedSeatings: cs, closedSlots: csl, openSeatings: sortByDate(os) })
+    if (weeklyIds.length) os[date] = unionIds(openIds, weeklyIds)
+    setClosures({ ...closures, closedDates: (closures.closedDates || []).filter(d => d !== date), closedSeatings: cs, closedSlots: csl, openSeatings: os })
   }
 
   // 不屬於任何場次的時段（午晚餐之間等），歸到「其他時段」
@@ -1191,11 +1227,11 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
     const nd = new Date(`${date}T00:00:00`); nd.setDate(nd.getDate() + 7)
     const target = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}-${String(nd.getDate()).padStart(2, '0')}`
     const closedDates = dayClosed ? [...new Set([...(closures.closedDates || []), target])] : (closures.closedDates || [])
-    const cs = { ...(closures.closedSeatings || {}) }; if (closedSeatingIds.length) cs[target] = [...new Set([...(cs[target] || []), ...closedSeatingIds])]
+    const cs = { ...(closures.closedSeatings || {}) }; if (closedSeatingIds.length) cs[target] = unionIds(cs[target] || [], closedSeatingIds)
     const csl = { ...(closures.closedSlots || {}) }; if (closedSlotList.length) csl[target] = [...new Set([...(csl[target] || []), ...closedSlotList])]
     // 本日特別開放一併複製（下週同一天的每週預設相同）
-    const os = { ...(closures.openSeatings || {}) }; if (openIds.length) os[target] = [...new Set([...(os[target] || []), ...openIds])]
-    setClosures({ ...closures, closedDates, closedSeatings: cs, closedSlots: csl, openSeatings: sortByDate(os) })
+    const os = { ...(closures.openSeatings || {}) }; if (openIds.length) os[target] = unionIds(os[target] || [], openIds)
+    setClosures({ ...closures, closedDates, closedSeatings: cs, closedSlots: csl, openSeatings: os })
     pickDate(target)
   }
 
@@ -1498,7 +1534,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                           seatingClosed ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-red/40 bg-white text-chicken-red hover:bg-red-50'
                         }`}
                       >
-                        {seatingClosed ? '已關閉 · 點此恢復' : '關閉整場次'}
+                        {seatingClosed ? (isWeekly ? '已關閉 · 點此本日恢復開放' : '已關閉 · 點此恢復') : '關閉整場次'}
                       </button>
                     </div>
                     {!seatingClosed && slots.length > 0 && (

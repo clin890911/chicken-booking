@@ -153,12 +153,23 @@ describe('正規化：前端 normalizeClosures 與後端 normalizeClosuresServer
     expect(JSON.stringify(getSettings().closures)).toBe(JSON.stringify(cloud))
     expect(JSON.stringify(server.normalizeClosuresServer(getSettings().closures))).toBe(JSON.stringify(cloud))
   })
-  it('舊資料沒有新欄位 → 補成空物件', () => {
+  it('舊資料沒有新欄位／新欄位為空 → 前後端都不輸出這兩個 key（與舊版形狀逐字相同）', () => {
     const old = { closedDates: [], closedSlots: {}, closedSeatings: {} }
     saveSettings({ ...getSettings(), closures: old })
-    expect(getSettings().closures).toEqual({ ...old, weeklySeatings: {}, openSeatings: {} })
-    expect(server.normalizeClosuresServer(old)).toEqual({ ...old, weeklySeatings: {}, openSeatings: {} })
-    expect(server.normalizeClosuresServer(undefined)).toEqual({ ...old, weeklySeatings: {}, openSeatings: {} })
+    expect(JSON.stringify(getSettings().closures)).toBe(JSON.stringify(old))
+    expect(JSON.stringify(server.normalizeClosuresServer(old))).toBe(JSON.stringify(old))
+    const empties = { ...old, weeklySeatings: { 6: [] }, openSeatings: { [SAT]: [] } }
+    expect(JSON.stringify(server.normalizeClosuresServer(empties))).toBe(JSON.stringify(old))
+    saveSettings({ ...getSettings(), closures: empties })
+    expect(JSON.stringify(getSettings().closures)).toBe(JSON.stringify(old))
+    expect(server.normalizeClosuresServer(undefined)).toEqual(old)
+  })
+  it('場次 id 前後端都去重＋排序（含既有 closedSeatings）', () => {
+    const c = { closedDates: [], closedSlots: {}, closedSeatings: { [SAT]: ['lunch2', 'lunch1', 'lunch2'] }, weeklySeatings: { 6: ['lunch2', 'dinner1'] }, openSeatings: { [SAT]: ['lunch2', 'dinner1'] } }
+    const want = { closedDates: [], closedSlots: {}, closedSeatings: { [SAT]: ['lunch1', 'lunch2'] }, weeklySeatings: { 6: ['dinner1', 'lunch2'] }, openSeatings: { [SAT]: ['dinner1', 'lunch2'] } }
+    saveSettings({ ...getSettings(), closures: c })
+    expect(JSON.stringify(getSettings().closures)).toBe(JSON.stringify(want))
+    expect(JSON.stringify(server.normalizeClosuresServer(c))).toBe(JSON.stringify(want))
   })
 })
 
