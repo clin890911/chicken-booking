@@ -14,6 +14,7 @@ import TelegramSettings from './TelegramSettings'
 import StaffAdminSection from './StaffAdminSection'
 import ExportCenter from './ExportCenter'
 import Icon from '../ui/Icon'
+import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
 import { validateLineReadiness } from '../../utils/lineReadiness'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
@@ -66,6 +67,14 @@ export default function SettingsView({ onOpenCustomer }) {
   const toast = useToast()
   const confirm = useConfirm()
   const [form, setForm] = useState(settings)
+  // 已存 settings 從外部更新（雲端拉取、其他裝置、桌位佈局編輯器存檔）時，表單跟上新值、只保留使用者改過的欄位。
+  // 否則表單停在打開頁面時的舊值：冒出不是自己改的「未儲存變更」，按儲存還會把別處的新值蓋回舊值。
+  // （render 期間比對前一份並 setState＝React 官方的「依 props 調整 state」寫法，不多一輪 effect 閃爍。）
+  const [formBase, setFormBase] = useState(settings)
+  if (settings !== formBase) {
+    setFormBase(settings)
+    setForm(f => rebaseSettingsForm(f, formBase, settings))
+  }
   const [searchPhone, setSearchPhone] = useState('')
   const [searchResult, setSearchResult] = useState(null)
   const [showLayoutEditor, setShowLayoutEditor] = useState(false)
@@ -84,17 +93,9 @@ export default function SettingsView({ onOpenCustomer }) {
     return p
   })
 
-  // B14：追蹤未儲存變更（比對目前表單 vs 已存 settings）
-  const dirtyKeys = useMemo(() => {
-    if (!settings) return []
-    return Object.keys(form || {}).filter(k => {
-      // 物件/陣列型欄位（如 heroBanners、seatings、closures）用 JSON 比對
-      const a = form[k]
-      const b = settings[k]
-      if (typeof a === 'object') return JSON.stringify(a) !== JSON.stringify(b)
-      return a !== b
-    })
-  }, [form, settings])
+  // B14：追蹤未儲存變更（比對目前表單 vs 已存 settings）＋給店員看的明細
+  const dirtyKeys = useMemo(() => dirtySettingsKeys(form, settings), [form, settings])
+  const changeList = useMemo(() => describeSettingsChanges(settings, form), [form, settings])
   const isDirty = dirtyKeys.length > 0
   // 只有店長能存設定（見 handleSave 的守門）。非店長時整頁視為唯讀：
   // 不武裝 beforeunload、不顯示「儲存」CTA——否則使用者手滑改到一個欄位後，
@@ -282,7 +283,8 @@ export default function SettingsView({ onOpenCustomer }) {
   const [actionBarSlot, setActionBarSlot] = useState(null)
   useEffect(() => { setActionBarSlot(document.getElementById(ADMIN_ACTION_BAR_SLOT)) }, [])
   const saveBar = isDirty ? (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
+    <div className="rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="text-sm font-bold text-amber-800">
         {canEditSettings ? `有未儲存變更（${dirtyKeys.length} 項）` : `這些變更不會被儲存（${dirtyKeys.length} 項）`}
         {capacityDirty && affectedBookingCount > 0 && (
@@ -311,6 +313,42 @@ export default function SettingsView({ onOpenCustomer }) {
           </button>
         )}
       </div>
+    </div>
+    {/* 修改明細：預設收合，點開看改了什麼，可逐項還原 */}
+    <details className="group mt-2 border-t border-amber-300/70 pt-2">
+      <summary className="flex min-h-[36px] cursor-pointer list-none items-center gap-1 text-sm font-bold text-amber-800">
+        查看修改內容
+        <span aria-hidden className="text-xs transition-transform group-open:rotate-180">⌄</span>
+      </summary>
+      <ul className="mt-1 max-h-[40vh] space-y-1.5 overflow-y-auto pr-1">
+        {changeList.map(c => (
+          <li key={c.key} className="flex items-start justify-between gap-2 rounded-lg bg-white/70 px-3 py-2 text-sm">
+            <div className="min-w-0 text-chicken-brown">
+              <div className="font-bold">{c.label}</div>
+              {c.details ? (
+                <ul className="mt-0.5 space-y-0.5 text-xs leading-5 text-chicken-brown/75">
+                  {c.details.map((d, i) => <li key={i}>・{d}</li>)}
+                </ul>
+              ) : (
+                <div className="mt-0.5 break-all text-xs leading-5">
+                  <span className="text-chicken-brown/50 line-through">{c.from}</span>
+                  <span className="mx-1.5 text-chicken-brown/40">→</span>
+                  <span className="font-bold text-chicken-red">{c.to}</span>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setForm(f => ({ ...f, [c.key]: settings[c.key] }))}
+              disabled={saving}
+              className="shrink-0 rounded-lg border border-amber-400/60 bg-white px-2.5 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+            >
+              還原此項
+            </button>
+          </li>
+        ))}
+      </ul>
+    </details>
     </div>
   ) : null
 

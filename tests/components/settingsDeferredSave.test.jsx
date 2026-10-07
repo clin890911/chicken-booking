@@ -54,9 +54,8 @@ describe('SettingsView：這台還沒取得雲端資料時儲存設定，文案�
     document.body.appendChild(container)
     root = createRoot(container)
     act(() => { root.render(<SettingsView />) })
-    // 表單以掛載時的 settings 為初值；換一份 settings 重繪 → 表單與已存值不同 ＝ 有未儲存變更
-    bookingCtx = { ...bookingCtx, settings: { ...base, storeName: '別的店名' } }
-    act(() => { root.render(<SettingsView />) })
+    // 製造一筆真的未儲存變更：休店管理把今天設為整天公休
+    act(() => { findButton('設為整天公休').click() })
   })
 
   afterEach(() => {
@@ -78,5 +77,65 @@ describe('SettingsView：這台還沒取得雲端資料時儲存設定，文案�
     expect(msg).toContain('請等同步完成後再改一次')
     expect(msg).not.toContain('重試')
     expect(msg).not.toContain('拒絕')
+  })
+})
+
+describe('SettingsView：已存設定從外部更新時，表單要跟上（不冒假的未儲存變更、不蓋回舊值）', () => {
+  let container, root
+  const findButton = (text) => [...container.querySelectorAll('button')].find(b => b.textContent.includes(text))
+  const render = () => act(() => { root.render(<SettingsView />) })
+
+  beforeEach(() => {
+    toastMock = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }
+    bookingCtx = {
+      settings: getSettings(),
+      bookings: [],
+      updateSettings: vi.fn((form) => form),
+      flushCloudNow: vi.fn(async () => ({ ok: true })),
+      cloudStatus: { state: 'synced', lastSyncAt: null, error: null },
+      migrateLocalToCloud: vi.fn(),
+      pullCloud: vi.fn(),
+      discardRejectedChanges: vi.fn(),
+      localPersistDegraded: false,
+    }
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    render()
+  })
+
+  afterEach(() => {
+    act(() => root?.unmount())
+    container?.remove()
+  })
+
+  it('打開設定頁後雲端／桌位編輯器更新了設定 → 不顯示未儲存變更', () => {
+    bookingCtx = { ...bookingCtx, settings: { ...bookingCtx.settings, storeName: '雲端新店名', floorPlan: { ...bookingCtx.settings.floorPlan, zones: [{ id: 'z1', name: '包廂', color: '#ff0000' }] } } }
+    render()
+    expect(container.textContent).not.toContain('有未儲存變更')
+    expect(findButton('儲存全部變更')).toBeFalsy()
+  })
+
+  it('使用者改了關閉時段後設定從外部更新 → 只剩使用者那一項，儲存不會把外部新值蓋回舊值', async () => {
+    act(() => { findButton('設為整天公休').click() })
+    const fresh = { ...bookingCtx.settings, storeName: '雲端新店名' }
+    bookingCtx = { ...bookingCtx, settings: fresh }
+    render()
+    expect(container.textContent).toContain('有未儲存變更（1 項）')
+    await act(async () => { findButton('儲存全部變更').click(); await new Promise(r => setTimeout(r, 0)) })
+    const saved = bookingCtx.updateSettings.mock.calls[0][0]
+    expect(saved.storeName).toBe('雲端新店名')
+    expect(saved.closures.closedDates.length).toBe(1)
+  })
+
+  it('修改明細：預設收合，列出改了什麼，可逐項還原', () => {
+    act(() => { findButton('設為整天公休').click() })
+    const details = [...container.querySelectorAll('details')].find(d => d.textContent.includes('查看修改內容'))
+    expect(details).toBeTruthy()
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('休店 / 關閉時段')
+    expect(details.textContent).toContain('關閉：整天公休')
+    act(() => { [...details.querySelectorAll('button')].find(b => b.textContent.includes('還原此項')).click() })
+    expect(container.textContent).not.toContain('有未儲存變更')
   })
 })
