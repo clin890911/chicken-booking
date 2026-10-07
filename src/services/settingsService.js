@@ -32,7 +32,7 @@ const DEFAULT = {
     { id: 'dinner1', name: '晚餐第一批', start: '17:00', end: '19:00' },
   ],
   // 關閉訂位：整天公休 / 特定日特定時段 / 特定日特定場次。
-  closures: { closedDates: [], closedSlots: {}, closedSeatings: {} },
+  closures: { closedDates: [], closedSlots: {}, closedSeatings: {}, weeklySeatings: {}, openSeatings: {} },
   heroBanners: [],
   lineOfficialUrl: 'https://lin.ee/8lECi4S',
   lineOfficialName: '雞王涮涮鍋 LINE 官方帳號',
@@ -73,7 +73,7 @@ function clampInt(value, min, max, fallback) {
 
 // 正規化「關閉設定」並深拷貝（避免與 DEFAULT.closures 共用參考被 mutate 污染）。
 function normalizeClosures(c = {}) {
-  const out = { closedDates: [], closedSlots: {}, closedSeatings: {} }
+  const out = { closedDates: [], closedSlots: {}, closedSeatings: {}, weeklySeatings: {}, openSeatings: {} }
   if (!c || typeof c !== 'object') return out
   if (Array.isArray(c.closedDates)) {
     out.closedDates = c.closedDates.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).map(String)
@@ -92,6 +92,17 @@ function normalizeClosures(c = {}) {
   }
   out.closedSlots = cleanMap(c.closedSlots, /^\d{1,2}:\d{2}$/)
   out.closedSeatings = cleanMap(c.closedSeatings, null)
+  // 每週預設關閉 / 單日開放（★ 與 functions normalizeClosuresServer 同口徑、同 key 順序）：
+  // key 依序輸出（星期 0→6、日期升冪），場次 id 去重，空陣列丟掉 → 序列化結果穩定。
+  const cleanIds = (arr) => [...new Set(arr.filter(x => (typeof x === 'string' || typeof x === 'number') && String(x)).map(String))]
+  const ws = (c.weeklySeatings && typeof c.weeklySeatings === 'object') ? c.weeklySeatings : {}
+  for (const k of ['0', '1', '2', '3', '4', '5', '6']) {
+    if (Array.isArray(ws[k])) { const v = cleanIds(ws[k]); if (v.length) out.weeklySeatings[k] = v }
+  }
+  const os = (c.openSeatings && typeof c.openSeatings === 'object') ? c.openSeatings : {}
+  for (const d of Object.keys(os).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort()) {
+    if (Array.isArray(os[d])) { const v = cleanIds(os[d]); if (v.length) out.openSeatings[d] = v }
+  }
   return out
 }
 

@@ -1,3 +1,5 @@
+import { WEEKDAY_LABELS, WEEKDAY_ORDER } from './weeklyClosures'
+
 // 設定頁「有未儲存變更」的明細：把表單與已存 settings 的差異翻成店員看得懂的一行一行。
 // 純函式，不碰 UI。另含 rebaseSettingsForm：已存 settings 從外部更新時（雲端拉取、桌位佈局編輯器
 // 存檔），把表單「沒被使用者改過的欄位」跟上新值，只保留使用者真的改過的欄位。
@@ -93,6 +95,25 @@ function closureDetails(prev = {}, next = {}, seatings = []) {
     const reopened = before.filter(x => !after.includes(x))
     if (closed.length) out.push(`${md(ds)} 關閉：${closed.join('、')}`)
     if (reopened.length) out.push(`${md(ds)} 恢復開放：${reopened.join('、')}`)
+  }
+  // 每週預設關閉（weeklySeatings）
+  for (const dow of WEEKDAY_ORDER) {
+    const before = prev.weeklySeatings?.[dow] || []
+    const after = next.weeklySeatings?.[dow] || []
+    const added = after.filter(x => !before.includes(x)).map(seatingName)
+    const removed = before.filter(x => !after.includes(x)).map(seatingName)
+    if (added.length) out.push(`每週${WEEKDAY_LABELS[dow]}預設關閉：${added.join('、')}`)
+    if (removed.length) out.push(`每週${WEEKDAY_LABELS[dow]}取消預設關閉：${removed.join('、')}`)
+  }
+  // 單日覆寫開放（openSeatings）
+  const openDays = [...new Set([...Object.keys(prev.openSeatings || {}), ...Object.keys(next.openSeatings || {})])].sort()
+  for (const ds of openDays) {
+    const before = prev.openSeatings?.[ds] || []
+    const after = next.openSeatings?.[ds] || []
+    const added = after.filter(x => !before.includes(x)).map(seatingName)
+    const removed = before.filter(x => !after.includes(x)).map(seatingName)
+    if (added.length) out.push(`${md(ds)} 本日特別開放：${added.join('、')}`)
+    if (removed.length) out.push(`${md(ds)} 恢復每週預設關閉：${removed.join('、')}`)
   }
   return out
 }
