@@ -264,6 +264,23 @@ describe('seatingService 整合層', () => {
       expect(r.ok).toBe(true)
       expect(bookingService.getById(b.id).status).toBe('completed')
     })
+
+    it('R2 副桌已被別組用餐、團體梯次佔另一張 → 只 checkout 本訂位持有的桌', () => {
+      tableService.bulkWrite([
+        mkTable('101', 4, '1F', { status: 'dining', currentBookingId: 'ME' }),
+        mkTable('108', 6, '1F', { status: 'dining', currentBookingId: 'OTHER' }),
+        mkTable('201', 4, '2F', { status: 'dining', currentBookingId: null, currentRef: { groupId: 'G1', batchId: 'B1' } }),
+      ])
+      const b = mkBooking({ guests: 8, status: 'arrived' })
+      bookingService.update(b.id, { assignedTableId: '101', extraTableIds: ['108', '201'] })
+      tableService.seatTable('101', b.id)
+      const r = seating.checkoutBooking(b.id)
+      expect(r.ok).toBe(true)
+      expect(tableService.getByNumber('101').status).toBe('cleaning')
+      expect(tableService.getByNumber('108').status).toBe('dining')   // ★ 別組不被打成待清桌
+      expect(tableService.getByNumber('108').currentBookingId).toBe('OTHER')
+      expect(tableService.getByNumber('201').status).toBe('dining')   // ★ 團體桌不被散客路徑動到
+    })
   })
 
   // ===========================================================
@@ -288,6 +305,19 @@ describe('seatingService 整合層', () => {
       const table = tableService.getByNumber('101')
       expect(table.status).toBe('vacant')
       expect(table.currentBookingId).toBeNull()
+    })
+
+    it('R2 副桌已被別組用餐 → 只釋出本訂位持有的桌、別組不被清掉', () => {
+      const b = mkBooking({ guests: 8, status: 'arrived' })
+      bookingService.update(b.id, { assignedTableId: '101', extraTableIds: ['108'] })
+      tableService.seatTable('101', b.id)
+      tableService.seatTable('108', 'OTHER')
+      const r = seating.finalizeBooking(b.id)
+      expect(r.ok).toBe(true)
+      expect(tableService.getByNumber('101').status).toBe('vacant')
+      const t108 = tableService.getByNumber('108')
+      expect(t108.status).toBe('dining')                              // ★ 別組仍在用餐
+      expect(t108.currentBookingId).toBe('OTHER')
     })
 
     it('無指派桌時 tableNumber 為 null', () => {

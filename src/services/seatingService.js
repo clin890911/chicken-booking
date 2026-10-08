@@ -190,8 +190,12 @@ export function undoSeatPreassigned(bookingId, tableNumber) {
 export function checkoutBooking(bookingId) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
-  // 大組併桌：主桌 + 額外桌全部 checkout（dining → cleaning）。
-  bookingTableNumbers(booking).forEach(n => tableService.checkoutTable(n))
+  // 大組併桌：主桌 + 額外桌 checkout（dining → cleaning）。
+  // ★ 只動「仍由本訂位持有」的桌：桌號可能只是預配、或已被改派／別組接手，
+  //   checkoutTable 是無條件覆寫，會把正在用餐的別組或團體梯次桌打成待清桌。
+  bookingTableNumbers(booking).forEach(n => {
+    if (heldBy(tableService.getByNumber(n), bookingId)) tableService.checkoutTable(n)
+  })
   bookingService.setStatus(bookingId, 'completed')
   return { ok: true }
 }
@@ -203,8 +207,10 @@ export function finalizeBooking(bookingId) {
   if (!booking) return { ok: false, error: '訂位不存在' }
   const tableNumbers = bookingTableNumbers(booking)
   bookingService.setStatus(bookingId, 'completed')
-  // 大組併桌：主桌 + 額外桌全部直接釋出（跳過待清桌）。
-  tableNumbers.forEach(n => tableService.clearTable(n))
+  // 大組併桌：主桌 + 額外桌直接釋出（跳過待清桌）。只清仍由本訂位持有的桌（同 checkoutBooking）。
+  tableNumbers.forEach(n => {
+    if (heldBy(tableService.getByNumber(n), bookingId)) tableService.clearTable(n)
+  })
   return { ok: true, tableNumber: booking.assignedTableId, tableNumbers }
 }
 
