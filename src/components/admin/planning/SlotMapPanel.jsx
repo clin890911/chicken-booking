@@ -3,7 +3,9 @@ import FloorMap from '../floormap/FloorMap'
 import StatGroup from '../../ui/StatGroup'
 import BookingDetailSheet from '../../booking/BookingDetailSheet'
 import { useBooking } from '../../../contexts/BookingContext'
+import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../ui/Toast'
+import { seatingPerms } from '../../../utils/seatingPerms'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
 import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
@@ -24,6 +26,9 @@ export default function SlotMapPanel({
   seatingId: seatingIdProp, onSeatingChange, floor: floorProp, onFloorChange,
 }) {
   const { settings, bookings, groupReservations, tables, fixtures, zones, preassignBookingTable, preassignBookingTables, clearBookingPreassign } = useBooking()
+  // 預先配桌／解除預配只改 booking.assignedTableId（不碰桌況）→ 要 booking.update。
+  // 唯讀角色（kitchen）仍看得到排位地圖，但沒有「配桌」「解除預先配桌」。fail-closed：無 Provider 視為無權。
+  const canPreassign = seatingPerms(useAuth()?.can).booking
   const toast = useToast()
 
   const seatings = Array.isArray(settings?.seatings) ? settings.seatings : []
@@ -55,7 +60,7 @@ export default function SlotMapPanel({
     if (!assignRequest) return
     if (assignRequest.seatingId) setSeatingId(assignRequest.seatingId)
     const b = (bookings || []).find(x => x.id === assignRequest.bookingId)
-    if (b && !b.assignedTableId) {
+    if (b && !b.assignedTableId && canPreassign) {
       setAssignBooking(b)
       setAssignSelected([])
       setSelectedTable(null)
@@ -123,7 +128,7 @@ export default function SlotMapPanel({
     [assignSelected, tables],
   )
 
-  const startAssign = (booking) => { setDetailBookingId(null); setAssignBooking(booking); setAssignSelected([]); setSelectedTable(null); setFocus(null) }
+  const startAssign = (booking) => { if (!canPreassign) return; setDetailBookingId(null); setAssignBooking(booking); setAssignSelected([]); setSelectedTable(null); setFocus(null) }
   const cancelAssign = () => { setAssignBooking(null); setAssignSelected([]) }
 
   // 詳情表「在地圖標示」：切到該桌樓層並畫白圈（散客用暖色系文案，與團客標示共用同一個 focus 機制）
@@ -319,8 +324,10 @@ export default function SlotMapPanel({
                       </span>
                       <Icon name="chevronRight" size={14} strokeWidth={2.2} className="text-chicken-brown/30" />
                     </button>
-                    <button type="button" onClick={() => { clearBookingPreassign(occ.booking.id); setSelectedTable(null); toast.info('已解除預先配桌') }}
-                      className="tap w-full min-h-[44px] px-3.5 border-t border-chicken-brown/[0.08] text-left text-sm font-semibold text-chicken-red">解除預先配桌</button>
+                    {canPreassign && (
+                      <button type="button" onClick={() => { clearBookingPreassign(occ.booking.id); setSelectedTable(null); toast.info('已解除預先配桌') }}
+                        className="tap w-full min-h-[44px] px-3.5 border-t border-chicken-brown/[0.08] text-left text-sm font-semibold text-chicken-red">解除預先配桌</button>
+                    )}
                   </>
                 )}
                 {occ?.kind === 'group' && (
@@ -352,10 +359,12 @@ export default function SlotMapPanel({
                       <span className="text-sm font-semibold text-chicken-brown truncate">{b.name}</span>
                       <span className="text-xs text-chicken-brown/60 tabular-nums shrink-0">{b.timeSlot} · {b.guests} 位</span>
                     </button>
-                    <button type="button" onClick={() => startAssign(b)} disabled={dayClosed}
-                      className={`tap text-xs font-semibold h-8 px-3 rounded-lg shrink-0 ${active ? 'bg-orange-600 text-white' : 'bg-chicken-red text-white'} disabled:cursor-not-allowed`}>
-                      {active ? '配桌中' : '配桌'}
-                    </button>
+                    {canPreassign && (
+                      <button type="button" onClick={() => startAssign(b)} disabled={dayClosed}
+                        className={`tap text-xs font-semibold h-8 px-3 rounded-lg shrink-0 ${active ? 'bg-orange-600 text-white' : 'bg-chicken-red text-white'} disabled:cursor-not-allowed`}>
+                        {active ? '配桌中' : '配桌'}
+                      </button>
+                    )}
                   </div>
                 )
               })}
@@ -368,7 +377,7 @@ export default function SlotMapPanel({
       <BookingDetailSheet
         bookingId={detailBookingId}
         onClose={() => setDetailBookingId(null)}
-        onAssign={(b) => { if (dayClosed) return toast.error('本日公休，無法配桌'); startAssign(b) }}
+        onAssign={canPreassign ? (b) => { if (dayClosed) return toast.error('本日公休，無法配桌'); startAssign(b) } : undefined}
         onFocusTable={focusBookingTables}
       />
     </div>

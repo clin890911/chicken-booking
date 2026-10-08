@@ -37,7 +37,7 @@ function exportCsv(agency, rows) {
 
 // 旅行社詳情：檔案 + 導遊 + 可篩選/匯出的來訪團體記錄。
 // stats / guides 由父層（AgencyDirectoryView）算好傳入，避免重算。
-export default function AgencyDetailModal({ agency, rank, stats, guides = [], onClose, onGoPlanning, onEdit }) {
+export default function AgencyDetailModal({ agency, rank, stats, guides = [], onClose, onGoPlanning, onEdit, canExport = false }) {
   const [filter, setFilter] = useState('all') // all | completed | active
   const a = agency
   const history = stats?.history || []
@@ -91,7 +91,7 @@ export default function AgencyDetailModal({ agency, rank, stats, guides = [], on
         </div>
 
         <div className="flex gap-2">
-          <button onClick={() => onGoPlanning?.()} className="btn-primary flex-1 !py-2 text-sm">新增團體預排</button>
+          {onGoPlanning && <button onClick={() => onGoPlanning()} className="btn-primary flex-1 !py-2 text-sm">新增團體預排</button>}
           {onEdit && <button onClick={() => onEdit(a)} className="btn-secondary flex-1 !py-2 text-sm">編輯旅行社</button>}
         </div>
 
@@ -100,10 +100,12 @@ export default function AgencyDetailModal({ agency, rank, stats, guides = [], on
             <div className="text-sm font-bold text-chicken-brown">
               來訪團體記錄 <span className="text-chicken-brown/50 font-normal">{rows.length} 筆</span>
             </div>
-            <button onClick={() => exportCsv(a, rows)} disabled={rows.length === 0}
-              className="text-xs font-bold text-chicken-brown border border-chicken-brown/15 rounded-lg px-2.5 py-1 disabled:opacity-40">
-              匯出 CSV
-            </button>
+            {canExport && (
+              <button onClick={() => exportCsv(a, rows)} disabled={rows.length === 0}
+                className="text-xs font-bold text-chicken-brown border border-chicken-brown/15 rounded-lg px-2.5 py-1 disabled:opacity-40">
+                匯出 CSV
+              </button>
+            )}
           </div>
           <div className="mb-2">
             <SegmentedControl size="sm" ariaLabel="團體記錄篩選" value={filter} onChange={setFilter}

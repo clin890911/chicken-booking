@@ -15,7 +15,7 @@ vi.mock('../../src/components/admin/TodayView', () => ({ default: () => <div>Tod
 vi.mock('../../src/components/admin/SearchBookingsView', () => ({ default: () => <div>SearchStub</div> }))
 vi.mock('../../src/components/admin/CalendarView', () => ({
   default: ({ onAddBooking }) => (
-    <button onClick={() => onAddBooking('2026-09-05')}>CalAddBtn</button>
+    onAddBooking ? <button onClick={() => onAddBooking('2026-09-05')}>CalAddBtn</button> : <span>CalReadOnly</span>
   ),
 }))
 vi.mock('../../src/components/admin/AddBookingView', () => ({
@@ -27,6 +27,14 @@ vi.mock('../../src/components/admin/AddBookingView', () => ({
     </div>
   ),
 }))
+
+// BookingsView 現在依 booking.create 決定要不要給「新增」子分頁（kitchen 唯讀）；
+// 本檔既有案例是 manager 視角，角色矩陣取自真實 PERMISSIONS。
+let currentRole = 'manager'
+vi.mock('../../src/contexts/AuthContext', async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, useAuth: () => ({ can: (p) => actual.PERMISSIONS[currentRole].has(p) }) }
+})
 
 const BookingsView = (await import('../../src/components/admin/BookingsView')).default
 
@@ -51,6 +59,7 @@ describe('BookingsView：日曆／名冊兩條「新增訂位」預填路徑', (
   afterEach(() => {
     act(() => root?.unmount())
     container?.remove()
+    currentRole = 'manager'
   })
 
   it('日曆按「＋ 新增訂位」→ 切到「新增」子分頁，且 initial.date 是選定日期', () => {
@@ -118,5 +127,23 @@ describe('BookingsView：日曆／名冊兩條「新增訂位」預填路徑', (
     expect(container.textContent).toContain('TodayStub')
     clickTab('新增')
     expect(container.querySelector('[data-testid="add-continuous"]').textContent).toBe('true')
+  })
+
+  it.each(['floor', 'host'])('%s：同樣有「新增」子分頁（能力不變）', (role) => {
+    currentRole = role
+    render()
+    expect([...container.querySelectorAll('button')].some(b => b.textContent.includes('新增'))).toBe(true)
+  })
+
+  it('kitchen（唯讀）：沒有「新增」子分頁、日曆也拿不到新增入口、名冊預填不會把他送進新增表單', () => {
+    currentRole = 'kitchen'
+    render({ openAdd: { phone: '0911222333', name: '陳先生', source: 'phone', seq: 1 } })
+    expect(container.querySelector('[data-testid="add-initial"]')).toBeNull()
+    expect(container.textContent).toContain('TodayStub')
+    expect([...container.querySelectorAll('button')].some(b => b.textContent.trim() === '新增')).toBe(false)
+    rerender({ openAdd: { phone: '0922', name: 'x', source: 'phone', seq: 2 } })
+    expect(container.querySelector('[data-testid="add-initial"]')).toBeNull()
+    clickTab('日曆')
+    expect(container.textContent).not.toContain('CalAddBtn')
   })
 })

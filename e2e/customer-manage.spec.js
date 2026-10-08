@@ -105,3 +105,25 @@ test('用戶端：LINE 推播被拒的訂位 → 顯示重加好友警示', asyn
   await expect(page.getByText('LINE 通知暫時無法送達')).toBeVisible()
   await expect(page.getByRole('link', { name: '重新加入好友' })).toBeVisible()
 })
+
+test('用戶端改期：後端 closed（如抵達前不足 2 小時）的時段不可選，原時段仍保留', async ({ page }) => {
+  const CLOSED_AVAIL = {
+    ...AVAILABILITY,
+    slots: [
+      { time: '12:00', remaining: 40, closed: true },
+      { time: '18:00', remaining: 40, closed: true },
+      { time: '18:30', remaining: 40, closed: true },
+      { time: '19:00', remaining: 20, closed: false },
+    ],
+  }
+  await page.route('**/guestGetAvailability', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CLOSED_AVAIL) }))
+
+  await openAndVerify(page)
+  await page.getByRole('button', { name: /修改日期/ }).click()
+
+  await expect(page.getByRole('button', { name: /19:00/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /18:00/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /18:30/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /12:00/ })).toHaveCount(0)
+})

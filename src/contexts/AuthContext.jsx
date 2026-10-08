@@ -58,7 +58,7 @@ export const PERMISSIONS = {
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',
     'table.read', 'table.update', 'table.block', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
-    'customer.read', 'customer.update',
+    'customer.read', 'customer.update', 'customer.blacklist',
     // 外場可看今日團體並帶位入座。⚠️ 入座**不是**只走 table.update——
     // seatGroupBatch 會把團 status 改成 'arrived'（寫 groupReservations），
     // 換日掃除的 complete-group 也會寫，且掃除開機自動跑。故必須有 group.update。
@@ -72,7 +72,7 @@ export const PERMISSIONS = {
     // 與後端 staffAccess.js 成對：帶位/指派/換桌/併桌/團體入座皆寫 tables。
     'table.read', 'table.update',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
-    'customer.read', 'customer.update',
+    'customer.read', 'customer.update', 'customer.blacklist',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
   ]),
   kitchen: new Set([

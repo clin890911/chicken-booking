@@ -3,6 +3,7 @@ import { Card, Input, Modal, Textarea, Select, EmptyState } from '../../ui'
 import CustomerDetailModal from './CustomerDetailModal'
 import { useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
+import { useAuth } from '../../../contexts/AuthContext'
 import { getNoshowCount, noshowRisk } from '../../../services/bookingService'
 import SegmentedControl from '../../ui/SegmentedControl'
 
@@ -31,6 +32,11 @@ function fmtDate(d) {
 
 export default function CustomersView({ initialQuery, onAddBooking }) {
   const { customers, bookings, updateCustomer, setCustomerBlacklist, setCustomerVip } = useBooking()
+  // 編輯顧客檔／VIP／黑名單／歸檔都寫 customers（customer.update）；「新增訂位」寫 bookings（booking.create）。
+  // 唯讀角色（kitchen）只看得到顧客與來訪記錄。fail-closed：useAuth() 無 Provider 視為無權。
+  const { can } = useAuth() || {}
+  const canEditCustomer = !!can?.('customer.update')
+  const canAddBooking = !!can?.('booking.create')
   const [query, setQuery] = useState(initialQuery || '')
   const [detail, setDetail] = useState(null)
 
@@ -62,6 +68,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
   }, [customers, query, filter])
 
   const openEdit = (c) => {
+    if (!canEditCustomer) return
     setEditing(c)
     setEditForm({
       notes: c.notes || '',
@@ -192,7 +199,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                     </div>
                     {c.notes && <p className="text-xs text-chicken-brown/70 italic mt-2">「{c.notes}」</p>}
                   </div>
-                  <div className="flex flex-col gap-1.5 flex-shrink-0">
+                  {canEditCustomer && <div className="flex flex-col gap-1.5 flex-shrink-0">
                     <button onClick={() => openEdit(c)} className="text-xs px-3 min-h-[44px] bg-chicken-cream rounded-lg font-bold text-chicken-brown">編輯</button>
                     <button
                       onClick={async () => {
@@ -214,7 +221,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                       onClick={() => updateCustomer(c.phone, { archived: !c.archived })}
                       className="text-xs px-3 min-h-[44px] rounded-lg font-bold bg-white border border-chicken-brown/15 text-chicken-brown/70 hover:bg-chicken-brown/5"
                     >{c.archived ? '↩ 取消歸檔' : '歸檔'}</button>
-                  </div>
+                  </div>}
                 </div>
               </Card>
             )
@@ -305,8 +312,8 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
       <CustomerDetailModal
         customer={detail}
         onClose={() => setDetail(null)}
-        onAddBooking={(c) => { setDetail(null); onAddBooking?.(c) }}
-        onEdit={(c) => { setDetail(null); openEdit(c) }}
+        onAddBooking={canAddBooking ? (c) => { setDetail(null); onAddBooking?.(c) } : undefined}
+        onEdit={canEditCustomer ? (c) => { setDetail(null); openEdit(c) } : undefined}
       />
     </div>
   )
