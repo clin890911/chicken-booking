@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, shouldAlertPersistDegraded, shouldCommitPullStatus } from '../../src/utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, shouldAlertPersistDegraded, shouldCommitPullStatus,
+  isRetryablePushError, nextPushRetryState, isPushRetryDue, pushErrorKey } from '../../src/utils/syncStatus'
 
 const T1 = '2026-07-26T10:00:00.000Z'
 const T2 = '2026-07-26T10:00:05.000Z'
@@ -177,5 +178,33 @@ describe('statusAfterPushError × statusAfterPull（F4）', () => {
   it('拉取失敗（非推送失敗）後回線 → 照舊 synced', () => {
     const s = statusAfterPull(statusAfterError({ state: 'synced' }, 'x', 'cloud-sync-failed'), T2)
     expect(s.state).toBe('synced')
+  })
+})
+
+describe('推送補推政策（退避＋錯誤分類）', () => {
+  const e = (status, code) => Object.assign(new Error(code || 'x'), status ? { status, code } : { code })
+  it('只補推：斷線／逾時／5xx／候位 409；其他 4xx 不補推', () => {
+    expect(isRetryablePushError(new TypeError('Failed to fetch'))).toBe(true)
+    expect(isRetryablePushError(e(0, 'timeout'))).toBe(true)
+    expect(isRetryablePushError(e(500))).toBe(true)
+    expect(isRetryablePushError(e(503))).toBe(true)
+    expect(isRetryablePushError(Object.assign(e(409, 'waitlist-changed'), { waitlistConflict: true }))).toBe(true)
+    expect(isRetryablePushError(e(413, 'operational-sync-too-large'))).toBe(false)
+    expect(isRetryablePushError(e(400, 'invalid'))).toBe(false)
+    expect(isRetryablePushError(e(409, 'task-changed'))).toBe(false)
+    expect(nextPushRetryState({ failures: 2, nextAt: 0 }, e(413), 0)).toBeNull()
+  })
+  it('退避 5→10→30→60→60 秒', () => {
+    let s = null
+    const delays = []
+    for (let i = 0; i < 5; i++) { s = nextPushRetryState(s, e(500), 1000); delays.push(s.nextAt - 1000) }
+    expect(delays).toEqual([5000, 10000, 30000, 60000, 60000])
+    expect(isPushRetryDue(s, 1000 + 58_000)).toBe(false)
+    expect(isPushRetryDue(s, 1000 + 59_000)).toBe(true)   // 1 秒寬限
+    expect(isPushRetryDue(null, 1e12)).toBe(false)
+  })
+  it('同一種錯誤同一個鍵', () => {
+    expect(pushErrorKey(e(500, 'a'))).toBe(pushErrorKey(e(500, 'a')))
+    expect(pushErrorKey(e(500, 'a'))).not.toBe(pushErrorKey(e(503, 'a')))
   })
 })
