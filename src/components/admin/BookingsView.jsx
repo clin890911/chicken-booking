@@ -17,6 +17,7 @@ const SUB_TABS = [
 // 「指派桌」按鈕呼叫 onAssignTable（今天→現場、未來日→規劃排位地圖，由 AdminPage 分流）；
 // 「改桌」呼叫 onMoveTable（今日待到、已有桌 → 現場頁 move 模式，由 AdminPage 跨頁）；
 // 團體卡點擊呼叫 onOpenGroup → 規劃頁團單詳情
+// 「新增」存檔後留在新增畫面（連續輸入電話訂位，保留日期＋時段）；只有這個入口如此，不影響現場頁／日曆路徑
 export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, onCreated, openAdd }) {
   const [sub, setSub] = useState(openAdd ? 'add' : 'today')
   // 新增表單的預填：可能來自名冊（openAdd prop）或日曆選日期後按「＋ 新增訂位」（本地觸發）。
@@ -53,7 +54,7 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
           {sub === 'today' && <TodayView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} />}
           {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} onAddBooking={handleAddBookingFromCalendar} />}
           {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
-          {sub === 'add' && <AddBookingView initial={addPrefill} onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
+          {sub === 'add' && <AddBookingView initial={addPrefill} continuous onCreated={(b) => { onCreated?.(b) }} onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
       </div>
     </div>
   )

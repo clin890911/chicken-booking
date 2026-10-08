@@ -19,7 +19,13 @@ vi.mock('../../src/components/admin/CalendarView', () => ({
   ),
 }))
 vi.mock('../../src/components/admin/AddBookingView', () => ({
-  default: ({ initial }) => <div data-testid="add-initial">{JSON.stringify(initial ?? null)}</div>,
+  default: ({ initial, continuous, onCreated }) => (
+    <div>
+      <div data-testid="add-initial">{JSON.stringify(initial ?? null)}</div>
+      <div data-testid="add-continuous">{String(!!continuous)}</div>
+      <button onClick={() => onCreated({ id: 'x' })}>FakeSave</button>
+    </div>
+  ),
 }))
 
 const BookingsView = (await import('../../src/components/admin/BookingsView')).default
@@ -83,5 +89,16 @@ describe('BookingsView：日曆／名冊兩條「新增訂位」預填路徑', (
     expect(container.querySelector('[data-testid="add-initial"]')).toBeTruthy()
     const initial = JSON.parse(container.querySelector('[data-testid="add-initial"]').textContent)
     expect(initial.seq).toBe(42)
+  })
+
+  it('「新增」存檔後留在新增分頁（continuous），不跳回今日', () => {
+    const onCreated = vi.fn()
+    render({ onCreated })
+    clickTab('新增')
+    expect(container.querySelector('[data-testid="add-continuous"]').textContent).toBe('true')
+    clickTab('FakeSave')
+    expect(onCreated).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[data-testid="add-initial"]')).toBeTruthy()
+    expect(container.textContent).not.toContain('TodayStub')
   })
 })
