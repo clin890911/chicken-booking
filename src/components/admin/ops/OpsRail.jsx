@@ -20,6 +20,8 @@ export default function OpsRail({
   activeTab, onTabChange, onClickBooking, onAssignTable, onMoveTable, onSeatWaitlist, onFocusTable, onReseatBatch,
   onAddBooking, reserve = null, flashBookingId = null,
   // 帶位籤（v3）：桌與人數的真相在 OperationsView，這裡純轉發給 FastWalkInPanel
+  // canWalkIn：無散客入座權限（唯讀角色 kitchen）時整個帶位籤不渲染——面板底部的「確認入座」會寫 bookings＋tables
+  canWalkIn = true,
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
   walkinWarning, onWalkinSeat, lastParty, onLocateSuggestion, showNextWaitlist, onNextWaitlist,
 }) {
@@ -48,7 +50,7 @@ export default function OpsRail({
   )
 
   const tabs = [
-    { key: 'walkin', label: '帶位', badge: 0 },
+    ...(canWalkIn ? [{ key: 'walkin', label: '帶位', badge: 0 }] : []),
     { key: 'upcoming', label: '今日訂位', badge: upcomingCount },
     { key: 'waitlist', label: '候位', badge: waitingCount },
     // 全完成的日子籤仍在（badge 0），才能回去印回傳單

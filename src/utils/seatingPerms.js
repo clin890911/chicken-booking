@@ -45,3 +45,28 @@ export function seatingPerms(can) {
     group: all('groupWrite'),
   }
 }
+
+// 「會寫入資料」的前端權限字串總表（與 AuthContext.PERMISSIONS 的命名一致；read 類不列）。
+// 用途：整個角色是否「完全唯讀」（kitchen）——該角色在頁面上不該看到任何可提交的編輯表單／寫入鈕。
+// 以「有沒有任何寫入權限」判定，而不是比對角色名稱：日後新增唯讀角色自動適用，
+// 且 manager／floor／host 只要有任何一項寫入權就不會被誤判（tests/utils/seatingPerms.test.js 以真實角色矩陣驗證）。
+export const WRITE_PERMS = [
+  'booking.create', 'booking.update', 'booking.delete', 'booking.assign',
+  'table.update', 'table.block', 'table.merge', 'table.config',
+  'waitlist.create', 'waitlist.update', 'waitlist.delete',
+  'customer.update', 'customer.delete', 'customer.blacklist',
+  'group.create', 'group.update', 'group.delete', 'agency.manage',
+  'settings.update', 'staff.manage',
+]
+
+// can 缺失（無 Provider）視為唯讀＝fail-closed，與 seatingPerms 一致。
+export function isReadOnlyRole(can) {
+  return !WRITE_PERMS.some(p => !!can?.(p))
+}
+
+// 資料匯出（CSV 含電話等個資）：完全唯讀角色（kitchen）一律不可匯出。
+// 目前沒有獨立的 export.* 權限字串，沿用 isReadOnlyRole（任何寫入權即視為可匯出）；
+// 設定頁匯出中心、旅行社詳情 CSV 等所有匯出入口都走這個判斷，新增匯出入口也請套用。
+export function canExportData(can) {
+  return !isReadOnlyRole(can)
+}

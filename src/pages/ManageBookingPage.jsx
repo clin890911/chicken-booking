@@ -23,6 +23,8 @@ import { lineBindUrl, lineOfficialUrl, resendLineBooking } from '../services/lin
 import { guestCancelBooking, guestGetAvailability, guestGetBooking, guestUpdateBooking } from '../services/cloudDataService'
 import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
 import { isValidTwPhone } from '../utils/validation'
+import { rescheduleSlotOptions } from '../utils/rescheduleSlots'
+import { onlineLeadLabel } from '../utils/guestPolicy'
 
 const NOTE_OPTIONS = [
   { key: 'pet', label: '攜帶寵物' },
@@ -112,23 +114,8 @@ export default function ManageBookingPage() {
     return () => { cancelled = true }
   }, [mode, form?.date])
 
-  const slots = useMemo(() => {
-    return serverSlots
-      .filter(s => s && typeof s.time === 'string' && /^\d{2}:\d{2}/.test(s.time))
-      .map(({ time, remaining }) => {
-        let rem = Number(remaining) || 0
-        // 同一天的原時段：把本訂位自己佔的座位加回（自己改自己，不該被自己擋住）。
-        if (booking && form?.date === booking.date && time === booking.timeSlot) {
-          rem += Number(booking.guests) || 0
-        }
-        return {
-          time,
-          remaining: rem,
-          full: rem < Number(form?.guests || 1),
-          period: Number(time.slice(0, 2)) < 15 ? '午餐' : '晚餐',
-        }
-      })
-  }, [serverSlots, form?.guests, form?.date, booking])
+  // 後端 closed（含抵達前提前量不足）的時段不可改期過去：由純函式統一判斷，與後端 guestUpdateBooking 同口徑。
+  const slots = useMemo(() => rescheduleSlotOptions(serverSlots, booking, form), [serverSlots, form, booking])
 
   const groupedSlots = useMemo(() => ({
     午餐: slots.filter(s => s.period === '午餐' && !s.full),
@@ -185,6 +172,7 @@ export default function ManageBookingPage() {
     if (!changed) return setError('目前沒有修改內容')
 
     const selectedSlot = slots.find(s => s.time === form.timeSlot)
+    if (selectedSlot?.closed) return setError('此時段已停止線上改期，請改選其他時段或來電洽詢')
     if (!selectedSlot || selectedSlot.full) return setError('此時段目前已無足夠座位，請改選其他時段')
 
     setBusy(true)
@@ -554,7 +542,7 @@ function SlotGrid({ groupedSlots, value, loading, error, onChange }) {
     )
   }
   if (total === 0) {
-    return <div className="empty-panel"><p className="font-bold text-chicken-brown">此日期沒有符合人數的可訂時段</p><p className="mt-1 text-sm text-chicken-brown/60">請改選其他日期，或來電詢問。</p></div>
+    return <div className="empty-panel"><p className="font-bold text-chicken-brown">此日期沒有符合人數的可訂時段</p><p className="mt-1 text-sm text-chicken-brown/60">線上改期須至少提前 {onlineLeadLabel()}；請改選其他日期，或來電詢問。</p></div>
   }
   return (
     <div>

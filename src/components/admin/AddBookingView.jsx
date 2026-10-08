@@ -33,7 +33,9 @@ const NOTE_OPTIONS = [
 
 // onAssignTable(booking)：「到桌況圖選」或事後「指派桌」→ 今天去現場指派模式、未來去規劃頁預配（AdminPage 分流）
 // onMoveTable(booking)：存檔後 toast 的「改桌」→ 現場頁 move 模式
-export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, initial }) {
+// continuous：連續新增（電話訂位入口專用）——存檔後保留日期＋時段，只清姓名／電話／人數／備註，
+//   游標回電話欄（不另跳提示，避免與「已建立」toast 疊兩則）。其他入口（現場頁、日曆）不傳 → 行為與過去完全相同。
+export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, initial, continuous = false }) {
   const { bookings, tables, groupReservations, settings, addBooking, findReserveCandidates, assignBookingToTable, preassignBookingTable } = useBooking()
   const { user } = useAuth()
   const toast = useToast()
@@ -194,10 +196,13 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
 
   // 日期快選 chips：今天 / 明天 / 後天 / 其他日期（展開緊湊月曆）
   const quickDates = useMemo(() => {
+    // 連假期間電話訂位常問一週內的日子：0–6 天都給快選（第 4 天起標 M/D(週X)）
     const base = new Date()
-    return [0, 1, 2].map(i => {
+    return [0, 1, 2, 3, 4, 5, 6].map(i => {
       const d = formatDate(addDays(base, i))
-      return { date: d, label: i === 0 ? '今天' : i === 1 ? '明天' : '後天', sub: dayLabel(d) }
+      if (i < 3) return { date: d, label: i === 0 ? '今天' : i === 1 ? '明天' : '後天', sub: dayLabel(d) }
+      const dt = new Date(d + 'T00:00:00')
+      return { date: d, label: `${dt.getMonth() + 1}/${dt.getDate()}(週${['日', '一', '二', '三', '四', '五', '六'][dt.getDay()]})`, sub: `${i} 天後` }
     })
   }, [])
   const isQuickDate = quickDates.some(q => q.date === date)
@@ -258,11 +263,16 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         toast.action(`${summary} 已建立`, { label: '預配桌位', onClick: () => onAssignTable?.(b) })
       }
       // 重設（保留 source）
-      setPhone(''); setName(''); setGuests(2); setTimeSlot('')
+      setPhone(''); setName(''); setGuests(2)
+      if (!continuous) setTimeSlot('')
       setNotes({ pet: false, child: false, mobility: false, text: '' })
       setTablePick('auto'); setTableNotice('')
       setAttempted(false); setShowCalendar(false)
       onCreated?.(b)
+      if (continuous) {
+        phoneRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+        phoneRef.current?.querySelector('input')?.focus()
+      }
       // 「到桌況圖選（可併桌）」→ 既有 handleAssignTable：今天的訂位進現場指派模式（大組自動走併桌）
       if (goToMap) onAssignTable?.(b)
     } finally {

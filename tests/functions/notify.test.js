@@ -8,6 +8,7 @@ import {
   classifyAdminBookingChange,
   classifyAdminBookingBackupEvent,
   diffAdminBooking,
+  bookingTableLabel,
   resolveBackupChatId,
   buildTelegramBookingMessage,
   stripTelegramBookingJson,
@@ -429,5 +430,56 @@ describe('diffAdminBooking（修改通知：從 X 變成 Y 的對照）', () => 
 
   it('guests 數字/字串混型不算變更', () => {
     expect(diffAdminBooking({ ...base, guests: 4 }, { ...base, guests: 4 })).toEqual([])
+  })
+})
+
+describe('併桌副桌 extraTableIds 在 Telegram 通知的呈現', () => {
+  const base = {
+    id: 'bk1', status: 'confirmed', date: '2026-10-08', timeSlot: '18:00', guests: 12,
+    name: '王先生', phone: '0912345678', assignedTableId: '101', notes: { text: '' },
+  }
+  const msg = (booking) => buildTelegramBookingMessage('🆕 <b>店員新增訂位</b>', booking, { event: 'admin_created' })
+
+  it('訂位通知列出主桌＋副桌（101 + 107）', () => {
+    const text = msg({ ...base, extraTableIds: ['107'] })
+    expect(text).toContain('🪑 101 + 107')
+  })
+
+  it('無副桌 / 空陣列 → 文案與舊版逐字相同（只有主桌）', () => {
+    expect(msg(base)).toContain('\n🪑 101\n')
+    expect(msg({ ...base, extraTableIds: [] })).toBe(msg(base))
+    expect(msg({ ...base, extraTableIds: undefined })).toBe(msg(base))
+  })
+
+  it('沒有任何桌 → 不列 🪑 行', () => {
+    expect(msg({ ...base, assignedTableId: null })).not.toContain('🪑')
+  })
+
+  it('bookingTableLabel：去重、略過空值、副桌排序固定', () => {
+    expect(bookingTableLabel({ assignedTableId: '101', extraTableIds: ['108', '107', '101', '', null] })).toBe('101 + 107 + 108')
+    expect(bookingTableLabel({ assignedTableId: null, extraTableIds: [] })).toBe('')
+    expect(bookingTableLabel(null)).toBe('')
+  })
+
+  it('只改副桌 → diffAdminBooking 偵測為桌位變更並列出合併桌號', () => {
+    expect(diffAdminBooking({ ...base, extraTableIds: [] }, { ...base, extraTableIds: ['107'] })).toEqual([
+      { key: 'assignedTableId', label: '桌位', from: '101', to: '101 + 107' },
+    ])
+    expect(diffAdminBooking({ ...base, extraTableIds: ['107'] }, { ...base, extraTableIds: ['107', '108'] })).toEqual([
+      { key: 'assignedTableId', label: '桌位', from: '101 + 107', to: '101 + 107 + 108' },
+    ])
+  })
+
+  it('副桌陣列值相同（含順序不同、空陣列 vs undefined）→ 不誤判變更', () => {
+    expect(diffAdminBooking({ ...base, extraTableIds: ['107', '108'] }, { ...base, extraTableIds: ['108', '107'] })).toEqual([])
+    expect(diffAdminBooking({ ...base }, { ...base, extraTableIds: [] })).toEqual([])
+    expect(diffAdminBooking({ ...base, extraTableIds: null }, { ...base, extraTableIds: undefined })).toEqual([])
+    expect(diffAdminBooking({ ...base, extraTableIds: ['107'] }, { ...base, extraTableIds: ['107'] })).toEqual([])
+  })
+
+  it('無副桌時 diff 文案與舊版相同（null → 102 顯示（無）→ 102）', () => {
+    expect(diffAdminBooking({ ...base, assignedTableId: null }, { ...base, assignedTableId: '102' })).toEqual([
+      { key: 'assignedTableId', label: '桌位', from: '（無）', to: '102' },
+    ])
   })
 })

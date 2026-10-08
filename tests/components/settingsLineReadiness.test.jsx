@@ -56,14 +56,16 @@ describe('LINE settings validation and read-only permissions', () => {
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('仍需確認 LINE Console'))
     expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('本人帳號'))
   })
-  it('kitchen cannot save changed settings; the effective arrival cutoff stays 60 minutes', () => {
+  it('kitchen cannot save changed settings; the effective arrival lead is 2 hours (not legacy session cutoff)', () => {
     permit = false; mount({ onlineSessionCutoffMin: 120 })
     ctx.settings = { ...ctx.settings, storeName: 'changed remotely' }
     act(() => root.render(<SettingsView />))
     expect(button('儲存全部變更')).toBeUndefined()
     expect(ctx.updateSettings).not.toHaveBeenCalled()
     act(() => button('線上訂位').click())
-    expect(container.textContent).toContain('至少提前 60 分鐘')
+    expect(container.textContent).toContain('至少提前 2 小時')
+    expect(container.textContent).toContain('抵達前 2 小時停止線上訂位')
+    expect(container.textContent).not.toContain('60 分')
     expect(container.textContent).not.toContain('場次前 120 分停訂')
   })
 })

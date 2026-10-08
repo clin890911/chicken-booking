@@ -3,7 +3,8 @@ import crypto from 'node:crypto'
 import {guestBackendHarness} from '../helpers/guestBackendHarness'
 const input=(patch={})=>({submissionKey:crypto.randomBytes(32).toString('hex'),name:'假資料',phone:'0900000000',date:'2026-10-05',timeSlot:'13:00',guests:2,notes:{},...patch})
 let h
-beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(new Date(2026,9,5,12));h=guestBackendHarness()})
+// 預設 10:00 訂 13:00（距抵達 180 分，≥ 2 小時提前量）；提前量邊界在下方專測。
+beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(new Date(2026,9,5,10));h=guestBackendHarness()})
 afterEach(()=>vi.useRealTimers())
 const books=()=>[...h.records].filter(([key])=>key.startsWith('bookings/')).map(([,b])=>b)
 const configuredLine=()=>Object.assign(h.settings,{lineLoginChannelId:'1234567890',lineLoginStartEndpoint:'https://lineloginstart-reaor76eyq-uc.a.run.app',lineLoginCallbackUrl:'https://linelogincallback-reaor76eyq-uc.a.run.app',publicSiteUrl:'https://chicken-booking.zeabur.app'})
@@ -13,7 +14,7 @@ describe('真guestcreate＋完整通知helper鏈',()=>{
   expect(first.code).toBe(200);expect(retry.code).toBe(200);expect(retry.body.recovered).toBe(true);expect(retry.body.booking.manageToken).toBe(first.body.booking.manageToken);expect(books()).toHaveLength(1);expect(h.deliveries).toHaveLength(1)
   const changed=await h.call('guestCreateBooking',{...body,guests:3});expect(changed.code).toBe(409);expect(changed.body.booking).toBeUndefined();expect(changed.body.bookingOutcome).toBeUndefined()
  })
- it('跨60min截止與午夜同key先recover原單，取消/完成反映當前、不重建；刪除410',async()=>{
+ it('跨2小時截止與午夜同key先recover原單，取消/完成反映當前、不重建；刪除410',async()=>{
   const body=input(),first=await h.call('guestCreateBooking',body),id=first.body.booking.id
   vi.setSystemTime(new Date(2026,9,6,0,1));expect((await h.call('guestCreateBooking',body)).code).toBe(200)
   h.records.set('bookings/'+id,{...h.records.get('bookings/'+id),status:'cancelled'})
@@ -42,8 +43,22 @@ describe('真guestcreate＋完整通知helper鏈',()=>{
   const result=await h.call('guestCreateBooking',body);expect(result.code).toBe(200);expect(result.body.recoverySupported).toBe(false)
   const duplicate=await h.call('guestCreateBooking',body);expect(duplicate.code).toBe(409);expect(duplicate.body.booking).toBeUndefined()
  })
- it.each([[59,400],[60,200],[61,200]])('新政策對舊120設定：距抵達%d分鐘code%d',async(min,code)=>{
-  vi.setSystemTime(Date.parse('2026-10-05T13:00:00+08:00')-min*60000);const r=await h.call('guestCreateBooking',input());expect(r.code).toBe(code);if(code===400)expect(r.body.bookingOutcome).toBe('not-created')
+ it.each([[59,400],[60,400],[119,400],[120,200],[121,200]])('2小時提前量（以抵達時段算）：距抵達%d分鐘code%d',async(min,code)=>{
+  vi.setSystemTime(Date.parse('2026-10-05T13:00:00+08:00')-min*60000);const r=await h.call('guestCreateBooking',input());expect(r.code).toBe(code)
+  if(code===400){expect(r.body.bookingOutcome).toBe('not-created');expect(r.body.reasonCode).toBe('booking-deadline-passed');expect(r.body.error).toContain('至少提前 2 小時')}
+ })
+ it('以客人選的抵達時段算、不以場次開始算：11:01 時午餐場 13:00 可訂、12:30 不可訂',async()=>{
+  vi.setSystemTime(new Date(2026,9,5,11,1))
+  expect((await h.call('guestCreateBooking',input({timeSlot:'12:30'}))).code).toBe(400)
+  expect((await h.call('guestCreateBooking',input({timeSlot:'13:30'}))).code).toBe(200)
+ })
+ it('guestGetAvailability：抵達前 <120 分的時段 closed、exact120 起開放',async()=>{
+  vi.setSystemTime(new Date(2026,9,5,11,0))
+  const r=await h.call('guestGetAvailability',{date:'2026-10-05'});expect(r.code).toBe(200)
+  const closed=Object.fromEntries(r.body.slots.map(s=>[s.time,s.closed]))
+  expect(closed['11:30']).toBe(true);expect(closed['12:00']).toBe(true);expect(closed['12:30']).toBe(true)
+  expect(closed['13:00']).toBe(false);expect(closed['13:30']).toBe(false)
+  expect(r.body.settings).toMatchObject({onlineMinimumLeadMinutes:120,onlineBookingPolicy:'arrival-lead-120-v1'})
  })
  it('confirmation reload DTO有真settings readiness且不下發private設定',async()=>{
   configuredLine();const created=await h.call('guestCreateBooking',input()),b=created.body.booking
@@ -54,6 +69,29 @@ describe('真guestcreate＋完整通知helper鏈',()=>{
   const body=input();const same=await Promise.all([h.call('guestCreateBooking',body),h.call('guestCreateBooking',body)]);expect(same.map(r=>r.code)).toEqual([200,200]);expect(same[0].body.booking.id).toBe(same[1].body.booking.id);expect(h.deliveries).toHaveLength(1)
   h=guestBackendHarness();h.records.set('tables/T',{number:'T',capacity:3,isActive:true})
   const last=await Promise.all([h.call('guestCreateBooking',input()),h.call('guestCreateBooking',input({phone:'0900000001'}))]);expect(last.map(r=>r.code).sort()).toEqual([200,409]);expect(books()).toHaveLength(1)
+ })
+})
+describe('改期提前量 vs 既有訂位管理期限（用餐前2小時，不變）',()=>{
+ it('改期到抵達前 <120 分的時段拒 409，≥120 分可改',async()=>{
+  const b=(await h.call('guestCreateBooking',input({timeSlot:'18:00'}))).body.booking
+  vi.setSystemTime(new Date(2026,9,5,11,1))
+  const tooSoon=await h.call('guestUpdateBooking',{bookingId:b.id,token:b.manageToken,patch:{timeSlot:'13:00'}})
+  expect(tooSoon.code).toBe(409);expect(tooSoon.body.error||tooSoon.body.reason).toContain('線上改期須至少提前 2 小時')
+  expect(h.records.get('bookings/'+b.id).timeSlot).toBe('18:00')
+  const ok=await h.call('guestUpdateBooking',{bookingId:b.id,token:b.manageToken,patch:{timeSlot:'13:30'}})
+  expect(ok.code).toBe(200);expect(h.records.get('bookings/'+b.id).timeSlot).toBe('13:30')
+ })
+ it('改人數／取消仍是用餐前2小時：15:59 可改人數、可取消；16:00 起拒',async()=>{
+  const b=(await h.call('guestCreateBooking',input({timeSlot:'18:00'}))).body.booking
+  vi.setSystemTime(new Date(2026,9,5,15,59))
+  expect((await h.call('guestUpdateBooking',{bookingId:b.id,token:b.manageToken,patch:{guests:3}})).code).toBe(200)
+  vi.setSystemTime(new Date(2026,9,5,16,0))
+  const late=await h.call('guestUpdateBooking',{bookingId:b.id,token:b.manageToken,patch:{guests:4}})
+  expect(late.code).toBe(409);expect(JSON.stringify(late.body)).toContain('用餐前 2 小時')
+  expect((await h.call('guestCancelBooking',{bookingId:b.id,token:b.manageToken})).code).toBe(409)
+  const c=(await h.call('guestCreateBooking',input({timeSlot:'18:30',phone:'0900000002'}))).body.booking
+  vi.setSystemTime(new Date(2026,9,5,16,29))
+  expect((await h.call('guestCancelBooking',{bookingId:c.id,token:c.manageToken})).code).toBe(200)
  })
 })
 describe('完整outbox lease/LINE atomic event',()=>{

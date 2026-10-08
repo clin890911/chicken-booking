@@ -1,6 +1,12 @@
 import crypto from 'node:crypto'
-export const GUEST_BOOKING_POLICY = 'arrival-lead-60-v1'
-export const MIN_GUEST_LEAD_MINUTES = 60
+// 線上客人新訂位／改期到新時段：以「客人選的抵達時段」往前算，至少提前 MIN_GUEST_LEAD_MINUTES（exact 可訂）。
+// 唯一真相：guestGetAvailability 的 closed、validateNewBooking、guestUpdateBooking 改期都走 isBeforeGuestDeadline。
+// 前端文案常數 src/utils/guestPolicy.js 須與此同步（tests/functions/guestReliability.test.js 鎖住）。
+// 注意：既有訂位的取消／改人數期限是另一條「用餐前 2 小時」規則（guestEditable），與此無關。
+export const GUEST_BOOKING_POLICY = 'arrival-lead-120-v1'
+export const MIN_GUEST_LEAD_MINUTES = 120
+export function guestLeadLabel(min=MIN_GUEST_LEAD_MINUTES){return min%60===0?`${min/60} 小時`:`${min} 分鐘`}
+export function guestLeadError(kind='create'){return `線上${kind==='reschedule'?'改期':'訂位'}須至少提前 ${guestLeadLabel()}，請選擇較晚時段或來電洽詢`}
 export function guestPolicy(){return {onlineBookingPolicy:GUEST_BOOKING_POLICY,onlineMinimumLeadMinutes:MIN_GUEST_LEAD_MINUTES}}
 export function isBeforeGuestDeadline(nowMs,slotMs){return Number.isFinite(slotMs)&&slotMs-Number(nowMs)>=MIN_GUEST_LEAD_MINUTES*60000}
 export function canonicalGuestIntent(body={}){

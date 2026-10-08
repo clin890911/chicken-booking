@@ -1,4 +1,5 @@
 // LINE 通知相關純邏輯（不碰 Firestore / secrets / fetch），抽出供根目錄 Vitest 直接測試。
+import { bookingOccupiedTables } from './groupTableConflicts.js'
 
 // 事件級防重窗口：同一事件、同一內容指紋，在窗口內只送一次。
 // 設 90 秒是為了擋「functions 先部署、舊前端 bundle 仍打 linePushBooking」共存期的重複推播，
@@ -78,6 +79,17 @@ const ADMIN_BOOKING_FIELD_LABELS = {
 const ADMIN_BOOKING_STATUS_LABELS = {
   confirmed: '已確認', arrived: '已入座', completed: '已結帳', cancelled: '已取消', noshow: '未到',
 }
+// 一筆訂位佔用桌的顯示字串：主桌＋大組併桌副桌（extraTableIds）以 ' + ' 串接，例「101 + 107」。
+// 副桌去重、略過空值並排序（陣列順序不同但桌相同視為同一組，diff 不誤判）；無副桌時就是主桌原字串。
+export function bookingTableLabel(booking) {
+  const [main, ...extras] = bookingOccupiedTables({
+    assignedTableId: booking?.assignedTableId,
+    extraTableIds: Array.isArray(booking?.extraTableIds)
+      ? booking.extraTableIds.filter(Boolean).map(String).sort((a, b) => a.localeCompare(b, 'zh-Hant', { numeric: true }))
+      : [],
+  })
+  return [main, ...extras].filter(Boolean).join(' + ')
+}
 function adminBookingFieldDisplay(key, val) {
   if (key === 'notes') return (val && typeof val === 'object') ? String(val.text || '') : String(val ?? '')
   if (key === 'status') return ADMIN_BOOKING_STATUS_LABELS[val] || String(val ?? '')
@@ -88,8 +100,9 @@ export function diffAdminBooking(before, after) {
   const changes = []
   for (const key of Object.keys(ADMIN_BOOKING_FIELD_LABELS)) {
     // 以「顯示值」為準比對：guests 4 vs '4'、備註只改了非文字旗標等，顯示相同就不列為變更。
-    const from = adminBookingFieldDisplay(key, before?.[key])
-    const to = adminBookingFieldDisplay(key, after?.[key])
+    // 桌位欄把副桌 extraTableIds 一併納入（只改副桌也要偵測得到），其餘欄位照舊取單一欄位值。
+    const from = adminBookingFieldDisplay(key, key === 'assignedTableId' ? bookingTableLabel(before) : before?.[key])
+    const to = adminBookingFieldDisplay(key, key === 'assignedTableId' ? bookingTableLabel(after) : after?.[key])
     if (from === to) continue
     changes.push({ key, label: ADMIN_BOOKING_FIELD_LABELS[key], from, to })
   }
@@ -137,7 +150,8 @@ export function buildTelegramBookingMessage(title, booking = {}, payload = {}, e
     `👤 ${escapeTelegramHtml(booking.name)}  ${booking.guests ?? ''} 位`,
     `📱 <code>${escapeTelegramHtml(booking.phone)}</code>`,
   )
-  if (booking.assignedTableId) lines.push(`🪑 ${escapeTelegramHtml(booking.assignedTableId)}`)
+  const tableLabel = bookingTableLabel(booking)
+  if (tableLabel) lines.push(`🪑 ${escapeTelegramHtml(tableLabel)}`)
   if (TELEGRAM_SOURCE_LABEL[booking.source]) lines.push(TELEGRAM_SOURCE_LABEL[booking.source])
   if (booking.notes?.text) lines.push(`📝 ${escapeTelegramHtml(booking.notes.text)}`)
   const flags = []

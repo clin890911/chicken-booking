@@ -23,6 +23,12 @@ import { isArriveEligible, isPreassignArriveEligible } from './FloorMap'
 // 遲到判定沿用 UpcomingPanel/BookingCard 既有口徑（graceMin=15，見 utils/bookingPulse.js）。
 const LATE_GRACE_MIN = 15
 
+// 電話末 3 碼（小字）：同名「陳先生」靠它分辨；無電話不顯示。
+const phoneTail = (phone) => {
+  const d = String(phone || '').replace(/\D/g, '')
+  return d.length >= 3 ? d.slice(-3) : ''
+}
+
 // 這筆訂位的全部桌號（主桌＋併桌額外桌，去重去空）
 const bookingNums = (b) => [...new Set([b?.assignedTableId, ...(b?.extraTableIds || [])].filter(Boolean).map(String))]
 
@@ -149,6 +155,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                   {booking.timeSlot}
                 </span>
                 <span className="text-sm font-bold text-chicken-brown truncate max-w-[7rem]">{booking.name}</span>
+                {phoneTail(booking.phone) && <span data-testid="phone-tail" className="text-[10px] text-chicken-brown/50 tabular-nums shrink-0 -ml-1">…{phoneTail(booking.phone)}</span>}
                 <span
                   className={`text-[11px] font-bold ${crossFloor ? 'text-chicken-brown/70' : 'text-chicken-brown/50'}`}
                   title={crossFloor ? `此桌在 ${table.floor}，點選會自動切換樓層` : undefined}
