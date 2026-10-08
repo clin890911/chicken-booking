@@ -14,7 +14,7 @@ import * as cloudData from '../services/cloudDataService'
 import * as opsLogService from '../services/opsLogService'
 import {
   computeOvertimeActions, computeDayRolloverActions,
-  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled,
+  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled, isSweepSnapshotFresh,
 } from '../utils/opsSweep'
 import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE } from '../utils/syncStatus'
 import { reconcileList, reconcileValue } from '../utils/stableState'
@@ -73,6 +73,8 @@ export function BookingProvider({ children }) {
   // 參考變動而重建。無 AuthProvider 的測試環境會是 undefined，屆時視為不設限（維持既有行為）。
   const canRef = useRef(can)
   canRef.current = can
+  const usingFirebaseRef = useRef(usingFirebase)
+  usingFirebaseRef.current = usingFirebase
 
   // 把員工 ID Token 提供者注入 cloudDataService（admin 端點需要 Bearer token）。
   useEffect(() => {
@@ -101,6 +103,8 @@ export function BookingProvider({ children }) {
   // 🔴 必須在拉取成功處直接設，不可由 cloudStatus.state === 'synced' 推導：
   // 部分推送被拒後狀態會黏在 'rejected'（拉取不得清除），推導會讓該裝置永遠不結號。
   const cloudPulledRef = useRef(false)
+  // 最近一次「拉取成功」的時間戳（掃除前的快照新鮮度閘門，見 utils/opsSweep.isSweepSnapshotFresh）。
+  const lastPullOkAtRef = useRef(0)
   // pullCloud 定義在 syncCloudSoon 之前，用 ref 取得後者（首拉開閘後要主動推一次）。
   const syncCloudSoonRef = useRef(null)
 
@@ -110,6 +114,7 @@ export function BookingProvider({ children }) {
       const gateWasOpen = cloudData.hasPulledCloud()
       cloudData.applyCloudSnapshot(data)
       cloudPulledRef.current = true
+      lastPullOkAtRef.current = Date.now()
       refresh()
       // 這次拉取打開了推送閘門（這台裝置第一次成功拉到雲端）：首拉前在這台建立、被閘門擋下的
       // 資料（訂位／候位…）現在才推得上去——主動推一次，不要等店員下一個動作。沒有待推資料時
@@ -210,6 +215,10 @@ export function BookingProvider({ children }) {
     const permit = canRef.current
     if (!canRunSweeps(permit)) return
     const nowMs = Date.now()
+    // 🔴 Firebase 模式：本機快照超過 10 秒沒被雲端刷新（喚醒、離線開機）就整輪不跑——換日／超時掃除
+    // 都會清桌，基於舊快照會把別台剛帶位的組清掉。放在寫節流戳記之前：被擋的這輪不吃掉 45 秒節流，
+    // 下一次拉取成功後的那一輪照常跑。回傳 false 讓開機 fallback 知道這次沒跑。
+    if (!isSweepSnapshotFresh({ usingFirebase: usingFirebaseRef.current, lastPullOkAt: lastPullOkAtRef.current, now: nowMs })) return false
     const last = Number(localStorage.getItem('chicken_ops_sweep_at') || 0)
     if (!opts.force && nowMs - last < 45000) return // 跨分頁節流
     localStorage.setItem('chicken_ops_sweep_at', String(nowMs))
@@ -278,8 +287,9 @@ export function BookingProvider({ children }) {
     if (!isStaff) return
     const fallback = window.setTimeout(() => {
       if (!bootSweepDoneRef.current) {
-        bootSweepDoneRef.current = true
-        runSweepsRef.current({ force: true })
+        // Firebase 模式且還沒拉到雲端（離線開機）：runSweeps 會因快照不新鮮回 false、什麼都不清；
+        // 此時不吃掉開機那一輪，等首次拉取成功（cloudStatus → synced）時再 force 跑。
+        bootSweepDoneRef.current = runSweepsRef.current({ force: true }) !== false
       }
     }, 20000)
     const id = window.setInterval(() => { runSweepsRef.current() }, 60000)
