@@ -2533,3 +2533,60 @@ describe('releaseCheckedOutTables（離席後一鍵釋出，含併桌副桌）',
     expect(seating.releaseCheckedOutTables('NOPE').ok).toBe(false)
   })
 })
+
+// ===========================================================
+// R5：手動標 No-show 釋放本訂位鎖住的桌（markNoshow / undoMarkNoshow）
+// 過去只改 booking 狀態，現場指派鎖桌（reserved＋currentBookingId＝本訂位）一直卡著、白佔容量。
+// ===========================================================
+describe('markNoshow / undoMarkNoshow（R5）', () => {
+  beforeEach(() => { seedDefaultTables() })
+
+  it('鎖桌 → 釋成空桌、booking noshow、爽約次數 +1；預配與別組桌不動', () => {
+    const b = mkBooking({ guests: 8, phone: '0922000111' })
+    bookingService.assignTables(b.id, ['101', '108', '201'])
+    tableService.reserveTable('101', b.id)              // 鎖桌
+    tableService.seatTable('201', 'OTHER')              // 只預配、但已被別組用餐
+    const r = seating.markNoshow(b.id)
+    expect(r.ok).toBe(true)
+    expect(r.releasedTables).toEqual(['101'])
+    expect(r.previousStatus).toBe('confirmed')
+    expect(tableService.getByNumber('101').status).toBe('vacant')
+    expect(tableService.getByNumber('108').status).toBe('vacant')
+    expect(tableService.getByNumber('201').status).toBe('dining')      // ★ 別組不被清
+    expect(tableService.getByNumber('201').currentBookingId).toBe('OTHER')
+    expect(bookingService.getById(b.id).status).toBe('noshow')
+    expect(bookingService.getNoshowCount('0922000111')).toBe(1)
+  })
+
+  it('復原：狀態回原值、次數扣回、桌仍空 → reserve 回來', () => {
+    const b = mkBooking({ guests: 2, phone: '0922000222' })
+    seating.assignBookingToTable(b.id, '101')
+    const r = seating.markNoshow(b.id)
+    const u = seating.undoMarkNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+    expect(u).toMatchObject({ ok: true, restored: ['101'], failed: [], status: 'confirmed' })
+    expect(bookingService.getById(b.id).status).toBe('confirmed')
+    expect(bookingService.getNoshowCount('0922000222')).toBe(0)
+    const t = tableService.getByNumber('101')
+    expect(t.status).toBe('reserved')
+    expect(t.currentBookingId).toBe(b.id)
+  })
+
+  it('復原時桌已被別組坐走 → 不搶桌、failed 回報、booking 不再掛著那張桌', () => {
+    const b = mkBooking({ guests: 2, phone: '0922000333' })
+    seating.assignBookingToTable(b.id, '101')
+    const r = seating.markNoshow(b.id)
+    tableService.seatTable('101', 'OTHER')
+    const u = seating.undoMarkNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+    expect(u.failed).toEqual(['101'])
+    expect(tableService.getByNumber('101').currentBookingId).toBe('OTHER')
+    expect(bookingService.getById(b.id).assignedTableId).toBeNull()
+    expect(bookingService.getById(b.id).status).toBe('confirmed')
+  })
+
+  it('已不是 noshow → 復原被擋（不覆寫別的操作結果）', () => {
+    const b = mkBooking({ guests: 2 })
+    const r = seating.markNoshow(b.id)
+    bookingService.setStatus(b.id, 'confirmed')
+    expect(seating.undoMarkNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus }).ok).toBe(false)
+  })
+})

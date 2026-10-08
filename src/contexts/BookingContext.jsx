@@ -385,6 +385,22 @@ export function BookingProvider({ children }) {
     if (b && status === 'noshow') safeNotify(() => tg.notifyBookingNoShow(b))
     return b
   }
+  // 手動標 No-show：booking → noshow（罰則照記）＋釋出本訂位鎖住的 reserved 桌（見 seatingService.markNoshow）。
+  // 回傳值是復原快照，復原時原封帶回 undoMarkBookingNoshow（桌已清掉，事後查不回）。
+  const markBookingNoshow = (bookingId) => {
+    const r = seatingService.markNoshow(bookingId)
+    if (r?.ok) {
+      refresh()
+      syncCloudSoon()
+      if (r.booking) safeNotify(() => tg.notifyBookingNoShow(r.booking))
+    }
+    return r
+  }
+  const undoMarkBookingNoshow = (bookingId, snapshot) => {
+    const r = seatingService.undoMarkNoshow(bookingId, snapshot)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
 
   // ============ 桌位動作 ============
   // toggle/setOutage 帶兩層守門（佔用 + 團體圈桌衝突）：失敗回 { ok:false, error }，
@@ -772,7 +788,7 @@ export function BookingProvider({ children }) {
     bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated,
     agencies, guides, groupReservations,
     refresh, pullCloud, migrateLocalToCloud,
-    addBooking, updateBooking, cycleStatus, setStatus,
+    addBooking, updateBooking, cycleStatus, setStatus, markBookingNoshow, undoMarkBookingNoshow,
     toggleTable, setTableOutage, clearTableOutage, setTableStatus, blockTable, unblockTable, updateTablePosition,
     bulkSaveTables, addTable, removeTable, saveFloorPlan,
     // 桌位佈局便捷存取（FloorMap 消費端傳入 fixtures/zones 用）

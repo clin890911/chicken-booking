@@ -26,6 +26,8 @@ const bookingCtx = {
   tables: [],
   groupReservations: [],
   setStatus: vi.fn(),
+  markBookingNoshow: vi.fn(() => ({ ok: true, releasedTables: [] })),
+  undoMarkBookingNoshow: vi.fn(() => ({ ok: true })),
   seatBooking: vi.fn(() => ({ ok: true })),
   completeWithoutSeating: vi.fn(() => ({ ok: true })),
   undoCompleteWithoutSeating: vi.fn(() => ({ ok: true })),
@@ -185,7 +187,7 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     expect(onClickBooking).toHaveBeenCalledWith(b)
     expect(onAssignTable).not.toHaveBeenCalled()
     expect(onMoveTable).not.toHaveBeenCalled()
-    for (const mutation of ['setStatus', 'seatBooking', 'completeWithoutSeating', 'undoCompleteWithoutSeating']) {
+    for (const mutation of ['setStatus', 'markBookingNoshow', 'seatBooking', 'completeWithoutSeating', 'undoCompleteWithoutSeating']) {
       expect(bookingCtx[mutation]).not.toHaveBeenCalled()
     }
   })

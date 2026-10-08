@@ -261,6 +261,57 @@ export function undoCompleteWithoutSeating(bookingId) {
   return { ok: true, restored, failed }
 }
 
+// === 手動標 No-show（店員確認客人不會來）===
+// booking → noshow（bookingService.setStatus 內會 recordNoshow，罰則行為不變）。
+// ★ 現場指派鎖桌（reserved 且由本訂位持有）一併釋成空桌：過去只改 booking 狀態，桌一直卡在
+//   reserved、白白佔掉容量，要等換日掃除才放出來。只預配（桌況沒鎖）或已被別組／團體佔用的桌不動。
+// 回傳復原快照 { releasedTables, previousStatus }：桌被清掉後 currentBookingId 已查不回，
+// 復原只能靠呼叫端把這份回傳值原封帶回 undoMarkNoshow。
+const NOSHOW_RESTORABLE_STATUSES = ['confirmed', 'pending']
+export function markNoshow(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  const previousStatus = booking.status
+  const releasedTables = []
+  for (const n of bookingTableNumbers(booking)) {
+    const t = tableService.getByNumber(n)
+    if (t && t.status === 'reserved' && heldBy(t, bookingId)) {
+      tableService.clearTable(n)
+      releasedTables.push(n)
+    }
+  }
+  const b = bookingService.setStatus(bookingId, 'noshow')
+  return { ok: true, booking: b, releasedTables, previousStatus }
+}
+
+// markNoshow 的復原：booking 改回原狀態（confirmed/pending；其他一律 confirmed）＋扣回爽約次數；
+// 剛釋出的桌只在「仍是空桌」時 reserve 回來（復原鐵律：不搶別組的桌）。搶不回的放 failed，
+// 並從 booking 的桌號中拿掉（不留指向別組桌位的孤兒鎖桌）；原本只預配的桌照舊保留。
+export function undoMarkNoshow(bookingId, { tableNumbers = [], status } = {}) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (booking.status !== 'noshow') return { ok: false, error: '這筆訂位已不是 No-show 狀態，無法復原' }
+  const restoreStatus = NOSHOW_RESTORABLE_STATUSES.includes(status) ? status : 'confirmed'
+  bookingService.setStatus(bookingId, restoreStatus)
+  bookingService.revokeNoshow(booking.phone, bookingId)
+  const restored = []
+  const failed = []
+  for (const n of [...new Set((tableNumbers || []).map(String).filter(Boolean))]) {
+    const t = tableService.getByNumber(n)
+    if (t && t.status === 'vacant') {
+      tableService.reserveTable(n, bookingId)
+      restored.push(n)
+    } else {
+      failed.push(n)
+    }
+  }
+  if (failed.length) {
+    const drop = new Set(failed)
+    bookingService.assignTables(bookingId, bookingTableNumbers(booking).filter(n => !drop.has(String(n))))
+  }
+  return { ok: true, restored, failed, status: restoreStatus }
+}
+
 // === 清桌完成 → 桌位釋出 ===
 export function clearTable(tableNumber) {
   return tableService.clearTable(tableNumber)

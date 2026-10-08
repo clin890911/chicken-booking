@@ -9,7 +9,7 @@ import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
 import { seatTableWarnings } from '../../../utils/capacity'
 import { assignmentKind } from '../../../utils/tableStatus'
-import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
+import { getNoshowCount } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
 
@@ -105,7 +105,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
 }
 
 export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTable, flashBookingId = null }) {
-  const { bookings, tables, groupReservations, setStatus, seatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
+  const { bookings, tables, groupReservations, markBookingNoshow, undoMarkBookingNoshow, seatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
   const { can } = useAuth() || {}
   const toast = useToast()
   const confirm = useConfirm()
@@ -154,14 +154,18 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
   const handleNoshow = async (b) => {
     const ok = await confirm(`已聯絡 ${b.name} 並確認未到？標記 No-show 會計入電話爽約紀錄。`, { title: '標記 No-show', confirmLabel: '確認標記', danger: true })
     if (!ok) return
-    setStatus(b.id, 'noshow')
+    // 標記時一併釋出本訂位鎖住的 reserved 桌（seatingService.markNoshow）；復原帶回快照，桌仍空才搶回。
+    const r = markBookingNoshow(b.id)
+    if (!r?.ok) return toast.error('標記失敗：' + (r?.error || '未知錯誤'))
     const count = getNoshowCount(b.phone)
     const countMsg = count > 0 ? `這支電話累計第 ${count} 次，之後訂位會提醒` : '已記錄這支電話的爽約次數'
-    toast.action(`已標記 ${b.name} No-show — ${countMsg}`,
+    const tableMsg = r.releasedTables?.length ? `，${r.releasedTables.join('、')} 已釋出空桌` : ''
+    toast.action(`已標記 ${b.name} No-show — ${countMsg}${tableMsg}`,
       { label: '↩ 復原', onClick: () => {
-          setStatus(b.id, 'confirmed')
-          revokeNoshow(b.phone, b.id)
-          toast.success(`已復原 ${b.name} 為待到，爽約次數已扣回`)
+          const u = undoMarkBookingNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+          if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+          const failMsg = u.failed?.length ? `（${u.failed.join('、')} 已被占用，桌位未搶回，請重新指派）` : ''
+          toast.success(`已復原 ${b.name} 為待到，爽約次數已扣回${failMsg}`)
       } },
       { duration: 8000 })
   }
