@@ -7,7 +7,7 @@
 - key是第二種長期secret capability；它能恢復此訂位當前管理token，管理token rotation不自動撤销submission capability。須保護瀏覽器sessionStorage，不能貼到issue或共享log。
 - legacy無key仍可建立但recoverySupported=false；舊分頁失回覆不具capability恢復，請重新整理以用新流程。舊電話duplicate仍409、不回管理token。
 - 只有明確prewrite business validation回bookingOutcome=not-created；commit成功但SDK ACK丢失、網路／5xx、payload conflict／deleted receipt皆保持unknown，不解鎖為新intent。
-- 新客人建立／選時段／改期目標一律以台灣servernow、預計抵達時間至少提前60分鐘，exact60可訂、59拒。onlineBookingPolicy=arrival-lead-60-v1／onlineMinimumLeadMinutes=60為權威模式；原onlineSessionCutoffMin保留相容資料但不再控制客人。設定頁明示60，未直接改正式120值。原訂位管理修改／取消的用餐前2小時限制保留。
+- 新客人建立／選時段／改期目標一律以台灣servernow、以客人選的預計抵達時段往前算至少提前2小時（120分鐘），exact120可訂、119拒（2026-10 店主決定，由60改120）。onlineBookingPolicy=arrival-lead-120-v1／onlineMinimumLeadMinutes=120為權威模式，唯一真相是functions/lib/guestReliability.js的MIN_GUEST_LEAD_MINUTES；前端文案常數src/utils/guestPolicy.js由測試鎖成一致。原onlineSessionCutoffMin保留相容資料但不再控制客人。設定頁明示「至少提前 2 小時」。原訂位管理修改人數／取消的用餐前2小時限制（guestEditable）是另一條規則，保留不變。我的訂位改期頁尊重後端closed（原時段保留可選）。
 - create／guest update／cancel／LINE binding的狀態與durable intent同交易。queue intent→outbox也以交易一次推進；存不了outbox時保留pendingintent供retryNotifications補償，不以catch當可靠成功。
 - 補償只掃新版notificationIntents，不掃歷史bookings發舊卡。pending舊event遇目前取消／改期或更高版本標superseded，不補送誤導的成功／舊時間。
 - 每事件有穩定ID／版本與LINE lastQueuedByEvent cursor。A→B→A為新revision；同event callback/旧前端触发重用intent。legacy只有真的sent outbox證據可迁移成功；光lastPush marker不能當成功。

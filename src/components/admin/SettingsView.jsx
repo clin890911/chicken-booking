@@ -17,6 +17,7 @@ import ExportCenter from './ExportCenter'
 import Icon from '../ui/Icon'
 import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
 import { validateLineReadiness } from '../../utils/lineReadiness'
+import { onlineLeadLabel } from '../../utils/guestPolicy'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -130,8 +131,8 @@ export default function SettingsView({ onOpenCustomer }) {
   const guardOn = form.onlineAutoCloseEnabled === true
   const guardPercent = Number(form.onlineAutoClosePercent) || 80
   const guardSummary = guardOn
-    ? `達 ${guardPercent}% 自動關閉 · 抵達前 60 分停止線上訂位`
-    : '抵達前 60 分停止線上訂位 · 未啟用滿座自動關閉'
+    ? `達 ${guardPercent}% 自動關閉 · 抵達前 ${onlineLeadLabel()}停止線上訂位`
+    : `抵達前 ${onlineLeadLabel()}停止線上訂位 · 未啟用滿座自動關閉`
   // 休店/關閉時段摘要：今天起有幾天有關閉設定（收合時就看得到）
   const upcomingClosureDays = (() => {
     const c = form.closures || {}
@@ -570,7 +571,7 @@ export default function SettingsView({ onOpenCustomer }) {
           <div>
             <span className="label">線上訂位截止時間</span>
             <div className="mt-2 rounded-xl bg-chicken-brown/5 px-4 py-3 text-sm leading-6 text-chicken-brown/70">
-              線上訂位依預計抵達時間，至少提前 60 分鐘；不足 60 分鐘請來電詢問。線上改期也適用，電話與現場不受影響。
+              線上訂位依預計抵達時間，至少提前 {onlineLeadLabel()}；不足 {onlineLeadLabel()}請來電詢問。線上改期也適用，電話與現場不受影響。
             </div>
           </div>
         </div>
