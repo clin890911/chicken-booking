@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { seatingPerms, ACTION_WRITES, COLLECTION_PERM, WRITE_PERMS, isReadOnlyRole } from '../../src/utils/seatingPerms.js'
+import { seatingPerms, ACTION_WRITES, COLLECTION_PERM, WRITE_PERMS, isReadOnlyRole, canExportData } from '../../src/utils/seatingPerms.js'
 import { PERMISSIONS as FRONT } from '../../src/contexts/AuthContext.jsx'
 import { PERMISSIONS as BACK, canWriteCollection, STAFF_ROLES } from '../../functions/lib/staffAccess.js'
 
@@ -81,5 +81,21 @@ describe('isReadOnlyRole：以「有沒有任何寫入權限」判定完全唯�
     }
     expect(isReadOnlyRole(undefined)).toBe(true)
     expect(isReadOnlyRole(() => undefined)).toBe(true)
+  })
+})
+
+describe('canExportData：資料匯出（含個資 CSV）只給有寫入權的角色', () => {
+  it('manager／host／floor 可匯出；kitchen 與無 can（fail-closed）不可', () => {
+    for (const role of ['manager', 'host', 'floor']) expect(canExportData(canOf(role)), role).toBe(true)
+    expect(canExportData(canOf('kitchen'))).toBe(false)
+    expect(canExportData(undefined)).toBe(false)
+  })
+  it('host／floor 具備 customer.blacklist（與後端成對）、kitchen 沒有', () => {
+    for (const role of ['manager', 'host', 'floor']) {
+      expect(FRONT[role].has('customer.blacklist'), role).toBe(true)
+      expect(BACK[role].has('customer.blacklist'), role).toBe(true)
+    }
+    expect(FRONT.kitchen.has('customer.blacklist')).toBe(false)
+    expect(BACK.kitchen.has('customer.blacklist')).toBe(false)
   })
 })

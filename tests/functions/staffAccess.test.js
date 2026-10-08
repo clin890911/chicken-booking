@@ -80,6 +80,31 @@ describe('roleCan / 權限矩陣', () => {
   })
 })
 
+describe('顧客黑名單權限（customer.blacklist）', () => {
+  it('manager／host／floor 有、kitchen 無', () => {
+    for (const r of ['manager', 'host', 'floor']) expect(roleCan(r, 'customer.blacklist'), r).toBe(true)
+    expect(roleCan('kitchen', 'customer.blacklist')).toBe(false)
+  })
+  it('加／解除黑名單都是同一個 customers 文件欄位更新：host／floor／manager 推送放行，kitchen 被拒', () => {
+    const COLS = ['bookings', 'tables', 'waitlist', 'customers', 'agencies', 'guides', 'groupReservations']
+    const addBl = { customers: [{ phone: '0911000111', name: '王小明', blacklisted: true, blacklistReason: '多次爽約' }] }
+    const unBl = { customers: [{ phone: '0911000111', name: '王小明', blacklisted: false, blacklistReason: '' }] }
+    for (const r of ['manager', 'host', 'floor']) {
+      for (const ds of [addBl, unBl]) {
+        const out = classifyDatasetByPermission(ds, r, COLS)
+        expect(out.hasRejection, r).toBe(false)
+        expect(out.writable.customers).toHaveLength(1)
+      }
+    }
+    const k = classifyDatasetByPermission(addBl, 'kitchen', COLS)
+    expect(k.hasRejection).toBe(true)
+    expect(k.rejected.writes).toEqual(['customers'])
+    // 刪顧客仍僅 manager（黑名單權限不連帶開放刪除）
+    expect(canDeleteCollection('host', 'customers')).toBe(false)
+    expect(canDeleteCollection('floor', 'customers')).toBe(false)
+  })
+})
+
 describe('canWriteCollection', () => {
   it('kitchen 不可寫任何同步集合', () => {
     for (const c of ['bookings', 'tables', 'waitlist', 'customers', 'agencies', 'guides', 'groupReservations']) {

@@ -5,7 +5,7 @@ import { Reorder, useDragControls } from 'framer-motion'
 import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
-import { isReadOnlyRole } from '../../utils/seatingPerms'
+import { isReadOnlyRole, canExportData } from '../../utils/seatingPerms'
 import { useToast, useConfirm } from '../ui/Toast'
 import { searchNoshow } from '../../services/bookingService'
 import { generateTimeSlots, todayStr, slotsInSeating, seatingForSlot } from '../../utils/timeSlots'
@@ -63,9 +63,9 @@ export const ADMIN_ACTION_BAR_SLOT = 'admin-action-bar-slot'
 // 由父層提供「目前分類包含的 sectionKey 清單」；SettingsSection 據此自我隱藏（不屬當前分類則 return null）。
 const CategoryContext = createContext([])
 // 完全唯讀角色（kitchen）：所有「可編輯」區塊用 <fieldset disabled> 整段鎖住，輸入框／按鈕一律不可操作。
-// 下列區塊本質是讀取或帳號操作（查 No-show、匯出、登出），維持可用；雲端同步區改由按鈕層級處理。
+// 下列區塊本質是讀取或帳號操作（查 No-show、登出），維持可用；資料匯出（含電話個資）不在其內——kitchen 直接不渲染；雲端同步區改由按鈕層級處理。
 const ReadOnlyContext = createContext(false)
-const READONLY_EXEMPT_SECTIONS = ['noshow', 'export', 'account', 'firestore']
+const READONLY_EXEMPT_SECTIONS = ['noshow', 'account', 'firestore']
 
 export default function SettingsView({ onOpenCustomer }) {
   const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud, discardRejectedChanges, localPersistDegraded } = useBooking()
@@ -996,9 +996,11 @@ export default function SettingsView({ onOpenCustomer }) {
         )}
       </SettingsSection>
 
-      <SettingsSection sectionKey="export" title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
-        <ExportCenter />
-      </SettingsSection>
+      {canExportData(can) && (
+        <SettingsSection sectionKey="export" title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
+          <ExportCenter />
+        </SettingsSection>
+      )}
 
       {can('staff.manage') && (
         <SettingsSection sectionKey="staff" title="管理員帳號" description="新增同仁的 Google 帳號即可登入後台；毋須重新部署。">

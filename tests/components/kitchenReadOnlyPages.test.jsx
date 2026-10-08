@@ -174,13 +174,23 @@ describe('名冊：顧客檔與旅行社', () => {
     click(btns().find(b => b.textContent.includes('詳情') || b.textContent.includes('歷史')))
     expect(has('新增團體預排')).toBe(false)
     expect(has('編輯旅行社')).toBe(false)
+    // 旅行社詳情的「匯出 CSV」也不可用
+    expect(has('匯出 CSV')).toBe(false)
+  })
+
+  it.each(['manager', 'host', 'floor'])('%s：旅行社詳情保有「匯出 CSV」', (role) => {
+    currentRole = role
+    mount(<AgencyDirectoryView onGoPlanning={vi.fn()} />)
+    click(btns().find(b => b.textContent.includes('詳情') || b.textContent.includes('歷史')))
+    expect(has('匯出 CSV')).toBe(true)
   })
 })
 
 describe('設定頁 SettingsView', () => {
   const CATEGORIES = ['ops-rules', 'online', 'floor', 'line', 'data']
-  // 本質是讀取／帳號操作而保持可用的區塊（標題）：No-show 查詢、資料匯出、帳號（登出）、Firestore 資料同步（另驗上傳鈕）
-  const EXEMPT_TITLES = ['No-show 查詢', '資料匯出', '帳號', 'Firestore 資料同步']
+  // 本質是讀取／帳號操作而保持可用的區塊（標題）：No-show 查詢、帳號（登出）、Firestore 資料同步（另驗上傳鈕）
+  // 資料匯出（含電話個資）不在其內——kitchen 根本不渲染（見下方專測）
+  const EXEMPT_TITLES = ['No-show 查詢', '帳號', 'Firestore 資料同步']
   beforeEach(() => {
     Object.assign(ctx, {
       bookings: [], updateSettings: vi.fn((s) => s), flushCloudNow: vi.fn(async () => ({ ok: true })),
@@ -235,16 +245,26 @@ describe('設定頁 SettingsView', () => {
     expect(checked).toBeGreaterThanOrEqual(8)   // 確認真的掃到了一堆區塊，不是空轉
   })
 
-  it('kitchen：資料同步「上傳本機資料」disabled；匯出、No-show 查詢、登出保持可用', () => {
+  it('kitchen：資料同步「上傳本機資料」disabled；No-show 查詢、登出保持可用；資料匯出整區不存在', () => {
     currentRole = 'kitchen'
     settingsSection = 'data'
     mount(<SettingsView />)
     const push = btns().find(b => b.textContent.includes('上傳本機資料到 Firestore'))
     expect(push.disabled).toBe(true)
     expect(btns().find(b => b.textContent.includes('從 Firestore 重新整理')).disabled).toBe(false)
-    expect(btns().find(b => b.textContent.includes('ExportBtn')).closest('fieldset[disabled]')).toBeNull()
+    expect(btns().some(b => b.textContent.includes('ExportBtn'))).toBe(false)
+    expect(sections().some(x => x.title === '資料匯出')).toBe(false)
+    expect(container.textContent).not.toContain('下載 CSV')
     expect(btns().find(b => b.textContent.trim() === '查詢').closest('fieldset[disabled]')).toBeNull()
     expect(btns().find(b => b.textContent.trim() === '登出').closest('fieldset[disabled]')).toBeNull()
+  })
+
+  it.each(['manager', 'host', 'floor'])('%s：資料匯出區塊在、匯出鈕可用（既有行為不動）', (role) => {
+    currentRole = role
+    settingsSection = 'data'
+    mount(<SettingsView />)
+    expect(sections().some(x => x.title === '資料匯出')).toBe(true)
+    expect(btns().find(b => b.textContent.includes('ExportBtn')).closest('fieldset[disabled]')).toBeNull()
   })
 
   it('manager：同一頁的上傳鈕可按（只受 usingFirebase 影響）', () => {
