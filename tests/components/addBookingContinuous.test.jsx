@@ -48,14 +48,13 @@ describe('AddBookingView continuous（電話訂位連續新增）', () => {
   beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 9, 9, 9, 0)) })
   afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
 
-  it('continuous：存檔後保留日期與時段、清空姓名電話，並 toast 提示', () => {
+  it('continuous：存檔後保留日期與時段、清空姓名電話', () => {
     const onCreated = vi.fn()
     render({ continuous: true, onCreated })
     fillAndSave()
     expect(bookingCtx.addBooking).toHaveBeenCalledTimes(1)
     expect(bookingCtx.addBooking.mock.calls[0][0]).toMatchObject({ date: '2026-10-10', timeSlot: '18:00', name: '余先生' })
     expect(onCreated).toHaveBeenCalledTimes(1)
-    expect(toast.info).toHaveBeenCalledWith('已新增，可繼續輸入下一筆')
     expect(phone().value).toBe('')
     expect(name().value).toBe('')
     // 日期、時段仍被選中：確認鈕可直接再送（只缺姓名電話），且再填就能用同一天同時段新增第二筆
@@ -65,10 +64,9 @@ describe('AddBookingView continuous（電話訂位連續新增）', () => {
     expect(bookingCtx.addBooking.mock.calls[1][0]).toMatchObject({ date: '2026-10-10', timeSlot: '18:00', name: '第二位' })
   })
 
-  it('未傳 continuous（其他入口）：時段照舊清空、不 toast 提示', () => {
+  it('未傳 continuous（其他入口）：時段照舊清空', () => {
     render({})
     fillAndSave()
-    expect(toast.info).not.toHaveBeenCalled()
     type(phone(), '0944555666'); type(name(), '第二位')
     // 時段被清掉 → 缺時段，不顯示確認新增鈕
     expect(btn(b => b.textContent.includes('確認新增'))).toBeUndefined()

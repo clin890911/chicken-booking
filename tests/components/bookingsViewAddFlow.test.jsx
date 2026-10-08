@@ -101,4 +101,22 @@ describe('BookingsView：日曆／名冊兩條「新增訂位」預填路徑', (
     expect(container.querySelector('[data-testid="add-initial"]')).toBeTruthy()
     expect(container.textContent).not.toContain('TodayStub')
   })
+
+  it('日曆帶預填進「新增」：不是連續模式，存檔後回今日', () => {
+    render()
+    clickTab('日曆')
+    clickTab('CalAddBtn')
+    expect(container.querySelector('[data-testid="add-continuous"]').textContent).toBe('false')
+    clickTab('FakeSave')
+    expect(container.textContent).toContain('TodayStub')
+  })
+
+  it('名冊 openAdd 預填進「新增」：存檔後回今日；之後直接點「新增」恢復連續模式', () => {
+    render({ openAdd: { phone: '0912', name: '', source: 'phone', seq: 7 } })
+    expect(container.querySelector('[data-testid="add-continuous"]').textContent).toBe('false')
+    clickTab('FakeSave')
+    expect(container.textContent).toContain('TodayStub')
+    clickTab('新增')
+    expect(container.querySelector('[data-testid="add-continuous"]').textContent).toBe('true')
+  })
 })

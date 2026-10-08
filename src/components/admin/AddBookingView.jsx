@@ -34,7 +34,7 @@ const NOTE_OPTIONS = [
 // onAssignTable(booking)：「到桌況圖選」或事後「指派桌」→ 今天去現場指派模式、未來去規劃頁預配（AdminPage 分流）
 // onMoveTable(booking)：存檔後 toast 的「改桌」→ 現場頁 move 模式
 // continuous：連續新增（電話訂位入口專用）——存檔後保留日期＋時段，只清姓名／電話／人數／備註，
-//   游標回電話欄並 toast 提示可繼續下一筆。其他入口（現場頁、日曆）不傳 → 行為與過去完全相同。
+//   游標回電話欄（不另跳提示，避免與「已建立」toast 疊兩則）。其他入口（現場頁、日曆）不傳 → 行為與過去完全相同。
 export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, initial, continuous = false }) {
   const { bookings, tables, groupReservations, settings, addBooking, findReserveCandidates, assignBookingToTable, preassignBookingTable } = useBooking()
   const { user } = useAuth()
@@ -270,7 +270,6 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
       setAttempted(false); setShowCalendar(false)
       onCreated?.(b)
       if (continuous) {
-        toast.info('已新增，可繼續輸入下一筆')
         phoneRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
         phoneRef.current?.querySelector('input')?.focus()
       }
