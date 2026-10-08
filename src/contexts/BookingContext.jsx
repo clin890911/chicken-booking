@@ -124,6 +124,24 @@ export function BookingProvider({ children }) {
     return !repeat
   }
   const notePushSuccess = () => { pushRetryRef.current = null; lastPushErrorKeyRef.current = null }
+  // 推送序列化：同一時間只跑一個 pushChangedData（逾時最長 20 秒）。推送進行中時拉取不觸發補推、
+  // 節流推送改為排隊（pushQueuedRef），進行中的那個有結果（成功或失敗）後再補送一次；flushCloudNow 等它跑完。
+  const pushInFlightRef = useRef(null)   // 進行中的推送 Promise
+  const pushQueuedRef = useRef(false)
+  const runPushExclusive = async () => {
+    const p = cloudData.pushChangedData()
+    pushInFlightRef.current = p
+    try {
+      return await p
+    } finally {
+      pushInFlightRef.current = null
+      if (pushQueuedRef.current) {
+        pushQueuedRef.current = false
+        // 排隊的推送若是店員操作觸發，userPushPendingRef 仍保留 true（排隊時沒消耗），toast 語意不變。
+        syncCloudSoonRef.current?.({ auto: true })
+      }
+    }
+  }
 
   const pullCloud = useCallback(async () => {
     try {
@@ -137,7 +155,10 @@ export function BookingProvider({ children }) {
       // 資料（訂位／候位…）現在才推得上去——主動推一次，不要等店員下一個動作。沒有待推資料時
       // pushChangedData 回 skipped、不發請求。
       // 上次推送失敗：連線恢復了就補推（沒有待推資料時同樣回 skipped、不發請求）。
-      if (!gateWasOpen || isPushRetryDue(pushRetryRef.current, Date.now())) syncCloudSoonRef.current?.({ auto: true })
+      // 推送進行中不觸發補推（不疊推送），等它有結果、下一次拉取再判斷。
+      if (!gateWasOpen || (!pushInFlightRef.current && isPushRetryDue(pushRetryRef.current, Date.now()))) {
+        syncCloudSoonRef.current?.({ auto: true })
+      }
       // 狀態轉移規則見 utils/syncStatus——拉取成功**不得**清掉 'rejected'。
       // 狀態沒變時不每 5 秒換一次物件（shouldCommitPullStatus）：避免整個後台跟著重繪。
       setCloudStatus(s => {
@@ -157,10 +178,11 @@ export function BookingProvider({ children }) {
     if (opts?.auto !== true) userPushPendingRef.current = true
     window.clearTimeout(syncTimerRef.current)
     syncTimerRef.current = window.setTimeout(async () => {
+      if (pushInFlightRef.current) { pushQueuedRef.current = true; return }   // 不重疊：等進行中的推送有結果再送
       const auto = !userPushPendingRef.current
       userPushPendingRef.current = false
       try {
-        const r = await cloudData.pushChangedData()
+        const r = await runPushExclusive()
         // 首拉閘門未開：資料留在本機，首拉成功後由 pullCloud 主動補推。不是成功也不是失敗，狀態不動。
         if (isPushDeferred(r)) return
         notePushSuccess()
@@ -201,7 +223,9 @@ export function BookingProvider({ children }) {
     window.clearTimeout(syncTimerRef.current) // 取消待送的節流推送，改為立即送出
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     try {
-      const r = await cloudData.pushChangedData()
+      // 已有推送在跑：等它有結果再送（不重疊）；這次推送會把全部待推變更一併帶上。
+      while (pushInFlightRef.current) await pushInFlightRef.current.catch(() => {})
+      const r = await runPushExclusive()
       if (isPushDeferred(r)) return { ok: false, deferred: true, error: PUSH_DEFERRED_MESSAGE }
       notePushSuccess()
       setCloudStatus(statusFromPushResult(r, new Date().toISOString()))

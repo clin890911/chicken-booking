@@ -13,6 +13,10 @@ const h = vi.hoisted(() => ({
   pushFailsLeft: 0,
   pushTimes: [],
   failWith: null,
+  hangMs: 0,
+  active: 0,
+  maxActive: 0,
+  applyResult: undefined,
   toastErrors: [],
   toast: { success: () => {}, error: (m) => h.toastErrors.push(m), warning: () => {}, info: () => {}, action: () => {} },
 }))
@@ -21,11 +25,16 @@ vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => h.toast, useCo
 vi.mock('../../src/services/cloudDataService', () => ({
   setAuthTokenProvider: () => {},
   pullCloudData: async () => ({}),
-  applyCloudSnapshot: () => {},
+  applyCloudSnapshot: () => h.applyResult,
   hasPulledCloud: () => true,
   pushChangedData: async () => {
     h.pushes += 1
     h.pushTimes.push(Date.now())
+    h.active += 1
+    h.maxActive = Math.max(h.maxActive, h.active)
+    try {
+      if (h.hangMs) await new Promise(r => setTimeout(r, h.hangMs))   // 模擬弱網：掛住到逾時
+    } finally { h.active -= 1 }
     if (h.failWith) throw h.failWith()
     if (h.pushFailsLeft > 0) { h.pushFailsLeft -= 1; throw new Error('連線逾時，請檢查網路後重試') }
     return { ok: true }
@@ -49,6 +58,10 @@ describe('F4 推送失敗後的補推與燈號', () => {
     h.pushFailsLeft = 0
     h.pushTimes = []
     h.failWith = null
+    h.hangMs = 0
+    h.active = 0
+    h.maxActive = 0
+    h.applyResult = undefined
     h.toastErrors = []
   })
   afterEach(async () => {
@@ -134,6 +147,29 @@ describe('F4 推送失敗後的補推與燈號', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000) })
     expect(h.pushTimes[h.pushTimes.length - 1] - failedAt).toBeLessThanOrEqual(6_000)   // ★ 回到 5 秒級
     expect(h.pushTimes.length).toBeGreaterThan(before + 2)
+  })
+
+  it('M1 補推掛住 20 秒期間連續 3 次拉取成功：只有 1 個推送請求，不疊推送', async () => {
+    await mount()
+    h.failWith = httpError(500, 'admin-push-failed')
+    await failOnce()                                   // 推送 #1 失敗 → 進入補推
+    expect(h.pushes).toBe(1)
+    h.failWith = () => Object.assign(new Error('連線逾時，請檢查網路後重試'), { code: 'timeout' })
+    h.hangMs = 20_000
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })   // t≈5.3：拉取 → 補推 #2 開始、掛住
+    expect(h.pushes).toBe(2)
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })  // 期間 3 次拉取成功
+    expect(h.pushes).toBe(2)                           // ★ 沒有再開新推送
+    // 店員此時又動了一下：不重疊，排隊等 #2 有結果
+    await act(async () => { ref.ctx.blockTable(ref.ctx.tables[1].number, '測試') })
+    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+    expect(h.pushes).toBe(2)
+    expect(h.maxActive).toBe(1)
+    h.hangMs = 0
+    h.failWith = null
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000) })   // #2 逾時失敗 → 排隊的那次送出
+    expect(h.pushes).toBe(3)
+    expect(h.maxActive).toBe(1)
   })
 
   it('沒有推送失敗時，拉取不額外觸發推送（不每 5 秒打 adminPushData）', async () => {
