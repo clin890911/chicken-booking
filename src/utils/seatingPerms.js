@@ -56,7 +56,7 @@ export const WRITE_PERMS = [
   'waitlist.create', 'waitlist.update', 'waitlist.delete',
   'customer.update', 'customer.delete', 'customer.blacklist',
   'group.create', 'group.update', 'group.delete', 'agency.manage',
-  'settings.update', 'staff.manage',
+  'settings.update', 'settings.closures', 'staff.manage',
 ]
 
 // can 缺失（無 Provider）視為唯讀＝fail-closed，與 seatingPerms 一致。

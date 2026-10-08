@@ -38,6 +38,7 @@ import {
   canWriteSettings,
   classifyDatasetByPermission,
 } from './lib/staffAccess.js'
+import { scopeClosureSettingsPush } from './lib/settingsScope.js'
 import {
   projectForRead,
   stripServerOwnedCustomerFields,
@@ -235,13 +236,15 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     //    「已同步」，若後端逕自改成部分寫入，被拒的那些變更會被舊前端靜默丟棄。
     //    functions 與前端是分開部署的（functions 先、前端後），中間必然存在新後端＋舊前端的
     //    時間窗，故沿用舊行為當預設，由新前端送 partial:true 才啟用。
-    const { dataset = {}, partial = false } = req.body || {}
+    // settingsChangedKeys：客戶端表態「本機 settings 相對上次同步基準線改了哪些頂層 key」。
+    // 只有 settings.closures 角色（host）用得到——沒表態的舊前端維持整份 settings 被拒（見 classifyDatasetByPermission）。
+    const { dataset = {}, partial = false, settingsChangedKeys } = req.body || {}
     if(dataset.handoffTasks || dataset.deletedIds?.handoffTasks) return res.status(403).json({ok:false,error:'use-handoff-command'})
     // 後端 RBAC：依角色把關每個集合的「寫入/刪除」與「改設定」。
     // 擋的是繞過 UI 直接打 API 的越權（如 kitchen 改設定/刪訂位）。
     const role = staff.role
-    const { rejected, writable, message: rejectedMessage, hasRejection } =
-      classifyDatasetByPermission(dataset, role, Object.keys(SYNC_COLLECTION_IDKEYS))
+    const { rejected, writable, message: rejectedMessage, hasRejection, settingsScope, settingsKeys } =
+      classifyDatasetByPermission(dataset, role, Object.keys(SYNC_COLLECTION_IDKEYS), { settingsChangedKeys })
     // 舊客戶端（未表態）維持「任一集合越權即整包 403」。
     // 嚴格比對 true：避免 "false" 這類字串因 truthiness 而誤啟部分模式。
     if (hasRejection && partial !== true) {
@@ -288,7 +291,33 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
       ops.push(...deleteOps(name, deletedIds[name]))
     }
-    if (writable.settings) {
+    // settingsApplied：只在 closures 範圍回傳，告訴前端「哪些 key 的本機值現在已在雲端」以便只推進那部分基準線。
+    let settingsApplied = null
+    let settingsForNotify = writable.settings
+    if (writable.settings && settingsScope === 'closures') {
+      // 訂位專員（settings.closures）：只套關閉相關 key，其餘沿用雲端（見 lib/settingsScope.js）。
+      const cloudSnap = await db.collection('settings').doc('main').get()
+      const scoped = scopeClosureSettingsPush({
+        clientSettings: writable.settings,
+        cloudSettings: cloudSnap.exists ? cloudSnap.data() : {},
+        role,
+        keys: settingsKeys,
+        normalize: normalizeStoreSettings,
+      })
+      if (scoped.mode === 'closures') {
+        settingsApplied = scoped.appliedKeys
+        settingsForNotify = scoped.next
+        // mergeFields：只替換這幾個頂層欄位（整個 closures 物件），其他設定欄位一律不碰。
+        if (scoped.changed) {
+          ops.push({ ref: db.collection('settings').doc('main'), data: {
+            ...scoped.patch,
+            updatedAt: new Date().toISOString(),
+          }, mergeFields: [...scoped.writeFields, 'updatedAt'] })
+        }
+      } else {
+        settingsForNotify = undefined
+      }
+    } else if (writable.settings) {
       ops.push({ ref: db.collection('settings').doc('main'), data: {
         ...normalizeStoreSettings(writable.settings),
         updatedAt: new Date().toISOString(),
@@ -298,7 +327,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     // 店員端改訂位 LINE 通知（feature flag lineNotifyOnAdminChange，預設關）：
     // 開關開啟時才在 commit「前」讀舊值（merge-upsert 不讀舊值，diff 需要 before 快照），
     // commit「成功後」才分類入列——先寫成功才通知，避免通知了卻沒寫進去。
-    const notifySettings = await readSettingsForAdminNotify(writable.settings)
+    const notifySettings = await readSettingsForAdminNotify(settingsForNotify)
     // beforeBookings 已於上方 commit 前無條件讀取（strict），此處直接重用做通知 diff，不再重讀。
     // 硬刪除的訂位只出現在 deletedIds，commit 後就查不到；先抓刪除前完整舊值，Telegram 才能附完整 JSON 供還原。
     const deletedBookingIds = (writable.deletedIds || {}).bookings || []
@@ -325,7 +354,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
         const repeated=snapshots.every(s=>s.retry)
         queueRepeated=repeated
         if(!repeated && snapshots.some(s=>s.retry)) throw errorWithStatus('sync-changed',409)
-        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,{merge:true}) }
+        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,op.mergeFields?{mergeFields:op.mergeFields}:{merge:true}) }
         for(const saved of snapshots){
           if(!saved.retry){tx.set(saved.ref,saved.data,{merge:true});tx.set(saved.receiptRef,{item:saved.data,createdAt:new Date().toISOString()})}
         }
@@ -339,10 +368,11 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     // 有越權時如實回報被拒的部分（僅 partial 客戶端會走到這裡）。ok 仍為 true——
     // 「可寫的已經寫進去了」是事實，前端需要據此推進那些集合的基準線；
     // 被拒的部分由前端隔離、不得標記為已同步。
+    const appliedPart = settingsApplied ? { settingsApplied } : {}
     if (hasRejection) {
-      return res.json({ ok: true, rejected, rejectedMessage, role, waitlistUpdates })
+      return res.json({ ok: true, rejected, rejectedMessage, role, waitlistUpdates, ...appliedPart })
     }
-    return res.json({ ok: true, waitlistUpdates })
+    return res.json({ ok: true, waitlistUpdates, ...appliedPart })
   } catch (err) {
     console.error('adminPushData failed:', err)
     return res.status(err.status || 500).json({ ok: false, error: err.message || 'admin-push-failed' })
@@ -1732,7 +1762,8 @@ async function commitInChunks(ops, chunkSize = 450) {
     const batch = db.batch()
     ops.slice(i, i + chunkSize).forEach(op => {
       if (op.delete) batch.delete(op.ref)
-      else batch.set(op.ref, op.data, { merge: true })
+      // mergeFields：只替換指定頂層欄位（settings closures 範圍寫入用）；其餘維持 merge-upsert。
+      else batch.set(op.ref, op.data, op.mergeFields ? { mergeFields: op.mergeFields } : { merge: true })
     })
     await batch.commit()
   }

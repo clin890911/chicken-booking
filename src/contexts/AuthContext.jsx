@@ -51,7 +51,7 @@ export const PERMISSIONS = {
     'waitlist.read', 'waitlist.create', 'waitlist.update', 'waitlist.delete',
     'customer.read', 'customer.update', 'customer.delete', 'customer.blacklist',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
-    'settings.read', 'settings.update',
+    'settings.read', 'settings.update', 'settings.closures',
     'staff.manage',
   ]),
   floor: new Set([
@@ -74,6 +74,9 @@ export const PERMISSIONS = {
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update', 'customer.blacklist',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
+    // 窄權限：設定頁只能儲存「休店／關閉時段」（settings 的 CLOSURE_SETTING_KEYS），其餘設定唯讀。
+    // 與後端 staffAccess.js 成對；後端只套客戶端改過的關閉 key、其餘沿用雲端值。
+    'settings.closures',
   ]),
   kitchen: new Set([
     'booking.read',
