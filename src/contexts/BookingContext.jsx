@@ -22,6 +22,7 @@ import { todayStr } from '../utils/timeSlots'
 import { markCreatedHere } from '../utils/newBookingAlerts'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
+import { formatBookingTables } from '../utils/bookingTables'
 
 const BookingContext = createContext(null)
 
@@ -560,7 +561,7 @@ export function BookingProvider({ children }) {
   }
   const moveTable = (bookingId, newTableNumber) => {
     const before = bookingService.getById(bookingId)
-    const fromTable = before?.assignedTableId
+    const fromTable = before ? formatBookingTables(before) : undefined
     const r = seatingService.moveTable(bookingId, newTableNumber)
     refresh()
     syncCloudSoon()

@@ -6,6 +6,7 @@ import { useToast, useConfirm } from '../ui/Toast'
 import { getNoshowCount, revokeNoshow } from '../../services/bookingService'
 import { bookingDayKind, todayStr } from '../../utils/timeSlots'
 import { diffMin, stageOf } from '../../utils/diningStage'
+import { formatBookingTables } from '../../utils/bookingTables'
 import { markNoshow, restoreFromNoshow, cancelWithUndo, releaseAfterCheckout } from '../../utils/bookingActions'
 
 // 用餐已坐分鐘數。分鐘級顯示只需要 30 秒 tick——原本每張「用餐中」卡片各自每秒 setState
@@ -112,7 +113,7 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
       }
       return toast.error('入座失敗：' + r.error)
     }
-    toast.success(`${booking.name} 已入座 ${booking.assignedTableId}`)
+    toast.success(`${booking.name} 已入座 ${formatBookingTables(booking)}`)
   }, [booking, onAssign, onMove, isCombo, seatBooking, toast])
 
   const checkout = useCallback(async () => {
@@ -132,7 +133,7 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
     if (!ok) return false
     const r = finalizeBooking(booking.id)
     if (!r.ok) { toast.error(r.error); return false }
-    toast.success(`${booking.name} 已離席 · ${booking.assignedTableId || ''} 已釋出（用餐 ${minutes} 分）`)
+    toast.success(`${booking.name} 已離席 · ${formatBookingTables(booking)} 已釋出（用餐 ${minutes} 分）`)
     return true
   }, [booking, confirm, finalizeBooking, minutes, toast])
 
@@ -158,7 +159,7 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
   }, [booking, setStatus, toast])
 
   const unpreassign = useCallback(async () => {
-    const ok = await confirm(`解除 ${booking.name} 的預先配桌（${booking.assignedTableId}）？\n之後可再到排位地圖重新配桌。`,
+    const ok = await confirm(`解除 ${booking.name} 的預先配桌（${formatBookingTables(booking)}）？\n之後可再到排位地圖重新配桌。`,
       { title: '解除預先配桌', confirmLabel: '解除' })
     if (!ok) return false
     clearBookingPreassign(booking.id)

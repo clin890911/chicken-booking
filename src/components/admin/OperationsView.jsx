@@ -27,6 +27,7 @@ import { todayStr, nowSlot } from '../../utils/timeSlots'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
 import SegmentedControl from '../ui/SegmentedControl'
 import { seatingPerms } from '../../utils/seatingPerms'
+import { formatBookingTables } from '../../utils/bookingTables'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
@@ -681,7 +682,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const r = moveTable(mode.booking.id, number)
       if (!r.ok) return toast.error('換桌失敗：' + r.error)
       releaseOverlappingPreassigns(overridden, releaseOpts)
-      toast.success(`${mode.booking.name} 已從 ${mode.booking.assignedTableId} 改到 ${number} · 可指派下一組`)
+      toast.success(`${mode.booking.name} 已從 ${formatBookingTables(mode.booking)} 改到 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)

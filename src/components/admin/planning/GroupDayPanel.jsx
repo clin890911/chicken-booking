@@ -3,6 +3,7 @@ import Icon from '../../ui/Icon'
 import { dayLabel } from '../../../utils/timeSlots'
 import GroupArrivalTimeline from './GroupArrivalTimeline'
 import GroupPrepDigest from './GroupPrepDigest'
+import { formatBookingTables } from '../../../utils/bookingTables'
 
 // Pane B：當日總覽。2026-09 改版為「群組清單」語彙（iOS 設定頁式）：
 //   標題列（日期 + 排位地圖 / 列印 / 今日→現場）→ 三格統計（團體 / 散客 / 保留）→ 警示 →
@@ -28,12 +29,12 @@ function Pill({ cls, children }) {
 }
 
 // 場次內散客列。整列可點 → 訂位詳情（onOpen）；桌號可點 → 排位地圖標示該桌（onFocusTable）；「配桌」→ 一鍵進預配模式。
-function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
+export function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
   const b = row.booking
   const st = WALKIN_STATUS[row.status] || WALKIN_STATUS.confirmed
   const n = b.notes || {}
-  const extra = Array.isArray(b.extraTableIds) ? b.extraTableIds : []
-  const tableLabel = row.assignedTableId ? `${row.assignedTableId}${extra.length ? ` +${extra.length}` : ''}` : ''
+  // 併桌列出所有桌號（「101 + 107」），不再只寫「101 +1」
+  const tableLabel = row.assignedTableId ? formatBookingTables({ assignedTableId: row.assignedTableId, extraTableIds: b.extraTableIds }) : ''
   const clickable = !!onOpen
   const needIcons = [n.child && 'child', n.mobility && 'wheelchair'].filter(Boolean)
   return (
@@ -51,7 +52,7 @@ function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
       </button>
       {row.assignedTableId ? (
         onFocusTable ? (
-          <button type="button" onClick={() => onFocusTable(b)} title={`在排位地圖上標示這桌（${[row.assignedTableId, ...extra].join('、')}）`}
+          <button type="button" onClick={() => onFocusTable(b)} title={`在排位地圖上標示這桌（${tableLabel.split(' + ').join('、')}）`}
             className="tap text-xs font-semibold text-chicken-brown/70 tabular-nums shrink-0 whitespace-nowrap h-8 px-2 rounded-lg hover:bg-chicken-brown/[0.05]">{tableLabel}</button>
         ) : (
           <span className="text-xs font-semibold text-chicken-brown/70 tabular-nums shrink-0">{tableLabel}</span>

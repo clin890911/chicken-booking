@@ -9,6 +9,7 @@ import { STATUS_MAP, SOURCE_MAP, fmtTime } from './bookingLabels'
 import { copyText } from '../../utils/clipboard'
 import { assignmentKind } from '../../utils/tableStatus'
 import { PREASSIGN_COLOR } from '../admin/floormap/statusColors'
+import { formatBookingTables } from '../../utils/bookingTables'
 
 // 顯示字典與純函式動作已抽到 ./bookingLabels 與 utils/bookingActions；
 // 這裡 re-export 讓既有 import（CustomerDetailModal / TableDrawer / 測試）不必改。
@@ -72,7 +73,7 @@ function BookingCard({ booking, onAssign, onMove }) {
                     title="只記在訂位上、桌況還沒鎖：別人仍坐得進去（桌況圖上是藍色虛線）"
                     className="text-xs font-bold px-2.5 py-0.5 rounded-full text-white border border-dashed border-white/70"
                     style={{ background: PREASSIGN_COLOR.badge }}>
-                    預配 {booking.assignedTableId}
+                    預配 {formatBookingTables(booking)}
                   </span>
                 ) : (
                   <span data-kind={tableKind}
@@ -80,7 +81,7 @@ function BookingCard({ booking, onAssign, onMove }) {
                     ${booking.status === 'arrived'
                       ? 'bg-orange-600 text-white'
                       : 'bg-emerald-600 text-white'}`}>
-                    桌 {booking.assignedTableId}
+                    桌 {formatBookingTables(booking)}
                   </span>
                 )
               )}

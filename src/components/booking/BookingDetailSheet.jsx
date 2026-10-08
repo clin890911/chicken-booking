@@ -9,6 +9,7 @@ import { normalize } from '../../services/customerService'
 import { customerBookings } from '../../utils/customerHistory'
 import { dayLabel, seatingForSlot } from '../../utils/timeSlots'
 import { copyText } from '../../utils/clipboard'
+import { bookingTableNumbers, formatBookingTables } from '../../utils/bookingTables'
 import Icon from '../ui/Icon'
 
 // 散客訂位詳情（bottom sheet）。
@@ -77,7 +78,7 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
 
   const st = STATUS_MAP[booking.status] || STATUS_MAP.pending
   const seating = seatingForSlot(settings, booking.timeSlot)
-  const tableNums = [booking.assignedTableId, ...(Array.isArray(booking.extraTableIds) ? booking.extraTableIds : [])].filter(Boolean)
+  const tableNums = bookingTableNumbers(booking)
   const phoneKey = normalize(booking.phone)
   const customer = useMemo(
     () => (phoneKey ? (customers || []).find(c => normalize(c.phone) === phoneKey) || null : null),
@@ -211,7 +212,7 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
                       <span className="font-bold w-[64px] shrink-0">{h.date ? dayLabel(h.date) : '—'}</span>
                       <span className="w-10 shrink-0">{h.timeSlot || '—'}</span>
                       <span className="shrink-0">{h.guests} 位</span>
-                      {h.assignedTableId && <span className="shrink-0">桌 {h.assignedTableId}</span>}
+                      {h.assignedTableId && <span className="shrink-0">桌 {formatBookingTables(h)}</span>}
                       <span className={`ml-auto shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${hs.color}`}>{hs.label}</span>
                     </div>
                   )
@@ -235,7 +236,7 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
         {act.show.move && (
           <ActionButton tone="indigo" className="col-span-2" disabled={!!act.moveDisabledReason}
             title={act.moveDisabledReason || undefined}
-            onClick={() => { onClose?.(); act.move() }}>↔ 改桌（目前 {booking.assignedTableId}）</ActionButton>
+            onClick={() => { onClose?.(); act.move() }}>↔ 改桌（目前 {formatBookingTables(booking)}）</ActionButton>
         )}
         {act.show.move && act.moveDisabledReason && (
           <div className="col-span-2 text-[11px] font-bold text-chicken-brown/50 text-center -mt-1">{act.moveDisabledReason}</div>
