@@ -129,6 +129,12 @@ function normalizeFloorPlan(fp) {
   return out
 }
 
+// 對外：把任意 settings 物件轉成本機正規形式（＝getSettings() 會回傳的形狀與 key 順序）。
+// cloudDataService 用它把舊版落地的同步基準線重新正規化，避免 settings 形狀演進後基準線永久 dirty。
+export function normalizeSettingsShape(value) {
+  return withDefaults(value && typeof value === 'object' ? value : {})
+}
+
 function withDefaults(value = {}) {
   const merged = { ...DEFAULT, ...value }
   return {
