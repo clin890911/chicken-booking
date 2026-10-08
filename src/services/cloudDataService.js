@@ -310,6 +310,8 @@ export function applyCloudSnapshot(data = {}) {
     return
   }
   // 後續拉取：合併。本機尚未推送的 dirty 文件保留本機版本，其餘採雲端最新值。
+  // 回傳 { waitlistConflictsResolved }：這次放棄掉的 409 衝突候位筆數（呼叫端據此退避歸零、立刻補推）。
+  let waitlistConflictsResolved = 0
   for (const col of DIFF_COLLECTIONS) {
     const cloudArr = data[col]
     if (!Array.isArray(cloudArr)) continue
@@ -323,6 +325,7 @@ export function applyCloudSnapshot(data = {}) {
       const dirty = lastSynced[col][id] !== stable(doc)
       if (dirty && col === 'waitlist' && waitlistConflictIds.has(id) && waitlistUpsertConflicts(doc, cloudMap[id] || null)) {
         // 候位 409 真正衝突的那筆：放棄本機變更（見上方說明）。merged 本來就是雲端版本／雲端已無此筆。
+        waitlistConflictsResolved += 1
         if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id])
         else delete lastSynced[col][id]                 // 雲端已刪：本機那筆一併丟棄，不再重推也不發刪除
       } else if (dirty) merged[id] = doc                // 保留待推送的本機變更
@@ -349,6 +352,7 @@ export function applyCloudSnapshot(data = {}) {
   }
   cloudPulled = true // 舊裝置（已 initialized、落地狀態沒有 cloudPulled）在第一次成功拉取時開閘
   persistSyncState()
+  return { waitlistConflictsResolved }
 }
 
 // 雲端請求逾時：平板在弱網／Wi‑Fi 切換時 fetch 可能永遠不回，呼叫端（設定頁「儲存」）

@@ -172,6 +172,21 @@ describe('F4 推送失敗後的補推與燈號', () => {
     expect(h.maxActive).toBe(1)
   })
 
+  it('M2 連續 3 次候位 409 後，下一次拉取解掉衝突 → 立刻補推，不等退避', async () => {
+    await mount()
+    h.failWith = () => Object.assign(new Error('waitlist-changed'), { status: 409, code: 'waitlist-changed', waitlistConflict: true })
+    for (let i = 0; i < 3; i++) {
+      await act(async () => { ref.ctx.blockTable(ref.ctx.tables[i].number, '測試') })
+      await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+    }
+    expect(h.pushes).toBe(3)                           // 3 次 409，退避被推到 30 秒級
+    h.failWith = null
+    h.applyResult = { waitlistConflictsResolved: 1 }
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_100 + 300) })  // t≈5.3：拉取解掉衝突＋250ms 節流
+    expect(h.pushes).toBe(4)                           // ★ 馬上補推
+    expect(ref.ctx.cloudStatus.state).toBe('synced')
+  })
+
   it('沒有推送失敗時，拉取不額外觸發推送（不每 5 秒打 adminPushData）', async () => {
     await mount()
     await act(async () => { await vi.advanceTimersByTimeAsync(15_500) })

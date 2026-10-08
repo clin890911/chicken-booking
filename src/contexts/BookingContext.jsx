@@ -147,7 +147,7 @@ export function BookingProvider({ children }) {
     try {
       const data = await cloudData.pullCloudData()
       const gateWasOpen = cloudData.hasPulledCloud()
-      cloudData.applyCloudSnapshot(data)
+      const applied = cloudData.applyCloudSnapshot(data)
       cloudPulledRef.current = true
       lastPullOkAtRef.current = Date.now()
       refresh()
@@ -155,6 +155,9 @@ export function BookingProvider({ children }) {
       // 資料（訂位／候位…）現在才推得上去——主動推一次，不要等店員下一個動作。沒有待推資料時
       // pushChangedData 回 skipped、不發請求。
       // 上次推送失敗：連線恢復了就補推（沒有待推資料時同樣回 skipped、不發請求）。
+      // 這次拉取解掉了候位 409 衝突：之前每個動作都帶著衝突候位吃 409、退避被推到 30–60 秒，
+      // 現在其他集合推得上去了——退避歸零、立刻補推一次。
+      if (applied?.waitlistConflictsResolved > 0) pushRetryRef.current = { failures: 0, nextAt: 0 }
       // 推送進行中不觸發補推（不疊推送），等它有結果、下一次拉取再判斷。
       if (!gateWasOpen || (!pushInFlightRef.current && isPushRetryDue(pushRetryRef.current, Date.now()))) {
         syncCloudSoonRef.current?.({ auto: true })
@@ -202,8 +205,8 @@ export function BookingProvider({ children }) {
         const now = Date.now()
         if (shouldToast && now - lastPushErrorToastRef.current > 8000) {
           lastPushErrorToastRef.current = now
-          // 候位 409 衝突：下一次拉取會改以雲端候位為準、其餘變更隨後補推（見 cloudDataService）。
-          if (err?.waitlistConflict) toastRef.current?.warning?.('候位狀態已由另一台更新，已改以雲端為準，請確認候位清單')
+          // 候位 409 衝突：下一次拉取會把衝突那幾筆改以雲端為準、其餘變更隨後補推（見 cloudDataService）。
+          if (err?.waitlistConflict) toastRef.current?.warning?.('候位狀態與另一台衝突，稍後自動以雲端為準，請確認候位清單')
           else toastRef.current?.error?.('雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
         }
       }

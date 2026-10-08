@@ -572,7 +572,8 @@ describe('候位 409 衝突自癒（R3）', () => {
     await pushChangedData().catch(() => {})
 
     // 另一台把 #5 帶位（v2）；#8 雲端沒動（v3）
-    applyCloudSnapshot({ bookings: [], waitlist: [{ ...w5, status: 'seated', queueVersion: 2 }, w8], tables: [table], settings: cloudSettingsPayload() })
+    const applied = applyCloudSnapshot({ bookings: [], waitlist: [{ ...w5, status: 'seated', queueVersion: 2 }, w8], tables: [table], settings: cloudSettingsPayload() })
+    expect(applied).toEqual({ waitlistConflictsResolved: 1 })              // M2：回報處理掉的衝突筆數
     expect(read(WAITLIST).find(w => w.id === 'w5').status).toBe('seated')   // 衝突 → 雲端
     expect(read(WAITLIST).find(w => w.id === 'w8').status).toBe('seated')   // ★ 不衝突 → 保留本機入座
 
