@@ -18,6 +18,8 @@ const SUB_TABS = [
 // 「指派桌」按鈕呼叫 onAssignTable（今天→現場、未來日→規劃排位地圖，由 AdminPage 分流）；
 // 「改桌」呼叫 onMoveTable（今日待到、已有桌 → 現場頁 move 模式，由 AdminPage 跨頁）；
 // 團體卡點擊呼叫 onOpenGroup → 規劃頁團單詳情
+// 直接點「新增」子分頁：存檔後留在新增畫面（連續輸入電話訂位，保留日期＋時段）；
+// 日曆／名冊帶預填進來的：存檔後照舊回「今日」
 export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, onCreated, openAdd }) {
   // 新增訂位要 booking.create；唯讀角色（kitchen）沒有「新增」子分頁、日曆也不出現「＋ 新增訂位」，
   // 名冊預填（openAdd）更不會把他送進新增表單。fail-closed：useAuth() 無 Provider 時視為無權。
@@ -27,12 +29,14 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   // 新增表單的預填：可能來自名冊（openAdd prop）或日曆選日期後按「＋ 新增訂位」（本地觸發）。
   // 兩條路共用同一個 state，誰後觸發就以誰為準（都帶 seq，AddBookingView 依 seq 變更才重灌欄位）。
   const [addPrefill, setAddPrefill] = useState(openAdd || null)
+  const [addViaPrefill, setAddViaPrefill] = useState(!!openAdd)
   // 名冊帶入預填時跳到「新增」子分頁（seq 變更才觸發，避免重複跳）
   const lastSeq = useRef(openAdd?.seq)
   useEffect(() => {
     if (openAdd && canCreate && openAdd.seq !== lastSeq.current) {
       lastSeq.current = openAdd.seq
       setAddPrefill(openAdd)
+      setAddViaPrefill(true)
       setSub('add')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -43,6 +47,7 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   const handleAddBookingFromCalendar = (dateStr) => {
     if (!canCreate) return
     setAddPrefill({ date: dateStr, seq: Date.now() })
+    setAddViaPrefill(true)
     setSub('add')
   }
 
@@ -52,7 +57,7 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   return (
     <div ref={rootRef} className="space-y-3">
       <div className="sticky top-0 z-20 py-1 bg-chicken-cream">
-      <SegmentedControl options={canCreate ? SUB_TABS : SUB_TABS.filter(t => t.key !== 'add')} value={sub} onChange={setSub} ariaLabel="訂位子分頁" />
+      <SegmentedControl options={canCreate ? SUB_TABS : SUB_TABS.filter(t => t.key !== 'add')} value={sub} onChange={(k) => { if (k === 'add') setAddViaPrefill(false); setSub(k) }} ariaLabel="訂位子分頁" />
       </div>
 
       {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
@@ -60,7 +65,7 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
           {sub === 'today' && <TodayView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} />}
           {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} onAddBooking={canCreate ? handleAddBookingFromCalendar : undefined} />}
           {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
-          {sub === 'add' && canCreate && <AddBookingView initial={addPrefill} onCreated={(b) => { setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
+          {sub === 'add' && canCreate && <AddBookingView initial={addPrefill} continuous={!addViaPrefill} onCreated={(b) => { if (addViaPrefill) setSub('today'); onCreated?.(b) }} onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
       </div>
     </div>
   )

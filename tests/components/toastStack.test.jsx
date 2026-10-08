@@ -47,3 +47,36 @@ describe('Toast 疊加上限', () => {
     expect(container.querySelector('button')?.textContent).toBe('復原')
   })
 })
+
+// iPad 現場頁：右下是地圖與報到列，toast 不可再出現在右下角；復原鈕要是 ≥44px 的實心按鈕。
+describe('Toast 位置與動作鈕', () => {
+  let container, root
+  afterEach(() => { act(() => root?.unmount()); container?.remove(); api = null })
+  const setup = () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => root.render(<ToastProvider><Probe /></ToastProvider>))
+  }
+
+  it('容器釘在頂部置中，不使用任何 bottom/right 錨點', () => {
+    setup()
+    act(() => api.info('hi', { duration: 0 }))
+    const cls = container.ownerDocument.querySelector('[data-testid="toast-container"]').className
+    expect(cls).toContain('top-4')
+    expect(cls).toContain('items-center')
+    expect(cls).not.toMatch(/bottom-|sm:left-auto|items-end/)
+  })
+
+  it('動作鈕：實心底色、最小 44px 高，點擊會呼叫 onClick 並關閉', () => {
+    setup()
+    let clicked = 0
+    act(() => api.action('已標記', { label: '↩ 復原', onClick: () => { clicked++ } }, { duration: 0 }))
+    const btn = document.querySelector('[data-testid="toast-action"]')
+    expect(btn.className).toContain('min-h-[44px]')
+    expect(btn.className).toMatch(/\bbg-white\b/)
+    expect(btn.className).not.toContain('underline')
+    act(() => btn.click())
+    expect(clicked).toBe(1)
+  })
+})

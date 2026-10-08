@@ -3,10 +3,15 @@ import {useHandoff} from '../../../contexts/HandoffContext'
 import {useBooking} from '../../../contexts/BookingContext'
 import {todayStr} from '../../../utils/timeSlots'
 import {commandId,resolveTaskTarget} from '../../../services/handoffService'
+const COLLAPSE_KEY='handoffPanelCollapsed'
+// 讀寫 localStorage 一律 try/catch（私密視窗／封鎖網站資料時會丟例外）→ 失敗就用預設
+const readStored=()=>{try{const v=localStorage.getItem(COLLAPSE_KEY);return v==='1'?true:v==='0'?false:null}catch{return null}}
+const writeStored=v=>{try{localStorage.setItem(COLLAPSE_KEY,v?'1':'0')}catch{/* 儲存失敗不影響操作 */}}
 export default function HandoffPanel({onLocate}){
  const {tasks,loaded,error,canWrite,changeTask,refresh}=useHandoff()
  const {bookings,tables}=useBooking()
- const [collapsed,setCollapsed]=useState(false)
+ // 沒有待辦 → 預設收合（記住使用者手動展開／收合）；有待辦 → 一律展開（新待辦進來不會被藏住），僅本次工作階段內可手動收
+ const [stored,setStored]=useState(readStored),[sessionCollapsed,setSessionCollapsed]=useState(false),[sawPending,setSawPending]=useState(false)
  const [date,setDate]=useState(todayStr()),[tab,setTab]=useState('pending'),[busy,setBusy]=useState(null),[failure,setFailure]=useState('')
  const pending=useRef(new Map())
  const failedTask=useRef(null)
@@ -17,6 +22,10 @@ export default function HandoffPanel({onLocate}){
   if(latest&&latest.version>failed.version&&latest.status===failed.status){setFailure('');failedTask.current=null}
  },[tasks])
  const items=tasks.filter(t=>t.date===date&&t.status===tab)
+ const pendingCount=tasks.filter(t=>t.date===date&&t.status==='pending').length
+ if(pendingCount>0&&!sawPending)setSawPending(true) // 本次看過待辦後，完成最後一筆也不自動收（避免操作到一半面板跳掉）
+ const collapsed=(pendingCount>0||sawPending)?sessionCollapsed:(stored??true)
+ const toggle=()=>{const next=!collapsed;setSessionCollapsed(next);setStored(next);writeStored(next)}
  const act=async(task)=>{
   if(busy)return
   const action=tab==='pending'?'complete':'reopen',key=task.id+':'+task.version+':'+action
@@ -28,7 +37,7 @@ export default function HandoffPanel({onLocate}){
  }
  return <section aria-label="現場交班待辦" className="rounded-xl border bg-white p-3 flex flex-col gap-2 max-h-[260px] overflow-hidden flex-none">
   <div className={`grid items-center gap-2 flex-none ${collapsed?'grid-cols-1':'grid-cols-[minmax(0,1fr)_120px_36px]'}`}>
-   <button aria-expanded={!collapsed} onClick={()=>setCollapsed(v=>!v)} className="font-bold text-sm text-left min-h-[44px]">交班待辦 {tasks.filter(t=>t.date===date&&t.status==='pending').length} <span className="text-xs font-normal">{collapsed?'展開':'收合'}</span></button>
+   <button aria-expanded={!collapsed} onClick={toggle} className="font-bold text-sm text-left min-h-[44px]">交班待辦 {pendingCount} <span className="text-xs font-normal">{collapsed?'展開':'收合'}</span></button>
    {!collapsed&&<><input aria-label="交班日期" type="date" value={date} onChange={e=>setDate(e.target.value)} className="min-h-[44px] w-full text-xs"/><button onClick={refresh} className="min-h-[44px] underline text-xs">重整</button></>}
   </div>
   {!collapsed&&<>

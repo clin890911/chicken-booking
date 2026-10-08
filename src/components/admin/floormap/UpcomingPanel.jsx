@@ -9,9 +9,29 @@ import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
 import { seatTableWarnings } from '../../../utils/capacity'
 import { assignmentKind } from '../../../utils/tableStatus'
+import { bookingTableNumbers } from '../../../utils/bookingTables'
 import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
+
+// 電話末 3 碼：分辨同名「陳先生」。無電話（現場散客常見）回空字串 → 不顯示。
+const phoneTail = (phone) => {
+  const d = String(phone || '').replace(/\D/g, '')
+  return d.length >= 3 ? d.slice(-3) : ''
+}
+
+// 搜尋：姓名／電話（含末碼，忽略符號）／桌號（主桌＋副桌）
+function matchesQuery(b, q) {
+  const raw = q.trim().toLowerCase()
+  if (!raw) return true
+  const digits = raw.replace(/\D/g, '')
+  return (
+    (b.name || '').toLowerCase().includes(raw) ||
+    (b.phone || '').toLowerCase().includes(raw) ||
+    (digits.length > 0 && String(b.phone || '').replace(/\D/g, '').includes(digits)) ||
+    bookingTableNumbers(b).some(n => String(n).toLowerCase().includes(raw))
+  )
+}
 
 function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, perms, flash = false }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
@@ -59,6 +79,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
           <div className="flex items-baseline gap-1.5">
             <span className="text-base font-bold text-chicken-brown tabular-nums">{b.timeSlot}</span>
             <span className="text-sm font-bold truncate">{b.name}</span>
+            {phoneTail(b.phone) && <span data-testid="phone-tail" className="text-[11px] text-chicken-brown/55 tabular-nums flex-shrink-0">…{phoneTail(b.phone)}</span>}
           </div>
           <div className="text-xs text-chicken-brown/60 mt-0.5 truncate">
             {b.guests} 位
@@ -111,6 +132,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
   const confirm = useConfirm()
   const today = todayStr()
   const [showLater, setShowLater] = useState(false)
+  const [query, setQuery] = useState('')
 
   // 卡片上四顆動作鈕的權限底料（誰要哪個組合由 BookingCard 決定）。
   // 後端 functions/lib/staffAccess.js 對 bookings/tables 集合各自把關，前端這道門是為了
@@ -138,10 +160,14 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
     return () => clearInterval(id)
   }, [])
 
-  const { overdue, soon, later } = useMemo(
+  const pulse = useMemo(
     () => classifyTodayPulse(bookings, today, now),
     [bookings, today, now],
   )
+  const searching = query.trim().length > 0
+  const { overdue, soon, later } = useMemo(() => searching
+    ? { overdue: pulse.overdue.filter(b => matchesQuery(b, query)), soon: pulse.soon.filter(b => matchesQuery(b, query)), later: pulse.later.filter(b => matchesQuery(b, query)) }
+    : pulse, [pulse, query, searching])
 
   // 剛新增的那筆落在收合的「之後」段 → 自動展開，才看得到它閃
   useEffect(() => {
@@ -217,7 +243,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
     toast.success(`${b.name} 已入座 ${tableNo}`)
   }
 
-  if (overdue.length + soon.length + later.length === 0) {
+  if (pulse.overdue.length + pulse.soon.length + pulse.later.length === 0) {
     return (
       <div className="text-center py-6 text-xs text-chicken-brown/40">
         今日已無待到訂位
@@ -225,8 +251,28 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
     )
   }
 
+  const matchCount = overdue.length + soon.length + later.length
   return (
     <div className="space-y-3">
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="搜尋姓名／電話／桌號"
+          aria-label="搜尋今日訂位"
+          enterKeyHint="search"
+          autoComplete="off"
+          className="w-full min-h-[44px] rounded-lg border border-chicken-brown/20 bg-white pl-3 pr-11 text-sm"
+        />
+        {query && (
+          <button type="button" onClick={() => setQuery('')} aria-label="清除搜尋"
+            className="absolute right-0 top-0 h-full min-w-[44px] text-chicken-brown/60 text-base">✕</button>
+        )}
+      </div>
+      {searching && matchCount === 0 && (
+        <div role="status" className="text-center py-6 text-xs text-chicken-brown/60">找不到符合「{query.trim()}」的今日訂位</div>
+      )}
       {overdue.length > 0 && (
         <div className="space-y-2">
           <div className="text-[11px] font-bold text-chicken-red">過時未到（{overdue.length} 組）— 請聯絡或標記</div>
@@ -256,9 +302,9 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
             className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-chicken-brown/5 text-xs font-bold text-chicken-brown/65 hover:bg-chicken-brown/10"
           >
             <span>之後（{later.length} 組）</span>
-            <span className="text-[10px]">{showLater ? '收合 ▲' : '展開 ▼'}</span>
+            <span className="text-[10px]">{showLater || searching ? '收合 ▲' : '展開 ▼'}</span>
           </button>
-          {showLater && (
+          {(showLater || searching) && (
             <div className="mt-2 space-y-2">
               {later.map(b => (
                 <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
