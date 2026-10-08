@@ -1,4 +1,5 @@
 import { validateLineReadiness, DEFAULT_LINE_LOGIN_START_ENDPOINT } from './lib/lineReadiness.js'
+import { guardSettingsPush } from './lib/settingsGuard.js'
 import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, verifyReceipt } from './lib/guestReliability.js'
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
@@ -288,9 +289,19 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
       ops.push(...deleteOps(name, deletedIds[name]))
     }
+    // settings 守門：寫前讀雲端，受保護 LINE 欄位「送空值不洗掉雲端值」＋稽核＋告警（見 lib/settingsGuard.js）。
+    let settingsGuard = null
     if (writable.settings) {
+      const existingSnap = await db.collection('settings').doc('main').get()
+      settingsGuard = guardSettingsPush({
+        existingRaw: existingSnap.exists ? existingSnap.data() : {},
+        incomingRaw: writable.settings,
+        normalize: normalizeStoreSettings,
+        staff,
+        userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
+      })
       ops.push({ ref: db.collection('settings').doc('main'), data: {
-        ...normalizeStoreSettings(writable.settings),
+        ...settingsGuard.next,
         updatedAt: new Date().toISOString(),
       } })
     }
@@ -298,7 +309,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     // 店員端改訂位 LINE 通知（feature flag lineNotifyOnAdminChange，預設關）：
     // 開關開啟時才在 commit「前」讀舊值（merge-upsert 不讀舊值，diff 需要 before 快照），
     // commit「成功後」才分類入列——先寫成功才通知，避免通知了卻沒寫進去。
-    const notifySettings = await readSettingsForAdminNotify(writable.settings)
+    const notifySettings = await readSettingsForAdminNotify(settingsGuard ? settingsGuard.guardedRaw : writable.settings)
     // beforeBookings 已於上方 commit 前無條件讀取（strict），此處直接重用做通知 diff，不再重讀。
     // 硬刪除的訂位只出現在 deletedIds，commit 後就查不到；先抓刪除前完整舊值，Telegram 才能附完整 JSON 供還原。
     const deletedBookingIds = (writable.deletedIds || {}).bookings || []
@@ -333,6 +344,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       })
     }else await commitInChunks(ops)
     if(!queueRepeated){
+      if (settingsGuard) await reportSettingsGuard(settingsGuard)
       await notifyAdminBookingChanges(beforeBookings, writable.bookings, notifySettings)
       await notifyAdminBookingTelegram(beforeBookings, deletedBefore, writable.bookings, deletedBookingIds, notifySettings)
     }
@@ -487,6 +499,19 @@ async function snapshotBookingsByIds(rawIds, { strict = false } = {}) {
 
 // 讀取通知判斷用 settings：以 Firestore 現值為底、疊上本次一併推送的 settings（若有），
 // 確保「同一筆 push 裡打開開關」也立即生效。
+// settings 寫入成功後：結構化稽核（Cloud Logging，不含設定值/PII）＋必要時店員 Telegram 告警。
+// 告警走 durable outbox；version 決定 intent id，同日同內容只會送一次（不洗版）。錯誤只記 log，不影響同步。
+async function reportSettingsGuard(guard) {
+  try {
+    console.log(JSON.stringify(guard.audit))
+    if (guard.alert) {
+      await enqueueAndTrySend({ channel: 'telegram', event: 'settings_guard', version: guard.alert.version, payload: { text: guard.alert.text } })
+    }
+  } catch (err) {
+    console.error('reportSettingsGuard failed:', err?.message)
+  }
+}
+
 async function readSettingsForAdminNotify(incomingSettings) {
   try {
     const snap = await db.collection('settings').doc('main').get()
