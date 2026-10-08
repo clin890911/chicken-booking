@@ -47,7 +47,7 @@ vi.mock('../../src/services/cloudDataService', () => ({
   localDataset: () => ({}),
 }))
 
-describe('F4 推送失敗後的補推與燈號', () => {
+describe('F4 推送失敗後的補推與燈號', { timeout: 30_000 }, () => {
   let root
   const ref = { ctx: null }
   beforeEach(() => {

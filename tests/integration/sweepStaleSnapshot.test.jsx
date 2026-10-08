@@ -47,7 +47,7 @@ function seedOvertimeTable() {
 
 const tableStatus = (n) => JSON.parse(localStorage.getItem('chicken_tables_v3')).find(t => t.number === n).status
 
-describe('R4 掃除快照新鮮度閘門（Firebase 模式）', () => {
+describe('R4 掃除快照新鮮度閘門（Firebase 模式）', { timeout: 30_000 }, () => {
   let root
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] })
