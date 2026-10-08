@@ -1,5 +1,5 @@
 import { validateLineReadiness, DEFAULT_LINE_LOGIN_START_ENDPOINT } from './lib/lineReadiness.js'
-import { guardSettingsPush } from './lib/settingsGuard.js'
+import { guardSettingsPush, settingsReplaceOptions } from './lib/settingsGuard.js'
 import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, verifyReceipt } from './lib/guestReliability.js'
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
@@ -300,10 +300,13 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
         staff,
         userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
       })
-      ops.push({ ref: db.collection('settings').doc('main'), data: {
+      // 頂層 key 整欄替換（mergeFields），不可用 merge:true：深層合併會讓前端刪掉的巢狀 map key
+      // （例如 closures.closedSeatings 已恢復開放的日期）留在雲端、下次拉取又復活。見 settingsReplaceOptions。
+      const settingsData = {
         ...settingsGuard.next,
         updatedAt: new Date().toISOString(),
-      } })
+      }
+      ops.push({ ref: db.collection('settings').doc('main'), data: settingsData, options: settingsReplaceOptions(settingsData) })
     }
     ops.push({ ref: db.collection('system').doc('sync'), data: { lastAdminPushAt: new Date().toISOString() } })
     // 店員端改訂位 LINE 通知（feature flag lineNotifyOnAdminChange，預設關）：
@@ -336,7 +339,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
         const repeated=snapshots.every(s=>s.retry)
         queueRepeated=repeated
         if(!repeated && snapshots.some(s=>s.retry)) throw errorWithStatus('sync-changed',409)
-        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,{merge:true}) }
+        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,op.options||{merge:true}) }
         for(const saved of snapshots){
           if(!saved.retry){tx.set(saved.ref,saved.data,{merge:true});tx.set(saved.receiptRef,{item:saved.data,createdAt:new Date().toISOString()})}
         }
@@ -1757,7 +1760,8 @@ async function commitInChunks(ops, chunkSize = 450) {
     const batch = db.batch()
     ops.slice(i, i + chunkSize).forEach(op => {
       if (op.delete) batch.delete(op.ref)
-      else batch.set(op.ref, op.data, { merge: true })
+      // op.options：個別寫入可指定選項（settings/main 用 mergeFields 整欄替換）；其餘維持 merge-upsert。
+      else batch.set(op.ref, op.data, op.options || { merge: true })
     })
     await batch.commit()
   }

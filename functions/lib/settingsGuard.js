@@ -163,3 +163,16 @@ export function guardSettingsPush({ existingRaw, incomingRaw, normalize, staff =
     alert: buildSettingsGuardAlert(result, { uaSummary, role: staff.role, day: taipeiDay(nowMs) }),
   }
 }
+
+// settings/main 的寫入選項：「本次寫入的頂層 key 整欄替換」，不是 merge:true 的深層合併。
+// 事故背景：merge:true 對巢狀 map 是逐 key 深層合併——店長在「休店/關閉時段」恢復某天開放，
+// 前端從 closures.closedSeatings／closedSlots 刪掉該日期 key，雲端該 key 卻不會被刪，下次拉取又「復活」。
+// 改用 mergeFields：列出的頂層欄位整個替換；沒列出的頂層欄位（後端專用欄位）保持不動。
+// 頂層 key 必須是單純識別字：mergeFields 以「.」解析巢狀路徑，含點的 key 會被誤當成子欄位。
+export function settingsReplaceOptions(data = {}) {
+  const fields = Object.keys(data || {})
+  if (!fields.length) throw new Error('settings-write-empty')
+  const bad = fields.filter(k => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k))
+  if (bad.length) throw new Error('settings-write-invalid-key:' + bad.join(','))
+  return { mergeFields: fields }
+}
