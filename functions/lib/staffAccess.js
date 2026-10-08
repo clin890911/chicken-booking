@@ -36,7 +36,7 @@ export const PERMISSIONS = {
     'booking.read', 'booking.create', 'booking.update', 'booking.assign',
     'table.read', 'table.update', 'table.block', 'table.merge',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
-    'customer.read', 'customer.update',
+    'customer.read', 'customer.update', 'customer.blacklist',
     // 外場帶團入座會寫 groupReservations（seatGroupBatch → groupService.setStatus('arrived')），
     // 換日掃除的 complete-group 也會（opsSweep → finalizeGroup），且掃除是開機自動跑的。
     // 少了 group.update，外場裝置只要昨天有團沒結，一開機就整包 403、整台同步全死。
@@ -53,7 +53,7 @@ export const PERMISSIONS = {
     // 佈局/刪桌(table.config)仍不給。
     'table.read', 'table.update',
     'waitlist.read', 'waitlist.create', 'waitlist.update',
-    'customer.read', 'customer.update',
+    'customer.read', 'customer.update', 'customer.blacklist',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
   ]),
   kitchen: new Set([
@@ -69,6 +69,8 @@ const COLLECTION_WRITE_PERM = {
   bookings: 'booking.update',
   tables: 'table.update',
   waitlist: 'waitlist.update',
+  // 顧客黑名單（blacklisted／blacklistReason）是 customers 文件的欄位，集合層推送只看 customer.update；
+  // 'customer.blacklist' 為語意權限（manager／host／floor 皆有、kitchen 無），與前端成對，欄位層不另擋。
   customers: 'customer.update',
   agencies: 'agency.manage',
   guides: 'agency.manage',
