@@ -161,7 +161,9 @@ export function BookingProvider({ children }) {
         const now = Date.now()
         if (now - lastPushErrorToastRef.current > 8000) {
           lastPushErrorToastRef.current = now
-          toastRef.current?.error?.('雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
+          // 候位 409 衝突：下一次拉取會改以雲端候位為準、其餘變更隨後補推（見 cloudDataService）。
+          if (err?.waitlistConflict) toastRef.current?.warning?.('候位狀態已由另一台更新，已改以雲端為準，請確認候位清單')
+          else toastRef.current?.error?.('雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
         }
       }
     }, 250)
