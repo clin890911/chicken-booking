@@ -36,6 +36,8 @@ export function statusFromPushResult(result, nowIso) {
 
 // 拉取成功 → 狀態。🔴 仍有 rejected 時必須回到 'rejected'（而不是沿用 prev.state——
 // 中間可能經歷過 offline，沿用會讓警示卡在離線態、回線後再也回不去）。
+// 🔴 上次推送失敗（pushFailed）時也不可洗成 synced：拉取成功只代表「讀得到雲端」，本機變更仍沒上雲。
+//   維持 offline＋原錯誤訊息，等補推成功（statusFromPushResult）才轉 synced。
 export function statusAfterPull(prev, nowIso) {
   if (prev?.rejected) {
     return {
@@ -45,6 +47,9 @@ export function statusAfterPull(prev, nowIso) {
       lastSyncAt: nowIso,
     }
   }
+  if (prev?.pushFailed) {
+    return { ...prev, state: 'offline', error: prev.error || 'cloud-push-failed', lastSyncAt: nowIso }
+  }
   return { state: 'synced', lastSyncAt: nowIso, error: '', rejected: null }
 }
 
@@ -52,6 +57,12 @@ export function statusAfterPull(prev, nowIso) {
 // 回復連線後仍要繼續警示。
 export function statusAfterError(prev, message, fallback) {
   return { ...prev, state: 'offline', error: message || fallback }
+}
+
+// 推送失敗 → offline，並標記 pushFailed：之後的拉取成功不得把它洗成 synced（見 statusAfterPull），
+// 只有下一次推送成功（statusFromPushResult 回新物件）才清除。
+export function statusAfterPushError(prev, message, fallback) {
+  return { ...statusAfterError(prev, message, fallback), pushFailed: true }
 }
 
 // 拉取成功後「要不要真的換掉 cloudStatus 物件」。

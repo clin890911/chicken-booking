@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus } from '../../src/utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, shouldAlertPersistDegraded, shouldCommitPullStatus } from '../../src/utils/syncStatus'
 
 const T1 = '2026-07-26T10:00:00.000Z'
 const T2 = '2026-07-26T10:00:05.000Z'
@@ -148,5 +148,34 @@ describe('shouldCommitPullStatus（拉取成功後要不要換掉 cloudStatus �
     const rej = statusFromPushResult({ ok: true, rejected: REJECTED, rejectedMessage: 'x' }, T1)
     expect(shouldCommitPullStatus(synced(T1), statusAfterPull(rej, T2))).toBe(true)
     expect(shouldCommitPullStatus(rej, statusAfterPull(rej, T2))).toBe(false)
+  })
+})
+
+// === F4：推送失敗後，拉取成功不得把燈號洗回 synced ===
+// 拉取成功只代表「讀得到雲端」，本機變更仍沒上雲；過去 5 秒輪詢一拉就顯示「已同步」，燈號說謊。
+describe('statusAfterPushError × statusAfterPull（F4）', () => {
+  it('推送失敗 → 拉取成功仍是 offline（保留錯誤訊息、時間前進）；補推成功才 synced', () => {
+    const failed = statusAfterPushError({ state: 'synced', lastSyncAt: T1, error: '', rejected: null }, '連線逾時', 'cloud-push-failed')
+    expect(failed).toMatchObject({ state: 'offline', error: '連線逾時', pushFailed: true })
+    const pulled = statusAfterPull(failed, T2)
+    expect(pulled.state).toBe('offline')
+    expect(pulled.error).toBe('連線逾時')
+    expect(pulled.pushFailed).toBe(true)
+    expect(pulled.lastSyncAt).toBe(T2)
+    const pushed = statusFromPushResult({ ok: true }, T2)
+    expect(pushed.state).toBe('synced')
+    expect(pushed.pushFailed).toBeUndefined()
+  })
+
+  it('推送失敗＋仍有 rejected → 拉取後回 rejected（rejected 不被清掉的既有不變量不變）', () => {
+    const rej = statusFromPushResult({ ok: true, rejected: REJECTED, rejectedMessage: 'x' }, T1)
+    const s = statusAfterPull(statusAfterPushError(rej, 'offline', 'cloud-push-failed'), T2)
+    expect(s.state).toBe('rejected')
+    expect(s.rejected).toMatchObject(REJECTED)
+  })
+
+  it('拉取失敗（非推送失敗）後回線 → 照舊 synced', () => {
+    const s = statusAfterPull(statusAfterError({ state: 'synced' }, 'x', 'cloud-sync-failed'), T2)
+    expect(s.state).toBe('synced')
   })
 })
