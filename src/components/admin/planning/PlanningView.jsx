@@ -18,6 +18,7 @@ import SlotMapPanel from './SlotMapPanel'
 import BookingDetailSheet from '../../booking/BookingDetailSheet'
 import Icon from '../../ui/Icon'
 import SegmentedControl from '../../ui/SegmentedControl'
+import { seatingPerms, isReadOnlyRole } from '../../../utils/seatingPerms'
 
 const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 
@@ -43,6 +44,15 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   } = useBooking()
   const toast = useToast()
   const { can } = useAuth()
+  // 寫入入口的前端權限門（唯讀角色 kitchen 一個都沒有；manager／host／floor 的既有能力不變）：
+  //   新增散客＝booking.create｜新增／複製團單＝唯讀角色不給（見下）｜編輯／改期團單＝group.update｜
+  //   預先配桌／解除預配只改 booking＝booking.update（seatingPerms.booking）
+  const canAddWalkin = !!can('booking.create')
+  // 新增／複製團單：外場（無 group.create）歷來看得到入口、由編輯器儲存時 can('group.create') 擋（見 GroupEditorStage），
+  // 這個既有行為不動；只對「完全唯讀」角色（kitchen）整個拿掉入口。
+  const canCreateGroup = !isReadOnlyRole(can)
+  const canEditGroup = !!can('group.update')
+  const canPreassign = seatingPerms(can).booking
 
   const today = todayStr()
   const [pane, setPane] = useState('day') // day=月曆+當日總覽 | map=排位地圖全寬
@@ -178,7 +188,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   }, [detailGroupId, detailGroup, editorGroup])
 
   const openEditorFromDetail = () => {
-    if (!detailGroup) return
+    if (!detailGroup || !canEditGroup) return
     setRescheduleFrom(null)
     setEditorGroup(detailGroup)
     setEditorIsNew(false)
@@ -186,7 +196,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
 
   // 「📅 改期」第一步：開改期 modal（選新日期）。
   const openReschedule = () => {
-    if (detailGroup) setReschedulingGroup(detailGroup)
+    if (detailGroup && canEditGroup) setReschedulingGroup(detailGroup)
   }
   // 改期第二步：選定新日期 → 把整團（清空圈桌、保留同 id）交給編輯器在新日重新圈桌。
   // 草稿優先：此處不落地，儲存才經 reserveGroupTables 原子搬移。跳到新日、直接進圈桌頁。
@@ -204,6 +214,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
 
   // 當日總覽散客列「→ 配桌」：跳排位地圖該場次並自動進預配模式
   const goAssignWalkin = (booking) => {
+    if (!canPreassign) return
     const sid = seatingForSlot(settings, booking.timeSlot)?.id
     if (!sid) return toast.error('此時段未對應任何場次，無法在地圖配桌（請先到設定調整場次）')
     setDetailBookingId(null)
@@ -245,6 +256,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   // seatingId 可選：由當日總覽的「某場次 ＋新增團單」帶入，預先鎖定主梯次的場次（= 場次.start）。
   // 注意 Hero 的純「新增團單」按鈕會把事件物件當參數傳入，故先正規化成字串或 null。
   const openNewDraft = (seatingId) => {
+    if (!canCreateGroup) return
     const sid = typeof seatingId === 'string' ? seatingId : null
     const seating = sid ? (settings.seatings || []).find(s => s.id === sid) : null
     const firstBatchId = 'BT' + Date.now().toString(36)
@@ -263,6 +275,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
 
   // 複製團單為新草稿（清空桌號，須重新圈桌）。
   const duplicateGroupToDraft = (sourceId, targetDate) => {
+    if (!canCreateGroup) return
     const src = groupReservations.find(g => g.id === sourceId)
     if (!src) return
     const target = targetDate || selectedDate
@@ -329,8 +342,8 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
           tables={tables}
           settings={settings}
           onBack={() => setDetailGroupId(null)}
-          onEdit={openEditorFromDetail}
-          onReschedule={openReschedule}
+          onEdit={canEditGroup ? openEditorFromDetail : undefined}
+          onReschedule={canEditGroup ? openReschedule : undefined}
         />
         <GroupRescheduleModal
           open={!!reschedulingGroup}
@@ -360,14 +373,18 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
         )}
         {pane === 'day' && (
           <div className="ml-auto flex items-center gap-1.5">
-            <button type="button" onClick={() => setShowAddWalkin(true)}
-              className="tap inline-flex items-center gap-1 h-9 px-3 rounded-[9px] bg-white border border-chicken-brown/15 text-[13px] font-semibold text-chicken-brown">
-              <Icon name="plus" size={15} strokeWidth={2.2} /><span>新增散客</span>
-            </button>
-            <button type="button" onClick={() => openNewDraft()}
-              className="tap inline-flex items-center gap-1 h-9 px-3 rounded-[9px] bg-chicken-red text-white text-[13px] font-semibold shadow-sm">
-              <Icon name="plus" size={15} strokeWidth={2.2} /><span>新增團單</span>
-            </button>
+            {canAddWalkin && (
+              <button type="button" onClick={() => setShowAddWalkin(true)}
+                className="tap inline-flex items-center gap-1 h-9 px-3 rounded-[9px] bg-white border border-chicken-brown/15 text-[13px] font-semibold text-chicken-brown">
+                <Icon name="plus" size={15} strokeWidth={2.2} /><span>新增散客</span>
+              </button>
+            )}
+            {canCreateGroup && (
+              <button type="button" onClick={() => openNewDraft()}
+                className="tap inline-flex items-center gap-1 h-9 px-3 rounded-[9px] bg-chicken-red text-white text-[13px] font-semibold shadow-sm">
+                <Icon name="plus" size={15} strokeWidth={2.2} /><span>新增團單</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -390,12 +407,12 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
             dayGroups={dayGroups}
             isToday={selectedDate === today}
             onSelectGroup={openExisting}
-            onNewGroup={openNewDraft}
-            onDuplicate={duplicateGroupToDraft}
+            onNewGroup={canCreateGroup ? openNewDraft : undefined}
+            onDuplicate={canCreateGroup ? duplicateGroupToDraft : undefined}
             onGoToday={onGoToday}
             onPrintSheet={() => setSheetOpen(true)}
             onOpenMap={() => setPane('map')}
-            onAssignWalkin={goAssignWalkin}
+            onAssignWalkin={canPreassign ? goAssignWalkin : undefined}
             onOpenWalkin={(b) => setDetailBookingId(b.id)}
             onFocusTable={focusWalkinOnMap}
             onFocusBatch={focusBatchOnMap}
@@ -419,7 +436,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
       <BookingDetailSheet
         bookingId={pane === 'day' ? detailBookingId : null}
         onClose={() => setDetailBookingId(null)}
-        onAssign={goAssignWalkin}
+        onAssign={canPreassign ? goAssignWalkin : undefined}
         onFocusTable={focusWalkinOnMap}
       />
 
@@ -434,7 +451,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
       )}
 
       {/* 快速新增散客（日期鎖定當日；建立後即現於當日散客名單） */}
-      <AddWalkinModal open={showAddWalkin} date={selectedDate} onClose={() => setShowAddWalkin(false)} />
+      <AddWalkinModal open={showAddWalkin && canAddWalkin} date={selectedDate} onClose={() => setShowAddWalkin(false)} />
     </div>
   )
 }

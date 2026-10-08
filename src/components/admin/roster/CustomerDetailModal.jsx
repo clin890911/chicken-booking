@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { formatBookingTables } from '../../../utils/bookingTables'
 import { Modal } from '../../ui'
 import { useBooking } from '../../../contexts/BookingContext'
 import { customerBookings } from '../../../utils/customerHistory'
@@ -57,10 +58,12 @@ export default function CustomerDetailModal({ customer, onClose, onAddBooking, o
           ))}
         </div>
 
-        <div className="flex gap-2">
-          <button onClick={() => onAddBooking?.(c)} className="btn-primary flex-1 !py-2 text-sm">新增訂位</button>
-          <button onClick={() => onEdit?.(c)} className="btn-secondary flex-1 !py-2 text-sm">編輯備註</button>
-        </div>
+        {(onAddBooking || onEdit) && (
+          <div className="flex gap-2">
+            {onAddBooking && <button onClick={() => onAddBooking(c)} className="btn-primary flex-1 !py-2 text-sm">新增訂位</button>}
+            {onEdit && <button onClick={() => onEdit(c)} className="btn-secondary flex-1 !py-2 text-sm">編輯備註</button>}
+          </div>
+        )}
 
         <div>
           <div className="text-sm font-bold text-chicken-brown mb-1.5">
@@ -79,7 +82,7 @@ export default function CustomerDetailModal({ customer, onClose, onAddBooking, o
                       <span className="font-bold tabular-nums w-[92px] shrink-0">{fmtDate(b.date)}</span>
                       <span className="text-chicken-brown/60 w-10 shrink-0">{b.timeSlot || '—'}</span>
                       <span className="font-bold shrink-0">{b.guests} 位</span>
-                      {b.assignedTableId && <span className="text-chicken-brown/60 shrink-0">桌 {b.assignedTableId}</span>}
+                      {b.assignedTableId && <span className="text-chicken-brown/60 shrink-0">桌 {formatBookingTables(b)}</span>}
                       <span className="text-chicken-brown/45 shrink-0">{SOURCE_MAP[b.source] || b.source || ''}</span>
                       <span className={`ml-auto shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
                     </div>

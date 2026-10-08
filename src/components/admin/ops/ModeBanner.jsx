@@ -1,5 +1,6 @@
 import Icon from '../../ui/Icon'
 import { conflictLine } from '../../../utils/preassignOverride'
+import { formatBookingTables } from '../../../utils/bookingTables'
 // 現場營運的「模式 banner」：指派 / 候位入座 / 立即帶位 / 換桌 / 團體改派桌位
 // 依模式不同底色 + emoji 避免誤判；指派類模式帶二步確認列與預配衝突警告
 const BANNER_STYLE = {
@@ -42,7 +43,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
             <span className="text-xs opacity-90">點桌加 / 減 · 可選單桌或多桌</span>
-            {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded">原配桌 {[mode.booking?.assignedTableId, ...(mode.booking?.extraTableIds || [])].filter(Boolean).join(' + ')} · 確認成功前保留</span>}
+            {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</span>}
             {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {suggestionLabel}（自行選桌）</span>}
             {!isWaitlist && <span className="text-xs opacity-90">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
           </div>
@@ -76,7 +77,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
   const bannerText = (() => {
     if (mode.type === 'assign') return `指派桌位：${mode.booking.name} ${mode.booking.guests} 位`
     if (mode.type === 'seat-waitlist') return `候位入座：${mode.wait.name} #${mode.wait.queueNumber}（${mode.wait.partySize} 位）`
-    if (mode.type === 'move') return `換桌：${mode.booking.name} 從 ${mode.booking.assignedTableId} → 選新桌`
+    if (mode.type === 'move') return `換桌：${mode.booking.name} 從 ${formatBookingTables(mode.booking)} → 選新桌`
     if (mode.type === 'group-reseat') {
       const remain = (mode.queue || []).length
       return `改派桌位：${mode.group?.agencyName || '團體'} ${mode.batch?.label || ''} — ${mode.current} 被佔，請點選替代桌${remain > 1 ? `（還有 ${remain - 1} 桌待處理）` : ''}`
@@ -101,7 +102,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
   const confirmText = mode.type === 'group-reseat'
     ? `把 ${mode.current} 改派為 ${pendingConfirm} 並整梯入座？（將更新該梯圈桌）`
     : mode.type === 'move'
-      ? `確認把 ${pendingTargetName} 從 ${mode.booking?.assignedTableId} 改到桌 ${pendingConfirm}？`
+      ? `確認把 ${pendingTargetName} 從 ${formatBookingTables(mode.booking)} 改到桌 ${pendingConfirm}？`
       : mode.type === 'assign'
         ? (assignPreassign
           ? `確認預配 ${pendingTargetName} 到 ${pendingConfirm}？（桌子現在仍可帶位）`

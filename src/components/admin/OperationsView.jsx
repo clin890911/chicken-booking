@@ -27,6 +27,7 @@ import { todayStr, nowSlot } from '../../utils/timeSlots'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
 import SegmentedControl from '../ui/SegmentedControl'
 import { seatingPerms } from '../../utils/seatingPerms'
+import { formatBookingTables } from '../../utils/bookingTables'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
@@ -224,6 +225,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const toast = useToast()
   const confirm = useConfirm()
   const { can, user } = useAuth()
+  // 帶位（散客直接入座）要同時寫 bookings＋tables，依實際寫入集合判定（見 utils/seatingPerms.js）
+  const canWalkIn = seatingPerms(can).walkIn
 
   const [floor, setFloor] = useState('1F')
   const [view, setView] = useState('map') // map=SVG 桌況圖 ｜ schedule=當日排程（每桌 turns）
@@ -578,7 +581,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (!mode) {
       // 帶位 v3：帶位籤上點「今日可入座的空桌」＝加入/移出帶位面板（不開抽屜、不進 mode）。
       // 一桌＝單桌帶位、多桌＝併桌，同一條路徑，人數與桌到齊後由面板滑動入座。
-      if (railTab === 'walkin' && walkinSelectable.includes(number)) {
+      // 無帶位權限（唯讀角色）時帶位籤不存在，點空桌不可偷偷累積「已選桌」，一律走開抽屜
+      if (railTab === 'walkin' && canWalkIn && walkinSelectable.includes(number)) {
         const isRemove = walkinTableNumbers.includes(number)
         // 同樓層守門：切樓層後想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
         if (!isRemove && walkinTableNumbers.length) {
@@ -681,7 +685,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const r = moveTable(mode.booking.id, number)
       if (!r.ok) return toast.error('換桌失敗：' + r.error)
       releaseOverlappingPreassigns(overridden, releaseOpts)
-      toast.success(`${mode.booking.name} 已從 ${mode.booking.assignedTableId} 改到 ${number} · 可指派下一組`)
+      toast.success(`${mode.booking.name} 已從 ${formatBookingTables(mode.booking)} 改到 ${number} · 可指派下一組`)
       flashAssigned(number)
       cancelMode()
       setSelectedTable(number)
@@ -890,6 +894,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 帶位入座：一桌走 walkInSeat、多桌走 walkInSeatMulti（同一個手勢靠陣列長度分派）。
   // 回傳 false = 失敗（面板保留欄位，方便改人數或改走候位）。
   const handleWalkinSeat = (payload) => {
+    // 權限門：散客直接入座會同時寫 bookings＋tables（seatingPerms.walkIn）。UI 已不給唯讀角色帶位籤，這裡是第二道防線。
+    if (!canWalkIn) { toast.error('你的角色沒有帶位權限'); return false }
     const nums = payload?.tableNumbers || []
     if (!nums.length) { toast.error('請先點桌況圖選一張桌'); return false }
     const guestData = {
@@ -1123,6 +1129,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               suspended={!!mode || !!selectedTableObj}
               activeTab={railTab}
               onTabChange={setRailTab}
+              canWalkIn={canWalkIn}
               walkinGuests={walkinGuests}
               onWalkinGuestsChange={setWalkinGuests}
               walkinTables={walkinTables}

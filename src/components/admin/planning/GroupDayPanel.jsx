@@ -3,6 +3,7 @@ import Icon from '../../ui/Icon'
 import { dayLabel } from '../../../utils/timeSlots'
 import GroupArrivalTimeline from './GroupArrivalTimeline'
 import GroupPrepDigest from './GroupPrepDigest'
+import { formatBookingTables } from '../../../utils/bookingTables'
 
 // Pane B：當日總覽。2026-09 改版為「群組清單」語彙（iOS 設定頁式）：
 //   標題列（日期 + 排位地圖 / 列印 / 今日→現場）→ 三格統計（團體 / 散客 / 保留）→ 警示 →
@@ -28,12 +29,12 @@ function Pill({ cls, children }) {
 }
 
 // 場次內散客列。整列可點 → 訂位詳情（onOpen）；桌號可點 → 排位地圖標示該桌（onFocusTable）；「配桌」→ 一鍵進預配模式。
-function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
+export function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
   const b = row.booking
   const st = WALKIN_STATUS[row.status] || WALKIN_STATUS.confirmed
   const n = b.notes || {}
-  const extra = Array.isArray(b.extraTableIds) ? b.extraTableIds : []
-  const tableLabel = row.assignedTableId ? `${row.assignedTableId}${extra.length ? ` +${extra.length}` : ''}` : ''
+  // 併桌列出所有桌號（「101 + 107」），不再只寫「101 +1」
+  const tableLabel = row.assignedTableId ? formatBookingTables({ assignedTableId: row.assignedTableId, extraTableIds: b.extraTableIds }) : ''
   const clickable = !!onOpen
   const needIcons = [n.child && 'child', n.mobility && 'wheelchair'].filter(Boolean)
   return (
@@ -51,7 +52,7 @@ function WalkinRow({ row, onAssign, onOpen, onFocusTable }) {
       </button>
       {row.assignedTableId ? (
         onFocusTable ? (
-          <button type="button" onClick={() => onFocusTable(b)} title={`在排位地圖上標示這桌（${[row.assignedTableId, ...extra].join('、')}）`}
+          <button type="button" onClick={() => onFocusTable(b)} title={`在排位地圖上標示這桌（${tableLabel.split(' + ').join('、')}）`}
             className="tap text-xs font-semibold text-chicken-brown/70 tabular-nums shrink-0 whitespace-nowrap h-8 px-2 rounded-lg hover:bg-chicken-brown/[0.05]">{tableLabel}</button>
         ) : (
           <span className="text-xs font-semibold text-chicken-brown/70 tabular-nums shrink-0">{tableLabel}</span>
@@ -118,10 +119,12 @@ function GroupBatchRow({ row, onSelect, onDuplicate }) {
         <Pill cls={st.cls}>{st.label}</Pill>
         <Icon name="chevronRight" size={14} strokeWidth={2.2} className="text-chicken-brown/30" />
       </button>
-      <button type="button" onClick={() => onDuplicate(g.id)} title="複製這團為新草稿" aria-label={`複製 ${g.agencyName || '團單'}`}
-        className="tap w-8 h-8 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]">
-        <Icon name="copy" size={15} />
-      </button>
+      {onDuplicate && (
+        <button type="button" onClick={() => onDuplicate(g.id)} title="複製這團為新草稿" aria-label={`複製 ${g.agencyName || '團單'}`}
+          className="tap w-8 h-8 rounded-lg flex items-center justify-center text-chicken-brown/40 hover:text-chicken-red hover:bg-chicken-brown/[0.05]">
+          <Icon name="copy" size={15} />
+        </button>
+      )}
     </div>
   )
 }
@@ -155,10 +158,12 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
           <span className={`text-xs font-semibold tabular-nums ${TONE_TEXT[tone]}`}>
             {closed ? '公休' : tone === 'full' ? '已客滿' : `剩 ${summary.remainingTables} 桌 · ${summary.remaining} 席`}
           </span>
-          <button type="button" onClick={() => onNewGroup(seating.id)} disabled={closed}
-            className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red disabled:text-chicken-brown/30 disabled:cursor-not-allowed">
-            <Icon name="plus" size={12} strokeWidth={2.4} />新增團單
-          </button>
+          {onNewGroup && (
+            <button type="button" onClick={() => onNewGroup(seating.id)} disabled={closed}
+              className="tap inline-flex items-center gap-0.5 text-xs font-semibold text-chicken-red disabled:text-chicken-brown/30 disabled:cursor-not-allowed">
+              <Icon name="plus" size={12} strokeWidth={2.4} />新增團單
+            </button>
+          )}
         </div>
         <StackedBar summary={summary} />
       </div>

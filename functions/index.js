@@ -1,5 +1,5 @@
 import { validateLineReadiness } from './lib/lineReadiness.js'
-import { guestPolicy, isBeforeGuestDeadline, submissionProof, verifyReceipt } from './lib/guestReliability.js'
+import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, verifyReceipt } from './lib/guestReliability.js'
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
 import crypto from 'node:crypto'
@@ -754,7 +754,7 @@ export const guestGetAvailability = onRequest({ cors: PUBLIC_CORS, invoker: 'pub
           return {
             time,
             remaining,
-            // 已關閉旗標：店休/關閉、場次前截止、滿座門檻任一成立即對線上客人關閉。
+            // 已關閉旗標：店休/關閉、抵達前提前量（MIN_GUEST_LEAD_MINUTES，以抵達時段往前算）、滿座門檻任一成立即對線上客人關閉。
             closed: isSlotClosedServer(settings, date, time)
               || !isBeforeGuestDeadline(nowMs, slotEpochMs(date, time))
               || isOverAutoCloseThreshold({ totalSeats, remaining, enabled: settings.onlineAutoCloseEnabled, percent: settings.onlineAutoClosePercent }),
@@ -968,7 +968,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       at: now,
       changedKeys,
       before: pickBookingHistory(booking),
-      after: pickBookingHistory({ ...booking, ...next, assignedTableId: structural ? null : booking.assignedTableId }),
+      after: pickBookingHistory({ ...booking, ...next, assignedTableId: structural ? null : booking.assignedTableId, extraTableIds: structural ? [] : booking.extraTableIds }),
     }
     const updatePatch = {
       ...next,
@@ -990,7 +990,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       if(!allowed.ok)throw errorWithStatus(allowed.reason,409) // 原單管理的用餐前2小時規則保留
       if((current.guestEditCount||0)!==(booking.guestEditCount||0))throw errorWithStatus('訂位資料已更動，請重新整理後再修改',409)
       if(structural){
-        if(!isBeforeGuestDeadline(Date.now(),slotEpochMs(next.date,next.timeSlot)))throw errorWithStatus('線上改期須至少提前60分鐘，請選擇較晚時段或來電洽詢',409)
+        if(!isBeforeGuestDeadline(Date.now(),slotEpochMs(next.date,next.timeSlot)))throw errorWithStatus(guestLeadError('reschedule'),409)
         if(isSlotClosedServer(settings,next.date,next.timeSlot))throw errorWithStatus('此時段已關閉訂位，請改選其他時段',409)
         const [tablesSnap,dateSnap,groupsSnap]=await Promise.all([tx.get(db.collection(COLLECTIONS.tables)),tx.get(db.collection(COLLECTIONS.bookings).where('date','==',next.date)),tx.get(db.collection(COLLECTIONS.groupReservations).where('date','==',next.date))])
         const tables=tablesSnap.docs.map(d=>({id:d.id,...d.data()})),others=dateSnap.docs.map(d=>({id:d.id,...d.data()})).filter(b=>b.id!==booking.id),groups=groupsSnap.docs.map(d=>({id:d.id,...d.data()}))
@@ -2058,6 +2058,10 @@ function pickBookingHistory(booking) {
     timeSlot: booking.timeSlot,
     notes: booking.notes || {},
     assignedTableId: booking.assignedTableId || null,
+    // 大組併桌副桌：僅在有副桌時才寫入，無副桌的歷史紀錄形狀與舊版完全相同。
+    ...(Array.isArray(booking.extraTableIds) && booking.extraTableIds.length
+      ? { extraTableIds: booking.extraTableIds.map(String) }
+      : {}),
   }
 }
 
@@ -2175,7 +2179,7 @@ function validateNewBooking(body = {}, settings = {}) {
   }
   // 後端硬擋「已過的時段」：避免繞過前端、或在時段剛過的邊界仍下訂今天已過的時間。
   const arrivalMs=slotEpochMs(date,timeSlot)
-  if (!isBeforeGuestDeadline(Date.now(),arrivalMs)) return {ok:false,error:'線上訂位須至少提前60分鐘，請選擇較晚時段或來電洽詢',reasonCode:arrivalMs<=Date.now()?'booking-slot-past':'booking-deadline-passed'}
+  if (!isBeforeGuestDeadline(Date.now(),arrivalMs)) return {ok:false,error:guestLeadError('create'),reasonCode:arrivalMs<=Date.now()?'booking-slot-past':'booking-deadline-passed'}
   // 後端硬擋「已關閉的時段/場次/公休日」：繞過前端也擋得住（權威層）。
   if (isSlotClosedServer(settings, date, timeSlot)) {
     return { ok: false, error: '此時段已關閉訂位，請改選其他時段' }

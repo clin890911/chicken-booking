@@ -5,6 +5,7 @@ import { Reorder, useDragControls } from 'framer-motion'
 import { Input, Button, Select } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { useAuth } from '../../contexts/AuthContext'
+import { isReadOnlyRole, canExportData } from '../../utils/seatingPerms'
 import { useToast, useConfirm } from '../ui/Toast'
 import { searchNoshow } from '../../services/bookingService'
 import { generateTimeSlots, todayStr, slotsInSeating, seatingForSlot } from '../../utils/timeSlots'
@@ -17,6 +18,7 @@ import Icon from '../ui/Icon'
 import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
 import { validateLineReadiness } from '../../utils/lineReadiness'
 import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds, openSeatingIdsOn, effectiveClosedSeatings, describeWeeklyClosures } from '../../utils/weeklyClosures'
+import { onlineLeadLabel } from '../../utils/guestPolicy'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -61,6 +63,10 @@ const DEFAULT_CATEGORY = 'ops-rules'
 export const ADMIN_ACTION_BAR_SLOT = 'admin-action-bar-slot'
 // 由父層提供「目前分類包含的 sectionKey 清單」；SettingsSection 據此自我隱藏（不屬當前分類則 return null）。
 const CategoryContext = createContext([])
+// 完全唯讀角色（kitchen）：所有「可編輯」區塊用 <fieldset disabled> 整段鎖住，輸入框／按鈕一律不可操作。
+// 下列區塊本質是讀取或帳號操作（查 No-show、登出），維持可用；資料匯出（含電話個資）不在其內——kitchen 直接不渲染；雲端同步區改由按鈕層級處理。
+const ReadOnlyContext = createContext(false)
+const READONLY_EXEMPT_SECTIONS = ['noshow', 'account', 'firestore']
 
 export default function SettingsView({ onOpenCustomer }) {
   const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud, discardRejectedChanges, localPersistDegraded } = useBooking()
@@ -103,6 +109,7 @@ export default function SettingsView({ onOpenCustomer }) {
   // 會永遠卡在「有未儲存變更」且每次離開/重新整理都被瀏覽器攔下來，
   // 而重新整理正是同步異常時的標準排除手段，等於把解藥擋掉。
   const canEditSettings = can('settings.update')
+  const readOnlyRole = isReadOnlyRole(can)
   // 是否動到會影響容量／時段的設定（B1）
   const capacityDirty = dirtyKeys.some(k => CAPACITY_FIELDS.includes(k))
   // 未來已確認訂位筆數（保守估計：date>=今天 && status==='confirmed'）
@@ -125,8 +132,8 @@ export default function SettingsView({ onOpenCustomer }) {
   const guardOn = form.onlineAutoCloseEnabled === true
   const guardPercent = Number(form.onlineAutoClosePercent) || 80
   const guardSummary = guardOn
-    ? `達 ${guardPercent}% 自動關閉 · 抵達前 60 分停止線上訂位`
-    : '抵達前 60 分停止線上訂位 · 未啟用滿座自動關閉'
+    ? `達 ${guardPercent}% 自動關閉 · 抵達前 ${onlineLeadLabel()}停止線上訂位`
+    : `抵達前 ${onlineLeadLabel()}停止線上訂位 · 未啟用滿座自動關閉`
   // 休店/關閉時段摘要：今天起有幾天有關閉設定（收合時就看得到）
   const upcomingClosureDays = (() => {
     const c = form.closures || {}
@@ -356,6 +363,7 @@ export default function SettingsView({ onOpenCustomer }) {
 
   return (
     <CategoryContext.Provider value={activeCat.sections}>
+    <ReadOnlyContext.Provider value={readOnlyRole}>
       <div className="flex gap-4">
       {/* 桌機：左側二級分類側欄 */}
       <nav className="hidden lg:flex w-44 shrink-0 flex-col gap-1" aria-label="設定分類">
@@ -565,7 +573,7 @@ export default function SettingsView({ onOpenCustomer }) {
           <div>
             <span className="label">線上訂位截止時間</span>
             <div className="mt-2 rounded-xl bg-chicken-brown/5 px-4 py-3 text-sm leading-6 text-chicken-brown/70">
-              線上訂位依預計抵達時間，至少提前 60 分鐘；不足 60 分鐘請來電詢問。線上改期也適用，電話與現場不受影響。
+              線上訂位依預計抵達時間，至少提前 {onlineLeadLabel()}；不足 {onlineLeadLabel()}請來電詢問。線上改期也適用，電話與現場不受影響。
             </div>
           </div>
         </div>
@@ -919,7 +927,7 @@ export default function SettingsView({ onOpenCustomer }) {
             {cloudStatus?.error && <div className="mt-1 font-bold text-chicken-red">錯誤：{cloudStatus.error}</div>}
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <Button disabled={cloudBusy || !usingFirebase} onClick={() => handleCloudSync('push')} className="w-full min-h-[44px]">
+            <Button disabled={cloudBusy || !usingFirebase || readOnlyRole} onClick={() => handleCloudSync('push')} className="w-full min-h-[44px]">
               {cloudBusy ? '同步中...' : '上傳本機資料到 Firestore'}
             </Button>
             <button disabled={cloudBusy || !usingFirebase} onClick={() => handleCloudSync('pull')} className="btn-secondary min-h-[44px] disabled:opacity-40">
@@ -990,9 +998,11 @@ export default function SettingsView({ onOpenCustomer }) {
         )}
       </SettingsSection>
 
-      <SettingsSection sectionKey="export" title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
-        <ExportCenter />
-      </SettingsSection>
+      {canExportData(can) && (
+        <SettingsSection sectionKey="export" title="資料匯出" description="自選日期區間、散客/團體、來源、場次、狀態、旅行社/導遊後下載 CSV。">
+          <ExportCenter />
+        </SettingsSection>
+      )}
 
       {can('staff.manage') && (
         <SettingsSection sectionKey="staff" title="管理員帳號" description="新增同仁的 Google 帳號即可登入後台；毋須重新部署。">
@@ -1016,6 +1026,7 @@ export default function SettingsView({ onOpenCustomer }) {
 
       {/* 桌位佈局編輯器 modal：掛在分類條件外，切換分類/開關皆不受影響 */}
       <LayoutEditor open={showLayoutEditor} onClose={() => setShowLayoutEditor(false)} />
+    </ReadOnlyContext.Provider>
     </CategoryContext.Provider>
   )
 }
@@ -1613,7 +1624,9 @@ function DefaultBadge({ current, fallback, unit = '' }) {
 function SettingsSection({ title, description, children, defaultOpen = false, danger = false, sectionKey, summary, badge }) {
   // 依目前分類自我隱藏：不屬當前分類則不渲染（隱藏時 unmount，但 form 在父層 → 編輯不遺失）。
   const activeSections = useContext(CategoryContext)
+  const readOnlyRole = useContext(ReadOnlyContext)
   if (sectionKey && !activeSections.includes(sectionKey)) return null
+  const locked = readOnlyRole && !READONLY_EXEMPT_SECTIONS.includes(sectionKey)
   return (
     <details className={`card group ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`} open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
@@ -1629,7 +1642,7 @@ function SettingsSection({ title, description, children, defaultOpen = false, da
         <span className="rounded-full bg-chicken-brown/5 px-2 py-1 text-xs font-bold text-chicken-brown/45 group-open:rotate-180">⌄</span>
       </summary>
       <div className="mt-4">
-        {children}
+        {locked ? <fieldset disabled className="m-0 min-w-0 border-0 p-0">{children}</fieldset> : children}
       </div>
     </details>
   )
