@@ -63,3 +63,10 @@ export const WRITE_PERMS = [
 export function isReadOnlyRole(can) {
   return !WRITE_PERMS.some(p => !!can?.(p))
 }
+
+// 資料匯出（CSV 含電話等個資）：完全唯讀角色（kitchen）一律不可匯出。
+// 目前沒有獨立的 export.* 權限字串，沿用 isReadOnlyRole（任何寫入權即視為可匯出）；
+// 設定頁匯出中心、旅行社詳情 CSV 等所有匯出入口都走這個判斷，新增匯出入口也請套用。
+export function canExportData(can) {
+  return !isReadOnlyRole(can)
+}
