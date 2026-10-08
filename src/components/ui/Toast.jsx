@@ -78,14 +78,15 @@ export function ToastProvider({ children }) {
 
 function ToastContainer({ toasts, onDismiss }) {
   return (
-    <div className="fixed top-4 sm:top-auto sm:bottom-4 right-4 left-4 sm:left-auto z-[60] flex flex-col gap-2 pointer-events-none items-end">
+    // 全尺寸統一頂部置中：iPad 現場頁右下是地圖與報到列，原本 sm 以上的右下角 toast 會蓋住「到了」鈕與桌子。
+    <div data-testid="toast-container" className="fixed top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none items-center">
       <AnimatePresence>
         {toasts.map(t => (
           <motion.div
             key={t.id}
-            initial={{ opacity: 0, x: 20, scale: 0.95 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 20, scale: 0.95 }}
+            initial={{ opacity: 0, y: -12, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.95 }}
             transition={{ duration: 0.18 }}
             className={`pointer-events-auto rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 max-w-md min-w-[260px] ${TYPE_STYLES[t.type]}`}
           >
@@ -94,14 +95,15 @@ function ToastContainer({ toasts, onDismiss }) {
             {t.action && (
               <button
                 onClick={() => { t.action.onClick?.(); onDismiss(t.id) }}
-                className="text-xs font-bold underline opacity-90 hover:opacity-100 flex-shrink-0"
+                data-testid="toast-action"
+                className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-white text-chicken-brown text-sm font-bold shadow-sm hover:bg-white/90 active:scale-95 flex-shrink-0"
               >
                 {t.action.label || '復原'}
               </button>
             )}
             <button
               onClick={() => onDismiss(t.id)}
-              className="opacity-60 hover:opacity-100 text-lg leading-none flex-shrink-0"
+              className="opacity-60 hover:opacity-100 text-lg leading-none flex-shrink-0 min-h-[44px] min-w-[44px] -mr-2"
               aria-label="關閉"
             >×</button>
           </motion.div>
