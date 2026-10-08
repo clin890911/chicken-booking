@@ -48,7 +48,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
   // 「指派桌位」「客人到了」都會同時寫 bookings 與 tables，故兩個權限都要。
   const showAssign = !assigned && perms.booking && perms.table
   const showSeat = assigned && perms.booking && perms.table
-  const showNoshow = overdue && perms.booking
+  const showNoshow = overdue && perms.booking && perms.table   // markNoshow 會釋出本筆鎖住的桌
   const showComplete = overdue && (assigned ? perms.booking && perms.table : perms.booking)
   // 改桌：已有桌的待到訂位從更多操作進現場整組選桌。
   // 會同時寫 bookings 與 tables → 兩個權限都要；唯讀角色仍看到原本的唯讀徽章。

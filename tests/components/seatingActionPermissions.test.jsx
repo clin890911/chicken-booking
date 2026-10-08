@@ -71,13 +71,13 @@ describe('BookingCard 動作鈕權限', () => {
     expect(hasBtn('客人到了')).toBe(false)
     expect(hasBtn('取消訂位')).toBe(false)
   })
-  it('只有 booking.update（寫不了 tables）：不給入座／取消／改桌／編輯，但仍可標 No-show（只改 booking）', () => {
+  it('只有 booking.update（寫不了 tables）：不給入座／取消／改桌／編輯／標 No-show（標 No-show 會釋出鎖桌）', () => {
     render(mk(), canOnly('booking.update'))
     expect(hasBtn('客人到了')).toBe(false)
     expect(hasBtn('取消訂位')).toBe(false)
     expect(hasBtn('改桌')).toBe(false)
     expect(hasBtn('編輯')).toBe(false)
-    expect(hasBtn('標 No-show')).toBe(true)
+    expect(hasBtn('標 No-show')).toBe(false)
   })
   it('未指派桌的今日待到：指派桌位鈕同樣依 booking＋table 權限', () => {
     render(mk({ assignedTableId: null }), roleCan('host'))

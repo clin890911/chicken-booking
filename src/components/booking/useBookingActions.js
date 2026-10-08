@@ -82,7 +82,7 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
     futureAssignedNote: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'future',
     checkout: perms.seat && status === 'arrived',
     edit: perms.seat && isOpen,   // updateByStaff 改日期／時段／人數時會連動釋放桌位
-    noshow: perms.booking && isOpen && dayKind !== 'future',
+    noshow: perms.seat && isOpen && dayKind !== 'future',   // markNoshow 會釋出本筆鎖住的桌 → bookings＋tables
     cancel: perms.seat && isOpen,
     restore: perms.booking && status === 'noshow',
     // 預配（未來日）解除：預配只記在 booking 上、不動桌況，解除不會留下孤兒桌；
