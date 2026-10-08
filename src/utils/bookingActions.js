@@ -39,7 +39,10 @@ export function cancelWithUndo(booking, { cancelBooking, undoCancelBooking, toas
   if (!r?.ok) return toast.error('取消失敗：' + (r?.error || '未知錯誤'))
   toast.action(`已取消 ${booking.name} 的訂位`,
     { label: '↩ 復原', onClick: () => {
-        const u = undoCancelBooking(booking.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+        const u = undoCancelBooking(booking.id, {
+          tableNumbers: r.releasedTables, preassignedTables: r.preassignedTables,
+          originalTables: r.originalTables, status: r.previousStatus,
+        })
         if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
         const okMsg = u.restored?.length ? `，${u.restored.join('、')} 已改回保留` : ''
         const failMsg = u.failed?.length ? `（${u.failed.join('、')} 已被占用，桌位未搶回，請重新指派）` : ''

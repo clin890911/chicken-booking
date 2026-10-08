@@ -528,7 +528,7 @@ describe('seatingService 整合層', () => {
       seating.assignBookingToTable(b.id, '101')
       const r = seating.cancelBooking(b.id)
       // releasedTables / previousStatus 是復原用的快照（取消後 booking 上已查不到桌號）
-      expect(r).toEqual({ ok: true, releasedTables: ['101'], previousStatus: 'confirmed' })
+      expect(r).toEqual({ ok: true, releasedTables: ['101'], preassignedTables: [], originalTables: ['101'], previousStatus: 'confirmed' })
       const updated = bookingService.getById(b.id)
       expect(updated.status).toBe('cancelled')
       expect(updated.assignedTableId).toBeNull()
@@ -543,6 +543,37 @@ describe('seatingService 整合層', () => {
       expect(r.ok).toBe(true)
       expect(r.releasedTables).toEqual([])
       expect(bookingService.getById(b.id).status).toBe('cancelled')
+    })
+
+    // R1：預配只記在 booking 上、桌況沒鎖；那張桌此刻可能正由別組用餐。
+    // 過去 cancelBooking 對每張桌無條件 clearTable → 正在用餐那組從桌況圖上消失。
+    it('R1 預配桌正被別組用餐時取消 → 那桌維持用餐中、不被清掉', () => {
+      const b = mkBooking({ guests: 2 })
+      bookingService.assignTable(b.id, '101')                      // 只預配（不鎖桌）
+      const other = seating.walkInSeat('101', { name: '別組', guests: 2 })
+      expect(other.ok).toBe(true)
+
+      const r = seating.cancelBooking(b.id)
+      expect(r.ok).toBe(true)
+      expect(r.releasedTables).toEqual([])
+      expect(r.preassignedTables).toEqual(['101'])
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('dining')                              // ★ 別組仍在用餐
+      expect(t.currentBookingId).toBe(other.booking.id)
+      expect(bookingService.getById(b.id).assignedTableId).toBeNull()
+    })
+
+    it('R1 團體梯次佔用的預配桌：取消散客訂位不清團體桌', () => {
+      tableService.bulkWrite([
+        mkTable('101', 4, '1F', { status: 'dining', currentBookingId: null, currentRef: { groupId: 'G1', batchId: 'B1' } }),
+        mkTable('108', 6, '1F'),
+      ])
+      const b = mkBooking({ guests: 2 })
+      bookingService.assignTable(b.id, '101')
+      seating.cancelBooking(b.id)
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('dining')
+      expect(t.currentRef).toEqual({ groupId: 'G1', batchId: 'B1' })
     })
   })
 
@@ -653,6 +684,47 @@ describe('seatingService 整合層', () => {
       const r = seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: c.previousStatus })
       expect(r.ok).toBe(false)
       expect(r.error).toContain('已取消')
+    })
+
+    it('R1 取消未來預配後復原 → 桌仍是空桌（不被鎖）、assignedTableId 回來', () => {
+      const b = mkBooking({ guests: 2 })
+      bookingService.assignTable(b.id, '101')                      // 預配：桌況仍是 vacant
+      const c = seating.cancelBooking(b.id)
+      expect(tableService.getByNumber('101').status).toBe('vacant')
+
+      const r = seating.undoCancelBooking(b.id, {
+        tableNumbers: c.releasedTables, preassignedTables: c.preassignedTables,
+        originalTables: c.originalTables, status: c.previousStatus,
+      })
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual([])
+      expect(r.failed).toEqual([])
+      const updated = bookingService.getById(b.id)
+      expect(updated.status).toBe('confirmed')
+      expect(updated.assignedTableId).toBe('101')                  // ★ 預配回來
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('vacant')                              // ★ 仍只預配、不鎖桌
+      expect(t.currentBookingId).toBeNull()
+    })
+
+    it('R1 併桌：主桌鎖桌＋副桌只預配 → 復原依原順序重建（主桌在前）', () => {
+      const b = mkBooking({ guests: 8 })
+      bookingService.assignTables(b.id, ['101', '108'])
+      tableService.reserveTable('101', b.id)                       // 主桌鎖桌、副桌 108 只預配
+      const c = seating.cancelBooking(b.id)
+      expect(c.releasedTables).toEqual(['101'])
+      expect(c.preassignedTables).toEqual(['108'])
+      expect(c.originalTables).toEqual(['101', '108'])
+
+      seating.undoCancelBooking(b.id, {
+        tableNumbers: c.releasedTables, preassignedTables: c.preassignedTables,
+        originalTables: c.originalTables, status: c.previousStatus,
+      })
+      const updated = bookingService.getById(b.id)
+      expect(updated.assignedTableId).toBe('101')
+      expect(updated.extraTableIds).toEqual(['108'])
+      expect(tableService.getByNumber('101').status).toBe('reserved')
+      expect(tableService.getByNumber('108').status).toBe('vacant')
     })
 
     it('沒帶快照呼叫也安全（不炸、不亂搶桌）', () => {
