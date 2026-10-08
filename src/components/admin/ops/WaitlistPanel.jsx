@@ -12,6 +12,11 @@ import GuestCountField from '../GuestCountField'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import WaitlistHistorySheet from './WaitlistHistorySheet'
 
+// 候位人數上限與散客後台相同（200，見 GuestCountField）；線上訂位的 12 人上限不在這裡。
+// 超過單桌常見容量（12）＝大組，入座時需併桌（seatingService 的候位入座已支援併桌）。
+const WAITLIST_MAX = 200
+const BIG_PARTY = 12
+
 function diffMin(d) {
   if (!d) return 0
   const t = new Date(d).getTime()
@@ -80,7 +85,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
 
   const handleAdd = () => {
     const size = Number(form.partySize)
-    if (!size || size < 1 || size > 12) return toast.warning('人數需介於 1～12 位')
+    if (!size || size < 1 || size > WAITLIST_MAX) return toast.warning(`人數需介於 1～${WAITLIST_MAX} 位`)
     // 快選組出來的稱呼優先；沒選就沿用手打的 name（兩者都空＝匿名取號，靠號碼叫人）
     const name = composeName(title, surname, customName.trim()) || form.name.trim()
     const w = addWaitlist({ ...form, name, partySize: size, estimatedMin: estimatedWaitMin })
@@ -118,7 +123,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                   <span className="text-sm font-bold text-chicken-red flex-shrink-0">#{w.queueNumber}</span>
                   <span className="text-sm font-bold truncate">{w.name}</span>
                   <span className="text-[10px] text-chicken-brown/60">{w.partySize} 位</span>
-                  <span className="text-[10px] text-chicken-brown/45">建議{w.partySize > 4 ? '六人桌' : '四人桌'}</span>
+                  <span className="text-[10px] text-chicken-brown/45">{w.partySize > BIG_PARTY ? '大組需併桌' : `建議${w.partySize > 4 ? '六人桌' : '四人桌'}`}</span>
                 </div>
                 {w.status === 'called' && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-bold">已叫號</span>}
               </div>
@@ -172,9 +177,14 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
           <GuestCountField
             value={form.partySize}
             onChange={n => setForm(f => ({ ...f, partySize: n }))}
-            max={12}
-            label="幾位？（1～12 位）"
+            max={WAITLIST_MAX}
+            label="幾位？"
           />
+          {Number(form.partySize) > BIG_PARTY && (
+            <p role="status" className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              大組，入座時需併桌
+            </p>
+          )}
           <div className="rounded-xl border border-chicken-brown/10 bg-chicken-cream/60 px-3 py-2 text-sm text-chicken-brown/70">
             預估約 <span className="font-bold text-amber-700">{estimatedWaitMin} 分</span>
             <span className="text-xs text-chicken-brown/50">（目前 {active.length} 組候位中）</span>
