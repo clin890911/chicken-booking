@@ -1,4 +1,4 @@
-import { validateLineReadiness } from './lib/lineReadiness.js'
+import { validateLineReadiness, DEFAULT_LINE_LOGIN_START_ENDPOINT } from './lib/lineReadiness.js'
 import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, verifyReceipt } from './lib/guestReliability.js'
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
@@ -1849,8 +1849,10 @@ function normalizeStoreSettings(settings = {}) {
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
     lineMyBookingsEndpoint: settings.lineMyBookingsEndpoint || 'https://linemybookings-reaor76eyq-uc.a.run.app',
-    // LINE Login network 綁定（新路徑）入口端點與 OAuth 回呼網址。空字串 = 沿用前端預設 / 尚未設定。
-    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || '').trim(),
+    // LINE Login network 綁定（新路徑）入口端點與 OAuth 回呼網址。
+    // 綁定入口未設定時預設為已部署的 lineLoginStart（後台無此輸入欄，空值會讓 readiness 永遠失敗）；
+    // 回呼網址不給預設：必須與 LINE Console 登記值逐字相同（見 lib/lineReadiness.js）。
+    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || '').trim() || DEFAULT_LINE_LOGIN_START_ENDPOINT,
     lineLoginCallbackUrl: String(settings.lineLoginCallbackUrl || '').trim(),
     // LINE Login channel ID（LIFF / Login 所屬 channel，非 Messaging API channel）：
     // lineLoginStart/Callback 與 lineMyBookings 驗 ID token 共用；未設定時相關功能停用。
