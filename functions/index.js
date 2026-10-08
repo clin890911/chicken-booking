@@ -1,4 +1,5 @@
-import { validateLineReadiness } from './lib/lineReadiness.js'
+import { validateLineReadiness, DEFAULT_LINE_LOGIN_START_ENDPOINT } from './lib/lineReadiness.js'
+import { guardSettingsPush, settingsReplaceOptions, buildClosuresSettingsReport } from './lib/settingsGuard.js'
 import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, verifyReceipt } from './lib/guestReliability.js'
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
@@ -291,15 +292,23 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
       ops.push(...deleteOps(name, deletedIds[name]))
     }
+    // settings 寫入分兩條路徑，兩條都「寫前讀雲端」且都以 options（mergeFields 頂層整欄替換）寫入，
+    // 不可落回 merge:true（深層合併會讓已恢復開放的 closures 巢狀 key 在雲端復活）。
+    //   - 訂位專員（settings.closures）：只套關閉相關 key（lib/settingsScope.js），不碰 LINE 欄位，故不走 LINE 守門；
+    //     仍寫稽核（scope=closures-only），且永不產生 LINE 告警。
+    //   - 店長（settings.update）：LINE 受保護欄位守門＋整欄替換＋告警＋稽核（lib/settingsGuard.js）。
     // settingsApplied：只在 closures 範圍回傳，告訴前端「哪些 key 的本機值現在已在雲端」以便只推進那部分基準線。
     let settingsApplied = null
     let settingsForNotify = writable.settings
+    // settingsGuard：店長路徑的守門結果；settingsReport：commit 後要送出的稽核／告警（兩條路徑共用 reportSettingsGuard）。
+    let settingsGuard = null
+    let settingsReport = null
     if (writable.settings && settingsScope === 'closures') {
-      // 訂位專員（settings.closures）：只套關閉相關 key，其餘沿用雲端（見 lib/settingsScope.js）。
       const cloudSnap = await db.collection('settings').doc('main').get()
+      const cloudRaw = cloudSnap.exists ? cloudSnap.data() : {}
       const scoped = scopeClosureSettingsPush({
         clientSettings: writable.settings,
-        cloudSettings: cloudSnap.exists ? cloudSnap.data() : {},
+        cloudSettings: cloudRaw,
         role,
         keys: settingsKeys,
         normalize: normalizeStoreSettings,
@@ -307,27 +316,47 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       if (scoped.mode === 'closures') {
         settingsApplied = scoped.appliedKeys
         settingsForNotify = scoped.next
-        // mergeFields：只替換這幾個頂層欄位（整個 closures 物件），其他設定欄位一律不碰。
+        settingsReport = buildClosuresSettingsReport({
+          scoped,
+          cloudRaw,
+          normalize: normalizeStoreSettings,
+          staff,
+          userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
+        })
+        // 只替換這幾個頂層欄位（整個 closures 物件＋updatedAt），其他設定欄位一律不碰。
         if (scoped.changed) {
-          ops.push({ ref: db.collection('settings').doc('main'), data: {
+          const settingsData = {
             ...scoped.patch,
             updatedAt: new Date().toISOString(),
-          }, mergeFields: [...scoped.writeFields, 'updatedAt'] })
+          }
+          ops.push({ ref: db.collection('settings').doc('main'), data: settingsData, options: settingsReplaceOptions(settingsData) })
         }
       } else {
         settingsForNotify = undefined
       }
     } else if (writable.settings) {
-      ops.push({ ref: db.collection('settings').doc('main'), data: {
-        ...normalizeStoreSettings(writable.settings),
+      const existingSnap = await db.collection('settings').doc('main').get()
+      settingsGuard = guardSettingsPush({
+        existingRaw: existingSnap.exists ? existingSnap.data() : {},
+        incomingRaw: writable.settings,
+        normalize: normalizeStoreSettings,
+        staff,
+        userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
+      })
+      settingsReport = settingsGuard
+      // 頂層 key 整欄替換（mergeFields），不可用 merge:true：深層合併會讓前端刪掉的巢狀 map key
+      // （例如 closures.closedSeatings 已恢復開放的日期）留在雲端、下次拉取又復活。見 settingsReplaceOptions。
+      const settingsData = {
+        ...settingsGuard.next,
         updatedAt: new Date().toISOString(),
-      } })
+      }
+      ops.push({ ref: db.collection('settings').doc('main'), data: settingsData, options: settingsReplaceOptions(settingsData) })
     }
     ops.push({ ref: db.collection('system').doc('sync'), data: { lastAdminPushAt: new Date().toISOString() } })
     // 店員端改訂位 LINE 通知（feature flag lineNotifyOnAdminChange，預設關）：
     // 開關開啟時才在 commit「前」讀舊值（merge-upsert 不讀舊值，diff 需要 before 快照），
     // commit「成功後」才分類入列——先寫成功才通知，避免通知了卻沒寫進去。
-    const notifySettings = await readSettingsForAdminNotify(settingsForNotify)
+    const notifySettings = await readSettingsForAdminNotify(settingsGuard ? settingsGuard.guardedRaw : settingsForNotify)
     // beforeBookings 已於上方 commit 前無條件讀取（strict），此處直接重用做通知 diff，不再重讀。
     // 硬刪除的訂位只出現在 deletedIds，commit 後就查不到；先抓刪除前完整舊值，Telegram 才能附完整 JSON 供還原。
     const deletedBookingIds = (writable.deletedIds || {}).bookings || []
@@ -354,7 +383,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
         const repeated=snapshots.every(s=>s.retry)
         queueRepeated=repeated
         if(!repeated && snapshots.some(s=>s.retry)) throw errorWithStatus('sync-changed',409)
-        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,op.mergeFields?{mergeFields:op.mergeFields}:{merge:true}) }
+        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,op.options||{merge:true}) }
         for(const saved of snapshots){
           if(!saved.retry){tx.set(saved.ref,saved.data,{merge:true});tx.set(saved.receiptRef,{item:saved.data,createdAt:new Date().toISOString()})}
         }
@@ -362,6 +391,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       })
     }else await commitInChunks(ops)
     if(!queueRepeated){
+      if (settingsReport) await reportSettingsGuard(settingsReport)
       await notifyAdminBookingChanges(beforeBookings, writable.bookings, notifySettings)
       await notifyAdminBookingTelegram(beforeBookings, deletedBefore, writable.bookings, deletedBookingIds, notifySettings)
     }
@@ -517,6 +547,19 @@ async function snapshotBookingsByIds(rawIds, { strict = false } = {}) {
 
 // 讀取通知判斷用 settings：以 Firestore 現值為底、疊上本次一併推送的 settings（若有），
 // 確保「同一筆 push 裡打開開關」也立即生效。
+// settings 寫入成功後：結構化稽核（Cloud Logging，不含設定值/PII）＋必要時店員 Telegram 告警。
+// 告警走 durable outbox；version 決定 intent id，同日同內容只會送一次（不洗版）。錯誤只記 log，不影響同步。
+async function reportSettingsGuard(guard) {
+  try {
+    console.log(JSON.stringify(guard.audit))
+    if (guard.alert) {
+      await enqueueAndTrySend({ channel: 'telegram', event: 'settings_guard', version: guard.alert.version, payload: { text: guard.alert.text } })
+    }
+  } catch (err) {
+    console.error('reportSettingsGuard failed:', err?.message)
+  }
+}
+
 async function readSettingsForAdminNotify(incomingSettings) {
   try {
     const snap = await db.collection('settings').doc('main').get()
@@ -1762,8 +1805,8 @@ async function commitInChunks(ops, chunkSize = 450) {
     const batch = db.batch()
     ops.slice(i, i + chunkSize).forEach(op => {
       if (op.delete) batch.delete(op.ref)
-      // mergeFields：只替換指定頂層欄位（settings closures 範圍寫入用）；其餘維持 merge-upsert。
-      else batch.set(op.ref, op.data, op.mergeFields ? { mergeFields: op.mergeFields } : { merge: true })
+      // op.options：個別寫入可指定選項（settings/main 兩條路徑都用 mergeFields 整欄替換）；其餘維持 merge-upsert。
+      else batch.set(op.ref, op.data, op.options || { merge: true })
     })
     await batch.commit()
   }
@@ -1880,8 +1923,10 @@ function normalizeStoreSettings(settings = {}) {
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
     lineMyBookingsEndpoint: settings.lineMyBookingsEndpoint || 'https://linemybookings-reaor76eyq-uc.a.run.app',
-    // LINE Login network 綁定（新路徑）入口端點與 OAuth 回呼網址。空字串 = 沿用前端預設 / 尚未設定。
-    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || '').trim(),
+    // LINE Login network 綁定（新路徑）入口端點與 OAuth 回呼網址。
+    // 綁定入口未設定時預設為已部署的 lineLoginStart（後台無此輸入欄，空值會讓 readiness 永遠失敗）；
+    // 回呼網址不給預設：必須與 LINE Console 登記值逐字相同（見 lib/lineReadiness.js）。
+    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || '').trim() || DEFAULT_LINE_LOGIN_START_ENDPOINT,
     lineLoginCallbackUrl: String(settings.lineLoginCallbackUrl || '').trim(),
     // LINE Login channel ID（LIFF / Login 所屬 channel，非 Messaging API channel）：
     // lineLoginStart/Callback 與 lineMyBookings 驗 ID token 共用；未設定時相關功能停用。

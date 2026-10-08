@@ -4,6 +4,9 @@ const ENDPOINTS = {
   lineLoginStartEndpoint: ['lineLoginStart', 'https://lineloginstart-reaor76eyq-uc.a.run.app'],
   lineLoginCallbackUrl: ['lineLoginCallback', 'https://linelogincallback-reaor76eyq-uc.a.run.app'],
 }
+// 綁定入口是我們自己部署的端點（不需在 LINE Console 登記），未設定時由 normalizeStoreSettings 補上。
+// 回呼網址刻意不給預設：它必須與 LINE Console 登記值逐字相同，預設錯一種形式會讓 readiness 顯示就緒、實際卻 redirect_uri 不符。
+export const DEFAULT_LINE_LOGIN_START_ENDPOINT = ENDPOINTS.lineLoginStartEndpoint[1]
 
 function httpsUrl(value) {
   try {

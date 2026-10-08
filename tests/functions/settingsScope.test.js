@@ -5,6 +5,7 @@ import {
   roleCan, classifyDatasetByPermission, settingsWriteScope, CLOSURE_SETTING_KEYS, STAFF_ROLES,
 } from '../../functions/lib/staffAccess'
 import { scopeClosureSettingsPush } from '../../functions/lib/settingsScope'
+import { guardSettingsPush, settingsReplaceOptions, buildClosuresSettingsReport } from '../../functions/lib/settingsGuard'
 import { normalizeOnlineGuardSettings } from '../../functions/lib/onlineGuards'
 import { guestPolicy } from '../../functions/lib/guestReliability'
 import { CLOSURE_SETTING_KEYS as FRONT_CLOSURE_KEYS, settingsWriteScope as frontScope } from '../../src/utils/settingsScope'
@@ -164,6 +165,8 @@ describe('scopeClosureSettingsPush（純函式）', () => {
 // fake 依 Firestore 語意：merge:true 會「深層合併」巢狀 map；mergeFields 只整個替換指定的頂層欄位。
 describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
   let records
+  let setCalls
+  let reports
   const clone = v => structuredClone(v)
   const isMap = v => v && typeof v === 'object' && !Array.isArray(v)
   const deepMerge = (old, next) => {
@@ -179,7 +182,7 @@ describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
     batch: () => {
       const staged = []
       return {
-        set: (r, data, opts) => staged.push({ r, data, opts }),
+        set: (r, data, opts) => { setCalls.push({ path: r.path, data, options: opts }); staged.push({ r, data, opts }) },
         delete: r => staged.push({ r, del: true }),
         commit: async () => {
           for (const { r, data, opts, del } of staged) {
@@ -203,6 +206,8 @@ describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
   }
   beforeEach(() => {
     records = new Map([['settings/main', clone(CLOUD)]])
+    setCalls = []
+    reports = []
     const pick = name => {
       const start = source.indexOf(`function ${name}(`)
       const s = source.slice(start - 6, start) === 'async ' ? start - 6 : start
@@ -216,6 +221,7 @@ describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
       'LINE_CHANNEL_ACCESS_TOKEN', 'SYNC_COLLECTION_IDKEYS', 'classifyDatasetByPermission', 'scopeClosureSettingsPush',
       'snapshotBookingsByIds', 'COLLECTIONS', 'buildBookingUpsertData', 'createServerToken', 'stripServerOwnedCustomerFields',
       'upsertOps', 'deleteOps', 'normalizeStoreSettings', 'protectQueueUpsert', 'notifyAdminBookingChanges', 'notifyAdminBookingTelegram',
+      'guardSettingsPush', 'settingsReplaceOptions', 'buildClosuresSettingsReport', 'reportSettingsGuard',
       body,
     )(
       (_, fn) => fn, db, async req => ({ uid: 'U', role: req.role }), (m, s) => Object.assign(Error(m), { status: s }), crypto, true, '', '', '',
@@ -226,6 +232,7 @@ describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
       (name, items, idKey) => (items || []).map(item => ({ ref: ref(`${name}/${item[idKey]}`), data: item })),
       (name, ids) => (ids || []).map(id => ({ ref: ref(`${name}/${id}`), delete: true })),
       normalizeStoreSettings, x => x, async () => {}, async () => {},
+      guardSettingsPush, settingsReplaceOptions, buildClosuresSettingsReport, async report => { reports.push(report) },
     )
   })
 
@@ -305,5 +312,53 @@ describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
     expect(r.body.rejected).toBeUndefined()
     expect(records.get('settings/main').openTime).toBe('10:00')
     expect(records.get('settings/main').lineLoginChannelId).toBe('2009996489')
+  })
+
+  // === 與 PR #160（LINE 守門＋整欄替換）合併後的整合鎖 ===
+  it('整合：host 推送寫入 options＝mergeFields:[closures, updatedAt]（不得 merge:true），稽核 closures-only 且無 LINE 告警', async () => {
+    const closures = { ...CLOUD.closures, closedDates: ['2026-10-20', '2026-10-22'] }
+    // 夾帶 LINE 空值：那些 key 被拒、不寫入，也不可觸發 LINE 告警
+    const client = hostClient(closures, { lineLoginChannelId: '', publicSiteUrl: '', lineLoginCallbackUrl: '' })
+    const r = await call('host', { partial: true, settingsChangedKeys: ['closures', 'lineLoginChannelId', 'publicSiteUrl', 'lineLoginCallbackUrl'], dataset: { settings: client } })
+    expect(r.code).toBe(200)
+    const settingsSets = setCalls.filter(c => c.path === 'settings/main')
+    expect(settingsSets).toHaveLength(1)
+    expect(settingsSets[0].options).toEqual({ mergeFields: ['closures', 'updatedAt'] })
+    expect(settingsSets[0].options).not.toHaveProperty('merge')
+    expect(Object.keys(settingsSets[0].data).sort()).toEqual(['closures', 'updatedAt'])
+    expect(setCalls.find(c => c.path === 'system/sync').options).toEqual({ merge: true })
+    expect(reports).toHaveLength(1)
+    expect(reports[0].alert).toBeNull()
+    expect(reports[0].audit).toMatchObject({
+      event: 'settings_push_audit', scope: 'closures-only', role: 'host',
+      appliedKeys: ['closures'], changedKeys: ['closures'], written: true, preservedFields: [], protectedChanged: [],
+    })
+    expect(JSON.stringify(reports[0].audit)).not.toContain('2026-10-22') // 稽核不含設定值
+    expect(records.get('settings/main').lineLoginChannelId).toBe('2009996489')
+  })
+
+  it('整合：host 關閉值與雲端相同 → 不寫 settings，但仍留稽核（written:false、無告警）', async () => {
+    await call('host', { partial: true, settingsChangedKeys: ['closures'], dataset: { settings: hostClient(CLOUD.closures) } })
+    expect(setCalls.filter(c => c.path === 'settings/main')).toHaveLength(0)
+    expect(reports).toHaveLength(1)
+    expect(reports[0].alert).toBeNull()
+    expect(reports[0].audit).toMatchObject({ scope: 'closures-only', written: false, changedKeys: [] })
+  })
+
+  it('整合：店長推送寫入 options＝mergeFields:全部頂層 key（含 closures／LINE／updatedAt），走 LINE 守門', async () => {
+    const client = { ...normalizeStoreSettings(CLOUD), openTime: '10:00', lineLoginChannelId: '' }
+    const r = await call('manager', { partial: true, dataset: { settings: client } })
+    expect(r.code).toBe(200)
+    const settingsSet = setCalls.find(c => c.path === 'settings/main')
+    expect(settingsSet.options).not.toHaveProperty('merge')
+    expect([...settingsSet.options.mergeFields].sort()).toEqual(Object.keys(settingsSet.data).sort())
+    expect(settingsSet.options.mergeFields).toEqual(expect.arrayContaining(['closures', 'floorPlan', 'lineLoginChannelId', 'openTime', 'updatedAt']))
+    expect(settingsSet.options.mergeFields.length).toBeGreaterThan(10)
+    // LINE 守門：空值保留雲端值，並產生守門稽核（無 scope 標記＝A 原樣）＋告警
+    expect(records.get('settings/main').lineLoginChannelId).toBe('2009996489')
+    expect(reports).toHaveLength(1)
+    expect(reports[0].audit.scope).toBeUndefined()
+    expect(reports[0].audit.preservedFields).toEqual(['lineLoginChannelId'])
+    expect(reports[0].alert).not.toBeNull()
   })
 })
