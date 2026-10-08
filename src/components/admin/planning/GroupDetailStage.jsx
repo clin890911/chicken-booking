@@ -79,7 +79,7 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
         {canReschedule && onReschedule && (
           <button type="button" onClick={onReschedule} className="tap inline-flex items-center gap-1 h-9 px-3 rounded-[9px] bg-white border border-chicken-brown/15 text-[13px] font-semibold text-chicken-brown"><Icon name="calendar" size={14} />改期</button>
         )}
-        <button type="button" onClick={onEdit} className="tap inline-flex items-center gap-1 h-9 px-3.5 rounded-[9px] bg-chicken-red text-white text-[13px] font-semibold shadow-sm">編輯</button>
+        {onEdit && <button type="button" onClick={onEdit} className="tap inline-flex items-center gap-1 h-9 px-3.5 rounded-[9px] bg-chicken-red text-white text-[13px] font-semibold shadow-sm">編輯</button>}
       </div>
       <div className="flex items-center gap-2 flex-wrap px-1">
         <Icon name="bus" size={20} className="text-chicken-red" />
