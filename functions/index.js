@@ -968,7 +968,7 @@ export const guestUpdateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
       at: now,
       changedKeys,
       before: pickBookingHistory(booking),
-      after: pickBookingHistory({ ...booking, ...next, assignedTableId: structural ? null : booking.assignedTableId }),
+      after: pickBookingHistory({ ...booking, ...next, assignedTableId: structural ? null : booking.assignedTableId, extraTableIds: structural ? [] : booking.extraTableIds }),
     }
     const updatePatch = {
       ...next,
@@ -2040,6 +2040,10 @@ function pickBookingHistory(booking) {
     timeSlot: booking.timeSlot,
     notes: booking.notes || {},
     assignedTableId: booking.assignedTableId || null,
+    // 大組併桌副桌：僅在有副桌時才寫入，無副桌的歷史紀錄形狀與舊版完全相同。
+    ...(Array.isArray(booking.extraTableIds) && booking.extraTableIds.length
+      ? { extraTableIds: booking.extraTableIds.map(String) }
+      : {}),
   }
 }
 
