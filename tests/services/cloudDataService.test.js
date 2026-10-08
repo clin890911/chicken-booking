@@ -563,6 +563,64 @@ describe('候位 409 衝突自癒（R3）', () => {
     expect(calls[0].dataset.waitlist.map(w => w.id).sort()).toEqual(['w1', 'w2'])
   })
 
+  it('同一包 #5 衝突、#8 不衝突：只放棄 #5，#8 的本機入座下一輪推上去', async () => {
+    const w5 = { id: 'w5', queueNumber: 5, name: '五號', partySize: 2, status: 'waiting', queueVersion: 1, takenAt: '2026-10-09T03:00:00.000Z' }
+    const w8 = { id: 'w8', queueNumber: 8, name: '八號', partySize: 4, status: 'called', queueVersion: 3, takenAt: '2026-10-09T03:10:00.000Z' }
+    applyCloudSnapshot({ bookings: [], waitlist: [w5, w8], tables: [table], settings: cloudSettingsPayload() })
+    localStorage.setItem(WAITLIST, JSON.stringify([{ ...w5, status: 'called' }, { ...w8, status: 'seated', seatedTable: '101' }]))
+    global.fetch = vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, error: 'waitlist-changed' }) }))
+    await pushChangedData().catch(() => {})
+
+    // 另一台把 #5 帶位（v2）；#8 雲端沒動（v3）
+    applyCloudSnapshot({ bookings: [], waitlist: [{ ...w5, status: 'seated', queueVersion: 2 }, w8], tables: [table], settings: cloudSettingsPayload() })
+    expect(read(WAITLIST).find(w => w.id === 'w5').status).toBe('seated')   // 衝突 → 雲端
+    expect(read(WAITLIST).find(w => w.id === 'w8').status).toBe('seated')   // ★ 不衝突 → 保留本機入座
+
+    const calls = []
+    global.fetch = vi.fn(async (_url, options) => {
+      calls.push(JSON.parse(options.body))
+      return { ok: true, json: async () => ({ ok: true }) }
+    })
+    await pushChangedData()
+    expect(calls[0].dataset.waitlist.map(w => [w.id, w.status])).toEqual([['w8', 'seated']])
+  })
+
+  it('雲端已刪除＋本機版本號 > 0：丟棄本機那筆，不再重推（也不發刪除）', async () => {
+    const w9 = { id: 'w9', queueNumber: 9, name: '九號', partySize: 2, status: 'waiting', queueVersion: 2, takenAt: '2026-10-09T03:00:00.000Z' }
+    applyCloudSnapshot({ bookings: [], waitlist: [w9], tables: [table], settings: cloudSettingsPayload() })
+    localStorage.setItem(WAITLIST, JSON.stringify([{ ...w9, status: 'called' }]))
+    global.fetch = vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, error: 'waitlist-changed' }) }))
+    await pushChangedData().catch(() => {})
+
+    applyCloudSnapshot({ bookings: [], waitlist: [], tables: [table], settings: cloudSettingsPayload() })
+    expect(read(WAITLIST).some(w => w.id === 'w9')).toBe(false)
+    const spy = vi.fn()
+    global.fetch = spy
+    expect((await pushChangedData()).skipped).toBe(true)
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  it('waitlistUpsertConflicts 與後端 protectQueueUpsert 同判準', async () => {
+    const { protectQueueUpsert } = await import('../../functions/lib/operationalCommands.js')
+    const { waitlistUpsertConflicts } = cloudModule
+    const base = { id: 'w', status: 'waiting', queueVersion: 1 }
+    const cases = [
+      [{ ...base, status: 'called' }, { ...base }],
+      [{ ...base, status: 'called' }, { ...base, queueVersion: 2 }],
+      [{ ...base, status: 'called' }, { ...base, status: 'seated' }],
+      [{ ...base, status: 'skipped' }, { ...base }],
+      [{ ...base, status: 'waiting' }, { ...base, status: 'skipped' }],
+      [{ ...base, status: 'left' }, { ...base, status: 'skipped' }],
+      [{ ...base, queueVersion: 0 }, null],
+      [{ ...base, queueVersion: 3 }, null],
+    ]
+    for (const [item, prev] of cases) {
+      let backendRejects = false
+      try { protectQueueUpsert(item, prev) } catch (e) { backendRejects = e.status === 409 }
+      expect(waitlistUpsertConflicts(item, prev)).toBe(backendRejects)
+    }
+  })
+
   it('衝突標記只用一次：採用雲端之後本機再改 w1，下一次拉取照常保護本機變更', async () => {
     seedDirty()
     global.fetch = vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, error: 'waitlist-changed' }) }))

@@ -106,9 +106,12 @@ export function hasPulledCloud() {
 // 後端把含候位的整包推送包在同一個 transaction，候位 queueVersion 對不上（另一台先改了同一號、
 // 或推送逾時但伺服器已寫入後又帶著舊版本重送）就整包 409、什麼都不寫。前端失敗不推進基準線，
 // 拉取時 dirty 的候位又保留本機舊 queueVersion → 每次推送都 409 → 這台的訂位／桌位也永遠上不了雲。
-// 解法：409 且錯誤碼屬候位衝突時，記下這次夾帶的候位 id；下一次拉取對這些 id 改以雲端版本為準
-// （寫入雲端值並把基準線設成雲端值＝不再待推），其他集合照常保留 dirty、下一輪照推。
-// 代價：衝突那一下的本機候位動作以雲端為準（呼叫端 toast 告知店員確認）。只存記憶體：
+// 解法：409 且錯誤碼屬候位衝突時，記下這次夾帶的候位 id（候選）。409 不會說是哪一筆，所以下一次拉取
+// 逐筆用後端同一套判準（waitlistUpsertConflicts）比對雲端版本，只有「真的會被拒」的那幾筆放棄本機變更：
+//   - 雲端有 → 改採雲端值並把基準線設成雲端值（不再待推）；
+//   - 雲端已不存在（本機版本 > 0 或狀態是 skipped，後端永遠會拒）→ 丟棄本機那筆、不再重推。
+// 同一包裡沒衝突的候位照舊保留本機 dirty，與其他集合一樣下一輪照推。
+// 代價：衝突那幾筆的本機候位動作以雲端為準（呼叫端 toast 告知店員確認）。只存記憶體：
 // 重新整理後若再衝突，下一次推送會再 409 並重新記下，同樣在下一次拉取自癒。
 // 錯誤碼來源：functions/lib/operationalCommands.js protectQueueUpsert、functions/index.js adminPushData。
 const WAITLIST_CONFLICT_CODES = new Set(['waitlist-changed', 'waitlist-ended', 'use-queue-command', 'sync-changed'])
@@ -116,6 +119,16 @@ export function isWaitlistConflictError(err) {
   return err?.status === 409 && WAITLIST_CONFLICT_CODES.has(err.code)
 }
 const waitlistConflictIds = new Set()
+
+// 本機候位 item 推上去會不會被後端拒（409）：判準逐條比照 protectQueueUpsert（previous＝雲端版本，可為 null）。
+// ⚠️ 後端判準改了這裡要跟著改。
+export function waitlistUpsertConflicts(item, previous) {
+  if (previous && ['seated', 'left'].includes(previous.status) && item.status !== previous.status) return true
+  if ((item.queueVersion || 0) !== (previous?.queueVersion || 0)) return true
+  if (item.status === 'skipped' && previous?.status !== 'skipped') return true
+  if (previous?.status === 'skipped' && !['skipped', 'left'].includes(item.status)) return true
+  return false
+}
 
 // === 佈局遺失根治：把同步基準線落地到 localStorage，撐過「整頁重新整理」===
 // initialized / lastSynced / pendingDeletes 原本全是模組層級記憶體變數：整頁重新整理＝
@@ -308,8 +321,10 @@ export function applyCloudSnapshot(data = {}) {
     pendingDeletes[col].forEach(id => { delete merged[id] })
     for (const [id, doc] of Object.entries(localMap)) {
       const dirty = lastSynced[col][id] !== stable(doc)
-      if (dirty && col === 'waitlist' && waitlistConflictIds.has(id) && cloudMap[id]) {
-        lastSynced[col][id] = stable(cloudMap[id])      // 候位 409 衝突：放棄本機變更、採雲端版本（見上方說明）
+      if (dirty && col === 'waitlist' && waitlistConflictIds.has(id) && waitlistUpsertConflicts(doc, cloudMap[id] || null)) {
+        // 候位 409 真正衝突的那筆：放棄本機變更（見上方說明）。merged 本來就是雲端版本／雲端已無此筆。
+        if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id])
+        else delete lastSynced[col][id]                 // 雲端已刪：本機那筆一併丟棄，不再重推也不發刪除
       } else if (dirty) merged[id] = doc                // 保留待推送的本機變更
       else if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id]) // 已同步 → 採雲端值
     }
