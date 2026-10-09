@@ -1,5 +1,6 @@
 import { compareWaitlistOrder } from '../utils/waitlistOrder'
 import { getSettings, saveSettings, normalizeSettingsShape } from './settingsService'
+import { changedSettingsKeys } from '../utils/settingsScope'
 
 const DEFAULT_FUNCTION_BASE = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
 
@@ -208,6 +209,31 @@ function restoreSyncStateFromStorage() {
 
 function stable(doc) { return JSON.stringify(doc ?? null) }
 
+// settings 基準線字串 → 物件（null／壞值回 null）。
+function parseSettingsBaseline(baseline) {
+  if (typeof baseline !== 'string') return null
+  try {
+    const parsed = JSON.parse(baseline)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+// 只把「後端確認已寫進雲端」的 settings 頂層 key 推進基準線（訂位專員只能存關閉相關 key）。
+// 🔴 「只有真的寫進雲端的才可推進基準線」：沒被套用的 key 維持 dirty（＝被拒、由店家決定放棄與否）。
+// 基準線一律存本機 withDefaults 形式（sync-baseline-keyorder 不變量），否則 key 順序不同會永久 dirty。
+// 沒有基準線（從未同步過 settings）時不推進——無從得知其他 key 的雲端值，寧可維持 dirty。
+function advanceSettingsBaselineKeys(keys, sentSettings) {
+  const base = parseSettingsBaseline(lastSynced.settings)
+  if (!base || !sentSettings) return
+  const next = { ...base }
+  for (const k of keys) {
+    if (Object.prototype.hasOwnProperty.call(sentSettings, k)) next[k] = sentSettings[k]
+  }
+  lastSynced.settings = stable(normalizeSettingsShape(next))
+}
+
 // 🔴 落地的 settings 基準線是「當時版本」的本機形式。程式改版後 settings 形狀若演進（新增/調整欄位、
 // 排序口徑），舊基準線字串與新版 getSettings() 永遠不相等 → settings 永久 dirty → 非店長裝置每次推送都
 // 夾帶 settings 被拒（卡 rejected），且 applyCloudSnapshot 因 dirty 不再套用雲端 settings。
@@ -388,12 +414,14 @@ export async function pullCloudData() {
 // 其餘照寫，並在回應的 rejected 裡如實回報。不送這個旗標時後端維持舊的
 // 「任一集合越權即整包 403」行為（新後端＋舊前端的部署時間窗需要這個相容性）。
 // 🔴 推送閘門放在最底層：所有推送（差異推送、設定頁「上傳本機資料」）都經過這裡。
-export async function pushCloudData(dataset = localDataset(), { partial = false } = {}) {
+export async function pushCloudData(dataset = localDataset(), { partial = false, settingsChangedKeys } = {}) {
   if (!cloudPulled) return awaitingFirstPullResult()
+  const body = partial ? { dataset, partial: true } : { dataset }
+  if (Array.isArray(settingsChangedKeys)) body.settingsChangedKeys = settingsChangedKeys
   return requestJson(endpoint('adminPushData'), {
     method: 'POST',
     headers: await authHeader(),
-    body: JSON.stringify(partial ? { dataset, partial: true } : { dataset }),
+    body: JSON.stringify(body),
   })
 }
 
@@ -448,7 +476,14 @@ export async function pushChangedData() {
   const deletedIds = recordLocalDeletes(ds)
   if (Object.keys(deletedIds).length) hasChange = true
   const settingsChanged = stable(ds.settings) !== lastSynced.settings
-  if (settingsChanged) { changed.settings = ds.settings; hasChange = true }
+  // 同時告訴後端「相對上次同步基準線改了哪些頂層 key」：訂位專員（settings.closures）後端只套
+  // 這裡列出的關閉 key，其餘沿用雲端（避免拿本機可能過時的整份 settings 蓋回雲端）。
+  let settingsChangedKeys
+  if (settingsChanged) {
+    changed.settings = ds.settings
+    hasChange = true
+    settingsChangedKeys = changedSettingsKeys(parseSettingsBaseline(lastSynced.settings) || {}, ds.settings)
+  }
   if (!hasChange) return { ok: true, skipped: true }
   // 先把「已標記待刪」的狀態落地：萬一接下來的網路請求整頁重新整理／中斷，
   // 待刪保護（F-A）不會因為模組重載而消失。
@@ -456,7 +491,7 @@ export async function pushChangedData() {
 
   const payload = { ...changed }
   if (Object.keys(deletedIds).length) payload.deletedIds = deletedIds
-  const result = await pushCloudData(payload, { partial: true })
+  const result = await pushCloudData(payload, { partial: true, settingsChangedKeys })
   // 推送後推進基準線。
   // 🔴 只有**真的被寫進雲端**的部分才可以推進。被拒的集合若也標記為已同步，
   //    那些本機變更會被當成「已上雲」→ 下一次拉取不再保護它們 → 直接被雲端值覆蓋
@@ -485,7 +520,13 @@ export async function pushChangedData() {
       lastSynced.waitlist[item.id]=stable(item)
     }
   }
-  if (settingsChanged && !rejected.settings) lastSynced.settings = stable(ds.settings)
+  if (settingsChanged) {
+    if (!rejected.settings) lastSynced.settings = stable(ds.settings)
+    // 部分套用（訂位專員改了關閉設定、同時有不能存的其他 key）：只推進已寫入的 key。
+    else if (Array.isArray(result?.settingsApplied) && result.settingsApplied.length) {
+      advanceSettingsBaselineKeys(result.settingsApplied, ds.settings)
+    }
+  }
   persistSyncState()
   return result
 }

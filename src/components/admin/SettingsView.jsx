@@ -19,6 +19,7 @@ import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '
 import { validateLineReadiness } from '../../utils/lineReadiness'
 import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds, openSeatingIdsOn, effectiveClosedSeatings, describeWeeklyClosures } from '../../utils/weeklyClosures'
 import { onlineLeadLabel } from '../../utils/guestPolicy'
+import { CLOSURE_SETTING_KEYS, isClosureSettingKey, settingsWriteScope } from '../../utils/settingsScope'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -109,6 +110,13 @@ export default function SettingsView({ onOpenCustomer }) {
   // 會永遠卡在「有未儲存變更」且每次離開/重新整理都被瀏覽器攔下來，
   // 而重新整理正是同步異常時的標準排除手段，等於把解藥擋掉。
   const canEditSettings = can('settings.update')
+  // 訂位專員（settings.closures、無 settings.update）：只能儲存「休店／關閉時段」；其他設定照舊不會被儲存。
+  const closuresOnly = settingsWriteScope(can) === 'closures'
+  const roleLabel = user?.roleLabel || '你的角色'
+  const closureDirtyKeys = dirtyKeys.filter(isClosureSettingKey)
+  const otherDirtyKeys = dirtyKeys.filter(k => !isClosureSettingKey(k))
+  // 只在「未存變更全是關閉相關」時可存：不能讓店員以為其他欄位也一起存了。
+  const canSaveClosuresNow = closuresOnly && closureDirtyKeys.length > 0 && otherDirtyKeys.length === 0
   const readOnlyRole = isReadOnlyRole(can)
   // 是否動到會影響容量／時段的設定（B1）
   const capacityDirty = dirtyKeys.some(k => CAPACITY_FIELDS.includes(k))
@@ -154,15 +162,17 @@ export default function SettingsView({ onOpenCustomer }) {
     : `未啟用自動釋桌${rolloverOn ? ' · 換日掃除' : ''}`
 
   // B14：離開前提醒尚有未儲存變更
+  // 訂位專員：只有「存得了的」關閉變更才攔離開（存不了的其他欄位不攔，理由同上）。
+  const armUnload = canEditSettings ? isDirty : (closuresOnly && closureDirtyKeys.length > 0)
   useEffect(() => {
-    if (!isDirty || !canEditSettings) return
+    if (!armUnload) return
     const handler = (e) => {
       e.preventDefault()
       e.returnValue = ''
     }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
-  }, [isDirty, canEditSettings])
+  }, [armUnload])
 
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
   const handleSave = async () => {
@@ -170,8 +180,14 @@ export default function SettingsView({ onOpenCustomer }) {
     // settings.update（僅 manager）。非店長寫進本機 settings 後永遠與雲端不一致、
     // 每次差異推送都夾帶並被拒，畫面會長期顯示雲端根本沒有的設定。
     // （部分推送上線後不再連坐拖垮其他集合，但這筆本機變更仍然永遠上不了雲。）
-    if (!can('settings.update')) {
+    // 例外：訂位專員（settings.closures）可存「休店／關閉」key——只寫這些 key 進本機，
+    // 推送時後端也只套這些 key、其餘沿用雲端（functions/lib/settingsScope.js）。
+    if (!can('settings.update') && !closuresOnly) {
       toast.error('你的角色沒有變更店家設定的權限，請聯絡店長')
+      return
+    }
+    if (closuresOnly && otherDirtyKeys.length > 0) {
+      toast.error(`${roleLabel}只能儲存休店／關閉設定，其他設定請用店長帳號。請先還原其他變更再儲存`)
       return
     }
     if (capacityDirty && affectedBookingCount > 0) {
@@ -186,7 +202,10 @@ export default function SettingsView({ onOpenCustomer }) {
     // 讓 sticky banner 正確消失、beforeunload 守衛解除。
     setSaving(true)
     try {
-      const saved = updateSettings(form)
+      // 訂位專員只把關閉相關 key 寫進本機（其他 key 不動，維持與雲端一致）。
+      const saved = updateSettings(closuresOnly
+        ? Object.fromEntries(CLOSURE_SETTING_KEYS.map(k => [k, form[k]]))
+        : form)
       setForm(saved)
       // 關鍵：以「雲端是否真的寫入成功」為準宣告成功，而非只憑本機 localStorage。
       // 本機模式（未設 Firebase）沒有雲端可寫，本機存好即算完成。
@@ -295,7 +314,11 @@ export default function SettingsView({ onOpenCustomer }) {
     <div className="rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 shadow-sm">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div className="text-sm font-bold text-amber-800">
-        {canEditSettings ? `有未儲存變更（${dirtyKeys.length} 項）` : `這些變更不會被儲存（${dirtyKeys.length} 項）`}
+        {canEditSettings
+          ? `有未儲存變更（${dirtyKeys.length} 項）`
+          : closuresOnly && closureDirtyKeys.length > 0
+            ? `有未儲存的休店／關閉變更${otherDirtyKeys.length ? `；另有 ${otherDirtyKeys.length} 項其他設定不會被儲存` : ''}`
+            : `這些變更不會被儲存（${dirtyKeys.length} 項）`}
         {capacityDirty && affectedBookingCount > 0 && (
           <span className="ml-2 inline-flex items-center rounded-full bg-chicken-red px-2 py-0.5 text-xs font-bold text-white">
             影響現有訂位
@@ -303,6 +326,16 @@ export default function SettingsView({ onOpenCustomer }) {
         )}
       </div>
       <div className="flex items-center gap-2">
+        {closuresOnly && closureDirtyKeys.length > 0 && otherDirtyKeys.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setForm(f => ({ ...f, ...Object.fromEntries(otherDirtyKeys.map(k => [k, settings[k]])) }))}
+            disabled={saving}
+            className="min-h-[44px] rounded-xl border border-amber-400/60 bg-white px-4 py-2 text-sm font-bold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+          >
+            還原其他設定
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setForm(settings)}
@@ -311,6 +344,16 @@ export default function SettingsView({ onOpenCustomer }) {
         >
           還原
         </button>
+        {closuresOnly && closureDirtyKeys.length > 0 && (
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || !canSaveClosuresNow}
+            className="btn-primary min-h-[44px] px-5 py-2 disabled:opacity-60"
+          >
+            {saving ? '儲存中…' : '儲存休店／關閉設定'}
+          </button>
+        )}
         {canEditSettings && (
           <button
             type="button"
@@ -323,6 +366,12 @@ export default function SettingsView({ onOpenCustomer }) {
         )}
       </div>
     </div>
+    {closuresOnly && (
+      <p className="mt-1 text-xs font-bold text-amber-800/90">
+        {roleLabel}只能儲存休店／關閉設定，其他設定請用店長帳號。
+        {otherDirtyKeys.length > 0 && closureDirtyKeys.length > 0 && '請先按「還原其他設定」，才能儲存休店／關閉設定。'}
+      </p>
+    )}
     {/* 修改明細：預設收合，點開看改了什麼，可逐項還原 */}
     <details className="group mt-2 border-t border-amber-300/70 pt-2">
       <summary className="flex min-h-[36px] cursor-pointer list-none items-center gap-1 text-sm font-bold text-amber-800">
@@ -453,9 +502,14 @@ export default function SettingsView({ onOpenCustomer }) {
       )}
 
       {/* 非店長：整頁唯讀提示。改了也存不了，先講清楚，免得白填。 */}
-      {!canEditSettings && (
+      {!canEditSettings && !closuresOnly && (
         <div className="-mx-1 rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">
           唯讀：你的角色無法變更店家設定。下方仍可查看內容與同步狀態，變更不會被儲存。
+        </div>
+      )}
+      {closuresOnly && (
+        <div className="-mx-1 rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700">
+          {roleLabel}只能儲存「休店 / 關閉時段管理」（在「營運規則」分類）；其他設定唯讀，變更不會被儲存，請用店長帳號。
         </div>
       )}
 
