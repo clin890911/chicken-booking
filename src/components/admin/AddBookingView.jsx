@@ -46,6 +46,9 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   const [name, setName] = useState(initial?.name || '')
   const [guests, setGuests] = useState(2)
   const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；guests 仍是總人數、容量邏輯只讀它
+  // 有小孩 →「兒童」自動勾且鎖住。notes.child 只記店員自己點的；有效值＝自己點的 || 有小孩，
+  // 所以小孩改回 0 時：自動勾的會跟著取消、店員自己勾的保留。
+  const hasKids = normalizeSplit(guests, kids).children > 0
   const [date, setDate] = useState(todayStr())
   const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState('')
@@ -219,7 +222,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
     try {
       const choice = tableChoice
       const b = addBooking({
-        name, phone: phone.trim(), guests, children: normalizeSplit(guests, kids).children, date, timeSlot, notes,
+        name, phone: phone.trim(), guests, children: normalizeSplit(guests, kids).children, date, timeSlot, notes: { ...notes, child: notes.child || hasKids },
         source,
         status: 'confirmed',
         createdBy: user?.email || 'staff',
@@ -437,13 +440,17 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         <h2 className="font-bold text-chicken-brown mb-3">特殊需求（選填）</h2>
         <div className="grid grid-cols-3 gap-2 mb-3">
           {NOTE_OPTIONS.map(n => {
-            const active = notes[n.key]
+            const locked = n.key === 'child' && hasKids
+            const active = notes[n.key] || locked
             return (
               <button
                 type="button"
                 key={n.key}
+                aria-pressed={!!active}
+                disabled={locked}
+                title={locked ? '有小孩已自動標記' : undefined}
                 onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
-                className={`px-3 py-2.5 rounded-xl border-2 transition-all text-sm font-bold ${
+                className={`px-3 py-2.5 rounded-xl border-2 transition-all text-sm font-bold disabled:cursor-not-allowed ${
                   active
                     ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'
                     : 'border-chicken-brown/15 bg-white text-chicken-brown'
@@ -454,6 +461,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
             )
           })}
         </div>
+        {hasKids && <p className="-mt-1 mb-3 text-xs font-bold text-chicken-red/80">有小孩，已自動標記「兒童」</p>}
         <Textarea
           value={notes.text}
           onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}

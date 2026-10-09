@@ -29,3 +29,14 @@ export function splitFields(total, kids, { force = false } = {}) {
   const s = normalizeSplit(total, kids)
   return (s.children > 0 || force) ? s : {}
 }
+
+// 有小孩 → 「兒童」標記必須是勾的（店主拍板：不必勾兩次，廚房／外場才看得到徽章）。
+// 只會補成 true、絕不自動改回 false；保留 notes 其他鍵，notes 缺席時補成標準形狀 {pet,child,mobility,text}。
+// 回傳要寫入的 notes；不需要動時回 undefined（呼叫端維持原值）。
+export function forcedChildNotes(record) {
+  if (!record || guestSplit(record).children <= 0) return undefined
+  const n = record.notes
+  if (n && typeof n === 'object' && n.child === true) return undefined
+  const base = (n && typeof n === 'object') ? n : { pet: false, child: false, mobility: false, text: typeof n === 'string' ? n : '' }
+  return { ...base, child: true }
+}

@@ -2609,3 +2609,24 @@ describe('markNoshow / undoMarkNoshow（R5）', () => {
     expect(seating.undoMarkNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus }).ok).toBe(false)
   })
 })
+
+describe('有小孩自動標記「兒童」：現場／候位入座建單', () => {
+  beforeEach(() => { seedDefaultTables() })
+  it('walkInSeat／walkInSeatMulti：children>0 → notes.child=true，備註文字保留', () => {
+    const r = seating.walkInSeat('201', { name: '散客', guests: 3, children: 1, notes: '慶生' })
+    expect(r.ok).toBe(true)
+    expect(r.booking.notes).toMatchObject({ child: true, text: '慶生' })
+    const m = seating.walkInSeatMulti(['101', '108'], { name: '大組', guests: 9, children: 3 })
+    expect(m.ok).toBe(true)
+    expect(m.booking.notes.child).toBe(true)
+    const none = seating.walkInSeat('208', { name: '無小孩', guests: 2 })
+    expect(none.booking.notes.child).toBe(false)
+  })
+  it('seatWaitlist：候位有小孩 → 建出的 walk-in 訂位 notes.child=true', () => {
+    const w = waitlistService.create({ name: '候A', phone: '0911', partySize: 4, children: 2, notes: '過敏' })
+    const r = seating.seatWaitlist(w.id, '101')
+    expect(r.ok).toBe(true)
+    expect(r.booking.children).toBe(2)
+    expect(r.booking.notes).toMatchObject({ child: true, text: '過敏' })
+  })
+})
