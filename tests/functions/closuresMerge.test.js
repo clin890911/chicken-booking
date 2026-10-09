@@ -149,3 +149,16 @@ describe('mergeClosures：以日期為單位三方合併', () => {
     expect(sameClosures(C({ closedDates: ['x'] }), C())).toBe(false)
   })
 })
+
+describe('describeClosureConflicts（前端提示文案）', () => {
+  it('日期轉 M/D、星期轉每週X、同日只列一次；沒有衝突回空字串', async () => {
+    const { describeClosureConflicts } = await import('../../src/utils/closuresMerge')
+    expect(describeClosureConflicts([])).toBe('')
+    expect(describeClosureConflicts(undefined)).toBe('')
+    expect(describeClosureConflicts([
+      { field: 'closedSeatings', key: '2026-10-12' },
+      { field: 'closedSlots', key: '2026-10-12' },
+      { field: 'weeklySeatings', key: '6' },
+    ])).toBe('10/12、每週六 的休店／關閉設定被他人同時修改，已以你的為準')
+  })
+})

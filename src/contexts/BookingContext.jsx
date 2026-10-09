@@ -23,6 +23,7 @@ import { markCreatedHere } from '../utils/newBookingAlerts'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
 import { formatBookingTables } from '../utils/bookingTables'
+import { describeClosureConflicts } from '../utils/closuresMerge'
 
 const BookingContext = createContext(null)
 
@@ -137,6 +138,12 @@ export function BookingProvider({ children }) {
         // 首拉閘門未開：資料留在本機，首拉成功後由 pullCloud 主動補推。不是成功也不是失敗，狀態不動。
         if (isPushDeferred(r)) return
         setCloudStatus(statusFromPushResult(r, new Date().toISOString()))
+        // 休店／關閉三方合併：別台同時存的日期已 rebase 進本機 settings，畫面跟上；同日衝突提示一次。
+        if (r?.closuresMerge) {
+          refresh()
+          const conflictMsg = describeClosureConflicts(r.closuresMerge.conflicts)
+          if (conflictMsg) toastRef.current?.warning?.(conflictMsg)
+        }
         if (r?.rejected) {
           const now = Date.now()
           if (now - lastPushErrorToastRef.current > 8000) {
@@ -154,7 +161,7 @@ export function BookingProvider({ children }) {
         }
       }
     }, 250)
-  }, [])
+  }, [refresh])
   syncCloudSoonRef.current = syncCloudSoon
 
   // 立即把本機變更推上雲端並回報「雲端是否真的寫入成功」。供「儲存」等主動操作 await：
@@ -172,15 +179,18 @@ export function BookingProvider({ children }) {
       const r = await cloudData.pushChangedData()
       if (isPushDeferred(r)) return { ok: false, deferred: true, error: PUSH_DEFERRED_MESSAGE }
       setCloudStatus(statusFromPushResult(r, new Date().toISOString()))
+      // 休店／關閉三方合併：別台同時存的日期已 rebase 進本機 settings → 畫面跟上；衝突交給呼叫端提示。
+      if (r?.closuresMerge) refresh()
+      const closureConflicts = Array.isArray(r?.closuresMerge?.conflicts) ? r.closuresMerge.conflicts : []
       // 有被拒的部分就不算成功——呼叫端（例如「儲存」）必須據此顯示誠實的失敗訊息，
       // 而不是本機存好就宣告成功。
-      if (r?.rejected) return { ok: false, error: r.rejectedMessage || '部分變更因權限不足未能上雲', rejected: r.rejected }
-      return { ok: true, skipped: !!r?.skipped }
+      if (r?.rejected) return { ok: false, error: r.rejectedMessage || '部分變更因權限不足未能上雲', rejected: r.rejected, closureConflicts }
+      return { ok: true, skipped: !!r?.skipped, closureConflicts }
     } catch (err) {
       setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
       return { ok: false, error: err.message || 'cloud-push-failed' }
     }
-  }, [])
+  }, [refresh])
 
   // hydrated：本機資料已灌入 state（本機模式的「資料備妥」訊號）。
   // 用途見 utils/newBookingAlerts——掛載當下 bookings 還是 []，把它當基準會讓首次

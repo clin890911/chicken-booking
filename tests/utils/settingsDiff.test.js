@@ -83,3 +83,35 @@ describe('rebaseSettingsForm', () => {
     expect(dirtySettingsKeys(out, next)).toEqual(['openTime'])
   })
 })
+
+describe('rebaseSettingsForm：休店／關閉以日期為單位跟上別處的修改', () => {
+  const C = (o = {}) => ({ closedDates: [], closedSlots: {}, closedSeatings: {}, ...o })
+  it('🔴 使用者正在關 10/12（未存）、雲端拉到別人關的 10/15 → 表單兩天都在（存檔時不會把 10/15 當成被刪）', () => {
+    const prev = { ...base, closures: C() }
+    const form = { ...base, closures: C({ closedSeatings: { '2026-10-12': ['lunch1'] } }) }
+    const next = { ...base, closures: C({ closedSeatings: { '2026-10-15': ['lunch2'] } }) }
+    const out = rebaseSettingsForm(form, prev, next)
+    expect(out.closures.closedSeatings).toEqual({ '2026-10-12': ['lunch1'], '2026-10-15': ['lunch2'] })
+    expect(dirtySettingsKeys(out, next)).toEqual(['closures'])
+  })
+  it('別人恢復開放的日期（使用者沒動）→ 表單也跟著恢復，不會被舊副本存回去', () => {
+    const prev = { ...base, closures: C({ closedDates: ['2026-10-10'] }) }
+    const form = { ...base, closures: C({ closedDates: ['2026-10-10', '2026-10-11'] }) }
+    const next = { ...base, closures: C() }
+    expect(rebaseSettingsForm(form, prev, next).closures.closedDates).toEqual(['2026-10-11'])
+  })
+  it('同一天兩邊都改 → 保留使用者的編輯', () => {
+    const prev = { ...base, closures: C({ closedSlots: { '2026-10-12': ['12:00'] } }) }
+    const form = { ...base, closures: C({ closedSlots: { '2026-10-12': ['12:00', '12:30'] } }) }
+    const next = { ...base, closures: C({ closedSlots: { '2026-10-12': ['18:00'] } }) }
+    expect(rebaseSettingsForm(form, prev, next).closures.closedSlots).toEqual({ '2026-10-12': ['12:00', '12:30'] })
+  })
+  it('合併後與新的已存值相同 → 直接用已存值（不冒出假的未儲存變更）', () => {
+    const prev = { ...base, closures: C() }
+    const form = { ...base, closures: C({ closedSeatings: { '2026-10-12': ['lunch2', 'lunch1'] } }) }
+    const next = { ...base, closures: C({ closedSeatings: { '2026-10-12': ['lunch1', 'lunch2'] } }) }
+    const out = rebaseSettingsForm(form, prev, next)
+    expect(out.closures).toBe(next.closures)
+    expect(dirtySettingsKeys(out, next)).toEqual([])
+  })
+})
