@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeOvertimeActions, computeDayRolloverActions,
-  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled,
+  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled, isSweepSnapshotFresh, SWEEP_PULL_MAX_AGE_MS,
   KNOWN_SWEEP_ACTIONS, SWEEP_ACTION_PERMISSION,
 } from '../../src/utils/opsSweep'
 
@@ -266,5 +266,21 @@ describe('掃除 action 註冊表完整性', () => {
     Object.keys(SWEEP_ACTION_PERMISSION).forEach(type => {
       expect(KNOWN_SWEEP_ACTIONS).toContain(type)
     })
+  })
+})
+
+describe('isSweepSnapshotFresh（R4：掃除前快照新鮮度閘門）', () => {
+  const now = 1_000_000_000
+  it('非 Firebase 模式一律放行（行為不變）', () => {
+    expect(isSweepSnapshotFresh({ usingFirebase: false, lastPullOkAt: 0, now })).toBe(true)
+    expect(isSweepSnapshotFresh({ usingFirebase: undefined, lastPullOkAt: 0, now })).toBe(true)
+  })
+  it('Firebase 模式：從未拉取成功 → 不跑', () => {
+    expect(isSweepSnapshotFresh({ usingFirebase: true, lastPullOkAt: 0, now })).toBe(false)
+  })
+  it('Firebase 模式：10 秒內拉過 → 跑；超過 → 不跑（喚醒後舊快照）', () => {
+    expect(SWEEP_PULL_MAX_AGE_MS).toBe(10000)
+    expect(isSweepSnapshotFresh({ usingFirebase: true, lastPullOkAt: now - 9_000, now })).toBe(true)
+    expect(isSweepSnapshotFresh({ usingFirebase: true, lastPullOkAt: now - 60_000, now })).toBe(false)
   })
 })

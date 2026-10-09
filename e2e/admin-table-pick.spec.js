@@ -86,7 +86,10 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
   await confirmBtn.click()
   await expect(page.getByText(/余先生 2 位 · .*11:00 · 已指派 106/)).toBeVisible()
 
-  // 回到今日清單：卡片是綠色「桌 106」（現場指派已鎖桌），有「改桌」
+  // 直接點「新增」是連續新增模式（存檔後留在新增頁）→ 手動切回「今日」子分頁
+  await page.locator('[aria-label="訂位子分頁"]').getByRole('button', { name: /今日/ }).click()
+
+  // 今日清單：卡片是綠色「桌 106」（現場指派已鎖桌），有「改桌」
   await expect(page.getByText('桌 106', { exact: true })).toBeVisible()
   await page.locator('summary[aria-label="余先生 更多操作"]').click()
   await page.getByRole('button', { name: '↔ 改桌' }).click()

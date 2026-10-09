@@ -8,15 +8,20 @@
 
 // No-show 標記：文案與 UpcomingPanel.jsx 的過時未到清單同一套（講清楚累計第幾次）；
 // 復原要把 recordNoshow 加上去的那一次扣回，否則店員按錯再復原，客人身上仍留著一次爽約紀錄。
-export function markNoshow(booking, { setStatus, getNoshowCount, revokeNoshow, toast }) {
-  setStatus(booking.id, 'noshow')
+// markBookingNoshow／undoMarkBookingNoshow＝BookingContext（seatingService.markNoshow／undoMarkNoshow）：
+// 標記時一併釋出本訂位鎖住的 reserved 桌；復原把回傳快照原封帶回，桌只在仍是空桌時搶回。
+export function markNoshow(booking, { markBookingNoshow, undoMarkBookingNoshow, getNoshowCount, toast }) {
+  const r = markBookingNoshow(booking.id)
+  if (!r?.ok) return toast.error('標記失敗：' + (r?.error || '未知錯誤'))
   const count = getNoshowCount(booking.phone)
   const countMsg = count > 0 ? `這支電話累計第 ${count} 次，之後訂位會提醒` : '已記錄這支電話的爽約次數'
-  toast.action(`已標記 ${booking.name} No-show — ${countMsg}`,
+  const tableMsg = r.releasedTables?.length ? `，${r.releasedTables.join('、')} 已釋出空桌` : ''
+  toast.action(`已標記 ${booking.name} No-show — ${countMsg}${tableMsg}`,
     { label: '↩ 復原', onClick: () => {
-        setStatus(booking.id, 'confirmed')
-        revokeNoshow(booking.phone, booking.id)
-        toast.success(`已復原 ${booking.name} 為待到，爽約次數已扣回`)
+        const u = undoMarkBookingNoshow(booking.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+        if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+        const failMsg = u.failed?.length ? `（${u.failed.join('、')} 已被占用，桌位未搶回，請重新指派）` : ''
+        toast.success(`已復原 ${booking.name} 為待到，爽約次數已扣回${failMsg}`)
     } },
     { duration: 8000 })
 }
@@ -39,7 +44,10 @@ export function cancelWithUndo(booking, { cancelBooking, undoCancelBooking, toas
   if (!r?.ok) return toast.error('取消失敗：' + (r?.error || '未知錯誤'))
   toast.action(`已取消 ${booking.name} 的訂位`,
     { label: '↩ 復原', onClick: () => {
-        const u = undoCancelBooking(booking.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+        const u = undoCancelBooking(booking.id, {
+          tableNumbers: r.releasedTables, preassignedTables: r.preassignedTables,
+          originalTables: r.originalTables, status: r.previousStatus,
+        })
         if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
         const okMsg = u.restored?.length ? `，${u.restored.join('、')} 已改回保留` : ''
         const failMsg = u.failed?.length ? `（${u.failed.join('、')} 已被占用，桌位未搶回，請重新指派）` : ''

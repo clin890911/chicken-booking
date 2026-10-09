@@ -15,6 +15,7 @@ vi.mock('../../src/contexts/AuthContext', async (importOriginal) => {
 const ctx = {
   bookings: [], tables: [], groupReservations: [],
   setStatus: vi.fn(), seatBooking: vi.fn(() => ({ ok: true })),
+  markBookingNoshow: vi.fn(() => ({ ok: true, releasedTables: [], previousStatus: 'confirmed' })), undoMarkBookingNoshow: vi.fn(() => ({ ok: true })),
   completeWithoutSeating: vi.fn(), undoCompleteWithoutSeating: vi.fn(),
 }
 const confirm = vi.fn(async () => true)
@@ -81,6 +82,7 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
     expect(ctx.bookings[0].assignedTableId).toBe('105')
     expect(ctx.bookings[0].extraTableIds).toEqual(['106'])
     expect(ctx.setStatus).not.toHaveBeenCalled()
+    expect(ctx.markBookingNoshow).not.toHaveBeenCalled()
   })
 
   it('D8：過時未到先提供電話，No-show 在更多並確認後才寫入', async () => {
@@ -92,10 +94,10 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
     act(() => details.querySelector('summary').click())
     confirm.mockResolvedValueOnce(false)
     await act(async () => btn('標 No-show').click())
-    expect(ctx.setStatus).not.toHaveBeenCalled()
+    expect(ctx.markBookingNoshow).not.toHaveBeenCalled()
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('已聯絡'), expect.objectContaining({ danger: true }))
     await act(async () => btn('標 No-show').click())
-    expect(ctx.setStatus).toHaveBeenCalledWith('Y1', 'noshow')
+    expect(ctx.markBookingNoshow).toHaveBeenCalledWith('Y1')
   })
 
   it('電話空白的現場客：人數後面不留「 · 」尾巴', () => {

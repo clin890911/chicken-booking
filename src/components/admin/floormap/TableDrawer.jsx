@@ -5,7 +5,7 @@ import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import TableCandidatePanel from './TableCandidatePanel'
-import { cancelWithUndo } from '../../../utils/bookingActions'
+import { cancelWithUndo, releaseAfterCheckout } from '../../../utils/bookingActions'
 import GroupTableSection from './GroupTableSection'
 import { STATUS_ZH as STATUS_LABELS, diningTablePresentation } from '../../../utils/tableStatus'
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
@@ -55,7 +55,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const confirmDialog = useConfirm()
   const {
     blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking,
+    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, releaseCheckedOutTables,
     setTableOutage, clearTableOutage, releaseOverriddenAssignment,
     settings, groupReservations, bookings, tables,
   } = useBooking()
@@ -176,12 +176,13 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
       { title: '客人已離席', confirmLabel: '已離席' })
     if (!ok) return
     const min = minutesSeated()
-    // 併桌時快照整組桌（onClose 後 booking/table 可能變）；單桌則用當前桌
-    const releasedTables = bookingTables.length ? bookingTables : [table.number]
-    const r = checkoutBooking(booking.id)
+    const checkedOut = booking
+    const r = checkoutBooking(checkedOut.id)
     if (!r.ok) return toast.error(r.error)
-    toast.action(`${booking.name} 已離席（用餐 ${min} 分）· 桌位待清桌`,
-      { label: '一鍵釋出', onClick: () => { releasedTables.forEach(n => clearTable(n)); toast.success(`${releasedTables.join('、')} 已釋出`) } })
+    // 「一鍵釋出」只清仍是待清桌、且仍由這筆持有的桌（seatingService.releaseCheckedOutTables）：
+    // toast 按鈕可能幾秒後才按，期間桌可能已清好、甚至已帶下一組，無條件 clearTable 會把那組抹掉。
+    toast.action(`${checkedOut.name} 已離席（用餐 ${min} 分）· 桌位待清桌`,
+      { label: '一鍵釋出', onClick: () => releaseAfterCheckout(checkedOut, { releaseCheckedOutTables, toast }) })
   }
 
   // 一鍵釋出：已離席 + 清桌完成（跳過待清桌）

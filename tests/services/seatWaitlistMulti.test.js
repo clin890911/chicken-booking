@@ -3,6 +3,7 @@ import * as seatingService from '../../src/services/seatingService'
 import * as waitlistService from '../../src/services/waitlistService'
 import * as tableService from '../../src/services/tableService'
 import * as bookingService from '../../src/services/bookingService'
+import { todayStr } from '../../src/utils/timeSlots'
 
 // 候位併桌入座（2026-08 店主回報）。
 // 症狀：候位 9 位、現場只剩幾張 4 人桌時，按「入座」只回「目前無符合容量的空桌」——
@@ -95,7 +96,7 @@ describe('seatWaitlistMulti（候位併桌入座）', () => {
   })
 
   it('含今日維修停用桌 → 拒絕', () => {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayStr() // 本地日（台北），UTC 會在 00:00–08:00 變成昨天
     seedTables({ 109: { outage: { from: today, to: today, reason: '桌椅維修' } } })
     const r = seatingService.seatWaitlistMulti('W1', ['105', '106', '109'])
     expect(r.ok).toBe(false)
