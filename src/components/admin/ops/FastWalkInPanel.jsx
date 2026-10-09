@@ -9,6 +9,7 @@ import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadge
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import Icon from '../../ui/Icon'
 import { todayStr } from '../../../utils/timeSlots'
+import { squeezeSeats } from '../../../utils/capacity'
 
 const KEYPAD_WIDTH = 392
 const KEYPAD_GAP = 12
@@ -83,7 +84,10 @@ export default function FastWalkInPanel({
   useEffect(() => { seatFired.current = false }, [tables.map(t => t.number).join(','), guests, warning?.text])
   const g = Number(guests) || 0
   const seats = tables.reduce((sum, t) => sum + (t.capacity || 0), 0)
-  const enough = tables.length > 0 && g > 0 && seats >= g
+  // 擠一擠：每桌可多坐 1 位（6 人桌坐 7 位），超過原席數照樣可入座、但標黃提醒
+  const maxSeats = squeezeSeats(tables)
+  const enough = tables.length > 0 && g > 0 && maxSeats >= g
+  const squeezed = enough && seats < g
 
   // 即時可坐判定（不估時間）。已選桌看合計席數；沒選桌才給建議。
   let verdict = null
@@ -92,9 +96,11 @@ export default function FastWalkInPanel({
     const label = tables.map(t => t.number).join(' + ')
     verdict = g <= 0
       ? { tone: 'idle', icon: 'chair', text: `已選 ${label}（${seats} 席）· 再選人數` }
-      : enough
-        ? { tone: 'ok', icon: 'checkCircle', text: `${g} 位 → ${label}（${seats} 席）` }
-        : { tone: 'none', icon: 'warning', text: `${g} 位坐不下 ${seats} 席 → 再加一桌或換桌` }
+      : squeezed
+        ? { tone: 'multi', icon: 'warning', text: `${g} 位 → ${label}（${seats} 席，擠一擠超坐 ${g - seats} 位）` }
+        : enough
+          ? { tone: 'ok', icon: 'checkCircle', text: `${g} 位 → ${label}（${seats} 席）` }
+          : { tone: 'none', icon: 'warning', text: `${g} 位擠一擠也坐不下 ${seats} 席 → 再加一桌或換桌` }
   } else if (g > 0) {
     // 建議桌看「現在入座」的佔用區間 [現在, 現在+佔位)：避開其間已被別筆預配的桌與團保桌（只影響建議，不擋點選）
     const single = suggestTable(g, { date: todayStr(), mode: 'now' })
@@ -133,7 +139,7 @@ export default function FastWalkInPanel({
   const seat = () => {
     if (!tables.length) return toast.error('請先點桌況圖選一張桌')
     if (!(g > 0)) return toast.error('請選人數')
-    if (seats < g) return toast.error(`${g} 位坐不下 ${seats} 席`)
+    if (maxSeats < g) return toast.error(`${g} 位擠一擠也坐不下 ${seats} 席`)
     if (seatFired.current || blockedByWarning) return false
     seatFired.current = true
     const nm = displayName

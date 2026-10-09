@@ -11,7 +11,7 @@ import * as customerService from '../../services/customerService'
 import { getNoshowCount } from '../../services/bookingService'
 import { todayStr, dayLabel, formatDate, addDays } from '../../utils/timeSlots'
 import { isTableUsableOnDate } from '../../utils/tableAvailability'
-import { HOLD_LEAD_MIN } from '../../utils/capacity'
+import { HOLD_LEAD_MIN, squeezeSeats } from '../../utils/capacity'
 
 // 後台新增訂位 — 電話為先導鍵，自動帶顧客檔
 // 設計：緊湊單頁、由上而下一路填完；缺漏欄位即時列在底部黏性操作列（點 pill 捲到該欄）；
@@ -141,7 +141,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   //   有 → 只是此刻沒空桌可鎖（被佔、被預配、團保）→ 預設「先不指派」，接近用餐時間再到現場頁指派
   //   沒有 → 需要併桌 → 預設「到桌況圖選（可併桌）」
   const anySingleFits = useMemo(
-    () => (tables || []).some(t => isTableUsableOnDate(t, date) && (Number(t.capacity) || 0) >= guests),
+    () => (tables || []).some(t => isTableUsableOnDate(t, date) && squeezeSeats([t]) >= guests),
     [tables, date, guests],
   )
   const emptyDefault = anySingleFits ? 'none' : 'map'
@@ -419,6 +419,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
               lockKind={lockKind}
               leadMin={HOLD_LEAD_MIN}
               candidates={tableCandidates}
+              guests={guests}
               choice={tableChoice}
               onPick={pickTable}
               notice={tableNotice}

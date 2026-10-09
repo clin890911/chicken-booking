@@ -234,10 +234,10 @@ describe('跨 service 端到端流程', () => {
       expect(cust.totalGuests).toBe(4)
     })
 
-    it('候位人數超過桌容量 → 拒絕，且不建 booking、不動桌、候位仍 waiting', () => {
-      const wait = waitlistService.create({ name: '大團', phone: '0900111222', partySize: 5 })
+    it('候位人數超過桌容量（擠一擠也坐不下）→ 拒絕，且不建 booking、不動桌、候位仍 waiting', () => {
+      const wait = waitlistService.create({ name: '大團', phone: '0900111222', partySize: 6 })
       const before = bookingService.listAll().length
-      const r = seating.seatWaitlist(wait.id, '101') // 101 容量 4 < 5
+      const r = seating.seatWaitlist(wait.id, '101') // 101 容量 4，擠一擠最多 5 < 6
       expect(r.ok).toBe(false)
       expect(r.error).toMatch(/容量不足/)
       expect(bookingService.listAll().length).toBe(before)

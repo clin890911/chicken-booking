@@ -130,13 +130,13 @@ test('離用餐 30 分內新增 → 存檔即鎖桌（桌 105）；點非候選�
   // 預設 13:30（離現在 20 分）→ 鎖桌型
   await expect(panel(page).getByTestId('reserve-table')).toContainText('桌 105')
   await expect(panel(page).getByText(/存檔後立刻鎖桌/)).toBeVisible()
-  // 大組（沒有單桌坐得下 7 位）→ 不選桌，存檔後再到今日訂位指派併桌
-  await panel(page).getByRole('button', { name: '7 位' }).click()
-  await expect(panel(page).getByText(/店裡沒有單桌坐得下 7 位/)).toBeVisible()
-  // 非候選桌：5 位時 105（4 人桌）坐不下 → 點了只 toast 說明，不選取（仍是建議的 6 人桌）
-  await panel(page).getByRole('button', { name: '5 位' }).click()
+  // 大組（6 人桌擠一擠也坐不下 8 位）→ 不選桌，存檔後再到今日訂位指派併桌
+  await panel(page).getByRole('button', { name: '8 位' }).click()
+  await expect(panel(page).getByText(/店裡沒有單桌坐得下 8 位/)).toBeVisible()
+  // 非候選桌：6 位時 105（4 人桌，擠一擠最多 5 位）坐不下 → 點了只 toast 說明，不選取（仍是建議的 6 人桌）
+  await panel(page).getByRole('button', { name: '6 位' }).click()
   await mapTable(page, '105').click()
-  await expect(page.getByText('105 只有 4 席，坐不下 5 位')).toBeVisible()
+  await expect(page.getByText('105 只有 4 席，擠一擠也坐不下 6 位')).toBeVisible()
   await expect(panel(page).getByTestId('reserve-table')).not.toContainText('105')
   await panel(page).getByRole('button', { name: '2 位' }).click()
 

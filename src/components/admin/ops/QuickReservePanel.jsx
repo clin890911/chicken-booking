@@ -213,7 +213,7 @@ export default function QuickReservePanel({
             <span data-testid="reserve-table" className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-sm font-bold ${
               lockKind === 'preassign' ? 'bg-blue-100 text-blue-800' : 'bg-chicken-green/15 text-chicken-green'}`}>
               {lockKind === 'preassign' ? `預配 ${table.number}` : `桌 ${table.number}`}
-              <span className="text-[11px] font-semibold opacity-75">· {table.capacity} 人桌{table.number === suggestedNumber ? ' · 建議' : ''}</span>
+              <span className="text-[11px] font-semibold opacity-75">· {table.capacity} 人桌{Number(guests) > (Number(table.capacity) || 0) ? ' · 擠一擠' : ''}{table.number === suggestedNumber ? ' · 建議' : ''}</span>
             </span>
           ) : (
             <span data-testid="reserve-table" className="text-sm font-bold text-chicken-brown/60">

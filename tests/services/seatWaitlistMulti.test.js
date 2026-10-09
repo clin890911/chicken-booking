@@ -71,10 +71,19 @@ describe('seatWaitlistMulti（候位併桌入座）', () => {
     expect(w.assignedTableNumber).toBe('105')
   })
 
-  it('合計席數不足 → 拒絕，且不留下半套狀態（桌位與候位都不動）', () => {
+  it('9 位併兩張 4 人桌（8 席）→ 擠一擠（每桌多坐 1 位，最多 10 位）可入座', () => {
     const r = seatingService.seatWaitlistMulti('W1', ['105', '106'])
+    expect(r.ok).toBe(true)
+    expect(bookingService.getById(r.booking.id).guests).toBe(9)
+    expect(tableService.getByNumber('105').status).toBe('dining')
+    expect(tableService.getByNumber('106').status).toBe('dining')
+  })
+
+  it('合計席數擠一擠也不足 → 拒絕，且不留下半套狀態（桌位與候位都不動）', () => {
+    seedWait({ partySize: 11 })
+    const r = seatingService.seatWaitlistMulti('W1', ['105', '106']) // 4+4 擠一擠最多 10 < 11
     expect(r.ok).toBe(false)
-    expect(r.error).toContain('不足 9 位')
+    expect(r.error).toContain('不足 11 位')
     expect(tableService.getByNumber('105').status).toBe('vacant')
     expect(tableService.getByNumber('106').status).toBe('vacant')
     expect(waitlistService.getById('W1').status).toBe('waiting')
@@ -116,11 +125,11 @@ describe('seatWaitlistMulti（候位併桌入座）', () => {
   })
 
   it('重複桌號會去重（點兩次同一張桌不該灌水席數）', () => {
-    seedWait({ partySize: 9 })
+    seedWait({ partySize: 11 })
     const r = seatingService.seatWaitlistMulti('W1', ['105', '105', '106'])
-    // 去重後只剩 105+106 = 8 席 < 9 → 應拒絕，而不是誤算成 12 席放行
+    // 去重後只剩 105+106 = 8 席（擠一擠最多 10 位）< 11 → 應拒絕，而不是誤算成 12 席（擠 15 位）放行
     expect(r.ok).toBe(false)
-    expect(r.error).toContain('不足 9 位')
+    expect(r.error).toContain('不足 11 位')
   })
 
   it('沒選桌 / 候位不存在 → 明確錯誤', () => {
