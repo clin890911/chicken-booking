@@ -137,6 +137,25 @@ describe('休店／關閉三方合併：前端同步引擎', () => {
     expect((await pushChangedData()).skipped).toBe(true)
   })
 
+  it('後端已合併 settings 但主要寫入失敗（500）→ 基準線不推進、仍待推送；重送得到相同結果後才推進且不再 dirty', async () => {
+    const initial = cloudSettings()
+    addSeating('2026-10-12', ['lunch1'])
+    await otherManagerSaves(c => { c.closedSeatings['2026-10-15'] = ['dinner1'] }, initial)
+    const bodies = routeFetch('host')
+    fake.failures.batch = 1
+    await expect(pushChangedData()).rejects.toThrow()
+    const cloudAfterFail = structuredClone(cloudSettings().closures)
+    expect(cloudAfterFail.closedSeatings['2026-10-12']).toEqual(['lunch1']) // 合併已寫入雲端
+    expect(getSettings().closures.closedSeatings['2026-10-15']).toBeUndefined() // 失敗回應不 rebase 本機
+    // 基準線沒推進：重送仍帶同一份 closuresBase
+    const r = await pushChangedData()
+    expect(r.ok).toBe(true)
+    expect(bodies[1].closuresBase).toEqual(bodies[0].closuresBase)
+    expect(cloudSettings().closures).toEqual(cloudAfterFail) // 冪等
+    expect(getSettings().closures.closedSeatings).toEqual({ '2026-10-10': ['lunch1'], '2026-10-12': ['lunch1'], '2026-10-15': ['dinner1'] })
+    expect((await pushChangedData()).skipped).toBe(true)
+  })
+
   it('舊後端（回應沒有 closuresMerge）→ 維持舊行為：基準線＝送出值、本機不動', async () => {
     addSeating('2026-10-12', ['lunch1'])
     global.fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ok: true, waitlistUpdates: [], settingsApplied: ['closures'] }) }))

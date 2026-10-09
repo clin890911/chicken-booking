@@ -378,6 +378,37 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     const deletedBefore = (notifySettings.telegramNotifyOnAdminChange === true && deletedBookingIds.length)
       ? await snapshotBookingsByIds(deletedBookingIds)
       : new Map()
+    // 休店／關閉三方合併（新前端）：在主要寫入（bookings 等）**之前**執行。
+    // 🔴 不可移到主要寫入之後：那樣合併失敗時主要資料已寫入、請求卻回 500 → 前端重送時 before==after，
+    //    客人 LINE 改期／取消通知與店員 Telegram（含硬刪除的還原 JSON）會永久漏發。
+    // 放在之前：合併失敗＝整包 500、主要資料不寫，重送一切照常；合併成功但主要寫入失敗＝重送時再合併一次，
+    // 合併冪等（同一 base/local 對已合併的雲端結果相同），含候位同步重送（queueRepeated）也照跑。
+    let closuresMerge = null
+    if (closuresPlan) {
+      const merged = await commitClosuresMerge({
+        db,
+        ref: db.collection('settings').doc('main'),
+        base: closuresMergeBase,
+        local: closuresPlan.local,
+        normalize: normalizeStoreSettings,
+        buildData: ({ closures, unchanged }) => {
+          const updatedAt = new Date().toISOString()
+          if (closuresPlan.kind === 'full') return { ...closuresPlan.next, closures, updatedAt }
+          return unchanged ? null : { closures, updatedAt }
+        },
+      })
+      closuresMerge = { closures: merged.closures, conflicts: merged.conflicts }
+      if (closuresPlan.kind === 'closures') {
+        settingsReport = buildClosuresSettingsReport({
+          scoped: { appliedKeys: ['closures'], next: normalizeStoreSettings({ ...merged.cloudRaw, closures: merged.closures }), changed: merged.wrote },
+          cloudRaw: merged.cloudRaw,
+          normalize: normalizeStoreSettings,
+          staff,
+          userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
+        })
+      }
+      if (settingsReport?.audit) settingsReport.audit.closuresMerge = { conflicts: merged.conflicts.length }
+    }
     // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
     const queueItems=writable.waitlist||[]
     if(queueItems.length){
@@ -405,36 +436,10 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
         waitlistUpdates.splice(0,waitlistUpdates.length,...snapshots.map(s=>s.data))
       })
     }else await commitInChunks(ops)
-    // 休店／關閉三方合併（新前端）：主要寫入成功後才寫 settings（主要寫入失敗＝整個請求失敗、settings 不動，前端保持 dirty 重送）。
-    // 合併是冪等的：同一 base/local 重送（含候位同步重送 queueRepeated）結果相同，故不跳過。
-    let closuresMerge = null
-    if (closuresPlan) {
-      const merged = await commitClosuresMerge({
-        db,
-        ref: db.collection('settings').doc('main'),
-        base: closuresMergeBase,
-        local: closuresPlan.local,
-        normalize: normalizeStoreSettings,
-        buildData: ({ closures, unchanged }) => {
-          const updatedAt = new Date().toISOString()
-          if (closuresPlan.kind === 'full') return { ...closuresPlan.next, closures, updatedAt }
-          return unchanged ? null : { closures, updatedAt }
-        },
-      })
-      closuresMerge = { closures: merged.closures, conflicts: merged.conflicts }
-      if (closuresPlan.kind === 'closures') {
-        settingsReport = buildClosuresSettingsReport({
-          scoped: { appliedKeys: ['closures'], next: normalizeStoreSettings({ ...merged.cloudRaw, closures: merged.closures }), changed: merged.wrote },
-          cloudRaw: merged.cloudRaw,
-          normalize: normalizeStoreSettings,
-          staff,
-          userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
-        })
-      }
-      if (settingsReport?.audit) settingsReport.audit.closuresMerge = { conflicts: merged.conflicts.length }
-    }
+    // settings 稽核／LINE 守門告警：合併路徑每次都真的寫了 settings（不受候位重送影響），故 queueRepeated 時也要報；
+    // 舊路徑的 settings 隨 ops 寫入，重送時 ops 被跳過，維持不報。
+    if (settingsReport && (closuresPlan || !queueRepeated)) await reportSettingsGuard(settingsReport)
     if(!queueRepeated){
-      if (settingsReport) await reportSettingsGuard(settingsReport)
       await notifyAdminBookingChanges(beforeBookings, writable.bookings, notifySettings)
       await notifyAdminBookingTelegram(beforeBookings, deletedBefore, writable.bookings, deletedBookingIds, notifySettings)
     }

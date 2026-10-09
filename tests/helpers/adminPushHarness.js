@@ -30,12 +30,21 @@ const pick = name => {
   return source.slice(s, source.indexOf('\n}', start) + 2)
 }
 
-// 回傳 call(role, body) → { code, body }。reports 收集 reportSettingsGuard 的稽核。
-export function buildAdminPush(db, { reports = [] } = {}) {
+// 回傳 call(role, body) → { code, body }。reports 收集 reportSettingsGuard 的稽核；
+// notifyChanges／notifyTelegram 可注入 spy（預設 no-op）；commit 前的 bookings 快照讀 db 現值。
+export function buildAdminPush(db, { reports = [], notifyChanges = async () => {}, notifyTelegram = async () => {} } = {}) {
   const pushStart = source.indexOf('export const adminPushData')
   const push = source.slice(pushStart, source.indexOf('\n})', pushStart) + 3).replace('export const', 'const')
   const body = [pick('commitInChunks'), pick('readSettingsForAdminNotify'), push].join('\n') + '\nreturn adminPushData'
   const ref = (name, id) => db.collection(name).doc(String(id))
+  const snapshotBookingsByIds = async (ids = []) => {
+    const out = new Map()
+    for (const id of ids || []) {
+      const snap = await ref('bookings', id).get()
+      if (snap.exists) out.set(String(id), snap.data())
+    }
+    return out
+  }
   const adminPushData = new Function(
     'onRequest', 'db', 'requireStaff', 'errorWithStatus', 'crypto', 'PUBLIC_CORS', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID',
     'LINE_CHANNEL_ACCESS_TOKEN', 'SYNC_COLLECTION_IDKEYS', 'classifyDatasetByPermission', 'scopeClosureSettingsPush',
@@ -47,11 +56,11 @@ export function buildAdminPush(db, { reports = [] } = {}) {
     (_, fn) => fn, db, async req => ({ uid: 'U', role: req.role }), (m, s) => Object.assign(Error(m), { status: s }), crypto, true, '', '', '',
     { bookings: 'id', tables: 'number', waitlist: 'id', customers: 'phone', agencies: 'id', guides: 'id', groupReservations: 'id' },
     classifyDatasetByPermission, scopeClosureSettingsPush,
-    async () => new Map(), { bookings: 'bookings', tables: 'tables', waitlist: 'waitlist', customers: 'customers' },
+    snapshotBookingsByIds, { bookings: 'bookings', tables: 'tables', waitlist: 'waitlist', customers: 'customers' },
     item => item, () => 'tok', item => item,
     (name, items, idKey) => (items || []).map(item => ({ ref: ref(name, item[idKey]), data: item })),
     (name, ids) => (ids || []).map(id => ({ ref: ref(name, id), delete: true })),
-    normalizeStoreSettings, x => x, async () => {}, async () => {},
+    normalizeStoreSettings, x => x, notifyChanges, notifyTelegram,
     guardSettingsPush, settingsReplaceOptions, buildClosuresSettingsReport, async report => { reports.push(report) }, commitClosuresMerge,
   )
   return async (role, reqBody) => {
@@ -62,7 +71,9 @@ export function buildAdminPush(db, { reports = [] } = {}) {
 }
 
 // 記憶體 Firestore：mergeFields＝列出的頂層欄位整個替換；merge:true＝深層合併；runTransaction 同步執行（無並行）。
+// failures：{ tx, batch } 為「接下來要失敗幾次」的計數（模擬 settings 合併 transaction／主要寫入 batch 失敗）。
 export function createFakeDb(initial = {}) {
+  const failures = { tx: 0, batch: 0 }
   const records = new Map(Object.entries(initial).map(([k, v]) => [k, structuredClone(v)]))
   const setCalls = []
   const isMap = v => v && typeof v === 'object' && !Array.isArray(v)
@@ -81,7 +92,7 @@ export function createFakeDb(initial = {}) {
     else records.set(path, structuredClone(data))
   }
   const snap = path => ({ exists: records.has(path), data: () => structuredClone(records.get(path)) })
-  const ref = path => ({ path, get: async () => snap(path) })
+  const ref = path => ({ path, get: async () => snap(path), collection: name => ({ doc: id => ref(`${path}/${name}/${id}`) }) })
   const db = {
     collection: name => ({ doc: id => ref(`${name}/${id}`) }),
     batch: () => {
@@ -89,10 +100,14 @@ export function createFakeDb(initial = {}) {
       return {
         set: (r, data, opts) => staged.push(() => apply(r.path, data, opts)),
         delete: r => staged.push(() => records.delete(r.path)),
-        commit: async () => staged.forEach(fn => fn()),
+        commit: async () => {
+          if (failures.batch > 0) { failures.batch--; throw new Error('injected-batch-failure') }
+          staged.forEach(fn => fn())
+        },
       }
     },
     runTransaction: async fn => {
+      if (failures.tx > 0) { failures.tx--; throw new Error('injected-transaction-failure') }
       const staged = []
       const result = await fn({
         get: async r => snap(r.path),
@@ -103,5 +118,5 @@ export function createFakeDb(initial = {}) {
       return result
     },
   }
-  return { db, records, setCalls }
+  return { db, records, setCalls, failures }
 }
