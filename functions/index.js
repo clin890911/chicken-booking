@@ -1763,7 +1763,25 @@ function normalizeClosuresServer(c) {
     return o
   }
   out.closedSlots = cleanMap(c.closedSlots, /^\d{1,2}:\d{2}$/)
-  out.closedSeatings = cleanMap(c.closedSeatings, null)
+  // 場次 id 一律去重＋排序（[B,A] 與 [A,B] 同義，避免被判成「有未儲存變更」卻列不出明細）
+  const cleanIds = (arr) => [...new Set(arr.filter(x => (typeof x === 'string' || typeof x === 'number') && String(x)).map(String))].sort()
+  out.closedSeatings = Object.fromEntries(Object.entries(cleanMap(c.closedSeatings, null)).map(([d, v]) => [d, cleanIds(v)]))
+  // 每週預設關閉 / 單日開放（★ 與前端 settingsService normalizeClosures 同口徑、同 key 順序）：
+  // key 依序輸出（星期 0→6、日期升冪），空陣列丟掉；**整個欄位為空時不輸出該 key**——
+  // 讓沒用到此功能的資料與舊版形狀（只有 closedDates/closedSlots/closedSeatings）完全相同，
+  // 舊版落地的同步基準線不會因新欄位而永久 dirty。
+  const ws = (c.weeklySeatings && typeof c.weeklySeatings === 'object') ? c.weeklySeatings : {}
+  const weekly = {}
+  for (const k of ['0', '1', '2', '3', '4', '5', '6']) {
+    if (Array.isArray(ws[k])) { const v = cleanIds(ws[k]); if (v.length) weekly[k] = v }
+  }
+  const os = (c.openSeatings && typeof c.openSeatings === 'object') ? c.openSeatings : {}
+  const open = {}
+  for (const d of Object.keys(os).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort()) {
+    if (Array.isArray(os[d])) { const v = cleanIds(os[d]); if (v.length) open[d] = v }
+  }
+  if (Object.keys(weekly).length) out.weeklySeatings = weekly
+  if (Object.keys(open).length) out.openSeatings = open
   return out
 }
 
@@ -2207,13 +2225,31 @@ function seatingForSlotServer(settings, timeSlot) {
   return list.find(s => x >= toMinutes(s.start) && x < toMinutes(s.end)) || null
 }
 
-// 某日某抵達時段是否已被店家關閉訂位：整天公休 / 該時段被關 / 其所屬場次被關，任一成立即關閉。
+// 由 'YYYY-MM-DD' 字串算星期幾（0＝週日），一律 UTC，不受伺服器時區影響（與前端 closureDayOfWeek 同法）。
+function closureDayOfWeekServer(date) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ''))
+  if (!m) return null
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay()
+}
+
+// 該日實際關閉的場次 = (closedSeatings[date] ∪ weeklySeatings[dow]) − openSeatings[date]
+// （單日開放只抵銷每週預設，不抵銷明細）。與前端 utils/weeklyClosures.js effectiveClosedSeatings 同邏輯。
+function effectiveClosedSeatingsServer(c, date) {
+  const ids = v => (Array.isArray(v) ? v.map(String) : [])
+  const explicit = ids(c?.closedSeatings?.[date])
+  const open = new Set(ids(c?.openSeatings?.[date]))
+  const dow = closureDayOfWeekServer(date)
+  const weekly = dow === null ? [] : ids(c?.weeklySeatings?.[String(dow)]).filter(id => !open.has(id))
+  return [...new Set([...explicit, ...weekly])]
+}
+
+// 某日某抵達時段是否已被店家關閉訂位：整天公休 / 該時段被關 / 其所屬場次被關（含每週預設），任一成立即關閉。
 function isSlotClosedServer(settings = {}, date, timeSlot) {
   const c = settings?.closures || {}
   if (Array.isArray(c.closedDates) && c.closedDates.includes(date)) return true
   if (Array.isArray(c.closedSlots?.[date]) && c.closedSlots[date].includes(timeSlot)) return true
   const seating = seatingForSlotServer(settings, timeSlot)
-  if (seating && Array.isArray(c.closedSeatings?.[date]) && c.closedSeatings[date].includes(seating.id)) return true
+  if (seating && effectiveClosedSeatingsServer(c, date).includes(seating.id)) return true
   return false
 }
 
