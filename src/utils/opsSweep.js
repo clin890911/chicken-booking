@@ -68,6 +68,18 @@ export function deferUntilCloudPulled(actions = [], cloudPulled) {
   return actions.filter(a => !CLOUD_FRESH_REQUIRED_ACTIONS.has(a?.type))
 }
 
+// 掃除前的「快照新鮮度」閘門（Firebase 模式）：掃除會清桌／結單，必須基於剛從雲端拉到的狀態。
+// iPad 鎖屏喚醒、開機離線時，本機快照可能停在幾分鐘甚至幾小時前——另一台早已帶位入座的桌，
+// 在這台仍是「昨日殘留／超時」，照跑會把正在用餐的組清掉並推上雲。距上次「拉取成功」超過
+// maxAgeMs 就整輪不跑（換日、超時都擋），等下一次拉取成功後的那一輪再跑。
+// 非 Firebase（純本機／demo）沒有雲端可拉，一律放行（行為不變）。
+export const SWEEP_PULL_MAX_AGE_MS = 10000
+export function isSweepSnapshotFresh({ usingFirebase, lastPullOkAt, now = Date.now(), maxAgeMs = SWEEP_PULL_MAX_AGE_MS }) {
+  if (!usingFirebase) return true
+  const last = Number(lastPullOkAt) || 0
+  return last > 0 && now - last <= maxAgeMs
+}
+
 export function computeOvertimeActions({ tables = [], settings = {}, now = Date.now() }) {
   if (settings.autoReleaseEnabled === false) return []
   const limit = Number(settings.autoReleaseAfterMin) || 300

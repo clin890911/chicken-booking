@@ -1,4 +1,5 @@
-import { validateLineReadiness } from './lib/lineReadiness.js'
+import { validateLineReadiness, DEFAULT_LINE_LOGIN_START_ENDPOINT } from './lib/lineReadiness.js'
+import { guardSettingsPush, settingsReplaceOptions, buildClosuresSettingsReport } from './lib/settingsGuard.js'
 import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, verifyReceipt } from './lib/guestReliability.js'
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
@@ -38,6 +39,8 @@ import {
   canWriteSettings,
   classifyDatasetByPermission,
 } from './lib/staffAccess.js'
+import { scopeClosureSettingsPush } from './lib/settingsScope.js'
+import { commitClosuresMerge } from './lib/closuresMergeCommit.js'
 import {
   projectForRead,
   stripServerOwnedCustomerFields,
@@ -235,13 +238,18 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     //    「已同步」，若後端逕自改成部分寫入，被拒的那些變更會被舊前端靜默丟棄。
     //    functions 與前端是分開部署的（functions 先、前端後），中間必然存在新後端＋舊前端的
     //    時間窗，故沿用舊行為當預設，由新前端送 partial:true 才啟用。
-    const { dataset = {}, partial = false } = req.body || {}
+    // settingsChangedKeys：客戶端表態「本機 settings 相對上次同步基準線改了哪些頂層 key」。
+    // 只有 settings.closures 角色（host）用得到——沒表態的舊前端維持整份 settings 被拒（見 classifyDatasetByPermission）。
+    // closuresBase：新前端送「該裝置上次同步基準線內的 closures」→ 休店／關閉改以日期為單位三方合併
+    // （lib/closuresMerge.js），在 transaction 內讀雲端、合併、寫回。舊前端不送 → 維持 PR #162 整欄替換。
+    const { dataset = {}, partial = false, settingsChangedKeys, closuresBase } = req.body || {}
+    const closuresMergeBase = closuresBase && typeof closuresBase === 'object' && !Array.isArray(closuresBase) ? closuresBase : null
     if(dataset.handoffTasks || dataset.deletedIds?.handoffTasks) return res.status(403).json({ok:false,error:'use-handoff-command'})
     // 後端 RBAC：依角色把關每個集合的「寫入/刪除」與「改設定」。
     // 擋的是繞過 UI 直接打 API 的越權（如 kitchen 改設定/刪訂位）。
     const role = staff.role
-    const { rejected, writable, message: rejectedMessage, hasRejection } =
-      classifyDatasetByPermission(dataset, role, Object.keys(SYNC_COLLECTION_IDKEYS))
+    const { rejected, writable, message: rejectedMessage, hasRejection, settingsScope, settingsKeys } =
+      classifyDatasetByPermission(dataset, role, Object.keys(SYNC_COLLECTION_IDKEYS), { settingsChangedKeys })
     // 舊客戶端（未表態）維持「任一集合越權即整包 403」。
     // 嚴格比對 true：避免 "false" 這類字串因 truthiness 而誤啟部分模式。
     if (hasRejection && partial !== true) {
@@ -288,25 +296,128 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     for (const name of Object.keys(SYNC_COLLECTION_IDKEYS)) {
       ops.push(...deleteOps(name, deletedIds[name]))
     }
-    if (writable.settings) {
-      ops.push({ ref: db.collection('settings').doc('main'), data: {
-        ...normalizeStoreSettings(writable.settings),
-        updatedAt: new Date().toISOString(),
-      } })
+    // settings 寫入分兩條路徑，兩條都「寫前讀雲端」且都以 options（mergeFields 頂層整欄替換）寫入，
+    // 不可落回 merge:true（深層合併會讓已恢復開放的 closures 巢狀 key 在雲端復活）。
+    //   - 訂位專員（settings.closures）：只套關閉相關 key（lib/settingsScope.js），不碰 LINE 欄位，故不走 LINE 守門；
+    //     仍寫稽核（scope=closures-only），且永不產生 LINE 告警。
+    //   - 店長（settings.update）：LINE 受保護欄位守門＋整欄替換＋告警＋稽核（lib/settingsGuard.js）。
+    // settingsApplied：只在 closures 範圍回傳，告訴前端「哪些 key 的本機值現在已在雲端」以便只推進那部分基準線。
+    let settingsApplied = null
+    let settingsForNotify = writable.settings
+    // settingsGuard：店長路徑的守門結果；settingsReport：commit 後要送出的稽核／告警（兩條路徑共用 reportSettingsGuard）。
+    let settingsGuard = null
+    let settingsReport = null
+    // closuresPlan：有 closuresBase 時，settings 不進 ops，改在主要寫入 commit 後以 transaction 合併寫入。
+    //   kind 'closures'（訂位專員）：只寫 closures＋updatedAt；kind 'full'（店長）：守門後整欄替換，但 closures 換成合併結果。
+    let closuresPlan = null
+    if (writable.settings && settingsScope === 'closures') {
+      const cloudSnap = await db.collection('settings').doc('main').get()
+      const cloudRaw = cloudSnap.exists ? cloudSnap.data() : {}
+      const scoped = scopeClosureSettingsPush({
+        clientSettings: writable.settings,
+        cloudSettings: cloudRaw,
+        role,
+        keys: settingsKeys,
+        normalize: normalizeStoreSettings,
+      })
+      if (scoped.mode === 'closures') {
+        settingsApplied = scoped.appliedKeys
+        settingsForNotify = scoped.next
+        if (closuresMergeBase && scoped.appliedKeys.includes('closures')) {
+          closuresPlan = { kind: 'closures', local: writable.settings.closures }
+        } else {
+          settingsReport = buildClosuresSettingsReport({
+            scoped,
+            cloudRaw,
+            normalize: normalizeStoreSettings,
+            staff,
+            userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
+          })
+          // 只替換這幾個頂層欄位（整個 closures 物件＋updatedAt），其他設定欄位一律不碰。
+          if (scoped.changed) {
+            const settingsData = {
+              ...scoped.patch,
+              updatedAt: new Date().toISOString(),
+            }
+            ops.push({ ref: db.collection('settings').doc('main'), data: settingsData, options: settingsReplaceOptions(settingsData) })
+          }
+        }
+      } else {
+        settingsForNotify = undefined
+      }
+    } else if (writable.settings) {
+      const existingSnap = await db.collection('settings').doc('main').get()
+      settingsGuard = guardSettingsPush({
+        existingRaw: existingSnap.exists ? existingSnap.data() : {},
+        incomingRaw: writable.settings,
+        normalize: normalizeStoreSettings,
+        staff,
+        userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
+      })
+      settingsReport = settingsGuard
+      // 頂層 key 整欄替換（mergeFields），不可用 merge:true：深層合併會讓前端刪掉的巢狀 map key
+      // （例如 closures.closedSeatings 已恢復開放的日期）留在雲端、下次拉取又復活。見 settingsReplaceOptions。
+      if (closuresMergeBase) {
+        closuresPlan = { kind: 'full', local: settingsGuard.next.closures, next: settingsGuard.next }
+      } else {
+        const settingsData = {
+          ...settingsGuard.next,
+          updatedAt: new Date().toISOString(),
+        }
+        ops.push({ ref: db.collection('settings').doc('main'), data: settingsData, options: settingsReplaceOptions(settingsData) })
+      }
     }
     ops.push({ ref: db.collection('system').doc('sync'), data: { lastAdminPushAt: new Date().toISOString() } })
     // 店員端改訂位 LINE 通知（feature flag lineNotifyOnAdminChange，預設關）：
     // 開關開啟時才在 commit「前」讀舊值（merge-upsert 不讀舊值，diff 需要 before 快照），
     // commit「成功後」才分類入列——先寫成功才通知，避免通知了卻沒寫進去。
-    const notifySettings = await readSettingsForAdminNotify(writable.settings)
+    const notifySettings = await readSettingsForAdminNotify(settingsGuard ? settingsGuard.guardedRaw : settingsForNotify)
     // beforeBookings 已於上方 commit 前無條件讀取（strict），此處直接重用做通知 diff，不再重讀。
     // 硬刪除的訂位只出現在 deletedIds，commit 後就查不到；先抓刪除前完整舊值，Telegram 才能附完整 JSON 供還原。
     const deletedBookingIds = (writable.deletedIds || {}).bookings || []
     const deletedBefore = (notifySettings.telegramNotifyOnAdminChange === true && deletedBookingIds.length)
       ? await snapshotBookingsByIds(deletedBookingIds)
       : new Map()
-    // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
+    // 休店／關閉三方合併（新前端）：在主要寫入（bookings 等）**之前**執行。
+    // 🔴 不可移到主要寫入之後：那樣合併失敗時主要資料已寫入、請求卻回 500 → 前端重送時 before==after，
+    //    客人 LINE 改期／取消通知與店員 Telegram（含硬刪除的還原 JSON）會永久漏發。
+    // 放在之前：合併失敗＝整包 500、主要資料不寫，重送一切照常；合併成功但主要寫入失敗＝重送時再合併一次，
+    // 合併冪等（同一 base/local 對已合併的雲端結果相同），含候位同步重送（queueRepeated）也照跑。
+    // 候位格式檢查必須在休店合併「之前」：這三種錯誤重送也必定失敗，若放在合併之後，
+    // closures 已寫進雲端、請求卻永遠回 4xx（這台一直顯示同步失敗）。只依賴 writable.waitlist 與 ops.length。
     const queueItems=writable.waitlist||[]
+    if(queueItems.length){
+      if(new Set(queueItems.map(item=>String(item?.id||'').trim())).size!==queueItems.length) throw errorWithStatus('duplicate-waitlist-id',400)
+      if(ops.length+queueItems.length*2>450) throw errorWithStatus('operational-sync-too-large',413)
+      if(queueItems.some(item=>{const id=String(item?.id||'').trim();return !id||id.includes('/')})) throw errorWithStatus('invalid-waitlist-id',400)
+    }
+    let closuresMerge = null
+    if (closuresPlan) {
+      const merged = await commitClosuresMerge({
+        db,
+        ref: db.collection('settings').doc('main'),
+        base: closuresMergeBase,
+        local: closuresPlan.local,
+        normalize: normalizeStoreSettings,
+        buildData: ({ closures, unchanged }) => {
+          const updatedAt = new Date().toISOString()
+          if (closuresPlan.kind === 'full') return { ...closuresPlan.next, closures, updatedAt }
+          return unchanged ? null : { closures, updatedAt }
+        },
+      })
+      closuresMerge = { closures: merged.closures, conflicts: merged.conflicts }
+      if (closuresPlan.kind === 'closures') {
+        settingsReport = buildClosuresSettingsReport({
+          scoped: { appliedKeys: ['closures'], next: normalizeStoreSettings({ ...merged.cloudRaw, closures: merged.closures }), changed: merged.wrote },
+          cloudRaw: merged.cloudRaw,
+          normalize: normalizeStoreSettings,
+          staff,
+          userAgent: req.get?.('user-agent') || req.headers?.['user-agent'] || '',
+        })
+      }
+      if (settingsReport?.audit) settingsReport.audit.closuresMerge = { conflicts: merged.conflicts.length }
+    }
+    // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
     if(queueItems.length){
       if(new Set(queueItems.map(item=>String(item?.id||'').trim())).size!==queueItems.length) throw errorWithStatus('duplicate-waitlist-id',400)
       // 含候位時一起原子提交。過大的單批拒絕，不能默默降成部分寫入。
@@ -325,13 +436,16 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
         const repeated=snapshots.every(s=>s.retry)
         queueRepeated=repeated
         if(!repeated && snapshots.some(s=>s.retry)) throw errorWithStatus('sync-changed',409)
-        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,{merge:true}) }
+        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,op.options||{merge:true}) }
         for(const saved of snapshots){
           if(!saved.retry){tx.set(saved.ref,saved.data,{merge:true});tx.set(saved.receiptRef,{item:saved.data,createdAt:new Date().toISOString()})}
         }
         waitlistUpdates.splice(0,waitlistUpdates.length,...snapshots.map(s=>s.data))
       })
     }else await commitInChunks(ops)
+    // settings 稽核／LINE 守門告警：合併路徑每次都真的寫了 settings（不受候位重送影響），故 queueRepeated 時也要報；
+    // 舊路徑的 settings 隨 ops 寫入，重送時 ops 被跳過，維持不報。
+    if (settingsReport && (closuresPlan || !queueRepeated)) await reportSettingsGuard(settingsReport)
     if(!queueRepeated){
       await notifyAdminBookingChanges(beforeBookings, writable.bookings, notifySettings)
       await notifyAdminBookingTelegram(beforeBookings, deletedBefore, writable.bookings, deletedBookingIds, notifySettings)
@@ -339,10 +453,12 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     // 有越權時如實回報被拒的部分（僅 partial 客戶端會走到這裡）。ok 仍為 true——
     // 「可寫的已經寫進去了」是事實，前端需要據此推進那些集合的基準線；
     // 被拒的部分由前端隔離、不得標記為已同步。
+    // closuresMerge：{ closures（合併後實際在雲端的值）, conflicts }——前端據此推進基準線、rebase 本機並提示衝突。
+    const appliedPart = { ...(settingsApplied ? { settingsApplied } : {}), ...(closuresMerge ? { closuresMerge } : {}) }
     if (hasRejection) {
-      return res.json({ ok: true, rejected, rejectedMessage, role, waitlistUpdates })
+      return res.json({ ok: true, rejected, rejectedMessage, role, waitlistUpdates, ...appliedPart })
     }
-    return res.json({ ok: true, waitlistUpdates })
+    return res.json({ ok: true, waitlistUpdates, ...appliedPart })
   } catch (err) {
     console.error('adminPushData failed:', err)
     return res.status(err.status || 500).json({ ok: false, error: err.message || 'admin-push-failed' })
@@ -487,6 +603,19 @@ async function snapshotBookingsByIds(rawIds, { strict = false } = {}) {
 
 // 讀取通知判斷用 settings：以 Firestore 現值為底、疊上本次一併推送的 settings（若有），
 // 確保「同一筆 push 裡打開開關」也立即生效。
+// settings 寫入成功後：結構化稽核（Cloud Logging，不含設定值/PII）＋必要時店員 Telegram 告警。
+// 告警走 durable outbox；version 決定 intent id，同日同內容只會送一次（不洗版）。錯誤只記 log，不影響同步。
+async function reportSettingsGuard(guard) {
+  try {
+    console.log(JSON.stringify(guard.audit))
+    if (guard.alert) {
+      await enqueueAndTrySend({ channel: 'telegram', event: 'settings_guard', version: guard.alert.version, payload: { text: guard.alert.text } })
+    }
+  } catch (err) {
+    console.error('reportSettingsGuard failed:', err?.message)
+  }
+}
+
 async function readSettingsForAdminNotify(incomingSettings) {
   try {
     const snap = await db.collection('settings').doc('main').get()
@@ -1732,7 +1861,8 @@ async function commitInChunks(ops, chunkSize = 450) {
     const batch = db.batch()
     ops.slice(i, i + chunkSize).forEach(op => {
       if (op.delete) batch.delete(op.ref)
-      else batch.set(op.ref, op.data, { merge: true })
+      // op.options：個別寫入可指定選項（settings/main 兩條路徑都用 mergeFields 整欄替換）；其餘維持 merge-upsert。
+      else batch.set(op.ref, op.data, op.options || { merge: true })
     })
     await batch.commit()
   }
@@ -1763,7 +1893,25 @@ function normalizeClosuresServer(c) {
     return o
   }
   out.closedSlots = cleanMap(c.closedSlots, /^\d{1,2}:\d{2}$/)
-  out.closedSeatings = cleanMap(c.closedSeatings, null)
+  // 場次 id 一律去重＋排序（[B,A] 與 [A,B] 同義，避免被判成「有未儲存變更」卻列不出明細）
+  const cleanIds = (arr) => [...new Set(arr.filter(x => (typeof x === 'string' || typeof x === 'number') && String(x)).map(String))].sort()
+  out.closedSeatings = Object.fromEntries(Object.entries(cleanMap(c.closedSeatings, null)).map(([d, v]) => [d, cleanIds(v)]))
+  // 每週預設關閉 / 單日開放（★ 與前端 settingsService normalizeClosures 同口徑、同 key 順序）：
+  // key 依序輸出（星期 0→6、日期升冪），空陣列丟掉；**整個欄位為空時不輸出該 key**——
+  // 讓沒用到此功能的資料與舊版形狀（只有 closedDates/closedSlots/closedSeatings）完全相同，
+  // 舊版落地的同步基準線不會因新欄位而永久 dirty。
+  const ws = (c.weeklySeatings && typeof c.weeklySeatings === 'object') ? c.weeklySeatings : {}
+  const weekly = {}
+  for (const k of ['0', '1', '2', '3', '4', '5', '6']) {
+    if (Array.isArray(ws[k])) { const v = cleanIds(ws[k]); if (v.length) weekly[k] = v }
+  }
+  const os = (c.openSeatings && typeof c.openSeatings === 'object') ? c.openSeatings : {}
+  const open = {}
+  for (const d of Object.keys(os).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort()) {
+    if (Array.isArray(os[d])) { const v = cleanIds(os[d]); if (v.length) open[d] = v }
+  }
+  if (Object.keys(weekly).length) out.weeklySeatings = weekly
+  if (Object.keys(open).length) out.openSeatings = open
   return out
 }
 
@@ -1849,8 +1997,10 @@ function normalizeStoreSettings(settings = {}) {
     linePushEndpoint: settings.linePushEndpoint || 'https://linepushbooking-reaor76eyq-uc.a.run.app',
     lineManageEndpoint: settings.lineManageEndpoint || 'https://linegetbooking-reaor76eyq-uc.a.run.app',
     lineMyBookingsEndpoint: settings.lineMyBookingsEndpoint || 'https://linemybookings-reaor76eyq-uc.a.run.app',
-    // LINE Login network 綁定（新路徑）入口端點與 OAuth 回呼網址。空字串 = 沿用前端預設 / 尚未設定。
-    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || '').trim(),
+    // LINE Login network 綁定（新路徑）入口端點與 OAuth 回呼網址。
+    // 綁定入口未設定時預設為已部署的 lineLoginStart（後台無此輸入欄，空值會讓 readiness 永遠失敗）；
+    // 回呼網址不給預設：必須與 LINE Console 登記值逐字相同（見 lib/lineReadiness.js）。
+    lineLoginStartEndpoint: String(settings.lineLoginStartEndpoint || '').trim() || DEFAULT_LINE_LOGIN_START_ENDPOINT,
     lineLoginCallbackUrl: String(settings.lineLoginCallbackUrl || '').trim(),
     // LINE Login channel ID（LIFF / Login 所屬 channel，非 Messaging API channel）：
     // lineLoginStart/Callback 與 lineMyBookings 驗 ID token 共用；未設定時相關功能停用。
@@ -2207,13 +2357,31 @@ function seatingForSlotServer(settings, timeSlot) {
   return list.find(s => x >= toMinutes(s.start) && x < toMinutes(s.end)) || null
 }
 
-// 某日某抵達時段是否已被店家關閉訂位：整天公休 / 該時段被關 / 其所屬場次被關，任一成立即關閉。
+// 由 'YYYY-MM-DD' 字串算星期幾（0＝週日），一律 UTC，不受伺服器時區影響（與前端 closureDayOfWeek 同法）。
+function closureDayOfWeekServer(date) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || ''))
+  if (!m) return null
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay()
+}
+
+// 該日實際關閉的場次 = (closedSeatings[date] ∪ weeklySeatings[dow]) − openSeatings[date]
+// （單日開放只抵銷每週預設，不抵銷明細）。與前端 utils/weeklyClosures.js effectiveClosedSeatings 同邏輯。
+function effectiveClosedSeatingsServer(c, date) {
+  const ids = v => (Array.isArray(v) ? v.map(String) : [])
+  const explicit = ids(c?.closedSeatings?.[date])
+  const open = new Set(ids(c?.openSeatings?.[date]))
+  const dow = closureDayOfWeekServer(date)
+  const weekly = dow === null ? [] : ids(c?.weeklySeatings?.[String(dow)]).filter(id => !open.has(id))
+  return [...new Set([...explicit, ...weekly])]
+}
+
+// 某日某抵達時段是否已被店家關閉訂位：整天公休 / 該時段被關 / 其所屬場次被關（含每週預設），任一成立即關閉。
 function isSlotClosedServer(settings = {}, date, timeSlot) {
   const c = settings?.closures || {}
   if (Array.isArray(c.closedDates) && c.closedDates.includes(date)) return true
   if (Array.isArray(c.closedSlots?.[date]) && c.closedSlots[date].includes(timeSlot)) return true
   const seating = seatingForSlotServer(settings, timeSlot)
-  if (seating && Array.isArray(c.closedSeatings?.[date]) && c.closedSeatings[date].includes(seating.id)) return true
+  if (seating && effectiveClosedSeatingsServer(c, date).includes(seating.id)) return true
   return false
 }
 

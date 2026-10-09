@@ -14,15 +14,16 @@ import * as cloudData from '../services/cloudDataService'
 import * as opsLogService from '../services/opsLogService'
 import {
   computeOvertimeActions, computeDayRolloverActions,
-  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled,
+  canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled, isSweepSnapshotFresh,
 } from '../utils/opsSweep'
-import { statusFromPushResult, statusAfterPull, statusAfterError, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE } from '../utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, nextPushRetryState, isPushRetryDue, pushErrorKey, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE } from '../utils/syncStatus'
 import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
 import { markCreatedHere } from '../utils/newBookingAlerts'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
 import { formatBookingTables } from '../utils/bookingTables'
+import { describeClosureConflicts } from '../utils/closuresMerge'
 
 const BookingContext = createContext(null)
 
@@ -73,6 +74,8 @@ export function BookingProvider({ children }) {
   // 參考變動而重建。無 AuthProvider 的測試環境會是 undefined，屆時視為不設限（維持既有行為）。
   const canRef = useRef(can)
   canRef.current = can
+  const usingFirebaseRef = useRef(usingFirebase)
+  usingFirebaseRef.current = usingFirebase
 
   // 把員工 ID Token 提供者注入 cloudDataService（admin 端點需要 Bearer token）。
   useEffect(() => {
@@ -101,20 +104,65 @@ export function BookingProvider({ children }) {
   // 🔴 必須在拉取成功處直接設，不可由 cloudStatus.state === 'synced' 推導：
   // 部分推送被拒後狀態會黏在 'rejected'（拉取不得清除），推導會讓該裝置永遠不結號。
   const cloudPulledRef = useRef(false)
+  // 最近一次「拉取成功」的時間戳（掃除前的快照新鮮度閘門，見 utils/opsSweep.isSweepSnapshotFresh）。
+  const lastPullOkAtRef = useRef(0)
   // pullCloud 定義在 syncCloudSoon 之前，用 ref 取得後者（首拉開閘後要主動推一次）。
   const syncCloudSoonRef = useRef(null)
+  // 上一次推送失敗（網路／逾時／5xx／候位 409）、本機變更還沒上雲：拉取成功（＝連線恢復）且退避時間到了
+  // 就主動補推，不必等店員下一個動作。null＝不補推；{ failures, nextAt }＝退避中（政策見 utils/syncStatus
+  // 的 nextPushRetryState：5→10→30→60 秒、其他 4xx 不補推）。推送成功（含部分被拒）就歸零；
+  // 被拒的部分不靠這裡重送（避免每 5 秒重送＋警示洗版）。
+  const pushRetryRef = useRef(null)
+  // 自動補推與店員操作觸發的推送要分開：自動補推遇到「同一種錯誤」不重跳 toast（lastPushErrorKeyRef）。
+  const userPushPendingRef = useRef(false)
+  const lastPushErrorKeyRef = useRef(null)
+  // 推送失敗的共用記帳：更新退避狀態，回傳這次要不要跳錯誤 toast。
+  const notePushFailure = (err, auto) => {
+    pushRetryRef.current = nextPushRetryState(pushRetryRef.current, err, Date.now())
+    const key = pushErrorKey(err)
+    const repeat = auto && key === lastPushErrorKeyRef.current
+    lastPushErrorKeyRef.current = key
+    return !repeat
+  }
+  const notePushSuccess = () => { pushRetryRef.current = null; lastPushErrorKeyRef.current = null }
+  // 推送序列化：同一時間只跑一個 pushChangedData（逾時最長 20 秒）。推送進行中時拉取不觸發補推、
+  // 節流推送改為排隊（pushQueuedRef），進行中的那個有結果（成功或失敗）後再補送一次；flushCloudNow 等它跑完。
+  const pushInFlightRef = useRef(null)   // 進行中的推送 Promise
+  const pushQueuedRef = useRef(false)
+  const runPushExclusive = async () => {
+    const p = cloudData.pushChangedData()
+    pushInFlightRef.current = p
+    try {
+      return await p
+    } finally {
+      pushInFlightRef.current = null
+      if (pushQueuedRef.current) {
+        pushQueuedRef.current = false
+        // 排隊的推送若是店員操作觸發，userPushPendingRef 仍保留 true（排隊時沒消耗），toast 語意不變。
+        syncCloudSoonRef.current?.({ auto: true })
+      }
+    }
+  }
 
   const pullCloud = useCallback(async () => {
     try {
       const data = await cloudData.pullCloudData()
       const gateWasOpen = cloudData.hasPulledCloud()
-      cloudData.applyCloudSnapshot(data)
+      const applied = cloudData.applyCloudSnapshot(data)
       cloudPulledRef.current = true
+      lastPullOkAtRef.current = Date.now()
       refresh()
       // 這次拉取打開了推送閘門（這台裝置第一次成功拉到雲端）：首拉前在這台建立、被閘門擋下的
       // 資料（訂位／候位…）現在才推得上去——主動推一次，不要等店員下一個動作。沒有待推資料時
       // pushChangedData 回 skipped、不發請求。
-      if (!gateWasOpen) syncCloudSoonRef.current?.()
+      // 上次推送失敗：連線恢復了就補推（沒有待推資料時同樣回 skipped、不發請求）。
+      // 這次拉取解掉了候位 409 衝突：之前每個動作都帶著衝突候位吃 409、退避被推到 30–60 秒，
+      // 現在其他集合推得上去了——退避歸零、立刻補推一次。
+      if (applied?.waitlistConflictsResolved > 0) pushRetryRef.current = { failures: 0, nextAt: 0 }
+      // 推送進行中不觸發補推（不疊推送），等它有結果、下一次拉取再判斷。
+      if (!gateWasOpen || (!pushInFlightRef.current && isPushRetryDue(pushRetryRef.current, Date.now()))) {
+        syncCloudSoonRef.current?.({ auto: true })
+      }
       // 狀態轉移規則見 utils/syncStatus——拉取成功**不得**清掉 'rejected'。
       // 狀態沒變時不每 5 秒換一次物件（shouldCommitPullStatus）：避免整個後台跟著重繪。
       setCloudStatus(s => {
@@ -128,15 +176,27 @@ export function BookingProvider({ children }) {
     }
   }, [refresh])
 
-  const syncCloudSoon = useCallback(() => {
+  const syncCloudSoon = useCallback((opts) => {
     if (!isStaffRef.current) return // 非員工不推送
+    // 店員操作觸發的推送（無參數呼叫）蓋過同一節流窗內的自動補推：那一輪的失敗照常跳 toast。
+    if (opts?.auto !== true) userPushPendingRef.current = true
     window.clearTimeout(syncTimerRef.current)
     syncTimerRef.current = window.setTimeout(async () => {
+      if (pushInFlightRef.current) { pushQueuedRef.current = true; return }   // 不重疊：等進行中的推送有結果再送
+      const auto = !userPushPendingRef.current
+      userPushPendingRef.current = false
       try {
-        const r = await cloudData.pushChangedData()
+        const r = await runPushExclusive()
         // 首拉閘門未開：資料留在本機，首拉成功後由 pullCloud 主動補推。不是成功也不是失敗，狀態不動。
         if (isPushDeferred(r)) return
+        notePushSuccess()
         setCloudStatus(statusFromPushResult(r, new Date().toISOString()))
+        // 休店／關閉三方合併：別台同時存的日期已 rebase 進本機 settings，畫面跟上；同日衝突提示一次。
+        if (r?.closuresMerge) {
+          refresh()
+          const conflictMsg = describeClosureConflicts(r.closuresMerge.conflicts)
+          if (conflictMsg) toastRef.current?.warning?.(conflictMsg)
+        }
         if (r?.rejected) {
           const now = Date.now()
           if (now - lastPushErrorToastRef.current > 8000) {
@@ -145,16 +205,20 @@ export function BookingProvider({ children }) {
           }
         }
       } catch (err) {
-        setCloudStatus(s => statusAfterError(s, err.message, 'cloud-push-failed'))
+        const shouldToast = notePushFailure(err, auto)
+        setCloudStatus(s => statusAfterPushError(s, err.message, 'cloud-push-failed'))
         // F-D：把推送失敗主動回饋給觸發操作的店員，避免「以為存檔成功、實際沒上雲」。
+        // 自動補推遇到同一種錯誤不重跳（退避期間同一種錯誤最多一次）。
         const now = Date.now()
-        if (now - lastPushErrorToastRef.current > 8000) {
+        if (shouldToast && now - lastPushErrorToastRef.current > 8000) {
           lastPushErrorToastRef.current = now
-          toastRef.current?.error?.('雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
+          // 候位 409 衝突：下一次拉取會把衝突那幾筆改以雲端為準、其餘變更隨後補推（見 cloudDataService）。
+          if (err?.waitlistConflict) toastRef.current?.warning?.('候位狀態與另一台衝突，稍後自動以雲端為準，請確認候位清單')
+          else toastRef.current?.error?.('雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
         }
       }
     }, 250)
-  }, [])
+  }, [refresh])
   syncCloudSoonRef.current = syncCloudSoon
 
   // 立即把本機變更推上雲端並回報「雲端是否真的寫入成功」。供「儲存」等主動操作 await：
@@ -169,18 +233,25 @@ export function BookingProvider({ children }) {
     window.clearTimeout(syncTimerRef.current) // 取消待送的節流推送，改為立即送出
     setCloudStatus(s => ({ ...s, state: 'syncing' }))
     try {
-      const r = await cloudData.pushChangedData()
+      // 已有推送在跑：等它有結果再送（不重疊）；這次推送會把全部待推變更一併帶上。
+      while (pushInFlightRef.current) await pushInFlightRef.current.catch(() => {})
+      const r = await runPushExclusive()
       if (isPushDeferred(r)) return { ok: false, deferred: true, error: PUSH_DEFERRED_MESSAGE }
+      notePushSuccess()
       setCloudStatus(statusFromPushResult(r, new Date().toISOString()))
+      // 休店／關閉三方合併：別台同時存的日期已 rebase 進本機 settings → 畫面跟上；衝突交給呼叫端提示。
+      if (r?.closuresMerge) refresh()
+      const closureConflicts = Array.isArray(r?.closuresMerge?.conflicts) ? r.closuresMerge.conflicts : []
       // 有被拒的部分就不算成功——呼叫端（例如「儲存」）必須據此顯示誠實的失敗訊息，
       // 而不是本機存好就宣告成功。
-      if (r?.rejected) return { ok: false, error: r.rejectedMessage || '部分變更因權限不足未能上雲', rejected: r.rejected }
-      return { ok: true, skipped: !!r?.skipped }
+      if (r?.rejected) return { ok: false, error: r.rejectedMessage || '部分變更因權限不足未能上雲', rejected: r.rejected, closureConflicts }
+      return { ok: true, skipped: !!r?.skipped, closureConflicts }
     } catch (err) {
-      setCloudStatus(s => ({ ...s, state: 'offline', error: err.message || 'cloud-push-failed' }))
+      notePushFailure(err, false)   // 呼叫端自己顯示失敗訊息，這裡只記退避狀態
+      setCloudStatus(s => statusAfterPushError(s, err.message, 'cloud-push-failed'))
       return { ok: false, error: err.message || 'cloud-push-failed' }
     }
-  }, [])
+  }, [refresh])
 
   // hydrated：本機資料已灌入 state（本機模式的「資料備妥」訊號）。
   // 用途見 utils/newBookingAlerts——掛載當下 bookings 還是 []，把它當基準會讓首次
@@ -210,6 +281,10 @@ export function BookingProvider({ children }) {
     const permit = canRef.current
     if (!canRunSweeps(permit)) return
     const nowMs = Date.now()
+    // 🔴 Firebase 模式：本機快照超過 10 秒沒被雲端刷新（喚醒、離線開機）就整輪不跑——換日／超時掃除
+    // 都會清桌，基於舊快照會把別台剛帶位的組清掉。放在寫節流戳記之前：被擋的這輪不吃掉 45 秒節流，
+    // 下一次拉取成功後的那一輪照常跑。回傳 false 讓開機 fallback 知道這次沒跑。
+    if (!isSweepSnapshotFresh({ usingFirebase: usingFirebaseRef.current, lastPullOkAt: lastPullOkAtRef.current, now: nowMs })) return false
     const last = Number(localStorage.getItem('chicken_ops_sweep_at') || 0)
     if (!opts.force && nowMs - last < 45000) return // 跨分頁節流
     localStorage.setItem('chicken_ops_sweep_at', String(nowMs))
@@ -278,8 +353,9 @@ export function BookingProvider({ children }) {
     if (!isStaff) return
     const fallback = window.setTimeout(() => {
       if (!bootSweepDoneRef.current) {
-        bootSweepDoneRef.current = true
-        runSweepsRef.current({ force: true })
+        // Firebase 模式且還沒拉到雲端（離線開機）：runSweeps 會因快照不新鮮回 false、什麼都不清；
+        // 此時不吃掉開機那一輪，等首次拉取成功（cloudStatus → synced）時再 force 跑。
+        bootSweepDoneRef.current = runSweepsRef.current({ force: true }) !== false
       }
     }, 20000)
     const id = window.setInterval(() => { runSweepsRef.current() }, 60000)
@@ -384,6 +460,22 @@ export function BookingProvider({ children }) {
     syncCloudSoon()
     if (b && status === 'noshow') safeNotify(() => tg.notifyBookingNoShow(b))
     return b
+  }
+  // 手動標 No-show：booking → noshow（罰則照記）＋釋出本訂位鎖住的 reserved 桌（見 seatingService.markNoshow）。
+  // 回傳值是復原快照，復原時原封帶回 undoMarkBookingNoshow（桌已清掉，事後查不回）。
+  const markBookingNoshow = (bookingId) => {
+    const r = seatingService.markNoshow(bookingId)
+    if (r?.ok) {
+      refresh()
+      syncCloudSoon()
+      if (r.booking) safeNotify(() => tg.notifyBookingNoShow(r.booking))
+    }
+    return r
+  }
+  const undoMarkBookingNoshow = (bookingId, snapshot) => {
+    const r = seatingService.undoMarkNoshow(bookingId, snapshot)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
   }
 
   // ============ 桌位動作 ============
@@ -759,6 +851,7 @@ export function BookingProvider({ children }) {
       throw new Error(`部分資料未能上雲：${result.rejectedMessage || '權限不足'}`)
     }
     cloudData.markLocalAsSynced()
+    notePushSuccess()
     setCloudStatus({ state: 'synced', lastSyncAt: new Date().toISOString(), error: '' })
     return result
   }
@@ -772,7 +865,7 @@ export function BookingProvider({ children }) {
     bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated,
     agencies, guides, groupReservations,
     refresh, pullCloud, migrateLocalToCloud,
-    addBooking, updateBooking, cycleStatus, setStatus,
+    addBooking, updateBooking, cycleStatus, setStatus, markBookingNoshow, undoMarkBookingNoshow,
     toggleTable, setTableOutage, clearTableOutage, setTableStatus, blockTable, unblockTable, updateTablePosition,
     bulkSaveTables, addTable, removeTable, saveFloorPlan,
     // 桌位佈局便捷存取（FloorMap 消費端傳入 fixtures/zones 用）

@@ -23,10 +23,10 @@ export const COLLECTION_PERM = {
 // 若硬要求它會讓「沒填電話的散客入座」也被擋，過度收緊。
 export const ACTION_WRITES = {
   clearTable: ['tables'],               // 清桌完成／強制釋出孤兒桌／團體只清桌／團體梯次離席（checkoutGroupBatch 只動桌）
-  seatBooking: ['bookings', 'tables'],  // 客人到了入座、預配入座、預訂（指派）、改桌、離席、一鍵釋出、取消訂位、復原
+  seatBooking: ['bookings', 'tables'],  // 客人到了入座、預配入座、預訂（指派）、改桌、離席、一鍵釋出、取消訂位、標 No-show（釋出鎖桌）、復原
   walkIn: ['bookings', 'tables'],       // 散客直接入座（bookingService.create + seatTable）
   seatWaitlist: ['waitlist', 'bookings', 'tables'], // 候位入座（建 walk-in booking + seatTable + waitlist.seat）
-  bookingOnly: ['bookings'],            // 標／恢復 No-show、解除未來日預配（只改 booking，不碰桌）
+  bookingOnly: ['bookings'],            // 恢復 No-show（卡片常駐鈕）、解除未來日預配（只改 booking，不碰桌）
   groupWrite: ['groupReservations', 'tables'],      // 團體梯次入座／整梯釋出／整團完成／接下一梯（寫團 status／releasedAt）
 }
 
@@ -56,7 +56,7 @@ export const WRITE_PERMS = [
   'waitlist.create', 'waitlist.update', 'waitlist.delete',
   'customer.update', 'customer.delete', 'customer.blacklist',
   'group.create', 'group.update', 'group.delete', 'agency.manage',
-  'settings.update', 'staff.manage',
+  'settings.update', 'settings.closures', 'staff.manage',
 ]
 
 // can 缺失（無 Provider）視為唯讀＝fail-closed，與 seatingPerms 一致。

@@ -1,3 +1,6 @@
+import { WEEKDAY_LABELS, WEEKDAY_ORDER } from './weeklyClosures'
+import { mergeClosures, sameClosures } from './closuresMerge'
+
 // 設定頁「有未儲存變更」的明細：把表單與已存 settings 的差異翻成店員看得懂的一行一行。
 // 純函式，不碰 UI。另含 rebaseSettingsForm：已存 settings 從外部更新時（雲端拉取、桌位佈局編輯器
 // 存檔），把表單「沒被使用者改過的欄位」跟上新值，只保留使用者真的改過的欄位。
@@ -94,6 +97,25 @@ function closureDetails(prev = {}, next = {}, seatings = []) {
     if (closed.length) out.push(`${md(ds)} 關閉：${closed.join('、')}`)
     if (reopened.length) out.push(`${md(ds)} 恢復開放：${reopened.join('、')}`)
   }
+  // 每週預設關閉（weeklySeatings）
+  for (const dow of WEEKDAY_ORDER) {
+    const before = prev.weeklySeatings?.[dow] || []
+    const after = next.weeklySeatings?.[dow] || []
+    const added = after.filter(x => !before.includes(x)).map(seatingName)
+    const removed = before.filter(x => !after.includes(x)).map(seatingName)
+    if (added.length) out.push(`每週${WEEKDAY_LABELS[dow]}預設關閉：${added.join('、')}`)
+    if (removed.length) out.push(`每週${WEEKDAY_LABELS[dow]}取消預設關閉：${removed.join('、')}`)
+  }
+  // 單日覆寫開放（openSeatings）
+  const openDays = [...new Set([...Object.keys(prev.openSeatings || {}), ...Object.keys(next.openSeatings || {})])].sort()
+  for (const ds of openDays) {
+    const before = prev.openSeatings?.[ds] || []
+    const after = next.openSeatings?.[ds] || []
+    const added = after.filter(x => !before.includes(x)).map(seatingName)
+    const removed = before.filter(x => !after.includes(x)).map(seatingName)
+    if (added.length) out.push(`${md(ds)} 本日特別開放：${added.join('、')}`)
+    if (removed.length) out.push(`${md(ds)} 恢復每週預設關閉：${removed.join('、')}`)
+  }
   return out
 }
 
@@ -162,5 +184,13 @@ export function rebaseSettingsForm(form, prevSaved, nextSaved) {
   if (!edited.length) return nextSaved
   const out = { ...nextSaved }
   for (const k of edited) out[k] = form[k]
+  // 休店／關閉：使用者正在編輯時，別處（雲端拉取／別台存檔）改了「其他日期」也要跟上——
+  // 以日期為單位三方合併（base＝表單打開時的已存值），否則表單停在舊副本，存檔時
+  // 會被當成「本機刪掉了別人的日期」而把它從雲端移除。同一天兩邊都改時保留使用者的編輯。
+  // 合併後內容與新的已存值相同（例如別人剛好存了一樣的）→ 直接用已存值，避免 key 順序不同冒出假的未儲存變更。
+  if (edited.includes('closures')) {
+    const merged = mergeClosures(prevSaved.closures, form.closures, nextSaved.closures).merged
+    out.closures = sameClosures(merged, nextSaved.closures) ? nextSaved.closures : merged
+  }
   return out
 }

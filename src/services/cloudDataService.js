@@ -1,5 +1,7 @@
 import { compareWaitlistOrder } from '../utils/waitlistOrder'
-import { getSettings, saveSettings } from './settingsService'
+import { getSettings, saveSettings, normalizeSettingsShape } from './settingsService'
+import { changedSettingsKeys } from '../utils/settingsScope'
+import { mergeClosures } from '../utils/closuresMerge'
 
 const DEFAULT_FUNCTION_BASE = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
 
@@ -102,6 +104,34 @@ export function hasPulledCloud() {
   return cloudPulled
 }
 
+// === 候位衝突（409）自癒 ===
+// 後端把含候位的整包推送包在同一個 transaction，候位 queueVersion 對不上（另一台先改了同一號、
+// 或推送逾時但伺服器已寫入後又帶著舊版本重送）就整包 409、什麼都不寫。前端失敗不推進基準線，
+// 拉取時 dirty 的候位又保留本機舊 queueVersion → 每次推送都 409 → 這台的訂位／桌位也永遠上不了雲。
+// 解法：409 且錯誤碼屬候位衝突時，記下這次夾帶的候位 id（候選）。409 不會說是哪一筆，所以下一次拉取
+// 逐筆用後端同一套判準（waitlistUpsertConflicts）比對雲端版本，只有「真的會被拒」的那幾筆放棄本機變更：
+//   - 雲端有 → 改採雲端值並把基準線設成雲端值（不再待推）；
+//   - 雲端已不存在（本機版本 > 0 或狀態是 skipped，後端永遠會拒）→ 丟棄本機那筆、不再重推。
+// 同一包裡沒衝突的候位照舊保留本機 dirty，與其他集合一樣下一輪照推。
+// 代價：衝突那幾筆的本機候位動作以雲端為準（呼叫端 toast 告知店員確認）。只存記憶體：
+// 重新整理後若再衝突，下一次推送會再 409 並重新記下，同樣在下一次拉取自癒。
+// 錯誤碼來源：functions/lib/operationalCommands.js protectQueueUpsert、functions/index.js adminPushData。
+const WAITLIST_CONFLICT_CODES = new Set(['waitlist-changed', 'waitlist-ended', 'use-queue-command', 'sync-changed'])
+export function isWaitlistConflictError(err) {
+  return err?.status === 409 && WAITLIST_CONFLICT_CODES.has(err.code)
+}
+const waitlistConflictIds = new Set()
+
+// 本機候位 item 推上去會不會被後端拒（409）：判準逐條比照 protectQueueUpsert（previous＝雲端版本，可為 null）。
+// ⚠️ 後端判準改了這裡要跟著改。
+export function waitlistUpsertConflicts(item, previous) {
+  if (previous && ['seated', 'left'].includes(previous.status) && item.status !== previous.status) return true
+  if ((item.queueVersion || 0) !== (previous?.queueVersion || 0)) return true
+  if (item.status === 'skipped' && previous?.status !== 'skipped') return true
+  if (previous?.status === 'skipped' && !['skipped', 'left'].includes(item.status)) return true
+  return false
+}
+
 // === 佈局遺失根治：把同步基準線落地到 localStorage，撐過「整頁重新整理」===
 // initialized / lastSynced / pendingDeletes 原本全是模組層級記憶體變數：整頁重新整理＝
 // JS 模組重新載入＝全部歸零。歸零後的第一次拉取會誤判成「全新裝置」，走 applyCloudSnapshot
@@ -188,6 +218,7 @@ function restoreSyncStateFromStorage() {
     // 舊版落地狀態沒有 cloudPulled → 視為尚未拉取，等下一次成功拉取才開閘。
     cloudPulled = persisted.cloudPulled === true
     lastSynced = { ...emptyColMap(), settings: null, ...(persisted.lastSynced || {}) }
+    lastSynced.settings = renormalizeSettingsBaseline(lastSynced.settings)
     for (const col of DIFF_COLLECTIONS) {
       pendingDeletes[col] = new Set(persisted.pendingDeletes?.[col] || [])
     }
@@ -206,6 +237,48 @@ function restoreSyncStateFromStorage() {
 }
 
 function stable(doc) { return JSON.stringify(doc ?? null) }
+
+// settings 基準線字串 → 物件（null／壞值回 null）。
+function parseSettingsBaseline(baseline) {
+  if (typeof baseline !== 'string') return null
+  try {
+    const parsed = JSON.parse(baseline)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+// 只把「後端確認已寫進雲端」的 settings 頂層 key 推進基準線（訂位專員只能存關閉相關 key）。
+// 🔴 「只有真的寫進雲端的才可推進基準線」：沒被套用的 key 維持 dirty（＝被拒、由店家決定放棄與否）。
+// 基準線一律存本機 withDefaults 形式（sync-baseline-keyorder 不變量），否則 key 順序不同會永久 dirty。
+// 沒有基準線（從未同步過 settings）時不推進——無從得知其他 key 的雲端值，寧可維持 dirty。
+function advanceSettingsBaselineKeys(keys, sentSettings) {
+  const base = parseSettingsBaseline(lastSynced.settings)
+  if (!base || !sentSettings) return
+  const next = { ...base }
+  for (const k of keys) {
+    if (Object.prototype.hasOwnProperty.call(sentSettings, k)) next[k] = sentSettings[k]
+  }
+  lastSynced.settings = stable(normalizeSettingsShape(next))
+}
+
+// 🔴 落地的 settings 基準線是「當時版本」的本機形式。程式改版後 settings 形狀若演進（新增/調整欄位、
+// 排序口徑），舊基準線字串與新版 getSettings() 永遠不相等 → settings 永久 dirty → 非店長裝置每次推送都
+// 夾帶 settings 被拒（卡 rejected），且 applyCloudSnapshot 因 dirty 不再套用雲端 settings。
+// 復原時把基準線重新走一次本機正規化：只「改寫形狀」、不改變內容（仍代表上次真的同步上雲的那份），
+// 不違反「只有真的寫進雲端的才可推進基準線」；且與 sync-baseline-keyorder 的不變量一致（基準線＝本機 withDefaults 形式）。
+// null／非物件（尚未同步過 settings）維持原樣，不可補成預設值（那會假裝預設已同步）。
+function renormalizeSettingsBaseline(baseline) {
+  if (typeof baseline !== 'string') return baseline ?? null
+  try {
+    const parsed = JSON.parse(baseline)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return baseline
+    return stable(normalizeSettingsShape(parsed))
+  } catch {
+    return baseline
+  }
+}
 function idOf(collection, doc) {
   return String(doc?.[COLLECTION_ID_KEY[collection]] ?? doc?.id ?? '').trim()
 }
@@ -282,6 +355,8 @@ export function applyCloudSnapshot(data = {}) {
     return
   }
   // 後續拉取：合併。本機尚未推送的 dirty 文件保留本機版本，其餘採雲端最新值。
+  // 回傳 { waitlistConflictsResolved }：這次放棄掉的 409 衝突候位筆數（呼叫端據此退避歸零、立刻補推）。
+  let waitlistConflictsResolved = 0
   for (const col of DIFF_COLLECTIONS) {
     const cloudArr = data[col]
     if (!Array.isArray(cloudArr)) continue
@@ -293,9 +368,15 @@ export function applyCloudSnapshot(data = {}) {
     pendingDeletes[col].forEach(id => { delete merged[id] })
     for (const [id, doc] of Object.entries(localMap)) {
       const dirty = lastSynced[col][id] !== stable(doc)
-      if (dirty) merged[id] = doc                       // 保留待推送的本機變更
+      if (dirty && col === 'waitlist' && waitlistConflictIds.has(id) && waitlistUpsertConflicts(doc, cloudMap[id] || null)) {
+        // 候位 409 真正衝突的那筆：放棄本機變更（見上方說明）。merged 本來就是雲端版本／雲端已無此筆。
+        waitlistConflictsResolved += 1
+        if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id])
+        else delete lastSynced[col][id]                 // 雲端已刪：本機那筆一併丟棄，不再重推也不發刪除
+      } else if (dirty) merged[id] = doc                // 保留待推送的本機變更
       else if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id]) // 已同步 → 採雲端值
     }
+    if (col === 'waitlist') waitlistConflictIds.clear()
     // 雲端有、本機沒有的文件（其他裝置新增）一併納入並記為已同步；
     // 但本機正在刪除的文件不納入、也不記為已同步。
     for (const [id, doc] of Object.entries(cloudMap)) {
@@ -316,6 +397,7 @@ export function applyCloudSnapshot(data = {}) {
   }
   cloudPulled = true // 舊裝置（已 initialized、落地狀態沒有 cloudPulled）在第一次成功拉取時開閘
   persistSyncState()
+  return { waitlistConflictsResolved }
 }
 
 // 雲端請求逾時：平板在弱網／Wi‑Fi 切換時 fetch 可能永遠不回，呼叫端（設定頁「儲存」）
@@ -370,12 +452,17 @@ export async function pullCloudData() {
 // 其餘照寫，並在回應的 rejected 裡如實回報。不送這個旗標時後端維持舊的
 // 「任一集合越權即整包 403」行為（新後端＋舊前端的部署時間窗需要這個相容性）。
 // 🔴 推送閘門放在最底層：所有推送（差異推送、設定頁「上傳本機資料」）都經過這裡。
-export async function pushCloudData(dataset = localDataset(), { partial = false } = {}) {
+// closuresBase：本機同步基準線內的 closures（＝這台上次同步到的雲端值）。有送時後端改以日期為單位
+// 三方合併休店／關閉（functions/lib/closuresMerge.js），不再整個 closures 物件最後存檔者勝。
+export async function pushCloudData(dataset = localDataset(), { partial = false, settingsChangedKeys, closuresBase } = {}) {
   if (!cloudPulled) return awaitingFirstPullResult()
+  const body = partial ? { dataset, partial: true } : { dataset }
+  if (Array.isArray(settingsChangedKeys)) body.settingsChangedKeys = settingsChangedKeys
+  if (closuresBase && typeof closuresBase === 'object' && !Array.isArray(closuresBase)) body.closuresBase = closuresBase
   return requestJson(endpoint('adminPushData'), {
     method: 'POST',
     headers: await authHeader(),
-    body: JSON.stringify(partial ? { dataset, partial: true } : { dataset }),
+    body: JSON.stringify(body),
   })
 }
 
@@ -430,7 +517,18 @@ export async function pushChangedData() {
   const deletedIds = recordLocalDeletes(ds)
   if (Object.keys(deletedIds).length) hasChange = true
   const settingsChanged = stable(ds.settings) !== lastSynced.settings
-  if (settingsChanged) { changed.settings = ds.settings; hasChange = true }
+  // 同時告訴後端「相對上次同步基準線改了哪些頂層 key」：訂位專員（settings.closures）後端只套
+  // 這裡列出的關閉 key，其餘沿用雲端（避免拿本機可能過時的整份 settings 蓋回雲端）。
+  let settingsChangedKeys
+  let closuresBase
+  if (settingsChanged) {
+    changed.settings = ds.settings
+    hasChange = true
+    const baseSettings = parseSettingsBaseline(lastSynced.settings)
+    settingsChangedKeys = changedSettingsKeys(baseSettings || {}, ds.settings)
+    // 沒有基準線（從未同步過 settings）就不送：後端退回舊行為，不可拿預設值假裝是基準。
+    closuresBase = baseSettings?.closures
+  }
   if (!hasChange) return { ok: true, skipped: true }
   // 先把「已標記待刪」的狀態落地：萬一接下來的網路請求整頁重新整理／中斷，
   // 待刪保護（F-A）不會因為模組重載而消失。
@@ -438,7 +536,17 @@ export async function pushChangedData() {
 
   const payload = { ...changed }
   if (Object.keys(deletedIds).length) payload.deletedIds = deletedIds
-  const result = await pushCloudData(payload, { partial: true })
+  let result
+  try {
+    result = await pushCloudData(payload, { partial: true, settingsChangedKeys, closuresBase })
+  } catch (err) {
+    // 整包沒寫（基準線一律不推進）；候位衝突時記下夾帶的候位，下一次拉取改以雲端為準。
+    if (isWaitlistConflictError(err) && changed.waitlist?.length) {
+      changed.waitlist.forEach(doc => waitlistConflictIds.add(idOf('waitlist', doc)))
+      err.waitlistConflict = true
+    }
+    throw err
+  }
   // 推送後推進基準線。
   // 🔴 只有**真的被寫進雲端**的部分才可以推進。被拒的集合若也標記為已同步，
   //    那些本機變更會被當成「已上雲」→ 下一次拉取不再保護它們 → 直接被雲端值覆蓋
@@ -467,9 +575,33 @@ export async function pushChangedData() {
       lastSynced.waitlist[item.id]=stable(item)
     }
   }
-  if (settingsChanged && !rejected.settings) lastSynced.settings = stable(ds.settings)
+  if (settingsChanged) {
+    // 後端做了休店／關閉三方合併：雲端的 closures＝合併結果（可能含別台同時存的日期），不是本機送出的那份。
+    const writtenSettings = applyClosuresMergeResult(ds.settings, result?.closuresMerge)
+    if (!rejected.settings) lastSynced.settings = stable(writtenSettings)
+    // 部分套用（訂位專員改了關閉設定、同時有不能存的其他 key）：只推進已寫入的 key。
+    else if (Array.isArray(result?.settingsApplied) && result.settingsApplied.length) {
+      advanceSettingsBaselineKeys(result.settingsApplied, writtenSettings)
+    }
+  }
   persistSyncState()
   return result
+}
+
+// 後端回傳的休店／關閉合併結果 → (1) 回傳「實際寫進雲端」的 settings（送出值＋合併後 closures）供推進基準線；
+// (2) 把別台同時存的日期 rebase 進本機（推送期間本機若又改了 closures，以「送出值」為 base 再三方合併一次，
+//     保留推送後的本機新修改，不會被當成「本機刪掉了別人的日期」）。
+// 🔴 只有真的寫進雲端的才可推進基準線：基準線用後端回傳的合併結果，不用本機送出值、也不自己猜。
+// 形狀一律走本機正規化（normalizeSettingsShape／saveSettings），與 sync-baseline-keyorder 不變量一致，不會永久 dirty。
+// 舊後端（沒有 closuresMerge）→ 原樣回傳送出值（維持舊行為）。
+function applyClosuresMergeResult(sentSettings, closuresMerge) {
+  const merged = closuresMerge?.closures
+  if (!merged || typeof merged !== 'object' || Array.isArray(merged)) return sentSettings
+  const current = getSettings()
+  const rebased = mergeClosures(sentSettings?.closures, current.closures, merged).merged
+  const next = normalizeSettingsShape({ ...current, closures: rebased })
+  if (stable(next.closures) !== stable(current.closures)) saveSettings({ closures: next.closures })
+  return normalizeSettingsShape({ ...sentSettings, closures: merged })
 }
 
 // 使用者主動「放棄被拒的本機變更、改以雲端為準」。

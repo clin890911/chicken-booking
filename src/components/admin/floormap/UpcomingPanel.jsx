@@ -10,15 +10,12 @@ import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
 import { seatTableWarnings } from '../../../utils/capacity'
 import { assignmentKind } from '../../../utils/tableStatus'
 import { bookingTableNumbers } from '../../../utils/bookingTables'
-import { getNoshowCount, revokeNoshow } from '../../../services/bookingService'
+import { getNoshowCount } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
+import PhoneLink from '../ops/PhoneLink'
+import { splitSuffix } from '../../../utils/partySplit'
 
-// 電話末 3 碼：分辨同名「陳先生」。無電話（現場散客常見）回空字串 → 不顯示。
-const phoneTail = (phone) => {
-  const d = String(phone || '').replace(/\D/g, '')
-  return d.length >= 3 ? d.slice(-3) : ''
-}
 
 // 搜尋：姓名／電話（含末碼，忽略符號）／桌號（主桌＋副桌）
 function matchesQuery(b, q) {
@@ -48,7 +45,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
   // 「指派桌位」「客人到了」都會同時寫 bookings 與 tables，故兩個權限都要。
   const showAssign = !assigned && perms.booking && perms.table
   const showSeat = assigned && perms.booking && perms.table
-  const showNoshow = overdue && perms.booking
+  const showNoshow = overdue && perms.booking && perms.table   // markNoshow 會釋出本筆鎖住的桌
   const showComplete = overdue && (assigned ? perms.booking && perms.table : perms.booking)
   // 改桌：已有桌的待到訂位從更多操作進現場整組選桌。
   // 會同時寫 bookings 與 tables → 兩個權限都要；唯讀角色仍看到原本的唯讀徽章。
@@ -78,11 +75,13 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             <span className="text-base font-bold text-chicken-brown tabular-nums">{b.timeSlot}</span>
-            <span className="text-sm font-bold truncate">{b.name}</span>
-            {phoneTail(b.phone) && <span data-testid="phone-tail" className="text-[11px] text-chicken-brown/55 tabular-nums flex-shrink-0">…{phoneTail(b.phone)}</span>}
+            <span className="text-sm font-bold truncate min-w-0">{b.name}</span>
           </div>
-          <div className="text-xs text-chicken-brown/60 mt-0.5 truncate">
-            {b.guests} 位
+          {/* 完整電話（取代過去的「…506」末碼）：店員要能直接照著撥；無電話不顯示。
+              電話不截斷，人數那段在窄欄時可截斷。 */}
+          <div className="flex items-baseline gap-2 mt-0.5 min-w-0">
+            <PhoneLink phone={b.phone} className="text-sm" />
+            <span className="text-xs text-chicken-brown/60 truncate">{b.guests} 位{splitSuffix(b)}</span>
           </div>
         </div>
         <div className="text-right flex-shrink-0">
@@ -126,7 +125,7 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
 }
 
 export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTable, flashBookingId = null }) {
-  const { bookings, tables, groupReservations, setStatus, seatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
+  const { bookings, tables, groupReservations, markBookingNoshow, undoMarkBookingNoshow, seatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
   const { can } = useAuth() || {}
   const toast = useToast()
   const confirm = useConfirm()
@@ -180,14 +179,18 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
   const handleNoshow = async (b) => {
     const ok = await confirm(`已聯絡 ${b.name} 並確認未到？標記 No-show 會計入電話爽約紀錄。`, { title: '標記 No-show', confirmLabel: '確認標記', danger: true })
     if (!ok) return
-    setStatus(b.id, 'noshow')
+    // 標記時一併釋出本訂位鎖住的 reserved 桌（seatingService.markNoshow）；復原帶回快照，桌仍空才搶回。
+    const r = markBookingNoshow(b.id)
+    if (!r?.ok) return toast.error('標記失敗：' + (r?.error || '未知錯誤'))
     const count = getNoshowCount(b.phone)
     const countMsg = count > 0 ? `這支電話累計第 ${count} 次，之後訂位會提醒` : '已記錄這支電話的爽約次數'
-    toast.action(`已標記 ${b.name} No-show — ${countMsg}`,
+    const tableMsg = r.releasedTables?.length ? `，${r.releasedTables.join('、')} 已釋出空桌` : ''
+    toast.action(`已標記 ${b.name} No-show — ${countMsg}${tableMsg}`,
       { label: '↩ 復原', onClick: () => {
-          setStatus(b.id, 'confirmed')
-          revokeNoshow(b.phone, b.id)
-          toast.success(`已復原 ${b.name} 為待到，爽約次數已扣回`)
+          const u = undoMarkBookingNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+          if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+          const failMsg = u.failed?.length ? `（${u.failed.join('、')} 已被占用，桌位未搶回，請重新指派）` : ''
+          toast.success(`已復原 ${b.name} 為待到，爽約次數已扣回${failMsg}`)
       } },
       { duration: 8000 })
   }

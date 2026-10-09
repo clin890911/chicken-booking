@@ -8,11 +8,13 @@ import { useState, useMemo, useRef } from 'react'
 import { Modal, Input } from '../../ui'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
-import GuestCountField from '../GuestCountField'
+import PartySizeField from '../PartySizeField'
+import PhoneLink from './PhoneLink'
+import { normalizeSplit, splitSuffix } from '../../../utils/partySplit'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import WaitlistHistorySheet from './WaitlistHistorySheet'
 
-// 候位人數上限與散客後台相同（200，見 GuestCountField）；線上訂位的 12 人上限不在這裡。
+// 候位人數上限與散客後台相同（200，見 GuestCountField／PartySizeField）；線上訂位的 12 人上限不在這裡。
 // 超過單桌常見容量（12）＝大組，入座時需併桌（seatingService 的候位入座已支援併桌）。
 const WAITLIST_MAX = 200
 const BIG_PARTY = 12
@@ -33,6 +35,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
   const [showAdd, setShowAdd] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [form, setForm] = useState({ name: '', phone: '', partySize: 2, notes: '' })
+  const [kids, setKids] = useState(0) // 小孩數（大人＝partySize−kids）；預設 0
   // 稱謂＋姓氏快選（與現場帶位共用同一套元件）：滿場尖峰時取號不必切注音。
   // 存進 waitlist 的仍是同一個 name 字串，資料結構不變。
   const [title, setTitle] = useState(DEFAULT_TITLE)
@@ -80,6 +83,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
 
   const resetForm = () => {
     setForm({ name: '', phone: '', partySize: 2, notes: '' })
+    setKids(0)
     setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
   }
 
@@ -88,7 +92,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
     if (!size || size < 1 || size > WAITLIST_MAX) return toast.warning(`人數需介於 1～${WAITLIST_MAX} 位`)
     // 快選組出來的稱呼優先；沒選就沿用手打的 name（兩者都空＝匿名取號，靠號碼叫人）
     const name = composeName(title, surname, customName.trim()) || form.name.trim()
-    const w = addWaitlist({ ...form, name, partySize: size, estimatedMin: estimatedWaitMin })
+    const w = addWaitlist({ ...form, name, partySize: size, children: normalizeSplit(size, kids).children, estimatedMin: estimatedWaitMin })
     setShowAdd(false)
     resetForm()
     if (w?.queueNumber) toast.success(`已取號 #${w.queueNumber}，預估等待 ${w.estimatedMin} 分`)
@@ -122,9 +126,10 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                 <div className="flex items-baseline gap-1.5 min-w-0 flex-1">
                   <span className="text-sm font-bold text-chicken-red flex-shrink-0">#{w.queueNumber}</span>
                   <span className="text-sm font-bold truncate">{w.name}</span>
-                  <span className="text-[10px] text-chicken-brown/60">{w.partySize} 位</span>
+                  <span className="text-[10px] text-chicken-brown/60 flex-shrink-0">{w.partySize} 位{splitSuffix(w)}</span>
                   <span className="text-[10px] text-chicken-brown/45">{w.partySize > BIG_PARTY ? '大組需併桌' : `建議${w.partySize > 4 ? '六人桌' : '四人桌'}`}</span>
                 </div>
+                <PhoneLink phone={w.phone} className="text-sm" />
                 {w.status === 'called' && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-bold">已叫號</span>}
               </div>
               <div className="text-[10px] text-chicken-brown/50 mt-0.5">
@@ -164,7 +169,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
         </div>
       )}
 
-      {!!skipped.length&&<section aria-label="暫過號候位" className="mt-3 space-y-2"><h3 className="font-bold text-sm">暫過號 · 保留原號</h3>{skipped.map(w=><div key={w.id} className="p-2 border rounded-lg text-sm"><b>#{w.queueNumber} {w.name}</b> · {w.partySize} 位{canEdit&&<div className="flex gap-2"><button disabled={!!busy} onClick={()=>changeQueue(w,'return')} className="min-h-[44px] px-3 border rounded-lg">{busy===w.id?'儲存中…':'回來了'}</button><button disabled={!!busy} onClick={async()=>{if(await confirm(`確定讓 #${w.queueNumber} 棄號？`,{title:'棄號',danger:true}))leaveWaitlist(w.id)}} className="min-h-[44px] px-3 border rounded-lg">棄號</button></div>}</div>)}</section>}
+      {!!skipped.length&&<section aria-label="暫過號候位" className="mt-3 space-y-2"><h3 className="font-bold text-sm">暫過號 · 保留原號</h3>{skipped.map(w=><div key={w.id} className="p-2 border rounded-lg text-sm"><div className="flex items-baseline gap-2 flex-wrap"><b>#{w.queueNumber} {w.name}</b><span>{w.partySize} 位{splitSuffix(w)}</span><PhoneLink phone={w.phone} className="text-sm" /></div>{canEdit&&<div className="flex gap-2"><button disabled={!!busy} onClick={()=>changeQueue(w,'return')} className="min-h-[44px] px-3 border rounded-lg">{busy===w.id?'儲存中…':'回來了'}</button><button disabled={!!busy} onClick={async()=>{if(await confirm(`確定讓 #${w.queueNumber} 棄號？`,{title:'棄號',danger:true}))leaveWaitlist(w.id)}} className="min-h-[44px] px-3 border rounded-lg">棄號</button></div>}</div>)}</section>}
       {/* 取號 Modal */}
       <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title="候位取號" footer={
         <>
@@ -174,11 +179,11 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
       }>
         {/* 人數擺第一個：它是唯一必填，滿場尖峰「點人數 → 取號」兩下就走完 */}
         <div className="space-y-3">
-          <GuestCountField
-            value={form.partySize}
-            onChange={n => setForm(f => ({ ...f, partySize: n }))}
+          <PartySizeField
+            total={form.partySize}
+            kids={kids}
+            onChange={(t, c) => { setKids(c); setForm(f => ({ ...f, partySize: t })) }}
             max={WAITLIST_MAX}
-            label="幾位？"
           />
           {Number(form.partySize) > BIG_PARTY && (
             <p role="status" className="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">

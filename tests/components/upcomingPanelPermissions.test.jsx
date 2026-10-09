@@ -26,6 +26,8 @@ const bookingCtx = {
   tables: [],
   groupReservations: [],
   setStatus: vi.fn(),
+  markBookingNoshow: vi.fn(() => ({ ok: true, releasedTables: [] })),
+  undoMarkBookingNoshow: vi.fn(() => ({ ok: true })),
   seatBooking: vi.fn(() => ({ ok: true })),
   completeWithoutSeating: vi.fn(() => ({ ok: true })),
   undoCompleteWithoutSeating: vi.fn(() => ({ ok: true })),
@@ -154,10 +156,10 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     }
   })
 
-  it('只有 booking.update、沒有 table.update：標 No-show 留著，會動到桌位的兩顆消失', () => {
+  it('只有 booking.update、沒有 table.update：會動到桌位的鈕全部消失（標 No-show 會釋出鎖桌，也要 table.update）', () => {
     render((a) => a === 'booking.update')
     const texts = buttonTexts()
-    expect(texts.some(t => t.includes('標 No-show'))).toBe(true)
+    expect(texts.some(t => t.includes('標 No-show'))).toBe(false)
     expect(texts.some(t => t.includes('指派桌位'))).toBe(false)
     expect(texts.some(t => t.includes('客人到了'))).toBe(false)
   })
@@ -185,7 +187,7 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     expect(onClickBooking).toHaveBeenCalledWith(b)
     expect(onAssignTable).not.toHaveBeenCalled()
     expect(onMoveTable).not.toHaveBeenCalled()
-    for (const mutation of ['setStatus', 'seatBooking', 'completeWithoutSeating', 'undoCompleteWithoutSeating']) {
+    for (const mutation of ['setStatus', 'markBookingNoshow', 'seatBooking', 'completeWithoutSeating', 'undoCompleteWithoutSeating']) {
       expect(bookingCtx[mutation]).not.toHaveBeenCalled()
     }
   })

@@ -29,7 +29,7 @@ export const PERMISSIONS = {
     'waitlist.read', 'waitlist.create', 'waitlist.update', 'waitlist.delete',
     'customer.read', 'customer.update', 'customer.delete', 'customer.blacklist',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
-    'settings.read', 'settings.update',
+    'settings.read', 'settings.update', 'settings.closures',
     'staff.manage',
   ]),
   floor: new Set([
@@ -55,6 +55,10 @@ export const PERMISSIONS = {
     'waitlist.read', 'waitlist.create', 'waitlist.update',
     'customer.read', 'customer.update', 'customer.blacklist',
     'group.read', 'group.create', 'group.update', 'group.delete', 'agency.manage',
+    // 窄權限：只能儲存 settings 的「休店／關閉」key（CLOSURE_SETTING_KEYS），其餘設定仍唯讀。
+    // 店主用訂位專員帳號關閉場次把位子留給團體（關閉只擋線上客人）。刻意不給 settings.update：
+    // 那會連 LINE／營業時間／佈局都能整份覆寫（LINE 設定已因整份覆寫被洗空三次）。
+    'settings.closures',
   ]),
   kitchen: new Set([
     'booking.read',
@@ -113,21 +117,48 @@ export function canWriteSettings(role) {
   return roleCan(role, 'settings.update')
 }
 
+// settings 裡屬於「休店／關閉」的頂層 key。只有 settings.closures（無 settings.update）的角色
+// 只能寫這些 key，其餘一律沿用雲端值。
+// ★ PR #156 的每週預設關閉（weeklySeatings）／本日開放（openSeatings）都在 closures 物件內，自然涵蓋。
+// ★ 與前端 src/utils/settingsScope.js 的 CLOSURE_SETTING_KEYS 成對（有測試比對）。
+export const CLOSURE_SETTING_KEYS = Object.freeze(['closures'])
+
+// 角色對 settings 的寫入範圍：'full'（整份，manager）／'closures'（只關閉 key，host）／null（不可寫）。
+export function settingsWriteScope(role) {
+  if (canWriteSettings(role)) return 'full'
+  if (roleCan(role, 'settings.closures')) return 'closures'
+  return null
+}
+
 // === 差異推送的權限分類（adminPushData 用）===
 // 背景：adminPushData 原本採「任一集合越權即整包 403」。配合前端把所有髒集合綁成同一個
 // payload 推送，任何一條沒被 UI 擋住的越權寫入，都會讓該裝置**全部**集合的同步一起失敗，
 // 且髒資料永遠留在本機重試、不會自癒（現場曾整天推不上雲）。此函式把 dataset 拆成
 // 「可寫的」與「被拒的」，讓呼叫端能只寫可寫的部分、並如實回報被拒的部分。
 //
+// settings 的三種情形（settingsWriteScope）：
+//   'full'     照舊整份可寫。
+//   'closures' 只能寫 CLOSURE_SETTING_KEYS。🔴 必須由客戶端以 settingsChangedKeys 表態「我改了哪些 key」
+//              （＝本機相對於上次同步基準線的差異）才啟用；沒表態的舊前端一律照舊拒絕整份 settings。
+//              理由：host 裝置的本機 settings 可能是過時的（基準線錯位、舊表單），若後端自行拿它的
+//              closures 去覆蓋雲端，會把店長剛改的關閉設定蓋回舊值。只套「客戶端真的改過」的關閉 key
+//              ＝頂層 key 粒度的三方合併。改了非關閉 key 的部分不寫入、回報在 rejected.settingsKeys，
+//              但不連坐（關閉 key 照寫）。
+//   null       照舊拒絕。
+//
 // 回傳：
-//   rejected     { writes: string[], deletes: string[], settings: boolean }
-//   writable     剔除越權部分後的 dataset（原物件不變動）
-//   message      給人看的中文說明（沿用原 403 文案格式）
-//   hasRejection 是否有任何越權
-export function classifyDatasetByPermission(dataset = {}, role, collectionNames = []) {
+//   rejected      { writes: string[], deletes: string[], settings: boolean, settingsKeys?: string[] }
+//   writable      剔除越權部分後的 dataset（原物件不變動）
+//   message       給人看的中文說明（沿用原 403 文案格式）
+//   hasRejection  是否有任何越權
+//   settingsScope writable.settings 的寫入範圍：'full' | 'closures' | null（無 settings 可寫）
+//   settingsKeys  settingsScope='closures' 時要套用的 key（⊆ CLOSURE_SETTING_KEYS）
+export function classifyDatasetByPermission(dataset = {}, role, collectionNames = [], { settingsChangedKeys } = {}) {
   const denied = []
   const rejected = { writes: [], deletes: [], settings: false }
   const deletedIds = dataset.deletedIds || {}
+  let settingsScope = null
+  let settingsKeys = []
 
   for (const name of collectionNames) {
     if (Array.isArray(dataset[name]) && dataset[name].length && !canWriteCollection(role, name)) {
@@ -141,9 +172,24 @@ export function classifyDatasetByPermission(dataset = {}, role, collectionNames 
       rejected.deletes.push(name)
     }
   }
-  if (dataset.settings && !canWriteSettings(role)) {
-    denied.push('變更設定')
-    rejected.settings = true
+  if (dataset.settings) {
+    const scope = settingsWriteScope(role)
+    if (scope === 'full') {
+      settingsScope = 'full'
+    } else if (scope === 'closures' && Array.isArray(settingsChangedKeys)) {
+      const changed = [...new Set(settingsChangedKeys.map(String))]
+      settingsKeys = changed.filter(k => CLOSURE_SETTING_KEYS.includes(k))
+      const ignored = changed.filter(k => !CLOSURE_SETTING_KEYS.includes(k)).sort()
+      if (settingsKeys.length) settingsScope = 'closures'
+      if (ignored.length) {
+        denied.push(`變更設定（只能儲存休店／關閉設定；未寫入：${ignored.join('、')}）`)
+        rejected.settings = true
+        rejected.settingsKeys = ignored
+      }
+    } else {
+      denied.push('變更設定')
+      rejected.settings = true
+    }
   }
 
   // 剔除越權部分（淺拷貝，不動原 dataset——呼叫端的通知路徑仍可能需要原始輸入）。
@@ -154,13 +200,15 @@ export function classifyDatasetByPermission(dataset = {}, role, collectionNames 
     rejected.deletes.forEach(name => { delete nextDeletes[name] })
     writable.deletedIds = nextDeletes
   }
-  if (rejected.settings) delete writable.settings
+  if (!settingsScope) delete writable.settings
 
   return {
     rejected,
     writable,
     message: denied.length ? `角色「${role}」無權：${denied.join('、')}` : '',
     hasRejection: denied.length > 0,
+    settingsScope,
+    settingsKeys,
   }
 }
 
