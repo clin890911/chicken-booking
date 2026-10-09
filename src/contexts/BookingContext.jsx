@@ -16,7 +16,7 @@ import {
   computeOvertimeActions, computeDayRolloverActions,
   canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled, isSweepSnapshotFresh,
 } from '../utils/opsSweep'
-import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, nextPushRetryState, isPushRetryDue, pushErrorKey, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE } from '../utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, nextPushRetryState, isPushRetryDue, pushErrorKey, shouldDeferPushErrorToast, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE } from '../utils/syncStatus'
 import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
 import { markCreatedHere } from '../utils/newBookingAlerts'
@@ -118,6 +118,9 @@ export function BookingProvider({ children }) {
   // 推送失敗的共用記帳：更新退避狀態，回傳這次要不要跳錯誤 toast。
   const notePushFailure = (err, auto) => {
     pushRetryRef.current = nextPushRetryState(pushRetryRef.current, err, Date.now())
+    // 暫時性錯誤第一次先不跳（交給 5 秒後的自動補推），也不記錯誤鍵——否則第 2 次（自動補推）
+    // 會被當成「同一種錯誤重複」而永遠不跳。見 utils/syncStatus.shouldDeferPushErrorToast。
+    if (shouldDeferPushErrorToast(err, pushRetryRef.current)) return false
     const key = pushErrorKey(err)
     const repeat = auto && key === lastPushErrorKeyRef.current
     lastPushErrorKeyRef.current = key
@@ -207,7 +210,7 @@ export function BookingProvider({ children }) {
           lastPushErrorToastRef.current = now
           // 候位 409 衝突：下一次拉取會把衝突那幾筆改以雲端為準、其餘變更隨後補推（見 cloudDataService）。
           if (err?.waitlistConflict) toastRef.current?.warning?.('候位狀態與另一台衝突，稍後自動以雲端為準，請確認候位清單')
-          else toastRef.current?.error?.('雲端同步失敗，剛才的變更可能未存到雲端，請檢查網路後重試')
+          else toastRef.current?.error?.('雲端同步失敗（已自動重試仍未成功），變更已存在這台平板，網路恢復後會自動補送；若持續出現請檢查 Wi‑Fi')
         }
       }
     }, 250)

@@ -38,6 +38,40 @@ async function authHeader() {
   }
 }
 
+// 員工端點專用：取不到 token 時**不可**照樣送出沒帶 Authorization 的請求。
+// iPad 鎖屏／休眠一段時間後 ID Token 已過期，喚醒當下 Wi‑Fi 還沒接上，SDK 換新 token 失敗
+// → 舊作法回 {} → 後端回 401 missing-auth-token。401 被當成「不會自己好的 4xx」：不自動補推，
+// 前台一直顯示「雲端同步失敗」直到店員下一個動作。改成丟出沒有 HTTP status 的錯誤（＝網路類，
+// 會自動補推，見 utils/syncStatus.isRetryablePushError）。
+async function strictAuthHeader(forceRefresh = false) {
+  if (!_tokenProvider) return {}
+  let token = null
+  try { token = await _tokenProvider(forceRefresh) } catch { token = null }
+  if (!token) {
+    const e = new Error('登入憑證暫時取不到（網路未就緒），稍後自動重試')
+    e.code = 'auth-token-unavailable'
+    throw e
+  }
+  return { Authorization: `Bearer ${token}` }
+}
+
+const AUTH_TOKEN_ERRORS = new Set(['missing-auth-token', 'invalid-auth-token'])
+
+// 帶員工 token 的請求。後端回 401（token 剛好過期／快取的 token 失效）時強制換新 token 重送一次：
+// 401 代表 requireStaff 在任何寫入之前就擋下，重送不會重複寫入。
+async function staffRequest(url, options = {}) {
+  const send = async (forceRefresh) => requestJson(url, {
+    ...options,
+    headers: { ...(await strictAuthHeader(forceRefresh)), ...(options.headers || {}) },
+  })
+  try {
+    return await send(false)
+  } catch (err) {
+    if (err?.status === 401 && AUTH_TOKEN_ERRORS.has(err.code) && _tokenProvider) return send(true)
+    throw err
+  }
+}
+
 function readJson(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
@@ -441,9 +475,8 @@ async function requestJson(url, options = {}) {
 }
 
 export async function pullCloudData() {
-  return requestJson(endpoint('adminPullData'), {
+  return staffRequest(endpoint('adminPullData'), {
     method: 'GET',
-    headers: await authHeader(),
   })
 }
 
@@ -455,9 +488,8 @@ export async function pushCloudData(dataset = localDataset(), { partial = false,
   if (!cloudPulled) return awaitingFirstPullResult()
   const body = partial ? { dataset, partial: true } : { dataset }
   if (Array.isArray(settingsChangedKeys)) body.settingsChangedKeys = settingsChangedKeys
-  return requestJson(endpoint('adminPushData'), {
+  return staffRequest(endpoint('adminPushData'), {
     method: 'POST',
-    headers: await authHeader(),
     body: JSON.stringify(body),
   })
 }
@@ -603,9 +635,8 @@ export function discardRejectedChanges({ writes = [], deletes = [], settings = f
 
 // 團體預排桌位原子把關（員工端，需帶 Bearer token）。回 { ok, group } 或丟出含 409 的錯誤。
 export async function groupReserveTables(group) {
-  return requestJson(endpoint('groupReserveTables'), {
+  return staffRequest(endpoint('groupReserveTables'), {
     method: 'POST',
-    headers: await authHeader(),
     body: JSON.stringify({ group }),
   })
 }
@@ -622,9 +653,8 @@ export async function staffWhoAmI(token) {
 
 // 管理員帳號管理（僅店長；後端硬性檢查角色）。payload: { action: 'list'|'upsert'|'remove', email, role, name }
 export async function adminManageStaff(payload) {
-  return requestJson(endpoint('adminManageStaff'), {
+  return staffRequest(endpoint('adminManageStaff'), {
     method: 'POST',
-    headers: await authHeader(),
     body: JSON.stringify(payload || {}),
   })
 }
@@ -633,9 +663,8 @@ export async function adminManageStaff(payload) {
 // payload: { action: 'record'|'list', type, count, dateFrom, dateTo, filters }
 // actor 與 at 由後端決定。record 由 ExportCenter fire-and-forget 呼叫（未部署則靜默失敗、不影響下載）。
 export async function adminExportLog(payload) {
-  return requestJson(endpoint('adminExportLog'), {
+  return staffRequest(endpoint('adminExportLog'), {
     method: 'POST',
-    headers: await authHeader(),
     body: JSON.stringify(payload || {}),
   })
 }
@@ -684,7 +713,7 @@ export async function guestCancelBooking(bookingId, token, reason) {
 
 // 操作型API不進整份資料同步；只有server確認的單筆回應才能接受。
 export async function operationalRequest(name, command = null) {
-  return requestJson(endpoint(name), {method:command?'POST':'GET',headers:await authHeader(),...(command?{body:JSON.stringify(command)}:{})})
+  return staffRequest(endpoint(name), {method:command?'POST':'GET',...(command?{body:JSON.stringify(command)}:{})})
 }
 export function acceptWaitlistRecord(item) {
   const list=readJson(KEYS.waitlist,[])
