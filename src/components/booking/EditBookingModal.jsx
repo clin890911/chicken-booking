@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Modal, Input, Button, Textarea } from '../ui'
-import GuestCountField from '../admin/GuestCountField'
+import PartySizeField from '../admin/PartySizeField'
+import { guestSplit, splitFields } from '../../utils/partySplit'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import TimeSlotPicker from './TimeSlotPicker'
@@ -29,6 +30,8 @@ export default function EditBookingModal({ booking, onClose }) {
   const [name, setName] = useState(booking.name || '')
   const [phone, setPhone] = useState(booking.phone || '')
   const [guests, setGuests] = useState(Number(booking.guests) || 1)
+  // 舊單沒有拆分 → 預填 大人＝guests、小孩＝0（guestSplit）
+  const [kids, setKids] = useState(() => guestSplit(booking).children)
   const [date, setDate] = useState(booking.date || todayStr())
   const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState(booking.timeSlot || '')
@@ -74,6 +77,8 @@ export default function EditBookingModal({ booking, onClose }) {
     try {
       updateBooking(booking.id, {
         name: name.trim(), phone: phone.trim(), guests, date, timeSlot, source, notes,
+        // 有小孩、或原單本來就有拆分（要能改回 0）才寫 adults/children；舊單只有大人時形狀不變
+        ...splitFields(guests, kids, { force: booking.children != null || booking.adults != null }),
       })
       if (structuralChanged && booking.assignedTableId) {
         toast.info(`已更新 ${name.trim()}（日期/時段/人數已變更，原桌位已解除，請重新指派）`)
@@ -104,8 +109,8 @@ export default function EditBookingModal({ booking, onClose }) {
         <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />
         <Input label={phoneOptional ? '電話（選填 · 現場客可不填）' : '電話'} type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder={phoneOptional ? '現場客可不填' : '0912345678'} />
 
-        {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
-        <GuestCountField value={guests} onChange={setGuests} />
+        {/* 人數：大人 1–8 快選 + 9+ 自由輸入＋小孩步進器（總數上限 200） */}
+        <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); setGuests(t) }} />
 
         {/* 日期：快選 chips + 月曆 */}
         <div>

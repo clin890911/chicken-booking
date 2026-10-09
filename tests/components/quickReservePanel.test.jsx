@@ -189,7 +189,7 @@ describe('QuickReservePanel', () => {
     expect(mainBtn().textContent).toBe('確認新增 · 14:00 · 3 位 · 先不指派')
     click(mainBtn())
     expect(onSave).toHaveBeenCalledWith({
-      name: '王小姐', phone: '', source: 'walkin', guests: 3, timeSlot: '14:00',
+      name: '王小姐', phone: '', source: 'walkin', guests: 3, children: 0, timeSlot: '14:00',
       notes: { child: true, pet: false, mobility: false, text: '' },
     })
   })

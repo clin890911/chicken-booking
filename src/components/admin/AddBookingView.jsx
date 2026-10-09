@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import MonthCalendar from '../booking/MonthCalendar'
 import TimeSlotPicker from '../booking/TimeSlotPicker'
 import { Card, Input, Textarea, Button } from '../ui'
-import GuestCountField from './GuestCountField'
+import PartySizeField from './PartySizeField'
+import { normalizeSplit, splitSuffix } from '../../utils/partySplit'
 import TablePickField from './TablePickField'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
@@ -44,6 +45,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   const [source, setSource] = useState(initial?.source || 'phone')
   const [name, setName] = useState(initial?.name || '')
   const [guests, setGuests] = useState(2)
+  const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；guests 仍是總人數、容量邏輯只讀它
   const [date, setDate] = useState(todayStr())
   const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState('')
@@ -217,7 +219,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
     try {
       const choice = tableChoice
       const b = addBooking({
-        name, phone: phone.trim(), guests, date, timeSlot, notes,
+        name, phone: phone.trim(), guests, children: normalizeSplit(guests, kids).children, date, timeSlot, notes,
         source,
         status: 'confirmed',
         createdBy: user?.email || 'staff',
@@ -263,7 +265,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         toast.action(`${summary} 已建立`, { label: '預配桌位', onClick: () => onAssignTable?.(b) })
       }
       // 重設（保留 source）
-      setPhone(''); setName(''); setGuests(2)
+      setPhone(''); setName(''); setGuests(2); setKids(0)
       if (!continuous) setTimeSlot('')
       setNotes({ pet: false, child: false, mobility: false, text: '' })
       setTablePick('auto'); setTableNotice('')
@@ -354,10 +356,11 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         <div className="space-y-4">
           {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
           <div ref={guestsRef}>
-            <GuestCountField
-              value={guests}
-              onChange={setGuests}
-              hint={`已選：${guests} 位${guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}`}
+            <PartySizeField
+              total={guests}
+              kids={kids}
+              onChange={(t, c) => { setKids(c); setGuests(t) }}
+              hint={`已選：${guests} 位${splitSuffix({ guests, children: kids })}${guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}`}
             />
           </div>
 

@@ -43,3 +43,43 @@ describe('EditBookingModal：現場訂位電話選填', () => {
     expect(saveBtn().textContent).toContain('還差：電話')
   })
 })
+
+describe('EditBookingModal：大人／小孩', () => {
+  let container, root
+  const render = (booking) => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root.render(<EditBookingModal booking={booking} onClose={() => {}} />) })
+  }
+  const btn = (pred) => [...document.querySelectorAll('button')].find(pred)
+  const saveBtn = () => btn(b => /儲存變更|還差/.test(b.textContent))
+  afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.clearAllMocks() })
+
+  it('舊單（無拆分）預填 大人＝guests、小孩＝0；不改就存不會多寫拆分欄位', () => {
+    render({ ...base, source: 'walkin', guests: 4 })
+    expect(btn(b => b.getAttribute('aria-label') === '4 位').getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('input[aria-label="小孩人數"]').value).toBe('0')
+    act(() => { saveBtn().click() })
+    const patch = ctx.updateBooking.mock.calls[0][1]
+    expect(patch.guests).toBe(4)
+    expect('children' in patch).toBe(false)
+  })
+
+  it('加一位小孩 → guests＝大人＋小孩，寫入 adults/children', () => {
+    render({ ...base, source: 'walkin', guests: 4 })
+    act(() => { btn(b => b.getAttribute('aria-label') === '小孩人數 加 1').click() })
+    act(() => { saveBtn().click() })
+    expect(ctx.updateBooking.mock.calls[0][1]).toMatchObject({ guests: 5, adults: 4, children: 1 })
+  })
+
+  it('原單有拆分 → 預填拆分；小孩減回 0 也會寫回 children:0', () => {
+    render({ ...base, source: 'walkin', guests: 5, adults: 3, children: 2 })
+    expect(btn(b => b.getAttribute('aria-label') === '3 位').getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('input[aria-label="小孩人數"]').value).toBe('2')
+    const minus = btn(b => b.getAttribute('aria-label') === '小孩人數 減 1')
+    act(() => { minus.click() }); act(() => { minus.click() })
+    act(() => { saveBtn().click() })
+    expect(ctx.updateBooking.mock.calls[0][1]).toMatchObject({ guests: 3, adults: 3, children: 0 })
+  })
+})
