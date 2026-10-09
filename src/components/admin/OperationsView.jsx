@@ -899,7 +899,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const nums = payload?.tableNumbers || []
     if (!nums.length) { toast.error('請先點桌況圖選一張桌'); return false }
     const guestData = {
-      name: payload.name, phone: payload.phone, guests: payload.guests, notes: payload.notes,
+      name: payload.name, phone: payload.phone, guests: payload.guests, children: payload.children, notes: payload.notes,
     }
     // 帶位前記下被覆蓋的預配（面板警示逐桌列出的那幾筆；店員已勾「仍要帶」才滑得動）
     const overridden = nums.flatMap(n => walkinConflictsFor(n))
@@ -914,7 +914,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     setLastSeated(snap)
     // M6：供下一組一鍵沿用。只存店員手打的 staffNotes——payload.notes 還含著
     // 由電話帶出的「過敏：xxx」，沿用會把上一位客人的過敏資訊掛到新客人身上。
-    setLastParty({ guests, notes: payload.staffNotes || '' })
+    setLastParty({ guests, children: Number(payload.children) || 0, notes: payload.staffNotes || '' })
     flashAssigned(nums[0])
     setWalkinTableNumbers([])
     // 不 setSelectedTable：留在帶位面板才能直接帶下一組（舊版會被 TableDrawer 蓋掉）

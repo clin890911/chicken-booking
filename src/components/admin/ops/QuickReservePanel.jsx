@@ -2,7 +2,8 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useConfirm } from '../../ui/Toast'
-import GuestCountField from '../GuestCountField'
+import PartySizeField from '../PartySizeField'
+import { normalizeSplit } from '../../../utils/partySplit'
 import NumericKeypad from './NumericKeypad'
 import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadges'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
@@ -96,6 +97,7 @@ export default function QuickReservePanel({
   const [phone, setPhone] = useState('')
   const [notes, setNotes] = useState({ child: false, pet: false, mobility: false, text: '' })
   const [showNoteText, setShowNoteText] = useState(false)
+  const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；預設 0
   const [keypadOpen, setKeypadOpen] = useState(false)
   const [keypadPos, setKeypadPos] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -180,6 +182,7 @@ export default function QuickReservePanel({
       phone: phone.trim(),
       source,
       guests: Number(guests),
+      children: normalizeSplit(guests, kids).children,
       timeSlot,
       notes: { ...notes, text: notes.text.trim() },
     })
@@ -284,7 +287,7 @@ export default function QuickReservePanel({
           onCustomChange={setCustomName}
         />
 
-        <GuestCountField value={guests} onChange={onGuestsChange} size="lg" />
+        <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); onGuestsChange(t) }} size="lg" />
 
         <div>
           <label className="label !text-xs !mb-1">時段（今天 · 已過的不列）</label>

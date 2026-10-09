@@ -22,7 +22,7 @@ const setValue = (el, v) => act(() => {
   el.dispatchEvent(new Event('input', { bubbles: true }))
 })
 
-describe('UpcomingPanel 搜尋＋電話末碼', () => {
+describe('UpcomingPanel 搜尋＋完整電話', () => {
   let container, root
   const render = (bookings) => {
     bookingCtx.bookings = bookings
@@ -61,12 +61,22 @@ describe('UpcomingPanel 搜尋＋電話末碼', () => {
     expect(cards()).toEqual(['b', 'a', 'c'])
   })
 
-  it('卡片顯示電話末 3 碼；無電話不顯示', () => {
+  it('卡片顯示完整格式化電話（可點撥）；無電話不顯示', () => {
     render(data())
-    const tail = id => container.querySelector(`[data-booking-id="${id}"] [data-testid="phone-tail"]`)
-    expect(tail('a').textContent).toBe('…678')
-    expect(tail('b').textContent).toBe('…999')
-    expect(tail('c')).toBeNull()
+    const phone = id => container.querySelector(`[data-booking-id="${id}"] [data-testid="phone-full"]`)
+    expect(phone('a').textContent).toBe('0912-345-678')
+    expect(phone('a').getAttribute('href')).toBe('tel:0912345678')
+    expect(phone('b').textContent).toBe('0922-111-999')
+    expect(phone('c')).toBeNull()
+    expect(container.querySelector('[data-testid="phone-tail"]')).toBeNull()
+  })
+
+  it('人數有小孩時附拆分；舊單（無拆分）只顯示總數', () => {
+    render([bk({ id: 'k', guests: 5, adults: 3, children: 2 }), bk({ id: 'o', guests: 4, timeSlot: '19:30' })])
+    const text = id => container.querySelector(`[data-booking-id="${id}"]`).textContent
+    expect(text('k')).toContain('5 位（大3・小2）')
+    expect(text('o')).toContain('4 位')
+    expect(text('o')).not.toContain('大4')
   })
 })
 

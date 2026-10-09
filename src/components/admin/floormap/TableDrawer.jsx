@@ -14,6 +14,8 @@ import { STATUS_COLOR } from './statusColors'
 import { preassignConflicts, assignmentWindow } from '../../../utils/capacity'
 import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
+import { splitSuffix } from '../../../utils/partySplit'
+import { formatPhone } from '../../../utils/phoneFormat'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -321,8 +323,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
         {booking && (table.status === 'reserved' || table.status === 'dining') && (
           <div className="space-y-1.5">
             <div className="flex justify-between"><span className="text-chicken-brown/60">客人</span><span className="font-bold">{booking.name}</span></div>
-            <div className="flex justify-between"><span className="text-chicken-brown/60">電話</span><span>{booking.phone}</span></div>
-            <div className="flex justify-between"><span className="text-chicken-brown/60">人數</span><span>{booking.guests} 位</span></div>
+            <div className="flex justify-between"><span className="text-chicken-brown/60">電話</span><span className="tabular-nums">{formatPhone(booking.phone)}</span></div>
+            <div className="flex justify-between"><span className="text-chicken-brown/60">人數</span><span>{booking.guests} 位{splitSuffix(booking)}</span></div>
             {isCombo && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs font-bold text-amber-800">
                 併桌（{bookingTables.length} 桌）：{bookingTables.join(' + ')}

@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 // accent：chips 選中色，'red'（訂位/編輯/規劃）或 'amber'（現場帶位）。
 // size：'md'（預設，所有既有呼叫點）或 'lg'（只有現場帶位面板傳）——iPad 站著單手點，
 //       chips 放大到 60px 並改用 8 欄格線佔滿欄寬，「9+/自訂」移到標題列右側。
+// headerExtra：只在 lg 標題列渲染（PartySizeField 放小孩步進器用）；md 路徑完全不受影響。
 // ⚠️ chips 的 aria-label 必須維持「N 位」（既有可及性紅線），兩種尺寸都不可改成裸數字。
 const QUICK = [1, 2, 3, 4, 5, 6, 7, 8]
 
@@ -15,7 +16,7 @@ export function clampGuests(n, max = 200) {
   return Math.min(max, Math.floor(v))
 }
 
-export default function GuestCountField({ value, onChange, max = 200, accent = 'red', label = '人數', hint, size = 'md' }) {
+export default function GuestCountField({ value, onChange, max = 200, accent = 'red', label = '人數', hint, size = 'md', headerExtra }) {
   // more：是否展開自訂輸入框。value>8 一律展開；點 chip 收回。
   const [more, setMore] = useState(value > 8)
   const [raw, setRaw] = useState(String(value > 8 ? value : 9))
@@ -77,7 +78,7 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
       {/* lg：標題與「9+/自訂」同一列，下面整排格線讓 chips 吃滿欄寬 */}
       <div className={lg ? 'flex items-center gap-2 mb-1' : ''}>
         {label && <label className={`label ${lg ? '!text-xs !mb-0' : ''}`}>{label}</label>}
-        {lg && <><div className="flex-1" />{overflowControl}</>}
+        {lg && <><div className="flex-1" />{headerExtra}{overflowControl}</>}
       </div>
       <div className={lg ? 'grid grid-cols-8 gap-1.5' : 'flex gap-1.5 flex-wrap items-center'}>
         {QUICK.map(n => (

@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { Input } from '../../ui'
 import { useToast } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
-import GuestCountField from '../GuestCountField'
+import PartySizeField from '../PartySizeField'
+import { normalizeSplit } from '../../../utils/partySplit'
 import NumericKeypad from './NumericKeypad'
 import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadges'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
@@ -40,6 +41,7 @@ export default function FastWalkInPanel({
   const [customName, setCustomName] = useState('')
   const [phone, setPhone] = useState('')
   const [notes, setNotes] = useState('')
+  const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；預設 0，常態只點大人
   const [keypadOpen, setKeypadOpen] = useState(false) // 漂浮數字鍵盤（點電話欄才跳）
   const [keypadPos, setKeypadPos] = useState(null)
   const [override, setOverride] = useState(false)   // 有警示時，店員要先明確解鎖才能確認
@@ -126,7 +128,7 @@ export default function FastWalkInPanel({
   const displayName = composeName(title, surname, customName.trim()) || matched?.name || ''
 
   const reset = () => {
-    onGuestsChange(2); setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
+    onGuestsChange(2); setKids(0); setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
     setPhone(''); setNotes(''); setKeypadOpen(false); setOverride(false)
   }
 
@@ -140,7 +142,7 @@ export default function FastWalkInPanel({
     const allergyNote = matched?.allergies ? `過敏：${matched.allergies}` : ''
     const noteText = [notes.trim(), allergyNote].filter(Boolean).join('；')
     const ok = onSeat?.({
-      name: nm, phone: phone.trim(), guests: g, notes: noteText,
+      name: nm, phone: phone.trim(), guests: g, children: normalizeSplit(g, kids).children, notes: noteText,
       // 🔴 staffNotes＝店員手打的那段，**不含**由電話帶出的「過敏：xxx」。
       // M6「沿用上一組」只能沿用這個；用 noteText 會把上一位客人的過敏資訊
       // 帶到下一組的訂位上（個資外洩＋出餐安全）。
@@ -213,17 +215,17 @@ export default function FastWalkInPanel({
           onCustomChange={setCustomName}
         />
 
-        <GuestCountField value={guests} onChange={onGuestsChange} accent="amber" size="lg" />
+        <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); onGuestsChange(t) }} accent="amber" size="lg" />
 
         {/* M6 沿用上一組：連續同型客人（一直來 2 位）省掉重選。
             只有在「真的會改變什麼」時才出現——人數與註記都已相同就別佔版面、也別讓人白按一下。 */}
-        {lastParty && (g !== lastParty.guests || notes.trim() !== (lastParty.notes || '')) && (
+        {lastParty && (g !== lastParty.guests || kids !== (lastParty.children || 0) || notes.trim() !== (lastParty.notes || '')) && (
           <button
             type="button"
-            onClick={() => { onGuestsChange(lastParty.guests); setNotes(lastParty.notes || '') }}
+            onClick={() => { setKids(lastParty.children || 0); onGuestsChange(lastParty.guests); setNotes(lastParty.notes || '') }}
             className="w-full min-h-[44px] rounded-xl border-2 border-dashed border-chicken-brown/25 bg-chicken-cream/60 text-sm font-bold text-chicken-brown/70"
           >
-            ↩︎ 沿用上一組（{lastParty.guests} 位{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
+            ↩︎ 沿用上一組（{lastParty.guests} 位{lastParty.children > 0 ? `（小${lastParty.children}）` : ''}{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
           </button>
         )}
 
