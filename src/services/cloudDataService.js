@@ -103,6 +103,34 @@ export function hasPulledCloud() {
   return cloudPulled
 }
 
+// === 候位衝突（409）自癒 ===
+// 後端把含候位的整包推送包在同一個 transaction，候位 queueVersion 對不上（另一台先改了同一號、
+// 或推送逾時但伺服器已寫入後又帶著舊版本重送）就整包 409、什麼都不寫。前端失敗不推進基準線，
+// 拉取時 dirty 的候位又保留本機舊 queueVersion → 每次推送都 409 → 這台的訂位／桌位也永遠上不了雲。
+// 解法：409 且錯誤碼屬候位衝突時，記下這次夾帶的候位 id（候選）。409 不會說是哪一筆，所以下一次拉取
+// 逐筆用後端同一套判準（waitlistUpsertConflicts）比對雲端版本，只有「真的會被拒」的那幾筆放棄本機變更：
+//   - 雲端有 → 改採雲端值並把基準線設成雲端值（不再待推）；
+//   - 雲端已不存在（本機版本 > 0 或狀態是 skipped，後端永遠會拒）→ 丟棄本機那筆、不再重推。
+// 同一包裡沒衝突的候位照舊保留本機 dirty，與其他集合一樣下一輪照推。
+// 代價：衝突那幾筆的本機候位動作以雲端為準（呼叫端 toast 告知店員確認）。只存記憶體：
+// 重新整理後若再衝突，下一次推送會再 409 並重新記下，同樣在下一次拉取自癒。
+// 錯誤碼來源：functions/lib/operationalCommands.js protectQueueUpsert、functions/index.js adminPushData。
+const WAITLIST_CONFLICT_CODES = new Set(['waitlist-changed', 'waitlist-ended', 'use-queue-command', 'sync-changed'])
+export function isWaitlistConflictError(err) {
+  return err?.status === 409 && WAITLIST_CONFLICT_CODES.has(err.code)
+}
+const waitlistConflictIds = new Set()
+
+// 本機候位 item 推上去會不會被後端拒（409）：判準逐條比照 protectQueueUpsert（previous＝雲端版本，可為 null）。
+// ⚠️ 後端判準改了這裡要跟著改。
+export function waitlistUpsertConflicts(item, previous) {
+  if (previous && ['seated', 'left'].includes(previous.status) && item.status !== previous.status) return true
+  if ((item.queueVersion || 0) !== (previous?.queueVersion || 0)) return true
+  if (item.status === 'skipped' && previous?.status !== 'skipped') return true
+  if (previous?.status === 'skipped' && !['skipped', 'left'].includes(item.status)) return true
+  return false
+}
+
 // === 佈局遺失根治：把同步基準線落地到 localStorage，撐過「整頁重新整理」===
 // initialized / lastSynced / pendingDeletes 原本全是模組層級記憶體變數：整頁重新整理＝
 // JS 模組重新載入＝全部歸零。歸零後的第一次拉取會誤判成「全新裝置」，走 applyCloudSnapshot
@@ -326,6 +354,8 @@ export function applyCloudSnapshot(data = {}) {
     return
   }
   // 後續拉取：合併。本機尚未推送的 dirty 文件保留本機版本，其餘採雲端最新值。
+  // 回傳 { waitlistConflictsResolved }：這次放棄掉的 409 衝突候位筆數（呼叫端據此退避歸零、立刻補推）。
+  let waitlistConflictsResolved = 0
   for (const col of DIFF_COLLECTIONS) {
     const cloudArr = data[col]
     if (!Array.isArray(cloudArr)) continue
@@ -337,9 +367,15 @@ export function applyCloudSnapshot(data = {}) {
     pendingDeletes[col].forEach(id => { delete merged[id] })
     for (const [id, doc] of Object.entries(localMap)) {
       const dirty = lastSynced[col][id] !== stable(doc)
-      if (dirty) merged[id] = doc                       // 保留待推送的本機變更
+      if (dirty && col === 'waitlist' && waitlistConflictIds.has(id) && waitlistUpsertConflicts(doc, cloudMap[id] || null)) {
+        // 候位 409 真正衝突的那筆：放棄本機變更（見上方說明）。merged 本來就是雲端版本／雲端已無此筆。
+        waitlistConflictsResolved += 1
+        if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id])
+        else delete lastSynced[col][id]                 // 雲端已刪：本機那筆一併丟棄，不再重推也不發刪除
+      } else if (dirty) merged[id] = doc                // 保留待推送的本機變更
       else if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id]) // 已同步 → 採雲端值
     }
+    if (col === 'waitlist') waitlistConflictIds.clear()
     // 雲端有、本機沒有的文件（其他裝置新增）一併納入並記為已同步；
     // 但本機正在刪除的文件不納入、也不記為已同步。
     for (const [id, doc] of Object.entries(cloudMap)) {
@@ -360,6 +396,7 @@ export function applyCloudSnapshot(data = {}) {
   }
   cloudPulled = true // 舊裝置（已 initialized、落地狀態沒有 cloudPulled）在第一次成功拉取時開閘
   persistSyncState()
+  return { waitlistConflictsResolved }
 }
 
 // 雲端請求逾時：平板在弱網／Wi‑Fi 切換時 fetch 可能永遠不回，呼叫端（設定頁「儲存」）
@@ -491,7 +528,17 @@ export async function pushChangedData() {
 
   const payload = { ...changed }
   if (Object.keys(deletedIds).length) payload.deletedIds = deletedIds
-  const result = await pushCloudData(payload, { partial: true, settingsChangedKeys })
+  let result
+  try {
+    result = await pushCloudData(payload, { partial: true, settingsChangedKeys })
+  } catch (err) {
+    // 整包沒寫（基準線一律不推進）；候位衝突時記下夾帶的候位，下一次拉取改以雲端為準。
+    if (isWaitlistConflictError(err) && changed.waitlist?.length) {
+      changed.waitlist.forEach(doc => waitlistConflictIds.add(idOf('waitlist', doc)))
+      err.waitlistConflict = true
+    }
+    throw err
+  }
   // 推送後推進基準線。
   // 🔴 只有**真的被寫進雲端**的部分才可以推進。被拒的集合若也標記為已同步，
   //    那些本機變更會被當成「已上雲」→ 下一次拉取不再保護它們 → 直接被雲端值覆蓋

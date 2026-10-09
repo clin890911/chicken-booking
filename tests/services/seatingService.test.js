@@ -264,6 +264,23 @@ describe('seatingService 整合層', () => {
       expect(r.ok).toBe(true)
       expect(bookingService.getById(b.id).status).toBe('completed')
     })
+
+    it('R2 副桌已被別組用餐、團體梯次佔另一張 → 只 checkout 本訂位持有的桌', () => {
+      tableService.bulkWrite([
+        mkTable('101', 4, '1F', { status: 'dining', currentBookingId: 'ME' }),
+        mkTable('108', 6, '1F', { status: 'dining', currentBookingId: 'OTHER' }),
+        mkTable('201', 4, '2F', { status: 'dining', currentBookingId: null, currentRef: { groupId: 'G1', batchId: 'B1' } }),
+      ])
+      const b = mkBooking({ guests: 8, status: 'arrived' })
+      bookingService.update(b.id, { assignedTableId: '101', extraTableIds: ['108', '201'] })
+      tableService.seatTable('101', b.id)
+      const r = seating.checkoutBooking(b.id)
+      expect(r.ok).toBe(true)
+      expect(tableService.getByNumber('101').status).toBe('cleaning')
+      expect(tableService.getByNumber('108').status).toBe('dining')   // ★ 別組不被打成待清桌
+      expect(tableService.getByNumber('108').currentBookingId).toBe('OTHER')
+      expect(tableService.getByNumber('201').status).toBe('dining')   // ★ 團體桌不被散客路徑動到
+    })
   })
 
   // ===========================================================
@@ -288,6 +305,19 @@ describe('seatingService 整合層', () => {
       const table = tableService.getByNumber('101')
       expect(table.status).toBe('vacant')
       expect(table.currentBookingId).toBeNull()
+    })
+
+    it('R2 副桌已被別組用餐 → 只釋出本訂位持有的桌、別組不被清掉', () => {
+      const b = mkBooking({ guests: 8, status: 'arrived' })
+      bookingService.update(b.id, { assignedTableId: '101', extraTableIds: ['108'] })
+      tableService.seatTable('101', b.id)
+      tableService.seatTable('108', 'OTHER')
+      const r = seating.finalizeBooking(b.id)
+      expect(r.ok).toBe(true)
+      expect(tableService.getByNumber('101').status).toBe('vacant')
+      const t108 = tableService.getByNumber('108')
+      expect(t108.status).toBe('dining')                              // ★ 別組仍在用餐
+      expect(t108.currentBookingId).toBe('OTHER')
     })
 
     it('無指派桌時 tableNumber 為 null', () => {
@@ -528,7 +558,7 @@ describe('seatingService 整合層', () => {
       seating.assignBookingToTable(b.id, '101')
       const r = seating.cancelBooking(b.id)
       // releasedTables / previousStatus 是復原用的快照（取消後 booking 上已查不到桌號）
-      expect(r).toEqual({ ok: true, releasedTables: ['101'], previousStatus: 'confirmed' })
+      expect(r).toEqual({ ok: true, releasedTables: ['101'], preassignedTables: [], originalTables: ['101'], previousStatus: 'confirmed' })
       const updated = bookingService.getById(b.id)
       expect(updated.status).toBe('cancelled')
       expect(updated.assignedTableId).toBeNull()
@@ -543,6 +573,37 @@ describe('seatingService 整合層', () => {
       expect(r.ok).toBe(true)
       expect(r.releasedTables).toEqual([])
       expect(bookingService.getById(b.id).status).toBe('cancelled')
+    })
+
+    // R1：預配只記在 booking 上、桌況沒鎖；那張桌此刻可能正由別組用餐。
+    // 過去 cancelBooking 對每張桌無條件 clearTable → 正在用餐那組從桌況圖上消失。
+    it('R1 預配桌正被別組用餐時取消 → 那桌維持用餐中、不被清掉', () => {
+      const b = mkBooking({ guests: 2 })
+      bookingService.assignTable(b.id, '101')                      // 只預配（不鎖桌）
+      const other = seating.walkInSeat('101', { name: '別組', guests: 2 })
+      expect(other.ok).toBe(true)
+
+      const r = seating.cancelBooking(b.id)
+      expect(r.ok).toBe(true)
+      expect(r.releasedTables).toEqual([])
+      expect(r.preassignedTables).toEqual(['101'])
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('dining')                              // ★ 別組仍在用餐
+      expect(t.currentBookingId).toBe(other.booking.id)
+      expect(bookingService.getById(b.id).assignedTableId).toBeNull()
+    })
+
+    it('R1 團體梯次佔用的預配桌：取消散客訂位不清團體桌', () => {
+      tableService.bulkWrite([
+        mkTable('101', 4, '1F', { status: 'dining', currentBookingId: null, currentRef: { groupId: 'G1', batchId: 'B1' } }),
+        mkTable('108', 6, '1F'),
+      ])
+      const b = mkBooking({ guests: 2 })
+      bookingService.assignTable(b.id, '101')
+      seating.cancelBooking(b.id)
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('dining')
+      expect(t.currentRef).toEqual({ groupId: 'G1', batchId: 'B1' })
     })
   })
 
@@ -653,6 +714,47 @@ describe('seatingService 整合層', () => {
       const r = seating.undoCancelBooking(b.id, { tableNumbers: c.releasedTables, status: c.previousStatus })
       expect(r.ok).toBe(false)
       expect(r.error).toContain('已取消')
+    })
+
+    it('R1 取消未來預配後復原 → 桌仍是空桌（不被鎖）、assignedTableId 回來', () => {
+      const b = mkBooking({ guests: 2 })
+      bookingService.assignTable(b.id, '101')                      // 預配：桌況仍是 vacant
+      const c = seating.cancelBooking(b.id)
+      expect(tableService.getByNumber('101').status).toBe('vacant')
+
+      const r = seating.undoCancelBooking(b.id, {
+        tableNumbers: c.releasedTables, preassignedTables: c.preassignedTables,
+        originalTables: c.originalTables, status: c.previousStatus,
+      })
+      expect(r.ok).toBe(true)
+      expect(r.restored).toEqual([])
+      expect(r.failed).toEqual([])
+      const updated = bookingService.getById(b.id)
+      expect(updated.status).toBe('confirmed')
+      expect(updated.assignedTableId).toBe('101')                  // ★ 預配回來
+      const t = tableService.getByNumber('101')
+      expect(t.status).toBe('vacant')                              // ★ 仍只預配、不鎖桌
+      expect(t.currentBookingId).toBeNull()
+    })
+
+    it('R1 併桌：主桌鎖桌＋副桌只預配 → 復原依原順序重建（主桌在前）', () => {
+      const b = mkBooking({ guests: 8 })
+      bookingService.assignTables(b.id, ['101', '108'])
+      tableService.reserveTable('101', b.id)                       // 主桌鎖桌、副桌 108 只預配
+      const c = seating.cancelBooking(b.id)
+      expect(c.releasedTables).toEqual(['101'])
+      expect(c.preassignedTables).toEqual(['108'])
+      expect(c.originalTables).toEqual(['101', '108'])
+
+      seating.undoCancelBooking(b.id, {
+        tableNumbers: c.releasedTables, preassignedTables: c.preassignedTables,
+        originalTables: c.originalTables, status: c.previousStatus,
+      })
+      const updated = bookingService.getById(b.id)
+      expect(updated.assignedTableId).toBe('101')
+      expect(updated.extraTableIds).toEqual(['108'])
+      expect(tableService.getByNumber('101').status).toBe('reserved')
+      expect(tableService.getByNumber('108').status).toBe('vacant')
     })
 
     it('沒帶快照呼叫也安全（不炸、不亂搶桌）', () => {
@@ -2429,5 +2531,62 @@ describe('releaseCheckedOutTables（離席後一鍵釋出，含併桌副桌）',
 
   it('訂位不存在 → ok:false', () => {
     expect(seating.releaseCheckedOutTables('NOPE').ok).toBe(false)
+  })
+})
+
+// ===========================================================
+// R5：手動標 No-show 釋放本訂位鎖住的桌（markNoshow / undoMarkNoshow）
+// 過去只改 booking 狀態，現場指派鎖桌（reserved＋currentBookingId＝本訂位）一直卡著、白佔容量。
+// ===========================================================
+describe('markNoshow / undoMarkNoshow（R5）', () => {
+  beforeEach(() => { seedDefaultTables() })
+
+  it('鎖桌 → 釋成空桌、booking noshow、爽約次數 +1；預配與別組桌不動', () => {
+    const b = mkBooking({ guests: 8, phone: '0922000111' })
+    bookingService.assignTables(b.id, ['101', '108', '201'])
+    tableService.reserveTable('101', b.id)              // 鎖桌
+    tableService.seatTable('201', 'OTHER')              // 只預配、但已被別組用餐
+    const r = seating.markNoshow(b.id)
+    expect(r.ok).toBe(true)
+    expect(r.releasedTables).toEqual(['101'])
+    expect(r.previousStatus).toBe('confirmed')
+    expect(tableService.getByNumber('101').status).toBe('vacant')
+    expect(tableService.getByNumber('108').status).toBe('vacant')
+    expect(tableService.getByNumber('201').status).toBe('dining')      // ★ 別組不被清
+    expect(tableService.getByNumber('201').currentBookingId).toBe('OTHER')
+    expect(bookingService.getById(b.id).status).toBe('noshow')
+    expect(bookingService.getNoshowCount('0922000111')).toBe(1)
+  })
+
+  it('復原：狀態回原值、次數扣回、桌仍空 → reserve 回來', () => {
+    const b = mkBooking({ guests: 2, phone: '0922000222' })
+    seating.assignBookingToTable(b.id, '101')
+    const r = seating.markNoshow(b.id)
+    const u = seating.undoMarkNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+    expect(u).toMatchObject({ ok: true, restored: ['101'], failed: [], status: 'confirmed' })
+    expect(bookingService.getById(b.id).status).toBe('confirmed')
+    expect(bookingService.getNoshowCount('0922000222')).toBe(0)
+    const t = tableService.getByNumber('101')
+    expect(t.status).toBe('reserved')
+    expect(t.currentBookingId).toBe(b.id)
+  })
+
+  it('復原時桌已被別組坐走 → 不搶桌、failed 回報、booking 不再掛著那張桌', () => {
+    const b = mkBooking({ guests: 2, phone: '0922000333' })
+    seating.assignBookingToTable(b.id, '101')
+    const r = seating.markNoshow(b.id)
+    tableService.seatTable('101', 'OTHER')
+    const u = seating.undoMarkNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus })
+    expect(u.failed).toEqual(['101'])
+    expect(tableService.getByNumber('101').currentBookingId).toBe('OTHER')
+    expect(bookingService.getById(b.id).assignedTableId).toBeNull()
+    expect(bookingService.getById(b.id).status).toBe('confirmed')
+  })
+
+  it('已不是 noshow → 復原被擋（不覆寫別的操作結果）', () => {
+    const b = mkBooking({ guests: 2 })
+    const r = seating.markNoshow(b.id)
+    bookingService.setStatus(b.id, 'confirmed')
+    expect(seating.undoMarkNoshow(b.id, { tableNumbers: r.releasedTables, status: r.previousStatus }).ok).toBe(false)
   })
 })

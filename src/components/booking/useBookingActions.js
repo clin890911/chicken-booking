@@ -32,7 +32,7 @@ export const MOVE_COMBO_REASON = '已入座的併桌客人本輪不支援整組�
 export function useBookingActions(booking, { onAssign, onMove } = {}) {
   const {
     tables, bookings, groupReservations, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking,
-    setStatus, releaseCheckedOutTables, findReserveCandidates, clearBookingPreassign,
+    setStatus, markBookingNoshow, undoMarkBookingNoshow, releaseCheckedOutTables, findReserveCandidates, clearBookingPreassign,
   } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -82,7 +82,7 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
     futureAssignedNote: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'future',
     checkout: perms.seat && status === 'arrived',
     edit: perms.seat && isOpen,   // updateByStaff 改日期／時段／人數時會連動釋放桌位
-    noshow: perms.booking && isOpen && dayKind !== 'future',
+    noshow: perms.seat && isOpen && dayKind !== 'future',   // markNoshow 會釋出本筆鎖住的桌 → bookings＋tables
     cancel: perms.seat && isOpen,
     restore: perms.booking && status === 'noshow',
     // 預配（未來日）解除：預配只記在 booking 上、不動桌況，解除不會留下孤兒桌；
@@ -150,9 +150,9 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
     const ok = await confirm(`標記 ${booking.name} 為 No-show？`,
       { title: 'No-show', confirmLabel: '標記', danger: true })
     if (!ok) return false
-    markNoshow(booking, { setStatus, getNoshowCount, revokeNoshow, toast })
+    markNoshow(booking, { markBookingNoshow, undoMarkBookingNoshow, getNoshowCount, toast })
     return true
-  }, [booking, confirm, setStatus, toast])
+  }, [booking, confirm, markBookingNoshow, undoMarkBookingNoshow, toast])
 
   const restore = useCallback(() => {
     restoreFromNoshow(booking, { setStatus, revokeNoshow, toast })

@@ -36,6 +36,8 @@ export function statusFromPushResult(result, nowIso) {
 
 // 拉取成功 → 狀態。🔴 仍有 rejected 時必須回到 'rejected'（而不是沿用 prev.state——
 // 中間可能經歷過 offline，沿用會讓警示卡在離線態、回線後再也回不去）。
+// 🔴 上次推送失敗（pushFailed）時也不可洗成 synced：拉取成功只代表「讀得到雲端」，本機變更仍沒上雲。
+//   維持 offline＋原錯誤訊息，等補推成功（statusFromPushResult）才轉 synced。
 export function statusAfterPull(prev, nowIso) {
   if (prev?.rejected) {
     return {
@@ -45,6 +47,9 @@ export function statusAfterPull(prev, nowIso) {
       lastSyncAt: nowIso,
     }
   }
+  if (prev?.pushFailed) {
+    return { ...prev, state: 'offline', error: prev.error || 'cloud-push-failed', lastSyncAt: nowIso }
+  }
   return { state: 'synced', lastSyncAt: nowIso, error: '', rejected: null }
 }
 
@@ -52,6 +57,12 @@ export function statusAfterPull(prev, nowIso) {
 // 回復連線後仍要繼續警示。
 export function statusAfterError(prev, message, fallback) {
   return { ...prev, state: 'offline', error: message || fallback }
+}
+
+// 推送失敗 → offline，並標記 pushFailed：之後的拉取成功不得把它洗成 synced（見 statusAfterPull），
+// 只有下一次推送成功（statusFromPushResult 回新物件）才清除。
+export function statusAfterPushError(prev, message, fallback) {
+  return { ...statusAfterError(prev, message, fallback), pushFailed: true }
 }
 
 // 拉取成功後「要不要真的換掉 cloudStatus 物件」。
@@ -86,4 +97,39 @@ export function shouldCommitPullStatus(prev, next, { minIntervalMs = 30000 } = {
 // 不划算，核心判斷邏輯抽成純函式最省事）。
 export function shouldAlertPersistDegraded(prevDegraded, nextDegraded) {
   return !!nextDegraded && !prevDegraded
+}
+
+// === 推送失敗後的自動補推政策（拉取成功時判斷要不要補推）===
+// 只有「等一下可能自己好」的錯誤才自動補推：網路斷線（沒有 HTTP status）、逾時、5xx、候位 409 衝突
+// （下一次拉取會改採雲端候位，見 cloudDataService）。其他 4xx（例如 413 推送過大、400 格式錯）重推也
+// 一樣失敗，不自動補推——照舊顯示失敗，等店員下一個動作才推，避免每 5 秒重推＋錯誤 toast 洗版。
+// 指數退避 5→10→30→60 秒（上限 60 秒），推送成功一次就歸零。
+export const PUSH_RETRY_BACKOFF_MS = [5000, 10000, 30000, 60000]
+// 拉取每 5 秒一次、推送失敗時間點落在兩次拉取之間：留 1 秒寬限，第一次補推才不會被拖到 10 秒。
+export const PUSH_RETRY_SLACK_MS = 1000
+
+export function isRetryablePushError(err) {
+  if (!err) return false
+  if (err.waitlistConflict) return true
+  const status = Number(err.status) || 0
+  if (!status) return true   // fetch 斷線（TypeError）、逾時（code 'timeout'）都沒有 HTTP status
+  return status >= 500
+}
+
+// 「同一種錯誤」的判別鍵：退避期間的自動補推遇到同一種錯誤不重跳 toast。
+export function pushErrorKey(err) {
+  if (err?.waitlistConflict) return 'waitlist-conflict'
+  return `${Number(err?.status) || 'network'}:${err?.code || ''}`
+}
+
+// 推送失敗後的補推狀態：不可補推的錯誤回 null（不自動補推）；可補推的累計失敗次數並算下一次時間。
+export function nextPushRetryState(prev, err, now) {
+  if (!isRetryablePushError(err)) return null
+  const failures = (prev?.failures || 0) + 1
+  const delay = PUSH_RETRY_BACKOFF_MS[Math.min(failures, PUSH_RETRY_BACKOFF_MS.length) - 1]
+  return { failures, nextAt: now + delay }
+}
+
+export function isPushRetryDue(state, now) {
+  return !!state && now + PUSH_RETRY_SLACK_MS >= state.nextAt
 }
