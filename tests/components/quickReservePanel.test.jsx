@@ -194,6 +194,32 @@ describe('QuickReservePanel', () => {
     })
   })
 
+  it('有小孩自動勾「兒童」並鎖住；小孩改回 0：自動勾的取消、店員自己勾的保留', () => {
+    render()
+    const child = () => byText('兒童')
+    const plusKid = () => byLabel('小孩人數 加 1')
+    const minusKid = () => byLabel('小孩人數 減 1')
+    expect(child().getAttribute('aria-pressed')).toBe('false')
+    click(plusKid())
+    expect(child().getAttribute('aria-pressed')).toBe('true')
+    expect(child().disabled).toBe(true)
+    expect(container.textContent).toContain('已自動標記「兒童」')
+    click(minusKid())
+    expect(child().getAttribute('aria-pressed')).toBe('false')   // 自動勾的 → 跟著取消
+    expect(child().disabled).toBe(false)
+    click(child())                                               // 店員自己勾
+    click(plusKid())
+    click(minusKid())
+    expect(child().getAttribute('aria-pressed')).toBe('true')    // 自己勾的保留
+    // 有小孩存檔 → notes.child 一定 true
+    click(child())
+    click(plusKid())
+    click(byLabel('王'))
+    click(byLabel('來源：現場'))
+    click(mainBtn())
+    expect(onSave.mock.calls.at(-1)[0]).toMatchObject({ children: 1, notes: { child: true } })
+  })
+
   it('存檔失敗（onSave 回 false）→ 留在面板、欄位不丟、按鈕可再按', () => {
     render({ saveResult: false })
     click(byLabel('林'))

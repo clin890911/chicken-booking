@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Modal, Input, Button, Textarea } from '../ui'
 import PartySizeField from '../admin/PartySizeField'
-import { guestSplit, splitFields } from '../../utils/partySplit'
+import { guestSplit, normalizeSplit, splitFields } from '../../utils/partySplit'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import TimeSlotPicker from './TimeSlotPicker'
@@ -32,13 +32,16 @@ export default function EditBookingModal({ booking, onClose }) {
   const [guests, setGuests] = useState(Number(booking.guests) || 1)
   // 舊單沒有拆分 → 預填 大人＝guests、小孩＝0（guestSplit）
   const [kids, setKids] = useState(() => guestSplit(booking).children)
+  // 有小孩 →「兒童」自動勾且鎖住；notes.child 只記店員自己點的
+  const hasKids = normalizeSplit(guests, kids).children > 0
   const [date, setDate] = useState(booking.date || todayStr())
   const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState(booking.timeSlot || '')
   const [source, setSource] = useState(booking.source || 'phone')
   const [notes, setNotes] = useState({
     pet: !!booking.notes?.pet,
-    child: !!booking.notes?.child,
+    // 原單已有小孩時「兒童」視為自動勾的（service 會強制補上）→ 小孩改回 0 會跟著取消；店員可再自己勾
+    child: !!booking.notes?.child && guestSplit(booking).children === 0,
     mobility: !!booking.notes?.mobility,
     text: booking.notes?.text || '',
   })
@@ -76,7 +79,7 @@ export default function EditBookingModal({ booking, onClose }) {
     setBusy(true)
     try {
       updateBooking(booking.id, {
-        name: name.trim(), phone: phone.trim(), guests, date, timeSlot, source, notes,
+        name: name.trim(), phone: phone.trim(), guests, date, timeSlot, source, notes: { ...notes, child: notes.child || hasKids },
         // 有小孩、或原單本來就有拆分（要能改回 0）才寫 adults/children；舊單只有大人時形狀不變
         ...splitFields(guests, kids, { force: booking.children != null || booking.adults != null }),
       })
@@ -172,16 +175,20 @@ export default function EditBookingModal({ booking, onClose }) {
           <label className="label">特殊需求（選填）</label>
           <div className="mb-2 grid grid-cols-3 gap-2">
             {NOTE_OPTIONS.map(n => {
-              const active = notes[n.key]
+              const locked = n.key === 'child' && hasKids
+              const active = notes[n.key] || locked
               return (
-                <button key={n.key} type="button" onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
-                  className={`px-3 py-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
+                <button key={n.key} type="button" aria-pressed={!!active} disabled={locked}
+                  title={locked ? '有小孩已自動標記' : undefined}
+                  onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
+                  className={`px-3 py-2.5 rounded-xl border-2 text-sm font-bold transition-all disabled:cursor-not-allowed ${
                     active ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
                   {n.label}
                 </button>
               )
             })}
           </div>
+          {hasKids && <p className="-mt-1 mb-2 text-xs font-bold text-chicken-red/80">有小孩，已自動標記「兒童」</p>}
           <Textarea value={notes.text} onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}
             placeholder="例：靠窗、慶生、長輩需軟食..." />
         </div>
