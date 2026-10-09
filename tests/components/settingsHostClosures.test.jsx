@@ -95,6 +95,15 @@ describe('SettingsView：訂位專員只能儲存休店／關閉設定', () => {
     expect(toastMock.success).toHaveBeenCalledWith('已儲存並同步雲端')
   })
 
+  it('同日被他人同時修改（後端回報 closureConflicts）→ 儲存成功但改用警告提示「已以你的為準」', async () => {
+    bookingCtx.flushCloudNow = vi.fn(async () => ({ ok: true, closureConflicts: [{ field: 'closedSeatings', key: '2026-10-12' }] }))
+    mount('host')
+    act(() => { findButton('設為整天公休').click() })
+    await act(async () => { findButton('儲存休店／關閉設定').click(); await flush() })
+    expect(toastMock.success).not.toHaveBeenCalled()
+    expect(toastMock.warning).toHaveBeenCalledWith('已儲存並同步雲端。10/12 的休店／關閉設定被他人同時修改，已以你的為準')
+  })
+
   it('host 同時改了營業時間：儲存鈕 disabled、提示其他不會被儲存；按「還原其他設定」後才可存（營業時間不會被送出）', async () => {
     mount('host')
     act(() => { findButton('設為整天公休').click() })
