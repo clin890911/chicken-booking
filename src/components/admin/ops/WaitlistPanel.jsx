@@ -24,6 +24,16 @@ function diffMin(d) {
   return Math.max(0, Math.floor((Date.now() - t) / 60000))
 }
 
+// 候位客人電話：叫號沒人回應時可直接撥打（手機/平板點了即撥）
+function PhoneLink({ w }) {
+  return (
+    <a href={`tel:${w.phone.replace(/[^+\d]/g, '')}`} aria-label={`撥打 ${w.name || `#${w.queueNumber}`} ${w.phone}`}
+      className="inline-flex items-center gap-1 text-xs font-bold text-chicken-red tabular-nums underline decoration-chicken-red/30 underline-offset-2">
+      ☎ {w.phone}
+    </a>
+  )
+}
+
 // 現場右側欄「候位」籤：取號 → 叫號 → 入座全程在現場頁完成。
 // 歷史與統計屬低頻查閱，收在 WaitlistHistorySheet（Modal）不佔常駐欄位。
 export default function WaitlistPanel({ onSeatWaitlist }) {
@@ -127,6 +137,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                 </div>
                 {w.status === 'called' && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-bold">已叫號</span>}
               </div>
+              {w.phone && <PhoneLink w={w} />}
               <div className="text-[10px] text-chicken-brown/50 mt-0.5">
                 已等 {diffMin(w.takenAt)} 分
                 {aheadOf[w.id] > 0
@@ -164,7 +175,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
         </div>
       )}
 
-      {!!skipped.length&&<section aria-label="暫過號候位" className="mt-3 space-y-2"><h3 className="font-bold text-sm">暫過號 · 保留原號</h3>{skipped.map(w=><div key={w.id} className="p-2 border rounded-lg text-sm"><b>#{w.queueNumber} {w.name}</b> · {w.partySize} 位{canEdit&&<div className="flex gap-2"><button disabled={!!busy} onClick={()=>changeQueue(w,'return')} className="min-h-[44px] px-3 border rounded-lg">{busy===w.id?'儲存中…':'回來了'}</button><button disabled={!!busy} onClick={async()=>{if(await confirm(`確定讓 #${w.queueNumber} 棄號？`,{title:'棄號',danger:true}))leaveWaitlist(w.id)}} className="min-h-[44px] px-3 border rounded-lg">棄號</button></div>}</div>)}</section>}
+      {!!skipped.length&&<section aria-label="暫過號候位" className="mt-3 space-y-2"><h3 className="font-bold text-sm">暫過號 · 保留原號</h3>{skipped.map(w=><div key={w.id} className="p-2 border rounded-lg text-sm"><b>#{w.queueNumber} {w.name}</b> · {w.partySize} 位{w.phone&&<> · <PhoneLink w={w} /></>}{canEdit&&<div className="flex gap-2"><button disabled={!!busy} onClick={()=>changeQueue(w,'return')} className="min-h-[44px] px-3 border rounded-lg">{busy===w.id?'儲存中…':'回來了'}</button><button disabled={!!busy} onClick={async()=>{if(await confirm(`確定讓 #${w.queueNumber} 棄號？`,{title:'棄號',danger:true}))leaveWaitlist(w.id)}} className="min-h-[44px] px-3 border rounded-lg">棄號</button></div>}</div>)}</section>}
       {/* 取號 Modal */}
       <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title="候位取號" footer={
         <>
