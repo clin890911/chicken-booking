@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as seatingService from '../../src/services/seatingService'
 import * as waitlistService from '../../src/services/waitlistService'
 import * as tableService from '../../src/services/tableService'
@@ -104,13 +104,28 @@ describe('seatWaitlistMulti（候位併桌入座）', () => {
     expect(tableService.getByNumber('105').status).toBe('vacant')
   })
 
-  it('含今日維修停用桌 → 拒絕', () => {
-    const today = todayStr() // 本地日（台北），UTC 會在 00:00–08:00 變成昨天
-    seedTables({ 109: { outage: { from: today, to: today, reason: '桌椅維修' } } })
-    const r = seatingService.seatWaitlistMulti('W1', ['105', '106', '109'])
-    expect(r.ok).toBe(false)
-    expect(r.error).toContain('109')
-    expect(bookingService.listAll()).toHaveLength(0)
+  // 「今天」必須跟產品碼同口徑＝本地日（todayStr）。曾用 toISOString().slice(0,10)（UTC），
+  // 台北 00:00–08:00 UTC 還是昨天 → 維修窗設在昨天、今日可用 → 本測試在凌晨必失敗。
+  // 固定 00:30（UTC 與本地不同日）與 12:00 兩個時點都要綠。
+  describe.each([
+    ['00:30（UTC 仍是前一天）', new Date(2026, 9, 9, 0, 30)],
+    ['12:00', new Date(2026, 9, 9, 12, 0)],
+  ])('含今日維修停用桌 → 拒絕 @ %s', (_label, now) => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(now)
+    })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('拒絕且不建 booking', () => {
+      const today = todayStr()
+      expect(today).toBe('2026-10-09')
+      seedTables({ 109: { outage: { from: today, to: today, reason: '桌椅維修' } } })
+      const r = seatingService.seatWaitlistMulti('W1', ['105', '106', '109'])
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain('109')
+      expect(bookingService.listAll()).toHaveLength(0)
+    })
   })
 
   it('只給一張桌 → 退回單桌路徑 seatWaitlist（維持單一實作）', () => {
