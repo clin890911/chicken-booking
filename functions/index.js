@@ -383,6 +383,14 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     //    客人 LINE 改期／取消通知與店員 Telegram（含硬刪除的還原 JSON）會永久漏發。
     // 放在之前：合併失敗＝整包 500、主要資料不寫，重送一切照常；合併成功但主要寫入失敗＝重送時再合併一次，
     // 合併冪等（同一 base/local 對已合併的雲端結果相同），含候位同步重送（queueRepeated）也照跑。
+    // 候位格式檢查必須在休店合併「之前」：這三種錯誤重送也必定失敗，若放在合併之後，
+    // closures 已寫進雲端、請求卻永遠回 4xx（這台一直顯示同步失敗）。只依賴 writable.waitlist 與 ops.length。
+    const queueItems=writable.waitlist||[]
+    if(queueItems.length){
+      if(new Set(queueItems.map(item=>String(item?.id||'').trim())).size!==queueItems.length) throw errorWithStatus('duplicate-waitlist-id',400)
+      if(ops.length+queueItems.length*2>450) throw errorWithStatus('operational-sync-too-large',413)
+      if(queueItems.some(item=>{const id=String(item?.id||'').trim();return !id||id.includes('/')})) throw errorWithStatus('invalid-waitlist-id',400)
+    }
     let closuresMerge = null
     if (closuresPlan) {
       const merged = await commitClosuresMerge({
@@ -410,7 +418,6 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       if (settingsReport?.audit) settingsReport.audit.closuresMerge = { conflicts: merged.conflicts.length }
     }
     // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
-    const queueItems=writable.waitlist||[]
     if(queueItems.length){
       if(new Set(queueItems.map(item=>String(item?.id||'').trim())).size!==queueItems.length) throw errorWithStatus('duplicate-waitlist-id',400)
       // 含候位時一起原子提交。過大的單批拒絕，不能默默降成部分寫入。

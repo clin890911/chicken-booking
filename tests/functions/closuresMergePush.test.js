@@ -54,6 +54,20 @@ describe('adminPushData：closures 三方合併（記憶體 Firestore）', () =>
     expect(fake.records.get('settings/main').openTime).toBe('10:00')
   })
 
+  it.each([
+    ['duplicate-waitlist-id', [{ id: 'W1', queueVersion: 1 }, { id: 'W1', queueVersion: 1 }], 400],
+    ['invalid-waitlist-id', [{ id: 'a/b', queueVersion: 1 }], 400],
+  ])('候位格式錯（%s）→ 在休店合併之前就擋下，settings 不可已寫進雲端', async (error, waitlist, code) => {
+    const base = normalizeStoreSettings(CLOUD)
+    const r = await call('host', {
+      partial: true, settingsChangedKeys: ['closures'], closuresBase: base.closures,
+      dataset: { settings: { ...base, closures: { ...base.closures, closedDates: ['2026-10-20', '2026-10-29'] } }, waitlist },
+    })
+    expect(r.code).toBe(code)
+    expect(JSON.stringify(r.body)).toContain(error)
+    expect(fake.setCalls.filter(c => c.path === 'settings/main')).toHaveLength(0)
+  })
+
   it('closuresBase 不是物件（陣列／字串）→ 視同舊前端，不走合併', async () => {
     const base = normalizeStoreSettings(CLOUD)
     for (const bad of [[], 'x', null]) {
