@@ -189,6 +189,7 @@ function restoreSyncStateFromStorage() {
     // 舊版落地狀態沒有 cloudPulled → 視為尚未拉取，等下一次成功拉取才開閘。
     cloudPulled = persisted.cloudPulled === true
     lastSynced = { ...emptyColMap(), settings: null, ...(persisted.lastSynced || {}) }
+    lastSynced.settings = renormalizeSettingsBaseline(lastSynced.settings)
     for (const col of DIFF_COLLECTIONS) {
       pendingDeletes[col] = new Set(persisted.pendingDeletes?.[col] || [])
     }
@@ -231,6 +232,23 @@ function advanceSettingsBaselineKeys(keys, sentSettings) {
     if (Object.prototype.hasOwnProperty.call(sentSettings, k)) next[k] = sentSettings[k]
   }
   lastSynced.settings = stable(normalizeSettingsShape(next))
+}
+
+// 🔴 落地的 settings 基準線是「當時版本」的本機形式。程式改版後 settings 形狀若演進（新增/調整欄位、
+// 排序口徑），舊基準線字串與新版 getSettings() 永遠不相等 → settings 永久 dirty → 非店長裝置每次推送都
+// 夾帶 settings 被拒（卡 rejected），且 applyCloudSnapshot 因 dirty 不再套用雲端 settings。
+// 復原時把基準線重新走一次本機正規化：只「改寫形狀」、不改變內容（仍代表上次真的同步上雲的那份），
+// 不違反「只有真的寫進雲端的才可推進基準線」；且與 sync-baseline-keyorder 的不變量一致（基準線＝本機 withDefaults 形式）。
+// null／非物件（尚未同步過 settings）維持原樣，不可補成預設值（那會假裝預設已同步）。
+function renormalizeSettingsBaseline(baseline) {
+  if (typeof baseline !== 'string') return baseline ?? null
+  try {
+    const parsed = JSON.parse(baseline)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return baseline
+    return stable(normalizeSettingsShape(parsed))
+  } catch {
+    return baseline
+  }
 }
 function idOf(collection, doc) {
   return String(doc?.[COLLECTION_ID_KEY[collection]] ?? doc?.id ?? '').trim()

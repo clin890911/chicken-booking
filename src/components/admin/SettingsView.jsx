@@ -17,6 +17,7 @@ import ExportCenter from './ExportCenter'
 import Icon from '../ui/Icon'
 import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
 import { validateLineReadiness } from '../../utils/lineReadiness'
+import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds, openSeatingIdsOn, effectiveClosedSeatings, describeWeeklyClosures } from '../../utils/weeklyClosures'
 import { onlineLeadLabel } from '../../utils/guestPolicy'
 import { CLOSURE_SETTING_KEYS, isClosureSettingKey, settingsWriteScope } from '../../utils/settingsScope'
 
@@ -152,6 +153,7 @@ export default function SettingsView({ onOpenCustomer }) {
     ])
     return [...days].filter(d => d >= t).length
   })()
+  const weeklyClosureLines = describeWeeklyClosures(form.closures, Array.isArray(form.seatings) ? form.seatings : [])
   const autoReleaseOn = form.autoReleaseEnabled !== false
   const autoReleaseHr = (Number(form.autoReleaseAfterMin) || 300) / 60
   const rolloverOn = form.dayRolloverEnabled !== false
@@ -678,7 +680,7 @@ export default function SettingsView({ onOpenCustomer }) {
         </div>
       </SettingsSection>
 
-      <SettingsSection sectionKey="closures" title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。" badge={upcomingClosureDays ? `${upcomingClosureDays} 天有關閉` : undefined} summary={upcomingClosureDays ? `近期有 ${upcomingClosureDays} 天設有公休或關閉時段，展開查看` : '近期沒有關閉的日期或時段'}>
+      <SettingsSection sectionKey="closures" title="休店 / 關閉時段管理" description="關閉整天（公休）、特定場次或特定時段的新訂位；既有訂位不受影響。" badge={upcomingClosureDays ? `${upcomingClosureDays} 天有關閉` : undefined} summary={[weeklyClosureLines.join('；'), upcomingClosureDays ? `近期有 ${upcomingClosureDays} 天設有公休或關閉時段，展開查看` : (weeklyClosureLines.length ? '' : '近期沒有關閉的日期或時段')].filter(Boolean).join(' · ')}>
         <ClosuresEditor form={form} setForm={setForm} bookings={bookings} unsaved={dirtyKeys.includes('closures')} />
       </SettingsSection>
 
@@ -1186,25 +1188,79 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
   const dayClosed = (closures.closedDates || []).includes(date)
   const closedSeatingIds = closures.closedSeatings?.[date] || []
   const closedSlotList = closures.closedSlots?.[date] || []
+  // 每週預設關閉 / 本日特別開放（見 utils/weeklyClosures.js）
+  const weeklyIds = weeklyClosedSeatingIds(closures, date)
+  const openIds = openSeatingIdsOn(closures, date)
+  const effectiveSeatingIds = effectiveClosedSeatings(closures, date)
 
   // 受影響的未來已確認訂位（僅此日期），供關閉前提醒。
   const affected = (bookings || []).filter(b => b.date === date && b.status === 'confirmed')
 
-  const setClosures = (next) => setForm(f => ({ ...f, closures: next }))
+  // 寫回 closures：weeklySeatings / openSeatings 是選用欄位——空時「不輸出該 key」（與 normalizeClosures 同形狀），
+  // openSeatings 依日期升冪並修剪今天以前的日期（過去的覆寫已無意義；只在 UI 存檔動作修剪，正規化不依賴「今天」，
+  // 確保前後端正規化輸出永遠相同）。否則點開再點回會殘留空物件／順序不同，被判成「有未儲存變更」。
+  const setClosures = (next) => {
+    const out = { ...next }
+    const ws = out.weeklySeatings || {}
+    if (Object.keys(ws).length) out.weeklySeatings = ws; else delete out.weeklySeatings
+    const t = todayStr()
+    const os = out.openSeatings || {}
+    const keys = Object.keys(os).filter(k => k >= t && os[k]?.length).sort()
+    if (keys.length) out.openSeatings = Object.fromEntries(keys.map(k => [k, os[k]])); else delete out.openSeatings
+    setForm(f => ({ ...f, closures: out }))
+  }
   const toggleArr = (arr = [], v) => arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]
+  // 場次 id 一律排序後存（與正規化同口徑），[B,A] 與 [A,B] 才不會被判成不同。
+  const toggleIds = (arr = [], v) => toggleArr(arr, v).sort()
+  const unionIds = (...arrs) => [...new Set(arrs.flat())].sort()
   const setDateMap = (mapKey, key, arr) => {
     const m = { ...(closures[mapKey] || {}) }
     if (arr.length) m[key] = arr; else delete m[key]
     setClosures({ ...closures, [mapKey]: m })
   }
+  // 每週預設關閉：切換某星期幾的某場次（key 為 '0'..'6'，整數鍵 JS 會自動升冪排序）。
+  // 取消規則時，連帶清掉該星期「今天以後」日期對此場次的「本日特別開放」——否則日後重新開啟規則，
+  // 那些日期會莫名維持開放。
+  const toggleWeekly = (dow, id) => {
+    const ws = { ...(closures.weeklySeatings || {}) }
+    const wasOn = (ws[dow] || []).includes(id)
+    const next = toggleIds(ws[dow] || [], id)
+    if (next.length) ws[dow] = next; else delete ws[dow]
+    const os = { ...(closures.openSeatings || {}) }
+    if (wasOn) {
+      const t = todayStr()
+      for (const d of Object.keys(os)) {
+        if (d >= t && closureDayOfWeek(d) === Number(dow)) {
+          const v = (os[d] || []).filter(x => x !== id)
+          if (v.length) os[d] = v; else delete os[d]
+        }
+      }
+    }
+    setClosures({ ...closures, weeklySeatings: ws, openSeatings: os })
+  }
+  // 本日特別開放（抵銷每週預設）↔ 恢復預設
+  const toggleOpenToday = (id) => setDateMap('openSeatings', date, toggleIds(openIds, id))
   const toggleDay = () => setClosures({ ...closures, closedDates: toggleArr(closures.closedDates, date) })
-  const toggleSeating = (id) => setDateMap('closedSeatings', date, toggleArr(closedSeatingIds, id))
+  // 明細關閉切換。若該場次「同時」是每週預設關閉，按「恢復」要一併寫入本日特別開放——
+  // 否則只清掉明細，場次仍依每週預設關閉，店員會以為按了沒反應。
+  const toggleSeating = (id) => {
+    const cs = { ...(closures.closedSeatings || {}) }
+    const nextIds = toggleIds(closedSeatingIds, id)
+    if (nextIds.length) cs[date] = nextIds; else delete cs[date]
+    const os = { ...(closures.openSeatings || {}) }
+    const reopening = closedSeatingIds.includes(id)
+    if (reopening && weeklyIds.includes(id) && !openIds.includes(id)) os[date] = unionIds(openIds, [id])
+    setClosures({ ...closures, closedSeatings: cs, openSeatings: os })
+  }
   const toggleSlot = (t) => setDateMap('closedSlots', date, toggleArr(closedSlotList, t))
   // 一鍵恢復此日全部開放（整天/場次/時段皆清除）
+  // 每週預設關閉的場次寫入「本日特別開放」，才算真的全部恢復。
   const reopenDay = () => {
     const cs = { ...(closures.closedSeatings || {}) }; delete cs[date]
     const csl = { ...(closures.closedSlots || {}) }; delete csl[date]
-    setClosures({ ...closures, closedDates: (closures.closedDates || []).filter(d => d !== date), closedSeatings: cs, closedSlots: csl })
+    const os = { ...(closures.openSeatings || {}) }
+    if (weeklyIds.length) os[date] = unionIds(openIds, weeklyIds)
+    setClosures({ ...closures, closedDates: (closures.closedDates || []).filter(d => d !== date), closedSeatings: cs, closedSlots: csl, openSeatings: os })
   }
 
   // 不屬於任何場次的時段（午晚餐之間等），歸到「其他時段」
@@ -1216,7 +1272,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
   const closedDatesSet = new Set(closures.closedDates || [])
   const dayStatus = (ds) => {
     if (closedDatesSet.has(ds)) return 'full'
-    if ((closures.closedSeatings?.[ds]?.length) || (closures.closedSlots?.[ds]?.length)) return 'partial'
+    if (effectiveClosedSeatings(closures, ds).length || (closures.closedSlots?.[ds]?.length)) return 'partial'
     return null
   }
   const [yy, mm] = monthAnchor.split('-').map(Number)
@@ -1236,9 +1292,11 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
     const nd = new Date(`${date}T00:00:00`); nd.setDate(nd.getDate() + 7)
     const target = `${nd.getFullYear()}-${String(nd.getMonth() + 1).padStart(2, '0')}-${String(nd.getDate()).padStart(2, '0')}`
     const closedDates = dayClosed ? [...new Set([...(closures.closedDates || []), target])] : (closures.closedDates || [])
-    const cs = { ...(closures.closedSeatings || {}) }; if (closedSeatingIds.length) cs[target] = [...new Set([...(cs[target] || []), ...closedSeatingIds])]
+    const cs = { ...(closures.closedSeatings || {}) }; if (closedSeatingIds.length) cs[target] = unionIds(cs[target] || [], closedSeatingIds)
     const csl = { ...(closures.closedSlots || {}) }; if (closedSlotList.length) csl[target] = [...new Set([...(csl[target] || []), ...closedSlotList])]
-    setClosures({ ...closures, closedDates, closedSeatings: cs, closedSlots: csl })
+    // 本日特別開放一併複製（下週同一天的每週預設相同）
+    const os = { ...(closures.openSeatings || {}) }; if (openIds.length) os[target] = unionIds(os[target] || [], openIds)
+    setClosures({ ...closures, closedDates, closedSeatings: cs, closedSlots: csl, openSeatings: os })
     pickDate(target)
   }
 
@@ -1246,13 +1304,18 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
   const describeDay = (ds) => {
     if (closedDatesSet.has(ds)) return '整天公休'
     const parts = []
-    const sIds = closures.closedSeatings?.[ds] || []
-    sIds.forEach(id => parts.push(seatings.find(s => s.id === id)?.name || '已刪除的場次'))
+    const explicitIds = closures.closedSeatings?.[ds] || []
+    effectiveClosedSeatings(closures, ds).forEach(id => {
+      const name = seatings.find(s => s.id === id)?.name || '已刪除的場次'
+      parts.push(explicitIds.includes(id) ? name : `${name}（每週）`)
+    })
     const slotList = [...(closures.closedSlots?.[ds] || [])].sort()
     if (slotList.length) parts.push(slotList.join('、'))
     return parts.join('、')
   }
-  const hasAnyClosure = dayClosed || closedSeatingIds.length > 0 || closedSlotList.length > 0
+  const hasAnyClosure = dayClosed || effectiveSeatingIds.length > 0 || closedSlotList.length > 0
+  const weeklyLines = describeWeeklyClosures(closures, seatings)
+  const dateDow = closureDayOfWeek(date)
   const dayLabel = (ds) => {
     const d = new Date(`${ds}T00:00:00`)
     return `${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`
@@ -1303,6 +1366,47 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
         </div>
       )}
 
+      {seatings.length > 0 && (
+        <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <div className="text-sm font-bold text-chicken-brown">每週預設關閉</div>
+            <div className="text-xs text-chicken-brown/60">每週這天自動關閉，只停線上新訂位；單日可在下方點「本日開放」。</div>
+          </div>
+          <div className="mt-3 space-y-3">
+            {seatings.map(s => (
+              <div key={s.id} className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="min-w-0 sm:w-36 sm:shrink-0">
+                  <span className="text-sm font-bold text-chicken-brown">{s.name}</span>
+                  <span className="ml-1.5 text-xs text-chicken-brown/50">{s.start}–{s.end}</span>
+                </div>
+                <div className="grid flex-1 grid-cols-7 gap-1.5">
+                  {WEEKDAY_ORDER.map(dow => {
+                    const on = (closures.weeklySeatings?.[dow] || []).includes(s.id)
+                    return (
+                      <button
+                        key={dow}
+                        type="button"
+                        onClick={() => toggleWeekly(dow, s.id)}
+                        aria-pressed={on}
+                        aria-label={`每週${WEEKDAY_LABELS[dow]} ${s.name}${on ? '：預設關閉中，點一下改為開放' : '：開放中，點一下設為預設關閉'}`}
+                        className={`tap flex min-h-[48px] flex-col items-center justify-center rounded-xl border-2 font-bold transition-colors ${
+                          on
+                            ? 'border-chicken-red bg-chicken-red text-white shadow-sm'
+                            : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/40'
+                        }`}
+                      >
+                        <span className="text-sm leading-tight">{WEEKDAY_LABELS[dow]}</span>
+                        <span className={`text-[10px] leading-tight ${on ? 'text-white' : 'text-emerald-700'}`}>{on ? '關閉' : '開放'}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid gap-3 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)] md:items-start">
         {/* 左：月曆 + 近期關閉清單 */}
         <div className="space-y-3">
@@ -1347,8 +1451,13 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
 
           <div className="rounded-xl border border-chicken-brown/10 bg-white p-3">
             <div className="mb-2 text-sm font-bold text-chicken-brown">近期已關閉（{upcoming.length}）</div>
+            {weeklyLines.length > 0 && (
+              <div className="mb-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs font-bold leading-5 text-amber-800">
+                {weeklyLines.map(l => <div key={l}>🔁 {l}</div>)}
+              </div>
+            )}
             {upcoming.length === 0 ? (
-              <p className="text-xs text-chicken-brown/50">目前沒有任何關閉的日期或時段。</p>
+              <p className="text-xs text-chicken-brown/50">{weeklyLines.length ? '除每週預設外，沒有個別關閉的日期或時段。' : '目前沒有任何關閉的日期或時段。'}</p>
             ) : (
               <ul className="max-h-60 space-y-1.5 overflow-y-auto">
                 {upcoming.map(ds => (
@@ -1400,7 +1509,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                   此日全部恢復開放
                 </button>
               )}
-              {hasAnyClosure && (
+              {(hasAnyClosure || openIds.length > 0) && (
                 <button type="button" onClick={copyToNextWeek} className="btn-secondary min-h-[44px] whitespace-nowrap text-sm">
                   複製到下週同一天
                 </button>
@@ -1432,9 +1541,46 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
           ) : (
             <>
               {seatings.map(s => {
-                const seatingClosed = closedSeatingIds.includes(s.id)
+                const explicitClosed = closedSeatingIds.includes(s.id)
+                const isWeekly = weeklyIds.includes(s.id)
+                // 每週預設關閉（且無明細關閉）：可「本日開放」；已開放者可「恢復預設」。明細關閉維持原行為。
+                const weeklyClosed = !explicitClosed && isWeekly && !openIds.includes(s.id)
+                const openedToday = !explicitClosed && isWeekly && openIds.includes(s.id)
+                const seatingClosed = explicitClosed
                 const slots = slotsInSeating(form, s)
                 const closedInSeating = slots.filter(t => closedSlotList.includes(t)).length
+                if (weeklyClosed || openedToday) {
+                  return (
+                    <div key={s.id} className={`rounded-xl border-2 p-3 ${weeklyClosed ? 'border-chicken-red bg-red-50' : closedInSeating ? 'border-amber-300 bg-white' : 'border-emerald-300 bg-white'}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="text-sm font-bold text-chicken-brown">{s.name}</span>
+                          <span className="ml-1.5 text-xs text-chicken-brown/50">{s.start}–{s.end}</span>
+                          <span className="ml-1.5 inline-block rounded-full bg-chicken-brown/10 px-2 py-0.5 text-[11px] font-bold text-chicken-brown/70">🔁 每週{WEEKDAY_LABELS[dateDow]}預設關閉</span>
+                          <div className={`mt-0.5 text-xs font-bold ${weeklyClosed ? 'text-chicken-red' : closedInSeating ? 'text-amber-700' : 'text-emerald-700'}`}>
+                            {weeklyClosed ? '⛔ 本日依每週預設關閉' : closedInSeating ? `✓ 本日特別開放 · 已關閉 ${closedInSeating} / ${slots.length} 個時段` : '✓ 本日特別開放'}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleOpenToday(s.id)}
+                          aria-pressed={openedToday}
+                          className={`tap min-h-[44px] rounded-xl border-2 px-4 text-sm font-bold ${
+                            weeklyClosed ? 'border-emerald-600 bg-white text-emerald-700 hover:bg-emerald-50' : 'border-chicken-brown/20 bg-white text-chicken-brown hover:bg-chicken-brown/5'
+                          }`}
+                        >
+                          {weeklyClosed ? '本日開放' : '本日特別開放 · 點此恢復預設'}
+                        </button>
+                      </div>
+                      {openedToday && slots.length > 0 && (
+                        <div className={`mt-3 ${slotGrid}`}>
+                          {slots.map(renderSlot)}
+                        </div>
+                      )}
+                      {weeklyClosed && <div className="mt-2 text-xs font-bold text-chicken-red/80">停止新訂位的時段：{slots.join('、') || '—'}</div>}
+                    </div>
+                  )
+                }
                 return (
                   <div key={s.id} className={`rounded-xl border-2 p-3 ${seatingClosed ? 'border-chicken-red bg-red-50' : closedInSeating ? 'border-amber-300 bg-white' : 'border-chicken-brown/10 bg-white'}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1453,7 +1599,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                           seatingClosed ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-red/40 bg-white text-chicken-red hover:bg-red-50'
                         }`}
                       >
-                        {seatingClosed ? '已關閉 · 點此恢復' : '關閉整場次'}
+                        {seatingClosed ? (isWeekly ? '已關閉 · 點此本日恢復開放' : '已關閉 · 點此恢復') : '關閉整場次'}
                       </button>
                     </div>
                     {!seatingClosed && slots.length > 0 && (

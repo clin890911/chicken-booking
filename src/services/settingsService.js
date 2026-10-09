@@ -32,6 +32,7 @@ const DEFAULT = {
     { id: 'dinner1', name: '晚餐第一批', start: '17:00', end: '19:00' },
   ],
   // 關閉訂位：整天公休 / 特定日特定時段 / 特定日特定場次。
+  // weeklySeatings（每週預設關閉）/ openSeatings（單日開放）為選用欄位，空時不輸出（見 normalizeClosures）。
   closures: { closedDates: [], closedSlots: {}, closedSeatings: {} },
   heroBanners: [],
   lineOfficialUrl: 'https://lin.ee/8lECi4S',
@@ -91,7 +92,25 @@ function normalizeClosures(c = {}) {
     return o
   }
   out.closedSlots = cleanMap(c.closedSlots, /^\d{1,2}:\d{2}$/)
-  out.closedSeatings = cleanMap(c.closedSeatings, null)
+  // 場次 id 一律去重＋排序（[B,A] 與 [A,B] 同義，避免被判成「有未儲存變更」卻列不出明細）
+  const cleanIds = (arr) => [...new Set(arr.filter(x => (typeof x === 'string' || typeof x === 'number') && String(x)).map(String))].sort()
+  out.closedSeatings = Object.fromEntries(Object.entries(cleanMap(c.closedSeatings, null)).map(([d, v]) => [d, cleanIds(v)]))
+  // 每週預設關閉 / 單日開放（★ 與 functions normalizeClosuresServer 同口徑、同 key 順序）：
+  // key 依序輸出（星期 0→6、日期升冪），空陣列丟掉；**整個欄位為空時不輸出該 key**——
+  // 讓沒用到此功能的資料與舊版形狀（只有 closedDates/closedSlots/closedSeatings）完全相同，
+  // 舊版落地的同步基準線不會因新欄位而永久 dirty。
+  const ws = (c.weeklySeatings && typeof c.weeklySeatings === 'object') ? c.weeklySeatings : {}
+  const weekly = {}
+  for (const k of ['0', '1', '2', '3', '4', '5', '6']) {
+    if (Array.isArray(ws[k])) { const v = cleanIds(ws[k]); if (v.length) weekly[k] = v }
+  }
+  const os = (c.openSeatings && typeof c.openSeatings === 'object') ? c.openSeatings : {}
+  const open = {}
+  for (const d of Object.keys(os).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort()) {
+    if (Array.isArray(os[d])) { const v = cleanIds(os[d]); if (v.length) open[d] = v }
+  }
+  if (Object.keys(weekly).length) out.weeklySeatings = weekly
+  if (Object.keys(open).length) out.openSeatings = open
   return out
 }
 
