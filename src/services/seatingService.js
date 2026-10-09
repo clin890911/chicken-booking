@@ -9,7 +9,7 @@ import { getSettings } from './settingsService'
 import { statusZh, assignmentKind } from '../utils/tableStatus'
 import { bookingTableNumbers } from '../utils/bookingTables'
 import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
-import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor, preassignConflicts } from '../utils/capacity'
+import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor, preassignConflicts, squeezeSeats } from '../utils/capacity'
 import { seatedMoveWarningSignature } from '../utils/seatedMoveWarnings'
 import { buildGroupHolds } from '../utils/groupLive'
 import { todayStr, nowSlot, formatDate } from '../utils/timeSlots'
@@ -61,6 +61,12 @@ function occupiedError(tableNumber, table) {
     : `${tableNumber} 目前${statusZh(table.status)}，請先改桌`
 }
 
+// 併桌席數不足（已含每桌擠一擠的額度，見 capacity.squeezeSeats）
+function squeezeShortError(tables, guests) {
+  const seats = tables.reduce((s, t) => s + (Number(t.capacity) || 0), 0)
+  return `所選桌合計 ${seats} 席（最多擠 ${squeezeSeats(tables)} 位），不足 ${guests} 位`
+}
+
 // === 訂位 → 指派桌 ===
 // 客人線上訂位（assignedTableId: null）→ 到店時店長指派一張空桌
 export function assignBookingToTable(bookingId, tableNumber) {
@@ -70,7 +76,7 @@ export function assignBookingToTable(bookingId, tableNumber) {
   if (!table) return { ok: false, error: '桌位不存在' }
   if (!tableUsableToday(table)) return { ok: false, error: outOfServiceError(tableNumber) }
   if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌（${statusZh(table.status)}）` }
-  if (booking.guests > table.capacity) return { ok: false, error: `${tableNumber} 容量不足（${table.capacity} < ${booking.guests}）` }
+  if (Number(booking.guests) > squeezeSeats([table])) return { ok: false, error: `${tableNumber} 容量不足（${table.capacity} 人桌最多擠 ${squeezeSeats([table])} 位，此組 ${booking.guests} 位）` }
 
   bookingService.assignTable(bookingId, tableNumber)
   tableService.reserveTable(tableNumber, bookingId)
@@ -80,7 +86,7 @@ export function assignBookingToTable(bookingId, tableNumber) {
 // === 訂位 → 指派多桌（大組併桌）===
 // 散客訂位人數超過任何單桌容量 → 一筆 booking 佔多張桌：tableNumbers[0]=主桌，其餘=額外桌。
 // 全部桌 reserved + currentBookingId 指向同一 booking。單桌時退回 assignBookingToTable（維持單一路徑）。
-// 與 walkInSeatMulti 同口徑：每張桌須存在/今日可用/空桌、合計容量≥人數、且同一樓層（一組不分坐兩層）。
+// 與 walkInSeatMulti 同口徑：每張桌須存在/今日可用/空桌、合計容量（含每桌擠一擠）≥人數、且同一樓層（一組不分坐兩層）。
 export function assignBookingTablesMulti(bookingId, tableNumbers) {
   const nums = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
   if (nums.length === 0) return { ok: false, error: '請至少選一張桌' }
@@ -89,20 +95,20 @@ export function assignBookingTablesMulti(bookingId, tableNumbers) {
   const booking = bookingService.getById(bookingId)
   if (!booking) return { ok: false, error: '訂位不存在' }
 
-  let totalCap = 0
+  const picked = []
   const floors = new Set()
   for (const n of nums) {
     const t = tableService.getByNumber(n)
     if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
     if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(n) }
     if (t.status !== 'vacant') return { ok: false, error: `${n} 目前不是空桌（${statusZh(t.status)}）` }
-    totalCap += Number(t.capacity) || 0
+    picked.push(t)
     floors.add(t.floor)
   }
   // ★ 併桌必須同一樓層——service 層硬擋，繞過 UI 也擋得住
   if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
   const guests = Number(booking.guests) || 0
-  if (guests > totalCap) return { ok: false, error: `所選桌合計 ${totalCap} 席，不足 ${guests} 位` }
+  if (guests > squeezeSeats(picked)) return { ok: false, error: squeezeShortError(picked, guests) }
 
   const [mainTable, ...extra] = nums
   bookingService.update(bookingId, { assignedTableId: mainTable, extraTableIds: extra })
@@ -436,7 +442,7 @@ export function seatWaitlist(waitId, tableNumber) {
   if (!table) return { ok: false, error: '桌位不存在' }
   if (!tableUsableToday(table)) return { ok: false, error: outOfServiceError(tableNumber) }
   if (table.status !== 'vacant') return { ok: false, error: `${tableNumber} 目前不是空桌` }
-  if (wait.partySize > table.capacity) return { ok: false, error: `${tableNumber} 容量不足` }
+  if (Number(wait.partySize) > squeezeSeats([table])) return { ok: false, error: `${tableNumber} 容量不足（最多擠 ${squeezeSeats([table])} 位）` }
 
   // 1. 建立一筆 walk-in 訂位（已到店狀態）
   const today = todayStr()
@@ -482,20 +488,20 @@ export function seatWaitlistMulti(waitId, tableNumbers) {
   if (!wait) return { ok: false, error: '候位記錄不存在' }
   if (!waitlistService.isSeatEligible(wait)) return { ok: false, error: '此候位已過號、結束或不是今天，請先確認候位狀態' }
 
-  let totalCap = 0
+  const picked = []
   const floors = new Set()
   for (const n of nums) {
     const t = tableService.getByNumber(n)
     if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
     if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(n) }
     if (t.status !== 'vacant') return { ok: false, error: `${n} 目前不是空桌（${statusZh(t.status)}）` }
-    totalCap += Number(t.capacity) || 0
+    picked.push(t)
     floors.add(t.floor)
   }
   // ★ 併桌必須同一樓層（一組客人不可能分坐兩層）——service 層硬擋，繞過 UI 也擋得住
   if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
   const guests = Number(wait.partySize) || 0
-  if (guests > totalCap) return { ok: false, error: `所選桌合計 ${totalCap} 席，不足 ${guests} 位` }
+  if (guests > squeezeSeats(picked)) return { ok: false, error: squeezeShortError(picked, guests) }
 
   const [mainTable, ...extra] = nums
   const booking = bookingService.create({
@@ -554,20 +560,20 @@ export function walkInSeatMulti(tableNumbers, guestData) {
   if (nums.length === 1) return walkInSeat(nums[0], guestData)
 
   // 驗證每張桌：存在、可用、空桌；累計容量 + 同樓層
-  let totalCap = 0
+  const picked = []
   const floors = new Set()
   for (const n of nums) {
     const t = tableService.getByNumber(n)
     if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
     if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(n) }
     if (t.status !== 'vacant') return { ok: false, error: `${n} 目前不是空桌（${statusZh(t.status)}）` }
-    totalCap += Number(t.capacity) || 0
+    picked.push(t)
     floors.add(t.floor)
   }
   // ★ 併桌必須同一樓層（一組客人不可能分坐兩層）——service 層硬擋，繞過 UI 也擋得住
   if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
   const guests = Number(guestData.guests) || 2
-  if (guests > totalCap) return { ok: false, error: `所選桌合計 ${totalCap} 席，不足 ${guests} 位` }
+  if (guests > squeezeSeats(picked)) return { ok: false, error: squeezeShortError(picked, guests) }
 
   const [mainTable, ...extra] = nums
   const booking = bookingService.create({
@@ -629,7 +635,7 @@ export function replacePendingBookingTables(bookingId, tableNumbers, { now = new
   })
   const kind = wasHeld ? 'hold' : lockKindFor({ date: booking.date, timeSlot: booking.timeSlot, now })
   const available = kind === 'preassign' ? new Set(preassignableTables(1, { bookingId, date: booking.date, timeSlot: booking.timeSlot, now }).map(t => String(t.number))) : null
-  let seats = 0
+  const picked = []
   const floors = new Set()
   for (const n of nums) {
     const t = tables.find(t => String(t.number) === n)
@@ -637,11 +643,11 @@ export function replacePendingBookingTables(bookingId, tableNumbers, { now = new
     if (!isTableUsableOnDate(t, booking.date)) return { ok: false, error: `${n} 停用／維修中` }
     const ownReserved = t.status === 'reserved' && heldBy(t, bookingId)
     if (!ownReserved && (kind === 'hold' ? t.status !== 'vacant' : !available.has(n))) return { ok: false, error: occupiedError(n, t) }
-    seats += Number(t.capacity) || 0
+    picked.push(t)
     floors.add(t.floor)
   }
   if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
-  if (seats < Number(booking.guests)) return { ok: false, error: `所選桌合計 ${seats} 席，不足 ${booking.guests} 位` }
+  if (Number(booking.guests) > squeezeSeats(picked)) return { ok: false, error: squeezeShortError(picked, booking.guests) }
   const updatedAt = now.toISOString()
   const nextTables = tables.map(t => {
     const n = String(t.number)
@@ -687,7 +693,7 @@ export function replaceSeatedBookingTables(bookingId, tableNumbers, { now = new 
   const hasConflicts = nums.some(n => conflicts.has(n))
   if (hasConflicts && confirmedWarningSignature !== seatedMoveWarningSignature(bookingId, nums, { bookings: allBookings, groups: groupService.listAll(), tables, settings, now })) return { ok: false, error: '桌位保留已改變，請重新確認警示' }
   if (allBookings.some(b => String(b.id) !== String(bookingId) && b.status === 'arrived' && b.date === formatDate(now) && bookingTableNumbers(b).some(n => nums.includes(n)))) return { ok: false, error: '目標桌仍屬於另一組已入座客人，請重新確認桌況' }
-  let seats = 0
+  const picked = []
   const floors = new Set()
   for (const n of nums) {
     const t = tables.find(t => String(t.number) === n)
@@ -695,11 +701,11 @@ export function replaceSeatedBookingTables(bookingId, tableNumbers, { now = new 
     if (!isTableUsableOnDate(t, formatDate(now))) return { ok: false, error: outOfServiceError(n) }
     if (!(original.includes(n) && own(t)) && (t.status !== 'vacant' || t.currentBookingId || t.currentRef)) return { ok: false, error: occupiedError(n, t) }
     if (conflicts.has(n) && !confirmedConflictTables.map(String).includes(n)) return { ok: false, error: `${n} 有其他訂位／團體保留，請重新確認警示` }
-    seats += Number(t.capacity) || 0
+    picked.push(t)
     floors.add(t.floor)
   }
   if (floors.size > 1) return { ok: false, error: '併桌必須在同一樓層，請改選同層的桌' }
-  if (seats < Number(booking.guests)) return { ok: false, error: `所選桌合計 ${seats} 席，不足 ${booking.guests} 位` }
+  if (Number(booking.guests) > squeezeSeats(picked)) return { ok: false, error: squeezeShortError(picked, booking.guests) }
   const start = tables.find(t => String(t.number) === original[0])?.seatedAt
     || original.map(n => tables.find(t => String(t.number) === n)?.seatedAt).find(Boolean)
     || booking.actualArrivalTime || null
@@ -743,7 +749,7 @@ export function moveTable(bookingId, newTableNumber) {
   if (!newTable) return { ok: false, error: '目標桌位不存在' }
   if (!tableUsableToday(newTable)) return { ok: false, error: outOfServiceError(newTableNumber) }
   if (newTable.status !== 'vacant') return { ok: false, error: '目標桌位非空桌' }
-  if (booking.guests > newTable.capacity) return { ok: false, error: '目標桌容量不足' }
+  if (Number(booking.guests) > squeezeSeats([newTable])) return { ok: false, error: '目標桌容量不足' }
 
   // 釋放舊桌（僅限仍由本訂位持有）、佔用新桌（依原本的語意）
   const oldTable = tableService.getByNumber(oldNumber)
@@ -777,7 +783,7 @@ export function timeConflictTableNumbers({ bookingId, date, timeSlot, mode = 'ho
 
 // === 找適合容量的空桌（給「指派桌」UI 用）===
 // 排序邏輯：
-// 1) 最小容量浪費（capacity - partySize 越小越好）
+// 1) 坐得下的桌優先（要擠一擠才坐得下的排後面，見 capacity.squeezeSeats）；再看最小容量浪費（capacity - partySize 越小越好）
 // 2) 1F 優先（行動方便、走道近）
 // 3) 桌號字典序
 // opts（可選）＝{ bookingId, date, timeSlot, mode, now }：帶了就再排除「依佔用區間會撞桌」的桌
@@ -787,7 +793,7 @@ export function findSuitableTables(partySize, opts = null) {
   const today = opts?.now ? formatDate(opts.now) : todayStr()
   const conflicts = opts ? timeConflictTableNumbers(opts) : null
   return tableService.listAll()
-    .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && t.capacity >= partySize)
+    .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && squeezeSeats([t]) >= partySize)
     .filter(t => !conflicts || !conflicts.has(String(t.number)))
     .sort(bySuitability(partySize))
 }
@@ -795,6 +801,10 @@ export function findSuitableTables(partySize, opts = null) {
 // 候選排序（findSuitableTables 與預配型候選共用）：浪費小 → 1F 優先 → 桌號
 function bySuitability(partySize) {
   return (a, b) => {
+    // 要擠一擠才坐得下的桌排在坐得下的桌之後（只有沒有剛好坐得下的桌才會建議超坐）
+    const overA = Math.max(0, partySize - (Number(a.capacity) || 0))
+    const overB = Math.max(0, partySize - (Number(b.capacity) || 0))
+    if (overA !== overB) return overA - overB
     const wasteA = a.capacity - partySize
     const wasteB = b.capacity - partySize
     if (wasteA !== wasteB) return wasteA - wasteB
@@ -817,7 +827,7 @@ export function preassignableTables(partySize, { bookingId, date, timeSlot, now 
   const window = assignmentWindow({ mode: 'preassign', timeSlot, date: day, now }, settings)
   const isToday = day === formatDate(now)
   return tableService.listAll()
-    .filter(t => isTableUsableOnDate(t, day) && (Number(t.capacity) || 0) >= partySize)
+    .filter(t => isTableUsableOnDate(t, day) && squeezeSeats([t]) >= partySize)
     .filter(t => {
       if (!isToday || t.status === 'vacant' || heldBy(t, bookingId)) return true
       if (!window) return false

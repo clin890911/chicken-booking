@@ -14,7 +14,7 @@ const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
 
 // pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
 //   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
-export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiWarnings = [], multiWarningConfirmed = true, onConfirmWarning, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
+export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiMaxSeats, multiWarnings = [], multiWarningConfirmed = true, onConfirmWarning, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
   if (!mode) return null
   const suggested = tables.find(t => String(t.number) === String(mode.suggestion))
   const suggestionLabel = suggested ? `${suggested.floor}・${suggested.number}` : mode.suggestion
@@ -26,7 +26,10 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
     const isWaitlist = mode.kind === 'waitlist'
     const need = mode.need || 0
     const selected = mode.selected || []
-    const enough = selected.length > 0 && multiSeats >= need
+    // 擠一擠：每桌可多坐 1 位（multiMaxSeats 由 capacity.squeezeSeats 算；沒傳就照原席數）
+    const maxSeats = multiMaxSeats ?? multiSeats
+    const enough = selected.length > 0 && maxSeats >= need
+    const squeezed = enough && multiSeats < need
     const ready = enough && multiWarningConfirmed
     const name = isWaitlist
       ? `${mode.wait?.name || '候位'}${mode.wait?.queueNumber ? ` #${mode.wait.queueNumber}` : ''}`
@@ -42,6 +45,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
+            {squeezed && <span data-testid="squeeze-badge" className="text-xs font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded">擠一擠 · 超坐 {need - multiSeats} 位</span>}
             <span className="text-xs opacity-90">點桌加 / 減 · 可選單桌或多桌</span>
             {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</span>}
             {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {suggestionLabel}（自行選桌）</span>}
@@ -52,7 +56,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
         <div className="bg-white/15 rounded-lg px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
           <div className="text-sm font-bold">
             {selected.length ? `已選：${selected.join(' + ')}` : '尚未選桌（點空桌加入）'}
-            {!enough && need > multiSeats && <span className="ml-2 opacity-90">— 還差 {need - multiSeats} 席</span>}
+            {!enough && need > maxSeats && <span className="ml-2 opacity-90">— 擠一擠也還差 {need - maxSeats} 位</span>}
           </div>
           <button
             onClick={onConfirmMulti}

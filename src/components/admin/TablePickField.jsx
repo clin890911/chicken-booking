@@ -17,6 +17,7 @@ import { statusZh } from '../../utils/tableStatus'
 //   lockKind    'hold' | 'preassign'（AddBookingView 由 findReserveCandidates 算好）
 //   leadMin     鎖桌門檻分鐘（文案用，與 capacity.HOLD_LEAD_MIN 同一份）
 //   candidates  候選桌（已排序）
+//   guests      人數（候選桌容量比人數小＝要擠一擠，晶片標「擠一擠」）
 //   choice      AddBookingView 算好的「實際會用的選擇」：{ kind:'table', table } | { kind:'map' } | { kind:'none' }
 //   onPick(v)   v＝桌號 | 'map' | 'none'
 //   notice      已選桌因人數/時段變動而改回建議時的提示（讓店員看得出桌號換了）
@@ -28,7 +29,7 @@ function floorOrder(a, b) {
   return String(a).localeCompare(String(b))
 }
 
-export default function TablePickField({ hasSlot, lockKind = 'hold', leadMin = 30, candidates = [], choice, onPick, notice, emptyReason }) {
+export default function TablePickField({ hasSlot, lockKind = 'hold', leadMin = 30, candidates = [], guests = 0, choice, onPick, notice, emptyReason }) {
   const [expanded, setExpanded] = useState(false)
   const suggestedNumber = candidates[0]?.number
   const selectedNumber = choice?.kind === 'table' ? choice.table.number : null
@@ -109,6 +110,10 @@ export default function TablePickField({ hasSlot, lockKind = 'hold', leadMin = 3
                           ? 'border-chicken-red bg-chicken-red text-white'
                           : 'border-chicken-brown/15 bg-white text-chicken-brown hover:border-chicken-red/50'}`}>
                       {t.number} · {t.capacity}人
+                      {/* 要擠一擠才坐得下（每桌可多坐 1 位）→ 標出來，店員一眼知道是超坐 */}
+                      {Number(guests) > (Number(t.capacity) || 0) && (
+                        <span className={`ml-1 text-[10px] ${selected ? 'text-white/90' : 'text-amber-700'}`}>· 擠一擠</span>
+                      )}
                       {/* 預配候選可能此刻有客（屆時會空出）→ 標出現況，店員才不會以為是空桌 */}
                       {t.status && t.status !== 'vacant' && (
                         <span className={`ml-1 text-[10px] ${selected ? 'text-white/80' : 'text-chicken-brown/50'}`}>· 現{statusZh(t.status)}</span>

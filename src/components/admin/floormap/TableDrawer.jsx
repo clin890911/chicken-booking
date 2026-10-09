@@ -11,7 +11,7 @@ import { STATUS_ZH as STATUS_LABELS, diningTablePresentation } from '../../../ut
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr } from '../../../utils/timeSlots'
 import { STATUS_COLOR } from './statusColors'
-import { preassignConflicts, assignmentWindow } from '../../../utils/capacity'
+import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
 import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
 import { splitSuffix } from '../../../utils/partySplit'
@@ -581,7 +581,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             label="人數"
             value={walkInForm.guests}
             onChange={e => setWalkInForm(f => ({ ...f, guests: Number(e.target.value) }))}
-            options={Array.from({ length: table.capacity }, (_, i) => ({ value: i + 1, label: `${i + 1} 位` }))}
+            options={Array.from({ length: squeezeSeats([table]) }, (_, i) => ({ value: i + 1, label: i + 1 > table.capacity ? `${i + 1} 位（擠一擠）` : `${i + 1} 位` }))}
           />
           <Input label="備註（選填）" value={walkInForm.notes} onChange={e => setWalkInForm(f => ({ ...f, notes: e.target.value }))} />
         </div>

@@ -156,6 +156,20 @@ export function totalActiveSeats(tables) {
   return tables.filter(t => t.isActive).reduce((s, t) => s + t.capacity, 0)
 }
 
+// === 擠一擠（超坐）===
+// 大客滿時現場會請客人擠一擠：每張桌最多多坐 SQUEEZE_PER_TABLE 位（6 人桌坐 7 位、4 人桌坐 5 位）。
+// 只用在店員操作的散客訂位指派／現場帶位／候位入座／換桌；線上客人的場次容量（calcSlotCapacity）口徑不動。
+// 團單另見 groupReservationService.groupSeatWarnings（只警告、不設上限）。
+export const SQUEEZE_PER_TABLE = 1
+
+// 所選桌「擠一擠」後最多可坐幾位（桌容量合計 + 每桌 SQUEEZE_PER_TABLE；容量 0 的桌不加）
+export function squeezeSeats(tables = []) {
+  return (tables || []).reduce((s, t) => {
+    const cap = Number(t?.capacity) || 0
+    return s + (cap > 0 ? cap + SQUEEZE_PER_TABLE : 0)
+  }, 0)
+}
+
 // === 統一佔用解析器（散客 × 團客同框）===
 // 給「日期 + 場次」維度的統一座位地圖：把同日、且 timeSlot 歸屬於該場次的散客訂位與團客梯次
 // 攤平成「每桌佔用者」+ 摘要。複用 CAPACITY_EXCLUDED_STATUSES 與 seatingForSlot，口徑與容量引擎一致。

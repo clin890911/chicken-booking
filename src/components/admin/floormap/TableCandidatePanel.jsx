@@ -5,12 +5,12 @@ import { seatingPerms } from '../../../utils/seatingPerms'
 import { useToast } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { fmtOverdueMin } from '../../../utils/bookingPulse'
-import { preassignConflicts, assignmentWindow } from '../../../utils/capacity'
+import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
 import { releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } from '../../../utils/preassignOverride'
 
 // 點空桌時顯示「可入座」候選名單
-// - 待指派訂位（今日 confirmed + assignedTableId=null + 人數 ≤ 桌容量）
-// - 候位中（waiting/called + 人數 ≤ 桌容量）
+// - 待指派訂位（今日 confirmed + assignedTableId=null + 人數 ≤ 桌容量＋擠一擠 1 位）
+// - 候位中（waiting/called + 人數 ≤ 桌容量＋擠一擠 1 位）
 // 排序：訂位按時段、候位按取號順序
 // 主要動作：
 //   - 訂位列：[入座]（指派+客人到了）/ [預訂]（只指派、status reserved）
@@ -47,10 +47,10 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
         b.date === today &&
         b.status === 'confirmed' &&
         !b.assignedTableId &&
-        b.guests <= table.capacity
+        Number(b.guests) <= squeezeSeats([table])
       )
       .sort((a, b) => (a.timeSlot || '').localeCompare(b.timeSlot || ''))
-  }, [bookings, today, table.capacity, perms.seat])
+  }, [bookings, today, table, perms.seat])
 
   // B3：訂位再依「是否已到場（時段已過）未入座」拆兩組
   //  - arrivedBookings：時段已過、應已到場、仍未入座 → 最高優先（過越久越前）
@@ -74,12 +74,12 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
     return waitlist
       .filter(w =>
         (w.status === 'waiting' || w.status === 'called') &&
-        w.partySize <= table.capacity
+        Number(w.partySize) <= squeezeSeats([table])
       )
       .sort((a, b) =>
         rank(a) - rank(b) ||
         (a.takenAt || '').localeCompare(b.takenAt || ''))
-  }, [waitlist, table.capacity, perms.waitlistSeat])
+  }, [waitlist, table, perms.waitlistSeat])
 
   // 這張桌上他筆的預配：依動作的佔用區間（現在入座 'now'／只指派＝現在就鎖桌 'hold'）判定重疊才解除，
   // 與現場指派／帶位同一個 helper。動手前先查（動作後 bookings 會變）。

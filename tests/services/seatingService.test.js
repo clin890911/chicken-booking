@@ -85,11 +85,18 @@ describe('seatingService 整合層', () => {
       expect(r.error).toContain('已預訂')
     })
 
-    it('容量不足 → 擋', () => {
-      const b = mkBooking({ guests: 5 })
-      const r = seating.assignBookingToTable(b.id, '101') // 101 容量 4 < 5
+    it('容量不足（擠一擠也坐不下）→ 擋', () => {
+      const b = mkBooking({ guests: 6 })
+      const r = seating.assignBookingToTable(b.id, '101') // 101 容量 4，擠一擠最多 5 < 6
       expect(r.ok).toBe(false)
       expect(r.error).toContain('容量不足')
+    })
+
+    it('超過容量 1 位 → 擠一擠可指派（4 人桌坐 5 位）', () => {
+      const b = mkBooking({ guests: 5 })
+      const r = seating.assignBookingToTable(b.id, '101')
+      expect(r.ok).toBe(true)
+      expect(tableService.getByNumber('101').status).toBe('reserved')
     })
 
     it('容量剛好相等 → 可指派（邊界）', () => {
@@ -163,8 +170,8 @@ describe('seatingService 整合層', () => {
     })
 
     it('合計席數不足人數 → 擋', () => {
-      const b = mkBooking({ guests: 12 })
-      const r = seating.assignBookingTablesMulti(b.id, ['108', '101']) // 6+4=10 < 12
+      const b = mkBooking({ guests: 13 })
+      const r = seating.assignBookingTablesMulti(b.id, ['108', '101']) // 6+4=10，擠一擠最多 12 < 13
       expect(r.ok).toBe(false)
       expect(r.error).toContain('不足')
     })
@@ -848,9 +855,9 @@ describe('seatingService 整合層', () => {
         expect(r.error).toContain('101')
       })
 
-      it('容量不足 → 擋', () => {
-        const w = waitlistService.create({ name: '候大團', phone: '0911', partySize: 5 })
-        const r = seating.seatWaitlist(w.id, '101') // 101 容量 4 < 5
+      it('容量不足（擠一擠也坐不下）→ 擋', () => {
+        const w = waitlistService.create({ name: '候大團', phone: '0911', partySize: 6 })
+        const r = seating.seatWaitlist(w.id, '101') // 101 容量 4，擠一擠最多 5 < 6
         expect(r.ok).toBe(false)
         expect(r.error).toContain('容量不足')
       })
@@ -926,9 +933,9 @@ describe('seatingService 整合層', () => {
       expect(r).toEqual({ ok: false, error: '目標桌位非空桌' })
     })
 
-    it('目標桌容量不足 → 擋', () => {
-      const b = mkBooking({ guests: 5 })
-      // 用一張足夠大的桌先指派（108 容量 6），再嘗試換到容量 4 的 101
+    it('目標桌容量不足（擠一擠也坐不下）→ 擋', () => {
+      const b = mkBooking({ guests: 6 })
+      // 用一張足夠大的桌先指派（108 容量 6），再嘗試換到容量 4 的 101（擠一擠最多 5）
       seating.assignBookingToTable(b.id, '108')
       const r = seating.moveTable(b.id, '101')
       expect(r).toEqual({ ok: false, error: '目標桌容量不足' })
@@ -977,10 +984,16 @@ describe('seatingService 整合層', () => {
       expect(list.map(t => t.number)).toEqual(['101'])
     })
 
-    it('容量過濾：partySize 等於容量也算符合（>=）', () => {
+    it('容量過濾：partySize 等於容量也算符合（>=）；超過 1 位可擠一擠，超過 2 位不列', () => {
       tableService.bulkWrite([mkTable('101', 4, '1F')])
       expect(seating.findSuitableTables(4).map(t => t.number)).toEqual(['101'])
-      expect(seating.findSuitableTables(5)).toEqual([])
+      expect(seating.findSuitableTables(5).map(t => t.number)).toEqual(['101'])
+      expect(seating.findSuitableTables(6)).toEqual([])
+    })
+
+    it('擠一擠的桌排在坐得下的桌之後（有 6 人桌就不建議 4 人桌擠 5 位）', () => {
+      tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('208', 6, '2F')])
+      expect(seating.findSuitableTables(5).map(t => t.number)).toEqual(['208', '101'])
     })
 
     it('最小浪費優先：浪費少的排前面', () => {
@@ -1157,9 +1170,15 @@ describe('seatingService 整合層', () => {
 
       it('合計席數不足人數 → 擋', () => {
         tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('102', 4, '1F')])
-        const r = seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 10 })
+        const r = seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 11 }) // 擠一擠最多 10
         expect(r.ok).toBe(false)
         expect(r.error).toContain('不足')
+      })
+
+      it('合計席數差 1～2 位 → 每桌擠一擠可入座（4+4 坐 10 位）', () => {
+        tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('102', 4, '1F')])
+        const r = seating.walkInSeatMulti(['101', '102'], { name: '大組', guests: 10 })
+        expect(r.ok).toBe(true)
       })
 
       it('維修桌 → 擋（service 層守門）', () => {
@@ -2265,7 +2284,7 @@ describe('預配型候選：preassignableTables / findPreassignCandidates / find
       mkTable('110', 4, '1F', { outage: { from: TODAY, to: '', reason: '修椅子' } }),
       mkTable('111', 4, '1F', { status: 'cleaning' }),
       mkTable('112', 4, '1F', { status: 'blocked', blockReason: '漏水' }),
-      mkTable('113', 2, '1F'),
+      mkTable('113', 1, '1F'),
     ])
     expect(nums(seating.findPreassignCandidates(3, { date: TODAY, timeSlot: '18:00', now: at(9) }))).toEqual(['106', '111'])
   })
