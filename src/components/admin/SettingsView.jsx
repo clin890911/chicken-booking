@@ -20,6 +20,7 @@ import { validateLineReadiness } from '../../utils/lineReadiness'
 import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds, openSeatingIdsOn, effectiveClosedSeatings, describeWeeklyClosures } from '../../utils/weeklyClosures'
 import { onlineLeadLabel } from '../../utils/guestPolicy'
 import { CLOSURE_SETTING_KEYS, isClosureSettingKey, settingsWriteScope } from '../../utils/settingsScope'
+import { describeClosureConflicts } from '../../utils/closuresMerge'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -214,7 +215,10 @@ export default function SettingsView({ onOpenCustomer }) {
         return
       }
       const r = await flushCloudNow()
-      if (r.ok) toast.success('已儲存並同步雲端')
+      // 休店／關閉以日期為單位合併：別人同時存的其他日期都保留；同一天兩人都改時以這次存檔為準並提示。
+      const conflictMsg = describeClosureConflicts(r.closureConflicts)
+      if (r.ok && conflictMsg) toast.warning(`已儲存並同步雲端。${conflictMsg}`)
+      else if (r.ok) toast.success('已儲存並同步雲端')
       // 這台還沒從雲端取得資料：設定取得後會以雲端版本為準，這次的修改不會補送（不是「重試」能解決的）。
       else if (r.deferred) toast.error('設定尚未存到雲端：這台裝置還沒取得雲端資料，取得後會以雲端版本為準。請等同步完成後再改一次')
       else if (r.rejected) toast.error(`本機已存，但雲端拒絕了這筆變更：${r.error}。請改用有權限的帳號，或到下方同步狀態列選擇以雲端為準`)
