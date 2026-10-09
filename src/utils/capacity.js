@@ -1,5 +1,8 @@
 import { seatingForSlot } from './timeSlots'
 import { isTableUsableOnDate } from './tableAvailability'
+import { effectiveClosedSeatings } from './weeklyClosures'
+
+export { effectiveClosedSeatings }
 
 const DEFAULT_DINING_DURATION_MIN = 90
 const DEFAULT_CLEANUP_BUFFER_MIN = 10
@@ -79,7 +82,8 @@ export function isSlotClosed(settings = {}, date, timeSlot) {
   if (Array.isArray(c.closedDates) && c.closedDates.includes(date)) return true
   if (Array.isArray(c.closedSlots?.[date]) && c.closedSlots[date].includes(timeSlot)) return true
   const seating = seatingForSlot(settings, timeSlot)
-  if (seating && Array.isArray(c.closedSeatings?.[date]) && c.closedSeatings[date].includes(seating.id)) return true
+  // 場次關閉＝明細 closedSeatings ∪ 每週預設 weeklySeatings − 單日開放 openSeatings（見 utils/weeklyClosures.js）
+  if (seating && effectiveClosedSeatings(c, date).includes(seating.id)) return true
   return false
 }
 
@@ -89,11 +93,11 @@ export function isDayClosedForClosures(settings = {}, date) {
   return Array.isArray(cd) && cd.includes(date)
 }
 
-// 某日某「場次」是否關閉（整天公休或該場次被關）。給統一地圖場次層判定用。
+// 某日某「場次」是否關閉（整天公休或該場次被關，含每週預設關閉、扣除單日開放）。給統一地圖場次層判定用。
 export function isSeatingClosed(settings = {}, date, seating) {
   const c = settings?.closures || {}
   if (Array.isArray(c.closedDates) && c.closedDates.includes(date)) return true
-  if (seating && Array.isArray(c.closedSeatings?.[date]) && c.closedSeatings[date].includes(seating.id)) return true
+  if (seating && effectiveClosedSeatings(c, date).includes(seating.id)) return true
   return false
 }
 
