@@ -27,7 +27,7 @@ import { squeezeSeats } from '../../../utils/capacity'
 //   warning                 — { text } 預配衝突或團體保留桌的警示；有警示時確認鈕要先解鎖
 //   onSeat(payload)         — 真正入座，回傳 false 代表失敗（維持欄位，方便改人數或改候位）
 export default function FastWalkInPanel({
-  suspended = false, onLocateSuggestion, showNextWaitlist, onNextWaitlist,
+  suspended = false, onLocateSuggestion, onApplySuggestion, showNextWaitlist, onNextWaitlist,
   guests, onGuestsChange, tables = [], onRemoveTable, onClearTables, warning, onSeat, onOpenTable,
   lastParty,
 }) {
@@ -79,10 +79,10 @@ export default function FastWalkInPanel({
   } else if (g > 0) {
     // 建議桌看「現在入座」的佔用區間 [現在, 現在+佔位)：避開其間已被別筆預配的桌與團保桌（只影響建議，不擋點選）
     const single = suggestTable(g, { date: todayStr(), mode: 'now' })
-    if (single) { recommendation = single; verdict = { tone: 'ok', icon: 'pointer', text: `${g} 位 · 建議 ${single.floor}・${single.number}（自行選桌）` } }
+    if (single) { recommendation = { ...single, tableNumbers: [String(single.number)] }; verdict = { tone: 'ok', icon: 'pointer', text: `${g} 位 · 建議 ${single.floor}・${single.number}（自行選桌）` } }
     else {
       const combo = suggestTableCombo(g, { date: todayStr(), mode: 'now' })
-      if (combo.enough) recommendation = { number: combo.tableNumbers?.[0], floor: combo.floor }
+      if (combo.enough) recommendation = { number: combo.tableNumbers?.[0], floor: combo.floor, tableNumbers: (combo.tableNumbers || []).map(String) }
       verdict = combo.enough
         ? { tone: 'multi', icon: 'chair', text: `無單桌可容 → 建議 ${combo.floor}・${(combo.tableNumbers || []).join(' + ')}（自行選 ${combo.tableNumbers?.length || 2} 張桌）` }
         : { tone: 'none', icon: 'hourglass', text: '目前座位不足 → 建議改候位取號' }
@@ -263,7 +263,19 @@ export default function FastWalkInPanel({
             <Icon name={verdict.icon} size={16} className="inline-block align-[-3px] mr-1" />{verdict.text}
           </div>
         )}
-        {recommendation && <button type="button" onClick={() => onLocateSuggestion?.(recommendation.number)} className="tap min-h-[44px] text-sm font-bold underline">定位建議桌 {recommendation.floor}・{recommendation.number}</button>}
+        {/* 「用建議桌」＝切樓層＋選好建議桌（含併桌），店員再按確認入座；不自動勾（PR #137） */}
+        {recommendation && (
+          <div className="flex items-center gap-3 flex-wrap">
+            {onApplySuggestion && (
+              <button type="button" data-testid="walkin-apply-suggestion"
+                onClick={() => onApplySuggestion(recommendation.tableNumbers)}
+                className="tap min-h-[44px] px-3 rounded-xl border-2 border-chicken-green bg-chicken-green/10 text-chicken-green text-sm font-bold">
+                用建議桌 {recommendation.floor}・{recommendation.tableNumbers.join(' + ')}
+              </button>
+            )}
+            <button type="button" onClick={() => onLocateSuggestion?.(recommendation.number)} className="tap min-h-[44px] text-sm font-bold underline">定位建議桌 {recommendation.floor}・{recommendation.number}</button>
+          </div>
+        )}
         <button data-testid="walkin-seat" type="button" onClick={seat} disabled={!ready} className="tap w-full min-h-[60px] rounded-xl bg-chicken-red text-white text-lg font-bold disabled:opacity-40">{ready ? `確認入座 · ${displayName || '現場客'} ${g} 位 · ${tables.map(t => t.number).join(' + ')}` : slideLabel}</button>
         {showNextWaitlist && <button type="button" onClick={onNextWaitlist} className="tap w-full min-h-[44px] rounded-xl border border-chicken-green text-chicken-green font-bold">帶下一組候位</button>}
       </div>

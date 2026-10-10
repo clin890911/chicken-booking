@@ -82,7 +82,9 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
     move: perms.seat && !!onMove && (isOpen || status === 'arrived') && !!booking.assignedTableId && dayKind === 'today',
     futureAssignedNote: status === 'confirmed' && !!booking.assignedTableId && dayKind === 'future',
     checkout: perms.seat && status === 'arrived',
-    edit: perms.seat && isOpen,   // updateByStaff 改日期／時段／人數時會連動釋放桌位
+    // 編輯：待到可改全部欄位；已入座只開放人數＋備註（EditBookingModal 依 status 收起其他欄位）。
+    // updateByStaff 改日期／時段才解除桌位；只改人數坐得下保留；已入座一律不動桌。
+    edit: perms.seat && (isOpen || status === 'arrived'),
     noshow: perms.seat && isOpen && dayKind !== 'future',   // markNoshow 會釋出本筆鎖住的桌 → bookings＋tables
     cancel: perms.seat && isOpen,
     restore: perms.booking && status === 'noshow',

@@ -15,6 +15,8 @@ import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
 import { formatPhone } from '../../../utils/phoneFormat'
 import { splitSuffix } from '../../../utils/partySplit'
+import { cancelWithUndo } from '../../../utils/bookingActions'
+import EditBookingModal from '../../booking/EditBookingModal'
 
 
 // 搜尋：姓名／電話（含末碼，忽略符號）／桌號（主桌＋副桌）
@@ -30,7 +32,7 @@ function matchesQuery(b, q) {
   )
 }
 
-function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onArriveSeat, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, perms, flash = false }) {
+function BookingCard({ b, now, kind, onClickBooking, onOpenDetail, onAssignTable, onArriveSeat, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, onEdit, onCancel, perms, flash = false }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
   const overdue = overdueMin > 15 // 與 classifyTodayPulse graceMin 同口徑
   const assigned = !!b.assignedTableId
@@ -54,6 +56,9 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onArriveSeat
   // 未到可整組改桌；已入座併桌仍保留既有限制。
   const isCombo = (b.extraTableIds || []).length > 0 && !['confirmed', 'pending'].includes(b.status)
   const canMove = assigned && !!onMoveTable && perms.booking && perms.table
+  // 現場直接改單／取消（不必繞去訂位頁）：會連動桌位（解除／釋桌）→ bookings＋tables 兩個權限都要
+  const canEdit = !!onEdit && perms.booking && perms.table
+  const canCancel = !!onCancel && perms.booking && perms.table
   const tableLabel = [b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean).join(' + ')
   // 已指派徽章是唯讀資訊，唯讀角色仍該看得到；整列全空時才不渲染（免留空白 margin）
 
@@ -111,14 +116,16 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onArriveSeat
           : showAssign ? <button onClick={() => onAssignTable?.(b)} className="px-3 min-h-[44px] bg-chicken-red text-white rounded-md text-xs font-bold">指派桌位</button> : null}
         {/* 已完成（客人來過、吃完了）：有 5 秒復原、不扣信用 → 直接放卡片上，不藏在「更多」 */}
         {showComplete && <button onClick={() => onComplete?.(b)} className="px-3 min-h-[44px] border border-chicken-green/50 text-chicken-green rounded-md text-xs font-bold">已完成</button>}
-        {(canMove || showNoshow) && <details className="relative">
+        {(canMove || showNoshow || canEdit || canCancel) && <details className="relative">
           <summary className="cursor-pointer list-none min-h-[44px] px-3 flex items-center rounded-md border text-xs" aria-label={`${b.name} 更多操作`}>⋯ 更多</summary>
           <div className="mt-1 min-w-[220px] bg-white rounded-lg border shadow-lg p-1 flex flex-col" onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
+            {canEdit && <button onClick={e => { e.currentTarget.closest('details').open = false; onEdit(b) }} className="min-h-[44px] px-3 text-left text-xs font-bold">改人數／時段／備註</button>}
             {canMove && <button aria-disabled={isCombo ? 'true' : undefined} onClick={() => isCombo ? onMoveBlocked?.() : onMoveTable(b)} title={isCombo ? MOVE_COMBO_REASON : '重新選擇桌位'} className="min-h-[44px] px-3 text-left text-xs">{preassigned ? `已預配 ${tableLabel}` : `✓ 已指派 ${tableLabel}`} · ↔ 改桌{isCombo ? '（併桌不支援）' : ''}</button>}
             {showNoshow && <><p className="text-xs px-3 py-2 text-chicken-brown/60">未到客人請先聯絡，確認後再標記。</p><button onClick={() => onNoshow?.(b)} className="min-h-[44px] px-3 text-left text-chicken-red text-xs">標 No-show</button></>}
+            {canCancel && <button onClick={e => { e.currentTarget.closest('details').open = false; onCancel(b) }} className="min-h-[44px] px-3 text-left text-chicken-red text-xs border-t border-chicken-brown/10">取消訂位</button>}
           </div>
         </details>}
-        <button type="button" onClick={() => onClickBooking?.(b)} className="min-h-[44px] px-2 text-xs text-chicken-brown/60">詳情 ›</button>
+        <button type="button" onClick={() => (onOpenDetail || onClickBooking)?.(b)} className="min-h-[44px] px-2 text-xs text-chicken-brown/60">詳情 ›</button>
       </div>
 
       {(b.notes?.pet || b.notes?.child || b.notes?.mobility) && (
@@ -132,14 +139,17 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onArriveSeat
   )
 }
 
-export default function UpcomingPanel({ onClickBooking, onAssignTable, onArriveSeat = null, onMoveTable, flashBookingId = null }) {
-  const { bookings, tables, groupReservations, settings, markBookingNoshow, undoMarkBookingNoshow, seatBooking, undoSeatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
+export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onAssignTable, onArriveSeat = null, onMoveTable, flashBookingId = null }) {
+  const { bookings, tables, groupReservations, settings, markBookingNoshow, undoMarkBookingNoshow, seatBooking, undoSeatBooking, completeWithoutSeating, undoCompleteWithoutSeating, cancelBooking, undoCancelBooking } = useBooking()
   const { can } = useAuth() || {}
   const toast = useToast()
   const confirm = useConfirm()
   const today = todayStr()
   const [showLater, setShowLater] = useState(false)
   const [query, setQuery] = useState('')
+  // 現場直接改單：以 id 追 live booking（存檔後卡片即時反映；被別台取消／刪除就自動關掉）
+  const [editingId, setEditingId] = useState(null)
+  const editingBooking = editingId ? (bookings || []).find(x => x.id === editingId) || null : null
 
   // 卡片上四顆動作鈕的權限底料（誰要哪個組合由 BookingCard 決定）。
   // 後端 functions/lib/staffAccess.js 對 bookings/tables 集合各自把關，前端這道門是為了
@@ -221,6 +231,16 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onArriveS
       { duration: 5000 })
   }
 
+  // 取消訂位：確認框必須保留——取消會排入 LINE 通知給客人，「復原」倒得回訂位與桌，但收不回已送出的通知。
+  // 確認後走與訂位頁／桌抽屜同一套 cancelWithUndo（復原只搶回仍是空桌的桌）。
+  const handleCancel = async (b) => {
+    const lineMsg = b.lineUserId ? '\n客人會收到 LINE 取消通知（復原收不回通知）。' : ''
+    const ok = await confirm(`取消 ${b.name} ${b.timeSlot} 的訂位？${lineMsg}`,
+      { title: '取消訂位', confirmLabel: '取消訂位', danger: true })
+    if (!ok) return
+    cancelWithUndo(b, { cancelBooking, undoCancelBooking, toast })
+  }
+
   // 客人到了（含遲到後才到）：對已指派的訂位直接入座（status→arrived、桌→用餐中）。
   // 防呆與報到列同一個口徑（utils/arriveSeat.preassignArriveConflictLines）：主桌＋副桌每張都查，
   //   今日團體保留 → 確認；他筆預配「與現在入座的用餐區間重疊」→ 確認；不重疊的預配（晚上那輪）不擋。
@@ -257,6 +277,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onArriveS
   const matchCount = overdue.length + soon.length + later.length
   return (
     <div className="space-y-3">
+      {editingBooking && <EditBookingModal booking={editingBooking} onClose={() => setEditingId(null)} />}
       <div className="relative">
         <input
           type="text"
@@ -281,7 +302,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onArriveS
           <div className="text-[11px] font-bold text-chicken-red">過時未到（{overdue.length} 組）— 請聯絡或標記</div>
           {overdue.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
+              onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onEdit={b => setEditingId(b.id)} onCancel={handleCancel} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
               onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
           ))}
         </div>
@@ -292,7 +313,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onArriveS
           <div className="text-[11px] font-bold text-chicken-brown/65">90 分內將到（{soon.length} 組）</div>
           {soon.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
+              onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onEdit={b => setEditingId(b.id)} onCancel={handleCancel} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
               onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
           ))}
         </div>
@@ -311,7 +332,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onArriveS
             <div className="mt-2 space-y-2">
               {later.map(b => (
                 <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-                  onClickBooking={onClickBooking} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
+                  onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onEdit={b => setEditingId(b.id)} onCancel={handleCancel} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
                   onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
               ))}
             </div>

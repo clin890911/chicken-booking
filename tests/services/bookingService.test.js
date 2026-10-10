@@ -827,6 +827,82 @@ describe('updateByStaff（員工後台編輯）', () => {
   })
 })
 
+describe('updateByStaff：只改人數坐得下保留桌位（A3）', () => {
+  const TABLES_KEY = 'chicken_tables_v3'
+  function seed(overrides = {}, tables = [{ number: '101', status: 'reserved', currentBookingId: 'B1', seatedAt: null, capacity: 6 }]) {
+    seedBookings([{
+      id: 'B1', name: '小明', phone: '0912345678', guests: 4,
+      date: '2026-06-20', timeSlot: '18:00',
+      notes: { pet: false, child: false, mobility: false, text: '' },
+      status: 'confirmed', assignedTableId: '101', extraTableIds: [],
+      lastGuestEditAt: null, guestEditCount: 0, guestEditHistory: [],
+      ...overrides,
+    }])
+    localStorage.setItem(TABLES_KEY, JSON.stringify(tables))
+  }
+  const rawTables = () => JSON.parse(localStorage.getItem(TABLES_KEY) || '[]')
+
+  it('坐得下（4→6，6 人桌）→ 保留桌位、桌仍由本筆持有', () => {
+    seed()
+    const r = bookingService.updateByStaff('B1', { guests: 6 })
+    expect(r.guests).toBe(6)
+    expect(r.assignedTableId).toBe('101')
+    expect(rawTables()[0]).toMatchObject({ status: 'reserved', currentBookingId: 'B1' })
+  })
+
+  it('擠一擠上限內（4→7，6 人桌最多擠 7 位）→ 保留桌位', () => {
+    seed()
+    expect(bookingService.updateByStaff('B1', { guests: 7 }).assignedTableId).toBe('101')
+  })
+
+  it('併桌副桌一起算容量（4+4 桌，8→10 坐得下）→ 主副桌都保留', () => {
+    seed({ guests: 8, extraTableIds: ['102'] }, [
+      { number: '101', status: 'reserved', currentBookingId: 'B1', capacity: 4 },
+      { number: '102', status: 'reserved', currentBookingId: 'B1', capacity: 4 },
+    ])
+    const r = bookingService.updateByStaff('B1', { guests: 10 })
+    expect(r.assignedTableId).toBe('101')
+    expect(r.extraTableIds).toEqual(['102'])
+    expect(rawTables().every(t => t.currentBookingId === 'B1')).toBe(true)
+  })
+
+  it('坐不下（4→8，6 人桌最多擠 7 位）→ 解除桌位並釋放原桌', () => {
+    seed()
+    const r = bookingService.updateByStaff('B1', { guests: 8 })
+    expect(r.assignedTableId).toBeNull()
+    expect(r.extraTableIds).toEqual([])
+    expect(rawTables()[0]).toMatchObject({ status: 'vacant', currentBookingId: null })
+  })
+
+  it('改時段（人數不變、坐得下）→ 照舊解除桌位', () => {
+    seed()
+    const r = bookingService.updateByStaff('B1', { timeSlot: '19:00', guests: 5 })
+    expect(r.assignedTableId).toBeNull()
+    expect(rawTables()[0].currentBookingId).toBeNull()
+  })
+
+  it('改日期 → 照舊解除桌位', () => {
+    seed()
+    expect(bookingService.updateByStaff('B1', { date: '2026-06-21' }).assignedTableId).toBeNull()
+  })
+
+  it('已入座改人數（超過擠一擠上限）→ 一律不動桌', () => {
+    seed({ status: 'arrived' }, [{ number: '101', status: 'dining', currentBookingId: 'B1', seatedAt: '2026-06-20T18:00:00', capacity: 6 }])
+    const r = bookingService.updateByStaff('B1', { guests: 9, notes: { pet: false, child: false, mobility: false, text: '過敏：花生' } })
+    expect(r.guests).toBe(9)
+    expect(r.notes.text).toBe('過敏：花生')
+    expect(r.assignedTableId).toBe('101')
+    expect(rawTables()[0]).toMatchObject({ status: 'dining', currentBookingId: 'B1' })
+  })
+
+  it('桌被別筆持有時解除，只動本筆持有的桌（不清別人的桌）', () => {
+    seed({}, [{ number: '101', status: 'reserved', currentBookingId: 'OTHER', capacity: 4 }])
+    const r = bookingService.updateByStaff('B1', { guests: 8 })
+    expect(r.assignedTableId).toBeNull()
+    expect(rawTables()[0]).toMatchObject({ status: 'reserved', currentBookingId: 'OTHER' })
+  })
+})
+
 describe('cancelBookingByGuest', () => {
   beforeEach(() => {
     vi.useFakeTimers()

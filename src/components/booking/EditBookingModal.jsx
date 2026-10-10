@@ -8,6 +8,8 @@ import TimeSlotPicker from './TimeSlotPicker'
 import MonthCalendar from './MonthCalendar'
 import { dayLabel, todayStr, formatDate, addDays } from '../../utils/timeSlots'
 import { slotForDateChange } from '../../utils/staffSlots'
+import { squeezeSeats } from '../../utils/capacity'
+import { bookingTableNumbers } from '../../utils/bookingTables'
 
 const SOURCE_OPTIONS = [
   { value: 'phone',  label: '電話' },
@@ -22,11 +24,13 @@ const NOTE_OPTIONS = [
 ]
 // 員工後台編輯既有訂位：姓名／電話／人數／日期／時段／來源／備註。
 // 採「按需掛載」（父層 {editing && <EditBookingModal/>}）→ 每次開啟都以當前 booking 初始化。
-// 結構性變更（日期/時段/人數）由 context.updateBooking → bookingService.updateByStaff
-// 自動解除並釋放原桌，這裡僅在送出後提示店員「需重新指派」。
+// 桌位連動由 context.updateBooking → bookingService.updateByStaff 決定（改日期／時段解除；只改人數、
+// 指派桌擠一擠坐得下就保留；已入座一律不動桌），這裡只把結果講清楚：解除了就提示「請重新指派」。
+// 已入座（arrived）只開放改人數與備註（日期、時段、電話、姓名、來源對已坐下的客人沒有意義，且改了會動到桌）。
 export default function EditBookingModal({ booking, onClose }) {
   const { settings, tables, bookings, groupReservations, updateBooking } = useBooking()
   const toast = useToast()
+  const seated = booking.status === 'arrived'
 
   const [name, setName] = useState(booking.name || '')
   const [phone, setPhone] = useState(booking.phone || '')
@@ -69,30 +73,48 @@ export default function EditBookingModal({ booking, onClose }) {
   // 與新增表單同口徑：來源＝現場時電話選填（現場客常不留電話；空電話不建/不併顧客檔）。
   // 否則在新增時沒留電話的現場訂位，一打開編輯就被「還差：電話」卡住存不了。
   const phoneOptional = source === 'walkin'
-  const missing = [
+  // 已入座只送人數＋備註：其他欄位不在表單上，也不該卡住儲存（現場客常沒電話）
+  const missing = (seated ? [!(guests > 0) && '人數'] : [
     !phoneOptional && !phone.trim() && '電話',
     !name.trim() && '姓名',
     !(guests > 0) && '人數',
     !timeSlot && '時段',
-  ].filter(Boolean)
+  ]).filter(Boolean)
   const valid = missing.length === 0
 
-  const structuralChanged =
-    date !== booking.date || timeSlot !== booking.timeSlot || Number(guests) !== Number(booking.guests)
+  // 桌位預告（與 updateByStaff 同口徑：主桌＋併桌副桌的擠一擠上限，capacity.squeezeSeats）
+  const heldNums = bookingTableNumbers(booking)
+  const heldTables = heldNums.map(n => (tables || []).find(t => String(t.number) === String(n))).filter(Boolean)
+  const maxSeats = heldTables.length === heldNums.length ? squeezeSeats(heldTables) : 0
+  const slotChanged = date !== booking.date || timeSlot !== booking.timeSlot
+  const guestsChanged = Number(guests) !== Number(booking.guests)
+  const overCapacity = heldNums.length > 0 && Number(guests) > maxSeats
+  const tableNote = !heldNums.length ? null
+    : seated ? (overCapacity && guestsChanged ? { tone: 'warn', text: `${heldNums.join(' + ')} 擠一擠最多 ${maxSeats} 位，桌位不變，請留意是否要加桌` } : null)
+      : slotChanged ? { tone: 'warn', text: `改了日期／時段，儲存後會解除 ${heldNums.join(' + ')}，請重新指派` }
+        : guestsChanged ? (overCapacity
+          ? { tone: 'warn', text: `${heldNums.join(' + ')} 擠一擠最多 ${maxSeats} 位，儲存後會解除桌位，請重新指派` }
+          : { tone: 'ok', text: `${heldNums.join(' + ')} 坐得下，桌位保留` })
+          : null
 
   const handleSave = async () => {
     if (!valid) return toast.error(`還差：${missing.join('、')}`)
     setBusy(true)
     try {
-      updateBooking(booking.id, {
-        name: name.trim(), phone: phone.trim(), guests, date, timeSlot, source, notes: { ...notes, child: notes.child || hasKids },
+      const common = {
+        guests, notes: { ...notes, child: notes.child || hasKids },
         // 有小孩、或原單本來就有拆分（要能改回 0）才寫 adults/children；舊單只有大人時形狀不變
         ...splitFields(guests, kids, { force: booking.children != null || booking.adults != null }),
-      })
-      if (structuralChanged && booking.assignedTableId) {
-        toast.info(`已更新 ${name.trim()}（日期/時段/人數已變更，原桌位已解除，請重新指派）`)
+      }
+      const patch = seated ? common : { ...common, name: name.trim(), phone: phone.trim(), date, timeSlot, source }
+      const updated = updateBooking(booking.id, patch)
+      const who = seated ? booking.name : name.trim()
+      if (booking.assignedTableId && updated && !updated.assignedTableId) {
+        toast.info(`已更新 ${who}，已解除桌位 ${heldNums.join(' + ')}，請重新指派`, { duration: 8000 })
+      } else if (seated && overCapacity && guestsChanged) {
+        toast.info(`已更新 ${who}（${guests} 位），超過 ${heldNums.join(' + ')} 擠一擠上限，桌位未變`)
       } else {
-        toast.success(`已更新 ${name.trim()} 的訂位`)
+        toast.success(`已更新 ${who} 的訂位`)
       }
       onClose()
     } finally {
@@ -104,7 +126,7 @@ export default function EditBookingModal({ booking, onClose }) {
     <Modal
       open
       onClose={onClose}
-      title={`編輯訂位 · #${booking.id}`}
+      title={seated ? `改人數／備註 · ${booking.name}` : `編輯訂位 · #${booking.id}`}
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={busy}>取消</Button>
@@ -115,14 +137,20 @@ export default function EditBookingModal({ booking, onClose }) {
       }
     >
       <div className="space-y-4">
-        <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />
-        <Input label={phoneOptional ? '電話（選填 · 現場客可不填）' : '電話'} type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder={phoneOptional ? '現場客可不填' : '0912345678'} />
+        {!seated && <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />}
+        {!seated && <Input label={phoneOptional ? '電話（選填 · 現場客可不填）' : '電話'} type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder={phoneOptional ? '現場客可不填' : '0912345678'} />}
 
         {/* 人數：大人 1–8 快選 + 9+ 自由輸入＋小孩步進器（總數上限 200） */}
         <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); setGuests(t) }} />
+        {tableNote && (
+          <p data-testid="edit-table-note" role="status"
+            className={`-mt-2 text-xs font-bold ${tableNote.tone === 'ok' ? 'text-chicken-green' : 'text-amber-700'}`}>
+            {tableNote.text}
+          </p>
+        )}
 
-        {/* 日期：快選 chips + 月曆 */}
-        <div>
+        {/* 日期：快選 chips + 月曆（已入座不開放） */}
+        {!seated && <div>
           <label className="label">日期</label>
           <div className="flex flex-wrap gap-1.5">
             {quickDates.map(q => (
@@ -143,10 +171,10 @@ export default function EditBookingModal({ booking, onClose }) {
               <MonthCalendar value={date} onChange={pickDate} />
             </div>
           )}
-        </div>
+        </div>}
 
         {/* 來源 */}
-        <div>
+        {!seated && <div>
           <label className="label">來源</label>
           <div className="flex flex-wrap gap-1.5">
             {SOURCE_OPTIONS.map(o => (
@@ -157,10 +185,10 @@ export default function EditBookingModal({ booking, onClose }) {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
-        {/* 時段 */}
-        <div>
+        {/* 時段（已入座不開放） */}
+        {!seated && <div>
           <label className="label">時段（{dayLabel(date)}）</label>
           <TimeSlotPicker
             date={date}
@@ -175,7 +203,7 @@ export default function EditBookingModal({ booking, onClose }) {
             ignoreOnlineClosure
             allowFull
           />
-        </div>
+        </div>}
 
         {/* 備註 */}
         <div>
@@ -196,7 +224,7 @@ export default function EditBookingModal({ booking, onClose }) {
             })}
           </div>
           {hasKids && <p className="-mt-1 mb-2 text-xs font-bold text-chicken-red/80">有小孩，已自動標記「兒童」</p>}
-          <Textarea value={notes.text} onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}
+          <Textarea aria-label="訂位備註" value={notes.text} onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}
             placeholder="例：靠窗、慶生、長輩需軟食..." />
         </div>
       </div>
