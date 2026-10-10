@@ -7,13 +7,13 @@ import { useToast, useConfirm } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
-import { seatTableWarnings } from '../../../utils/capacity'
+import { preassignArriveConflictLines, toastSeatedWithUndo } from '../../../utils/arriveSeat'
 import { assignmentKind } from '../../../utils/tableStatus'
 import { bookingTableNumbers } from '../../../utils/bookingTables'
 import { getNoshowCount } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
-import PhoneLink from '../ops/PhoneLink'
+import { formatPhone } from '../../../utils/phoneFormat'
 import { splitSuffix } from '../../../utils/partySplit'
 
 
@@ -30,7 +30,7 @@ function matchesQuery(b, q) {
   )
 }
 
-function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, perms, flash = false }) {
+function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onArriveSeat, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, perms, flash = false }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
   const overdue = overdueMin > 15 // 與 classifyTodayPulse graceMin 同口徑
   const assigned = !!b.assignedTableId
@@ -44,6 +44,8 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
   // 畫面上卻毫無錯誤提示 → 本機與雲端永久不一致。權限不足一律不渲染。
   // 「指派桌位」「客人到了」都會同時寫 bookings 與 tables，故兩個權限都要。
   const showAssign = !assigned && perms.booking && perms.table
+  // 未配桌的客人到了：選桌即入座（指派＋入座一步，見 OperationsView.startArriveSeat）——尖峰省 3–4 下
+  const showArriveSeat = showAssign && !!onArriveSeat
   const showSeat = assigned && perms.booking && perms.table
   const showNoshow = overdue && perms.booking && perms.table   // markNoshow 會釋出本筆鎖住的桌
   const showComplete = overdue && (assigned ? perms.booking && perms.table : perms.booking)
@@ -77,10 +79,11 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
             <span className="text-base font-bold text-chicken-brown tabular-nums">{b.timeSlot}</span>
             <span className="text-sm font-bold truncate min-w-0">{b.name}</span>
           </div>
-          {/* 完整電話（取代過去的「…506」末碼）：店員要能直接照著撥；無電話不顯示。
-              電話不截斷，人數那段在窄欄時可截斷。 */}
+          {/* 完整電話（取代過去的「…506」末碼）：店員要能照著撥；無電話不顯示。
+              刻意是純文字、不是 tel: 連結——下方已有「聯絡」鈕，兩個撥號熱區上下相鄰，
+              尖峰時點卡片常誤撥。電話不截斷，人數那段在窄欄時可截斷。 */}
           <div className="flex items-baseline gap-2 mt-0.5 min-w-0">
-            <PhoneLink phone={b.phone} className="text-sm" />
+            {formatPhone(b.phone) && <span data-testid="phone-full" className="text-sm tabular-nums whitespace-nowrap flex-shrink-0 font-bold text-chicken-brown">{formatPhone(b.phone)}</span>}
             <span className="text-xs text-chicken-brown/60 truncate">{b.guests} 位{splitSuffix(b)}</span>
           </div>
         </div>
@@ -101,13 +104,18 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
       <div className="mt-2 flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
         {b.phone && <a href={`tel:${b.phone.replace(/[^+\d]/g, '')}`} aria-label={`聯絡 ${b.name} ${b.phone}`} className="inline-flex items-center min-h-[44px] px-3 border rounded-md text-xs font-bold">☎ 聯絡</a>}
         {showSeat ? <button onClick={() => onSeat?.(b)} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">客人到了</button>
+          : showArriveSeat ? <>
+            <button onClick={() => onArriveSeat(b)} aria-label={`${b.name} 到了，選桌入座`} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">到了 · 選桌入座</button>
+            <button onClick={() => onAssignTable?.(b)} className="px-3 min-h-[44px] border border-chicken-red/50 text-chicken-red rounded-md text-xs font-bold">指派桌位</button>
+          </>
           : showAssign ? <button onClick={() => onAssignTable?.(b)} className="px-3 min-h-[44px] bg-chicken-red text-white rounded-md text-xs font-bold">指派桌位</button> : null}
-        {(canMove || showNoshow || showComplete) && <details className="relative">
+        {/* 已完成（客人來過、吃完了）：有 5 秒復原、不扣信用 → 直接放卡片上，不藏在「更多」 */}
+        {showComplete && <button onClick={() => onComplete?.(b)} className="px-3 min-h-[44px] border border-chicken-green/50 text-chicken-green rounded-md text-xs font-bold">已完成</button>}
+        {(canMove || showNoshow) && <details className="relative">
           <summary className="cursor-pointer list-none min-h-[44px] px-3 flex items-center rounded-md border text-xs" aria-label={`${b.name} 更多操作`}>⋯ 更多</summary>
           <div className="mt-1 min-w-[220px] bg-white rounded-lg border shadow-lg p-1 flex flex-col" onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
             {canMove && <button aria-disabled={isCombo ? 'true' : undefined} onClick={() => isCombo ? onMoveBlocked?.() : onMoveTable(b)} title={isCombo ? MOVE_COMBO_REASON : '重新選擇桌位'} className="min-h-[44px] px-3 text-left text-xs">{preassigned ? `已預配 ${tableLabel}` : `✓ 已指派 ${tableLabel}`} · ↔ 改桌{isCombo ? '（併桌不支援）' : ''}</button>}
             {showNoshow && <><p className="text-xs px-3 py-2 text-chicken-brown/60">未到客人請先聯絡，確認後再標記。</p><button onClick={() => onNoshow?.(b)} className="min-h-[44px] px-3 text-left text-chicken-red text-xs">標 No-show</button></>}
-            {showComplete && <button onClick={() => onComplete?.(b)} className="min-h-[44px] px-3 text-left text-xs">✓ 已完成</button>}
           </div>
         </details>}
         <button type="button" onClick={() => onClickBooking?.(b)} className="min-h-[44px] px-2 text-xs text-chicken-brown/60">詳情 ›</button>
@@ -124,8 +132,8 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
   )
 }
 
-export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTable, flashBookingId = null }) {
-  const { bookings, tables, groupReservations, markBookingNoshow, undoMarkBookingNoshow, seatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
+export default function UpcomingPanel({ onClickBooking, onAssignTable, onArriveSeat = null, onMoveTable, flashBookingId = null }) {
+  const { bookings, tables, groupReservations, settings, markBookingNoshow, undoMarkBookingNoshow, seatBooking, undoSeatBooking, completeWithoutSeating, undoCompleteWithoutSeating } = useBooking()
   const { can } = useAuth() || {}
   const toast = useToast()
   const confirm = useConfirm()
@@ -214,22 +222,14 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
   }
 
   // 客人到了（含遲到後才到）：對已指派的訂位直接入座（status→arrived、桌→用餐中）。
-  // 防呆：指派桌若被今日團體保留、或已預先配給別筆訂位，先跳確認再覆蓋（與指派模式同口徑）。
-  //   併桌大組：主桌＋副桌每張都要檢查（只看主桌會讓副桌被團保／別人預配時無聲坐上去）。
+  // 防呆與報到列同一個口徑（utils/arriveSeat.preassignArriveConflictLines）：主桌＋副桌每張都查，
+  //   今日團體保留 → 確認；他筆預配「與現在入座的用餐區間重疊」→ 確認；不重疊的預配（晚上那輪）不擋。
+  //   （過去用 seatTableWarnings 不看時段，12:00 入座也會為 20:30 的預配跳確認，白多一下。）
+  // 成功 toast 帶 5 秒復原（共用 toastSeatedWithUndo：booking 與桌一起倒、被別組佔走不搶）。
   const handleSeat = async (b) => {
-    const seatTables = [b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean)
-    const tableNo = seatTables.join('、')
-    const warnings = seatTableWarnings(b, { bookings, groupHolds: groupHoldTables, date: today })
-    if (warnings.length) {
-      const subject = (t) => seatTables.length > 1 ? `${t} ` : '此桌'
-      const lines = []
-      warnings.forEach(({ table, hold, conflict }) => {
-        if (hold) {
-          const h = hold.holds[0]
-          lines.push(`${subject(table)}為今日團體「${hold.agencyName || '旅行社'}」預留${h?.batch ? `（${h.batch.label} ${h.batch.timeSlot}）` : ''}`)
-        }
-        if (conflict) lines.push(`${subject(table)}已預先配給 ${conflict.name}（${conflict.guests} 位${conflict.timeSlot ? ` · ${conflict.timeSlot}` : ''}）`)
-      })
+    const tableNo = bookingTableNumbers(b).join('、')
+    const lines = preassignArriveConflictLines(b, { bookings, groupHoldTables, settings, now: new Date() })
+    if (lines.length) {
       const ok = await confirm(`${lines.join('；')}。\n仍要讓 ${b.name} 入座 ${tableNo}？`,
         { title: '桌位有預留', confirmLabel: '仍要入座', danger: true })
       if (!ok) return
@@ -243,7 +243,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
       }
       return toast.error(msg)
     }
-    toast.success(`${b.name} 已入座 ${tableNo}`)
+    toastSeatedWithUndo(r, { message: `${b.name} 已入座 ${tableNo}`, name: b.name, undoSeatBooking, toast })
   }
 
   if (pulse.overdue.length + pulse.soon.length + pulse.later.length === 0) {
@@ -281,7 +281,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
           <div className="text-[11px] font-bold text-chicken-red">過時未到（{overdue.length} 組）— 請聯絡或標記</div>
           {overdue.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
+              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
               onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
           ))}
         </div>
@@ -292,7 +292,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
           <div className="text-[11px] font-bold text-chicken-brown/65">90 分內將到（{soon.length} 組）</div>
           {soon.map(b => (
             <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
+              onClickBooking={onClickBooking} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
               onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
           ))}
         </div>
@@ -311,7 +311,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
             <div className="mt-2 space-y-2">
               {later.map(b => (
                 <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)}
-                  onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
+                  onClickBooking={onClickBooking} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
                   onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
               ))}
             </div>

@@ -12,8 +12,9 @@ import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/t
 import { todayStr } from '../../../utils/timeSlots'
 import { STATUS_COLOR } from './statusColors'
 import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
-import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
+import { releaseOverlappingPreassigns, conflictLine } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
+import { toastSeatedWithUndo } from '../../../utils/arriveSeat'
 import { splitSuffix } from '../../../utils/partySplit'
 import { formatPhone } from '../../../utils/phoneFormat'
 
@@ -57,7 +58,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const confirmDialog = useConfirm()
   const {
     blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, releaseCheckedOutTables,
+    assignBookingToTable, seatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, releaseCheckedOutTables,
     setTableOutage, clearTableOutage, releaseOverriddenAssignment,
     settings, groupReservations, bookings, tables,
   } = useBooking()
@@ -66,6 +67,9 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const [showBlock, setShowBlock] = useState(false)
   const [showOutage, setShowOutage] = useState(false)
   const [walkInForm, setWalkInForm] = useState({ name: '散客', phone: '', guests: 2, notes: '' })
+  // 散客入座會解除時段重疊的他筆預配 → 與現場帶位／選桌模式同口徑：先勾「仍要帶這桌」才解鎖
+  const [walkInOverride, setWalkInOverride] = useState(false)
+  useEffect(() => { if (showWalkIn) setWalkInOverride(false) }, [showWalkIn])
   const [blockReason, setBlockReason] = useState('臨時保留')
   const [outageForm, setOutageForm] = useState({ days: 0, reason: '桌椅維修' })
 
@@ -112,11 +116,16 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     ? preassignConflicts(bookings, table.number, { date: todayStr(), window: assignmentWindow({ mode: 'now' }, settings) }, settings)
     : []
 
+  // 只在 Modal 開著時算（每秒 tick 不必白算）
+  const walkInReleases = showWalkIn ? nowConflicts().filter(c => c.willRelease) : []
+  const walkInLocked = walkInReleases.length > 0 && !walkInOverride
+
   const handleWalkIn = () => {
     if (!walkInForm.guests || walkInForm.guests < 1) return toast.error('請填人數')
-    if (!walkInForm.name.trim()) return toast.error('請填姓名')
+    // 姓名選填：空白交給 walkInSeat 補「散客」（與現場帶位面板同口徑，不逼店員打字）
     const overridden = nowConflicts()
-    const r = walkInSeat(table.number, walkInForm)
+    if (overridden.some(c => c.willRelease) && !walkInOverride) return toast.warning('請先勾選「我知道，仍要帶這桌」')
+    const r = walkInSeat(table.number, { ...walkInForm, name: walkInForm.name.trim() })
     if (!r.ok) return toast.error('入座失敗：' + r.error)
     releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
     toast.success(`${r.booking.name} 已入座 ${table.number}`)
@@ -134,7 +143,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
       }
       return toast.error(r.error)
     }
-    toast.success(`${booking.name} 已入座 ${table.number}`)
+    // 5 秒復原：與報到列／今日訂位卡共用（booking 與桌一起倒、被別組佔走不搶）
+    toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${(r.tableNumbers || [table.number]).join('、')}`, name: booking.name, undoSeatBooking, toast })
   }
 
   // 預配（規劃頁預先配桌、桌仍 vacant）的訂位客人到場 → 一鍵指派+入座。
@@ -151,7 +161,9 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
       if (isComboPreassign) return toast.error('入座失敗：' + r2.error)
       toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return
     }
-    toast.success(`${preassign.name}（${preassign.guests} 位）入座 ${(r2.tableNumbers || [table.number]).join('、')}`)
+    // 復原：桌倒回空桌、訂位回待到（單桌時入座前剛鎖給本筆，快照記為 reserved → 改倒回空桌，保留原本的預配語意）
+    const undo = isComboPreassign ? r2.undo : { ...r2.undo, restore: Object.fromEntries((r2.undo?.tableNumbers || []).map(n => [n, 'vacant'])) }
+    toastSeatedWithUndo({ ...r2, undo }, { message: `${preassign.name}（${preassign.guests} 位）入座 ${(r2.tableNumbers || [table.number]).join('、')}`, name: preassign.name, undoSeatBooking, toast })
     onClose?.()
   }
 
@@ -571,11 +583,22 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
       <Modal open={showWalkIn} onClose={() => setShowWalkIn(false)} title={`${table.number} · 散客入座`} footer={
         <>
           <button onClick={() => setShowWalkIn(false)} className="btn-secondary px-4 py-2">取消</button>
-          <button onClick={handleWalkIn} className="btn-primary px-4 py-2">確認入座</button>
+          <button onClick={handleWalkIn} disabled={walkInLocked} className="btn-primary px-4 py-2 disabled:opacity-40">確認入座</button>
         </>
       }>
         <div className="space-y-3">
-          <Input label="姓名" value={walkInForm.name} onChange={e => setWalkInForm(f => ({ ...f, name: e.target.value }))} placeholder="散客" />
+          {walkInReleases.length > 0 && (
+            <div className="rounded-xl border border-chicken-red/40 bg-chicken-red/10 px-3 py-2">
+              {walkInReleases.map(c => (
+                <div key={c.booking.id} className="text-sm font-bold text-chicken-red">{conflictLine(table.number, c, '入座')}</div>
+              ))}
+              <label className="mt-1.5 flex items-center gap-2 text-xs font-bold text-chicken-red cursor-pointer">
+                <input type="checkbox" checked={walkInOverride} onChange={e => setWalkInOverride(e.target.checked)} className="w-4 h-4 accent-current" />
+                我知道，仍要帶這桌
+              </label>
+            </div>
+          )}
+          <Input label="姓名（選填）" value={walkInForm.name} onChange={e => setWalkInForm(f => ({ ...f, name: e.target.value }))} placeholder="散客" />
           <Input label="電話（選填）" value={walkInForm.phone} onChange={e => setWalkInForm(f => ({ ...f, phone: e.target.value }))} placeholder="0912345678" />
           <Select
             label="人數"

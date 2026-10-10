@@ -24,6 +24,9 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
   // 其餘為訂位指派，是先把桌佔起來、客人到了再入座（沿用指派模式的藍）。
   if (mode.type === 'assign-multi') {
     const isWaitlist = mode.kind === 'waitlist'
+    // 'arrive'＝未配桌訂位的客人已在現場：選好桌確認即「指派＋入座」（同候位入座用綠色）
+    const isArrive = mode.kind === 'arrive'
+    const seatsNow = isWaitlist || isArrive
     const need = mode.need || 0
     const selected = mode.selected || []
     // 擠一擠：每桌可多坐 1 位（multiMaxSeats 由 capacity.squeezeSeats 算；沒傳就照原席數）
@@ -34,14 +37,14 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
     const name = isWaitlist
       ? `${mode.wait?.name || '候位'}${mode.wait?.queueNumber ? ` #${mode.wait.queueNumber}` : ''}`
       : (mode.booking?.name || '訂位')
-    const bg = isWaitlist ? 'bg-emerald-600' : 'bg-sky-600'
-    const cancelBtn = isWaitlist ? 'text-emerald-700' : 'text-sky-700'
+    const bg = seatsNow ? 'bg-emerald-600' : 'bg-sky-600'
+    const cancelBtn = seatsNow ? 'text-emerald-700' : 'text-sky-700'
     return (
       <div className={`${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
             <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
-            <span>{isWaitlist ? '候位入座' : mode.replacing ? '重新選桌' : '指派桌位'}：{name} {need} 位</span>
+            <span>{isWaitlist ? '候位入座' : isArrive ? '到了 · 選桌入座' : mode.replacing ? '重新選桌' : '指派桌位'}：{name} {need} 位</span>
             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
@@ -49,7 +52,8 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
             <span className="text-xs opacity-90">點桌加 / 減 · 可選單桌或多桌</span>
             {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</span>}
             {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {suggestionLabel}（自行選桌）</span>}
-            {!isWaitlist && <span className="text-xs opacity-90">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
+            {!seatsNow && <span className="text-xs opacity-90">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
+            {isArrive && <span className="text-xs opacity-90">確認即入座 · 只能選此刻空桌</span>}
           </div>
           <button onClick={onCancel} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${cancelBtn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
         </div>
@@ -63,7 +67,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
             disabled={!ready}
             className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
               ready ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-          >✓ {mode.replacing ? '確認改桌' : isWaitlist ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}</button>
+          >✓ {mode.replacing ? '確認改桌' : seatsNow ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}</button>
         </div>
         {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs">定位建議桌 {suggestionLabel}</button>}
         {!!selected.length && <button onClick={onClearSelection} className="text-xs underline min-h-[44px]">清空已選桌</button>}

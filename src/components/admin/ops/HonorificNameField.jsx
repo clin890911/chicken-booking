@@ -35,11 +35,15 @@ export function composeName(title, surname, custom) {
   return honorificApplies(base) ? `${base}${title || ''}` : base
 }
 
-export default function HonorificNameField({ title, surname, onChange, custom, onCustomChange }) {
+// customAlwaysVisible：手打欄常駐（後台電話訂位：客人常報全名，或從 LINE 複製）——不必先點「其他姓氏…」。
+//   此時欄位兼收「姓氏」與「全名」：單字接稱謂、全名原樣（同 composeName）。
+// customPlaceholder / customLabel：常駐時的提示與無障礙名稱。
+// dense：格子 48px（仍 ≥44px 觸控門檻）——後台新增訂位表單用，讓時段在 iPad 橫向不必捲就看得到；現場頁維持 64px。
+export default function HonorificNameField({ title, surname, onChange, custom, onCustomChange, customAlwaysVisible = false, customPlaceholder, customLabel, label = '貴姓・稱謂', dense = false }) {
   // 只用 state 記「店員手動展開過」；實際是否顯示還要 or 上 custom 有值。
   // 否則電話帶顧客檔在掛載**之後**才填入姓名時，輸入框不會打開 → 名字會被送出卻看不見。
   const [manualOpen, setManualOpen] = useState(false)
-  const showCustom = manualOpen || !!custom
+  const showCustom = customAlwaysVisible || manualOpen || !!custom
 
   // 父層理應以 DEFAULT_TITLE 起手；萬一傳進 null（舊呼叫點）也要顯示得出東西，
   // 且點一下就會把真正的稱謂寫回父層，不會停在「畫面有字、資料是空」的狀態。
@@ -55,9 +59,9 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
   return (
     <div>
       <div className="flex items-center gap-1.5 mb-1">
-        <label className="label !text-xs !mb-0">貴姓・稱謂</label>
+        <label className="label !text-xs !mb-0">{label}</label>
         <div className="flex-1" />
-        <button
+        {!customAlwaysVisible && <button
           type="button"
           aria-label="其他"
           aria-pressed={showCustom}
@@ -66,7 +70,7 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
             showCustom ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}
         >
           其他姓氏…
-        </button>
+        </button>}
       </div>
 
       {/* 7 欄 × 2 排＝14 格：12 大姓佔前 12 格，稱謂鈕佔最後兩格 */}
@@ -78,7 +82,7 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
             aria-label={s}
             aria-pressed={surname === s}
             onClick={() => pickSurname(s)}
-            className={`h-16 rounded-xl border-2 text-[23px] font-bold transition-all ${
+            className={`${dense ? 'h-12 text-[20px]' : 'h-16 text-[23px]'} rounded-xl border-2 font-bold transition-all ${
               surname === s ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}
           >
             {s}
@@ -89,10 +93,10 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
           aria-label={`稱謂：${activeTitle}（點一下換${upcoming}）`}
           data-honorific-applies={applies ? 'true' : 'false'}
           onClick={cycleTitle}
-          className={`col-span-2 h-16 rounded-xl border-2 border-chicken-brown bg-chicken-brown text-white flex flex-col items-center justify-center gap-0.5 transition-all ${
+          className={`col-span-2 ${dense ? 'h-12' : 'h-16'} rounded-xl border-2 border-chicken-brown bg-chicken-brown text-white flex flex-col items-center justify-center gap-0.5 transition-all ${
             applies ? '' : 'opacity-40'}`}
         >
-          <span className="text-[22px] font-bold leading-none">{activeTitle}</span>
+          <span className={`${dense ? 'text-[18px]' : 'text-[22px]'} font-bold leading-none`}>{activeTitle}</span>
           <span className="text-[10px] font-bold opacity-70 leading-none">
             {applies ? `⇄ 點一下換${upcoming}` : '全名不接稱謂'}
           </span>
@@ -104,8 +108,8 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
           type="text"
           value={custom || ''}
           onChange={e => onCustomChange && onCustomChange(e.target.value)}
-          placeholder="輸入姓氏（如：歐陽、諸葛）"
-          aria-label="自訂姓氏"
+          placeholder={customPlaceholder || '輸入姓氏（如：歐陽、諸葛）'}
+          aria-label={customLabel || '自訂姓氏'}
           className="input mt-2"
         />
       )}

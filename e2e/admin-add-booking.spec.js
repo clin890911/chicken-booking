@@ -26,19 +26,19 @@ test('新增訂位：缺漏清單即時提示 → 補齊 → 建立成功', asyn
   // 進「新增」sub-tab
   await page.getByRole('button', { name: /新增/ }).click()
 
-  // 初始：人數預設 2、日期預設今天 → 底部黏性列收成一列「還差」pills（電話/姓名/時段），無確認鈕
+  // 初始：人數預設 2、日期預設今天 → 底部黏性列收成一列「還差」pills（電話/姓名），無確認鈕。
+  // 「時段」今天會預選下一個可訂時段（打烊後才沒有可預選的），所以不在這裡斷言。
   const stillMissing = page.getByText('還差', { exact: true })
   await expect(stillMissing).toBeVisible()
   await expect(page.getByRole('button', { name: '電話', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '姓名', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '時段', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: /確認新增/ })).toHaveCount(0)
 
-  // 補電話、姓名 → 缺漏縮減為「時段」
+  // 補電話、姓名 → 電話／姓名從缺漏清單消失
   await page.getByPlaceholder('0912345678').fill('0933111222')
   await page.getByPlaceholder('王小姐').fill('測試客')
   await expect(page.getByRole('button', { name: '電話', exact: true })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '時段', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '姓名', exact: true })).toHaveCount(0)
 
   // 日期點「明天」chip（避免今天的過時時段干擾）→ 選 18:00
   await page.getByRole('button', { name: /^明天/ }).click()
