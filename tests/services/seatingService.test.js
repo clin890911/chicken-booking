@@ -2253,6 +2253,15 @@ describe('併桌建議排除重疊預配與團保（suggestTableCombo）', () =>
     expect(r.tableNumbers).not.toContain('101')
   })
 
+  // 上一支只預配 101，它是否會紅取決於最佳組合的並列排序；這支逐張預配、直接斷言結果不含那張桌，與排序無關。
+  it.each(['101', '102', '103', '104'])('重疊預配 %s（11:00）→ 建議結果一定不含它（不依賴並列排序）', (num) => {
+    const yu = mkBooking({ name: '余先生', date: TODAY, timeSlot: '11:00' })
+    bookingService.assignTable(yu.id, num)
+    const r = seating.suggestTableCombo(9)
+    expect(r.tableNumbers).not.toContain(num)
+    expect(r.tableNumbers.length).toBeGreaterThan(0)
+  })
+
   it('不重疊的預配（20:30）仍可建議：預配會保留，不必避開', () => {
     const late = mkBooking({ name: '晚到客', date: TODAY, timeSlot: '20:30' })
     bookingService.assignTable(late.id, '101')

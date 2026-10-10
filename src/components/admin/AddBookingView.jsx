@@ -60,6 +60,10 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   const [showCalendar, setShowCalendar] = useState(false)
   // 今天 → 預選下一個可訂時段（接電話大多訂接下來的場，多數不必改）
   const [timeSlot, setTimeSlot] = useState(() => nextBookableSlot({ settings, tables, bookings, groupReservations, date: todayStr(), guests: 2 }))
+  // 店員是否真的點過時段。「今天自動預選」不算：沒點過 → 換到非今天要清空（缺時段提示才會回來，
+  // 否則接電話時預選的今天時段會被默默沿用到別天，訂錯時間）；點過 → 才走「新日期同時段仍可訂就保留」。
+  const slotTouched = useRef(false)
+  const pickSlot = (t) => { slotTouched.current = true; setTimeSlot(t) }
   const [notes, setNotes] = useState({ pet: false, child: false, mobility: false, text: '' })
   // 桌位選擇：'auto'＝跟著建議（第一張候選）｜桌號＝店員點選的桌｜'map'＝到桌況圖選｜'none'＝先不指派
   const [tablePick, setTablePick] = useState('auto')
@@ -95,12 +99,15 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchedCustomer?.phone])
 
-  // 換日：原時段在新日期仍可訂就保留；不行 → 今天預選下一個可訂時段、其他日清空重選（utils/staffSlots）
+  // 換日：店員點過的時段在新日期仍可訂就保留；不行 → 今天預選下一個可訂時段、其他日清空重選（utils/staffSlots）。
+  // 沒點過（只是今天自動預選的）→ 換到非今天一律清空。
   const lastDateRef = useRef(date)
   useEffect(() => {
     if (lastDateRef.current === date) return
     lastDateRef.current = date
-    setTimeSlot(prev => slotForDateChange(prev, { settings, tables, bookings, groupReservations, date, guests }))
+    setTimeSlot(prev => (!slotTouched.current && date !== todayStr())
+      ? ''
+      : slotForDateChange(prev, { settings, tables, bookings, groupReservations, date, guests }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date])
 
@@ -283,7 +290,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
       }
       // 重設（保留 source）
       setPhone(''); setCustomName(''); setSurname(null); setTitle(DEFAULT_TITLE); setGuests(2); setKids(0)
-      if (!continuous) setTimeSlot('')
+      if (!continuous) { setTimeSlot(''); slotTouched.current = false }
       setNotes({ pet: false, child: false, mobility: false, text: '' })
       setTablePick('auto'); setTableNotice('')
       setAttempted(false); setShowCalendar(false)
@@ -442,7 +449,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
               variant="compact"
               date={date}
               value={timeSlot}
-              onChange={setTimeSlot}
+              onChange={pickSlot}
               settings={settings}
               tables={tables}
               bookings={bookings}
