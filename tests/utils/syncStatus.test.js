@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, shouldAlertPersistDegraded, shouldCommitPullStatus,
-  isRetryablePushError, nextPushRetryState, isPushRetryDue, pushErrorKey } from '../../src/utils/syncStatus'
+  isRetryablePushError, nextPushRetryState, isPushRetryDue, pushErrorKey, shouldDeferPushErrorToast } from '../../src/utils/syncStatus'
 
 const T1 = '2026-07-26T10:00:00.000Z'
 const T2 = '2026-07-26T10:00:05.000Z'
@@ -206,5 +206,23 @@ describe('推送補推政策（退避＋錯誤分類）', () => {
   it('同一種錯誤同一個鍵', () => {
     expect(pushErrorKey(e(500, 'a'))).toBe(pushErrorKey(e(500, 'a')))
     expect(pushErrorKey(e(500, 'a'))).not.toBe(pushErrorKey(e(503, 'a')))
+  })
+})
+
+describe('iPad 同步失敗誤報', () => {
+  const e = (status, code) => Object.assign(new Error(code || 'x'), { status, code })
+  it('401（token 過期／喚醒換發失敗）可自動補推；403 不行', () => {
+    expect(isRetryablePushError(e(401, 'invalid-auth-token'))).toBe(true)
+    expect(isRetryablePushError(Object.assign(new Error('x'), { code: 'auth-token-unavailable' }))).toBe(true)
+    expect(isRetryablePushError(e(403, 'not-authorized'))).toBe(false)
+  })
+  it('暫時性錯誤第一次不跳 toast、第二次才跳；候位衝突與不可補推的錯誤立刻跳', () => {
+    const net = new TypeError('Load failed')
+    const s1 = nextPushRetryState(null, net, 0)
+    expect(shouldDeferPushErrorToast(net, s1)).toBe(true)
+    expect(shouldDeferPushErrorToast(net, nextPushRetryState(s1, net, 0))).toBe(false)
+    const conflict = Object.assign(e(409, 'waitlist-changed'), { waitlistConflict: true })
+    expect(shouldDeferPushErrorToast(conflict, nextPushRetryState(null, conflict, 0))).toBe(false)
+    expect(shouldDeferPushErrorToast(e(413), nextPushRetryState(null, e(413), 0))).toBe(false)
   })
 })

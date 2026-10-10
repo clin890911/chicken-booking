@@ -112,8 +112,23 @@ export function isRetryablePushError(err) {
   if (!err) return false
   if (err.waitlistConflict) return true
   const status = Number(err.status) || 0
-  if (!status) return true   // fetch 斷線（TypeError）、逾時（code 'timeout'）都沒有 HTTP status
+  if (!status) return true   // fetch 斷線（TypeError）、逾時（code 'timeout'）、取不到 token 都沒有 HTTP status
+  // 401：iPad 休眠喚醒時 token 過期／換發失敗（cloudDataService 已強制換新重送一次仍失敗）。
+  // 連線穩了就會好；真的被登出時補推最多每 60 秒一次、toast 不重跳，無害。
+  if (status === 401) return true
   return status >= 500
+}
+
+// 推送失敗要不要立刻跳錯誤 toast。
+// iPad 前台最常見的「雲端同步失敗」其實是暫時性的：喚醒當下 Wi‑Fi 還沒接上、換手、雲端函式冷啟動逾時，
+// 5 秒後的自動補推通常就成功了——第一次就跳紅字只會嚇到店員（而且資料其實已補上雲）。
+// 規則：可自動補推的暫時性錯誤，第一次失敗不跳，連續第 2 次仍失敗才跳；
+//       候位 409 衝突（要店員確認候位）與不會自己好的錯誤（413、400…）照舊第一次就跳。
+// retryState：nextPushRetryState 的結果（null＝不補推）。
+export const PUSH_TOAST_AFTER_FAILURES = 2
+export function shouldDeferPushErrorToast(err, retryState) {
+  if (!retryState || err?.waitlistConflict) return false
+  return retryState.failures < PUSH_TOAST_AFTER_FAILURES
 }
 
 // 「同一種錯誤」的判別鍵：退避期間的自動補推遇到同一種錯誤不重跳 toast。

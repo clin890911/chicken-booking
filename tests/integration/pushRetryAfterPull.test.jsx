@@ -119,6 +119,17 @@ describe('F4 推送失敗後的補推與燈號', { timeout: 30_000 }, () => {
     expect(h.toastErrors).toHaveLength(1)                          // ★ 自動補推同一種錯誤不重跳
   })
 
+  it('iPad 網路閃斷一次、5 秒後補推成功：不跳「雲端同步失敗」紅字', async () => {
+    await mount()
+    h.pushFailsLeft = 1
+    await failOnce()
+    expect(h.toastErrors).toHaveLength(0)                          // 第一次暫時性失敗先不跳
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000) })
+    expect(h.pushes).toBe(2)
+    expect(ref.ctx.cloudStatus.state).toBe('synced')
+    expect(h.toastErrors).toHaveLength(0)
+  })
+
   it('413（其他 4xx）：拉取成功後不自動補推，等店員下一個動作', async () => {
     await mount()
     h.failWith = httpError(413, 'operational-sync-too-large')

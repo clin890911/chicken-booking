@@ -114,6 +114,7 @@ describe('seatWaitlistMulti（候位併桌入座）', () => {
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['Date'] })
       vi.setSystemTime(now)
+      seedWait()   // 外層 beforeEach 用真實時鐘取號；換到固定日後要重取，否則候位「不是今天」（只有 10/9 當天會過）
     })
     afterEach(() => { vi.useRealTimers() })
 
