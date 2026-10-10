@@ -44,3 +44,21 @@ describe('交班面板預設收合',()=>{
   expect(toggle().getAttribute('aria-expanded')).toBe('true')
  })
 })
+describe('交班面板：沒有待辦時不佔版面',()=>{
+ it('待辦 0＋收合 → 縮成細列（不是卡片），仍可展開',async()=>{
+  await render()
+  const section=document.querySelector('section[aria-label="現場交班待辦"]')
+  expect(section.getAttribute('data-compact')).toBe('true')
+  expect(section.className).not.toContain('p-3')
+  expect(section.className).not.toContain('border')
+  await act(async()=>toggle().click())
+  const expanded=document.querySelector('section[aria-label="現場交班待辦"]')
+  expect(expanded.getAttribute('data-compact')).toBeNull()
+  expect(document.querySelector('input[aria-label="交班日期"]')).toBeTruthy()
+ })
+ it('有待辦 → 照常是完整卡片',async()=>{
+  state.tasks=[{id:'T',version:1,label:'需協助',status:'pending',date:todayStr(),createdAt:'2026-10-05T04:00:00Z'}]
+  await render()
+  expect(document.querySelector('section[aria-label="現場交班待辦"]').getAttribute('data-compact')).toBeNull()
+ })
+})
