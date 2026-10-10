@@ -16,9 +16,14 @@
 // 早上接的訂位多半只預配、桌況仍空，只看 reserved 桌會讓這些客人到了在報到列找不到。
 // chip 標「預配」；桌此刻被別組佔著另標「桌被佔」（按到了會被擋下並給改桌出口）。
 // 「等報到 N」一律是兩種合計。同一張桌可能同時有鎖桌那筆與預配那筆 → key 改用訂位 id。
+// 五版（2026-10）：時間窗內「還沒配桌」的待到訂位也列（isUnassignedArriveEligible）——過去 12 組待到
+// 只列出 3 組，其餘要繞去今日訂位籤「指派桌位 → 點桌 → 確認 → 客人到了」。chip 標「未配桌」，
+// 「到了 · 選桌」進選桌入座模式（OperationsView.startArriveSeat，選好桌確認即指派＋入座）。
+// 「等報到 N」是三種合計。
 import { useState, useEffect, useRef } from 'react'
 import { overdueMinOf } from '../../../utils/bookingPulse'
-import { isArriveEligible, isPreassignArriveEligible } from './FloorMap'
+import { formatDate } from '../../../utils/timeSlots'
+import { isArriveEligible, isPreassignArriveEligible, ARRIVE_WINDOW_BEFORE_MIN, ARRIVE_WINDOW_AFTER_MIN } from './FloorMap'
 
 // 遲到判定沿用 UpcomingPanel/BookingCard 既有口徑（graceMin=15，見 utils/bookingPulse.js）。
 const LATE_GRACE_MIN = 15
@@ -27,6 +32,16 @@ const LATE_GRACE_MIN = 15
 const phoneTail = (phone) => {
   const d = String(phone || '').replace(/\D/g, '')
   return d.length >= 3 ? d.slice(-3) : ''
+}
+
+// 未配桌的待到訂位：今天、confirmed/pending、沒有任何桌號、時間窗同鎖桌／預配（前 60／後 60 分）。
+export function isUnassignedArriveEligible(booking, now = Date.now()) {
+  if (!booking?.id || !booking.timeSlot) return false
+  if (!['confirmed', 'pending'].includes(booking.status)) return false
+  if (booking.assignedTableId || (booking.extraTableIds || []).filter(Boolean).length) return false
+  if (booking.date !== formatDate(new Date(now))) return false
+  const overdue = overdueMinOf(booking.timeSlot, now)
+  return overdue >= -ARRIVE_WINDOW_BEFORE_MIN && overdue <= ARRIVE_WINDOW_AFTER_MIN
 }
 
 // 這筆訂位的全部桌號（主桌＋併桌額外桌，去重去空）
@@ -63,6 +78,10 @@ export function buildTargets(tables, bookings, now) {
     })
     byBooking.set(b.id, { table: t, booking: b, preassigned: true, taken, isMain: true, nums })
   })
+  bookings.forEach(b => {
+    if (!b?.id || byBooking.has(b.id) || !isUnassignedArriveEligible(b, now)) return
+    byBooking.set(b.id, { table: null, booking: b, preassigned: false, unassigned: true, taken: false, isMain: true, nums: [] })
+  })
   const list = [...byBooking.values()]
   // 排序：遲到（已過訂位時間 >15 分）優先，且越晚到的排越前面；其餘依訂位時段由早到晚。
   return list.sort((a, b) => {
@@ -76,7 +95,7 @@ export function buildTargets(tables, bookings, now) {
   })
 }
 
-export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive, currentFloor = null, now = null }) {
+export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive, onArriveUnassigned, currentFloor = null, now = null }) {
   const scrollRef = useRef(null)
   const [edge, setEdge] = useState({ left: false, right: false })
   const [, setTick] = useState(0)
@@ -135,9 +154,51 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
           onScroll={updateEdge}
           className="flex items-center gap-2.5 overflow-x-auto overflow-y-hidden pb-1"
         >
-          {targets.map(({ table, booking, preassigned, taken, nums }) => {
+          {targets.map(({ table, booking, preassigned, unassigned, taken, nums }) => {
             const overdueMin = overdueMinOf(booking.timeSlot, effectiveNow)
             const late = overdueMin > LATE_GRACE_MIN
+            // 未配桌：沒有桌可看，chip 本體與「到了 · 選桌」都進選桌入座模式（不寫資料、可取消）
+            const arrive = unassigned ? () => onArriveUnassigned?.(booking) : () => onArrive(table, booking)
+            if (unassigned) {
+              return (
+                <div
+                  key={booking.id}
+                  data-unassigned="true"
+                  role="listitem"
+                  onClick={arrive}
+                  className={`flex items-center gap-2 shrink-0 cursor-pointer rounded-full border-2 pl-3 pr-1.5 py-1 transition-colors
+                    ${late ? 'bg-chicken-red/5 border-chicken-red/40' : 'bg-white border-chicken-brown/15 hover:border-chicken-brown/30'}`}
+                >
+                  <span className={`tabular-nums text-xs font-bold ${late ? 'text-chicken-red' : 'text-chicken-brown'}`}>
+                    {booking.timeSlot}
+                  </span>
+                  <span className="text-sm font-bold text-chicken-brown truncate max-w-[7rem]">{booking.name}</span>
+                  {phoneTail(booking.phone) && <span data-testid="phone-tail" className="text-[10px] text-chicken-brown/50 tabular-nums shrink-0 -ml-1">…{phoneTail(booking.phone)}</span>}
+                  <span className="text-[11px] font-bold text-chicken-brown/50 tabular-nums">{booking.guests} 位</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-800"
+                    title="還沒配桌：按到了在桌況圖選一張空桌，確認即入座">
+                    未配桌
+                  </span>
+                  {late && (
+                    <span className="text-[10px] font-bold text-white bg-chicken-red px-1.5 py-0.5 rounded-full shrink-0">
+                      遲到
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); arrive() }}
+                    aria-label={`${booking.name} 到了，選桌入座`}
+                    className="rounded-full bg-chicken-green text-white text-xs font-bold shrink-0
+                               hover:opacity-90 focus-visible:outline focus-visible:outline-2
+                               focus-visible:outline-offset-2 focus-visible:outline-chicken-red
+                               motion-safe:transition-transform motion-safe:active:scale-95"
+                    style={{ height: 44, minWidth: 44, paddingLeft: 12, paddingRight: 12 }}
+                  >
+                    到了 · 選桌
+                  </button>
+                </div>
+              )
+            }
             // 跨樓層標記：只有桌所在樓層跟目前顯示的樓層不同才標，避免同樓層 chip 多一截視覺噪音。
             const crossFloor = currentFloor != null && table.floor !== currentFloor
             // 大組顯示整組桌號（主桌在前）
@@ -176,7 +237,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                 )}
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); onArrive(table, booking) }}
+                  onClick={(e) => { e.stopPropagation(); arrive() }}
                   aria-label={`${booking.name} 到了，入座 ${table.number}`}
                   className="rounded-full bg-chicken-green text-white text-xs font-bold shrink-0
                              hover:opacity-90 focus-visible:outline focus-visible:outline-2

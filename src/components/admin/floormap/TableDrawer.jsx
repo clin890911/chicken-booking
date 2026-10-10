@@ -14,6 +14,7 @@ import { STATUS_COLOR } from './statusColors'
 import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
 import { releaseOverlappingPreassigns, conflictLine } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
+import { toastSeatedWithUndo } from '../../../utils/arriveSeat'
 import { splitSuffix } from '../../../utils/partySplit'
 import { formatPhone } from '../../../utils/phoneFormat'
 
@@ -57,7 +58,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const confirmDialog = useConfirm()
   const {
     blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, releaseCheckedOutTables,
+    assignBookingToTable, seatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, releaseCheckedOutTables,
     setTableOutage, clearTableOutage, releaseOverriddenAssignment,
     settings, groupReservations, bookings, tables,
   } = useBooking()
@@ -142,7 +143,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
       }
       return toast.error(r.error)
     }
-    toast.success(`${booking.name} 已入座 ${table.number}`)
+    // 5 秒復原：與報到列／今日訂位卡共用（booking 與桌一起倒、被別組佔走不搶）
+    toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${(r.tableNumbers || [table.number]).join('、')}`, name: booking.name, undoSeatBooking, toast })
   }
 
   // 預配（規劃頁預先配桌、桌仍 vacant）的訂位客人到場 → 一鍵指派+入座。
@@ -159,7 +161,9 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
       if (isComboPreassign) return toast.error('入座失敗：' + r2.error)
       toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return
     }
-    toast.success(`${preassign.name}（${preassign.guests} 位）入座 ${(r2.tableNumbers || [table.number]).join('、')}`)
+    // 復原：桌倒回空桌、訂位回待到（單桌時入座前剛鎖給本筆，快照記為 reserved → 改倒回空桌，保留原本的預配語意）
+    const undo = isComboPreassign ? r2.undo : { ...r2.undo, restore: Object.fromEntries((r2.undo?.tableNumbers || []).map(n => [n, 'vacant'])) }
+    toastSeatedWithUndo({ ...r2, undo }, { message: `${preassign.name}（${preassign.guests} 位）入座 ${(r2.tableNumbers || [table.number]).join('、')}`, name: preassign.name, undoSeatBooking, toast })
     onClose?.()
   }
 

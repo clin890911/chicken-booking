@@ -139,9 +139,21 @@ export function seatBooking(bookingId) {
     return { ok: false, code: 'table-occupied', error: occupiedError(booking.assignedTableId, table) }
   }
 
+  const undo = seatUndoSnapshot(bookingId, [table])
   bookingService.setStatus(bookingId, 'arrived')   // setStatus 內會自動記 actualArrivalTime
   tableService.seatTable(booking.assignedTableId, bookingId)
-  return { ok: true, tableNumber: booking.assignedTableId }
+  return { ok: true, tableNumber: booking.assignedTableId, undo }
+}
+
+// 入座前的復原快照（四個「客人到了」入口共用，見 undoSeatBooking）：
+// 每張桌入座前是「本筆鎖住（reserved）」還是「空桌（預配）」——復原時據此倒回 reserved 或 vacant。
+// assignment：入座前的配桌（只有「到了 · 選桌入座」那條會連桌號一起改，復原要寫回原本的未配桌）。
+function seatUndoSnapshot(bookingId, tables, assignment) {
+  const restore = {}
+  tables.forEach(t => { restore[String(t.number)] = heldBy(t, bookingId) ? 'reserved' : 'vacant' })
+  const snap = { bookingId, tableNumbers: tables.map(t => String(t.number)), restore }
+  if (assignment) snap.assignment = assignment
+  return snap
 }
 
 // === 預配的大組（主桌＋額外桌）到店：整組一起入座 ===
@@ -163,9 +175,70 @@ export function seatBookingAllTables(bookingId) {
       return { ok: false, code: 'table-occupied', error: occupiedError(n, t) }
     }
   }
+  const undo = seatUndoSnapshot(bookingId, nums.map(n => tableService.getByNumber(n)))
   bookingService.setStatus(bookingId, 'arrived')
   nums.forEach(n => tableService.seatTable(n, bookingId))
-  return { ok: true, tableNumber: nums[0], tableNumbers: nums }
+  return { ok: true, tableNumber: nums[0], tableNumbers: nums, undo }
+}
+
+// === 未配桌的訂位到店：選桌即入座（指派＋入座一步完成）===
+// 不另寫佔用邏輯：先走 assignBookingTablesMulti（單桌退回 assignBookingToTable）的全部守門——
+// 今日可用、此刻空桌（鎖桌型只能選此刻空桌）、同樓層、擠一擠容量——再走 seatBooking／seatBookingAllTables
+// 的佔用守門入座。入座若意外失敗（理論上不會：桌剛由本筆鎖住）就把剛才的指派倒回，不留半套。
+// 只給「還沒配桌」的待到訂位用：已有桌（鎖桌／預配）的到店走 seatBooking，換桌走 replace*。
+// 回傳 undo 快照（桌全部倒回空桌、訂位回到未配桌），由 undoSeatBooking 復原。
+// 通知：service 層不發；BookingContext 包裝只發一次「客人到了」（不發「桌位已指派」，避免一次入座兩則）。
+export function assignAndSeatBooking(bookingId, tableNumbers) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (!['confirmed', 'pending'].includes(booking.status)) return { ok: false, error: '這筆訂位不是待到狀態，無法入座' }
+  if (bookingTableNumbers(booking).length) return { ok: false, error: '這筆訂位已有桌，請改用「客人到了」或改桌' }
+  const assignment = { assignedTableId: null, extraTableIds: [] }
+  const picked = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
+  const a = assignBookingTablesMulti(bookingId, picked)
+  if (!a.ok) return a
+  const r = seatBooking(bookingId)
+  if (!r.ok) {
+    // 倒回剛才的指派：只清仍由本筆鎖住的桌
+    bookingService.update(bookingId, assignment)
+    picked.forEach(n => { const t = tableService.getByNumber(n); if (t && t.status === 'reserved' && heldBy(t, bookingId)) tableService.clearTable(n) })
+    return r
+  }
+  const nums = r.tableNumbers || [r.tableNumber]
+  // 入座前這些桌都是空桌（剛才才鎖給本筆）→ 復原一律倒回空桌，訂位回未配桌
+  return { ok: true, tableNumber: nums[0], tableNumbers: nums, undo: { ...r.undo, restore: Object.fromEntries(nums.map(n => [String(n), 'vacant'])), assignment } }
+}
+
+// === 「客人到了」的 5 秒復原（報到列／今日訂位卡／桌抽屜／訂位卡共用）===
+// snap＝入座時回傳的 undo 快照（seatBooking／seatBookingAllTables／assignAndSeatBooking）。
+// 復原鐵律（見 undo-paths 記錄）：
+//   - 訂位必須仍是 arrived、桌組仍是當初那幾張（期間被改桌／離席就不動）
+//   - 每張桌必須「仍由本筆用餐中」或「已是無人持有的空桌」才可倒；任一張被別組／團體接手 → 整組不動、回錯誤
+//     （不搶別人的桌、不清別人的桌；只動本筆持有或空著的桌）
+//   - 桌倒回入座前的樣子：本筆鎖住的 → reserved（重新鎖給本筆）、原本空桌（預配）→ vacant
+//   - 訂位回待到（清 actualArrivalTime）；有 assignment（選桌入座）則桌號一併寫回入座前（未配桌）
+export function undoSeatBooking(snap = {}) {
+  const { bookingId, tableNumbers = [], restore = {}, assignment } = snap || {}
+  const booking = bookingId != null ? bookingService.getById(bookingId) : null
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (booking.status !== 'arrived') return { ok: false, error: '這筆訂位的狀態已被更動，無法復原' }
+  const nums = bookingTableNumbers(booking)
+  const want = [...new Set(tableNumbers.map(String))]
+  if (!want.length || nums.length !== want.length || nums.some(n => !want.includes(n))) {
+    return { ok: false, error: '這筆訂位的桌位已被更動，無法復原' }
+  }
+  const taken = nums.filter(n => {
+    const t = tableService.getByNumber(n)
+    if (!t || t.currentRef) return true
+    if (t.status === 'dining' && heldBy(t, bookingId)) return false
+    if (t.status === 'vacant' && t.currentBookingId == null) return false
+    return true
+  })
+  if (taken.length) return { ok: false, code: 'table-occupied', error: `${taken.join('、')} 已被別組使用，無法復原` }
+  bookingService.setStatus(bookingId, 'confirmed')   // 清掉 actualArrivalTime
+  if (assignment) bookingService.update(bookingId, { assignedTableId: assignment.assignedTableId ?? null, extraTableIds: assignment.extraTableIds || [] })
+  nums.forEach(n => (restore[n] === 'reserved' ? tableService.reserveTable(n, bookingId) : tableService.clearTable(n)))
+  return { ok: true, tableNumbers: nums }
 }
 
 // === 報到列「到了」入座「預配」訂位後的 5 秒復原 ===
