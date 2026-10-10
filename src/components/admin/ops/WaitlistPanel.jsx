@@ -13,6 +13,7 @@ import PhoneLink from './PhoneLink'
 import { normalizeSplit, splitSuffix } from '../../../utils/partySplit'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import WaitlistHistorySheet from './WaitlistHistorySheet'
+import FloatingPhoneKeypad from './FloatingPhoneKeypad'
 
 // 候位人數上限與散客後台相同（200，見 GuestCountField／PartySizeField）；線上訂位的 12 人上限不在這裡。
 // 超過單桌常見容量（12）＝大組，入座時需併桌（seatingService 的候位入座已支援併桌）。
@@ -41,6 +42,10 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
   const [title, setTitle] = useState(DEFAULT_TITLE)
   const [surname, setSurname] = useState(null)
   const [customName, setCustomName] = useState('')
+  // 電話用與帶位面板同款的漂浮數字鍵盤：iPad 系統鍵盤會整個蓋住 Modal 底部的「取號」鈕
+  const [keypadOpen, setKeypadOpen] = useState(false)
+  const phoneRef = useRef(null)
+  const formRef = useRef(null)
 
   const {can}=useAuth()
   const canEdit=can('waitlist.update')
@@ -85,6 +90,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
     setForm({ name: '', phone: '', partySize: 2, notes: '' })
     setKids(0)
     setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
+    setKeypadOpen(false)
   }
 
   const handleAdd = () => {
@@ -178,7 +184,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
         </>
       }>
         {/* 人數擺第一個：它是唯一必填，滿場尖峰「點人數 → 取號」兩下就走完 */}
-        <div className="space-y-3">
+        <div ref={formRef} className="space-y-3">
           <PartySizeField
             total={form.partySize}
             kids={kids}
@@ -201,9 +207,30 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
             custom={customName}
             onCustomChange={setCustomName}
           />
-          <Input label="電話（選填）" type="tel" inputMode="numeric" value={form.phone}
-            onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
-            placeholder="0912345678" />
+          {/* inputMode="none"：不叫出系統鍵盤，點欄位改浮出數字鍵盤（不蓋住「取號」） */}
+          <div>
+            <label className="label">電話（選填）</label>
+            <input
+              ref={phoneRef}
+              type="tel"
+              inputMode="none"
+              aria-label="電話（選填）"
+              value={form.phone}
+              onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+              onClick={() => setKeypadOpen(true)}
+              onFocus={() => setKeypadOpen(true)}
+              placeholder="0912345678"
+              className={`input tabular-nums ${keypadOpen ? 'ring-4 ring-chicken-red/20 border-chicken-red' : ''}`}
+            />
+          </div>
+          <FloatingPhoneKeypad
+            open={showAdd && keypadOpen}
+            onClose={() => setKeypadOpen(false)}
+            value={form.phone}
+            onChange={v => setForm(f => ({ ...f, phone: v }))}
+            anchorRef={phoneRef}
+            boundsRef={formRef}
+          />
           <Input label="備註（選填）" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="例：靠窗、過敏" />
         </div>
       </Modal>

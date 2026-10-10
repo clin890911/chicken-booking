@@ -374,13 +374,23 @@ describe('ArrivalStrip：預配訂位', () => {
     expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(2)
   })
 
-  it('窗外（11:29 以前）不列', () => {
+  it('窗外（10:59 以前，前 60 分）不列', () => {
     setup()
     act(() => root.render(
       <ArrivalStrip tables={[table({ number: '105', status: 'vacant', currentBookingId: null })]}
-        bookings={[pre()]} onSelectTable={() => {}} onArrive={() => {}} now={new Date(2026, 8, 19, 11, 0).getTime()} />,
+        bookings={[pre()]} onSelectTable={() => {}} onArrive={() => {}} now={new Date(2026, 8, 19, 10, 59).getTime()} />,
     ))
     expect(container.firstChild).toBeNull()
+  })
+
+  it('早到 50 分（11:10，過去前 30 分窗外）→ 現在照列，報到列找得到', () => {
+    setup()
+    act(() => root.render(
+      <ArrivalStrip tables={[table({ number: '105', status: 'vacant', currentBookingId: null })]}
+        bookings={[pre()]} onSelectTable={() => {}} onArrive={() => {}} now={new Date(2026, 8, 19, 11, 10).getTime()} />,
+    ))
+    expect(container.textContent).toContain('等報到 1')
+    expect(container.textContent).toContain('余先生')
   })
 })
 

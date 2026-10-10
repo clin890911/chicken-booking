@@ -554,6 +554,24 @@ export function BookingProvider({ children }) {
     }
     return r
   }
+  // 未配桌的訂位到店「選桌即入座」（指派＋入座一步，見 seatingService.assignAndSeatBooking）。
+  // 通知只發一次「客人到了」（不另發「桌位已指派」：對店員群組而言這是一個動作）。
+  const assignAndSeatBooking = (bookingId, tableNumbers) => {
+    const r = seatingService.assignAndSeatBooking(bookingId, tableNumbers)
+    refresh()
+    syncCloudSoon()
+    if (r.ok) {
+      const b = bookingService.getById(bookingId)
+      if (b) safeNotify(() => tg.notifyBookingArrived(b))
+    }
+    return r
+  }
+  // 四個「客人到了」入口共用的 5 秒復原（只倒仍由本筆持有或已空的桌，見 seatingService.undoSeatBooking）
+  const undoSeatBooking = (snapshot) => {
+    const r = seatingService.undoSeatBooking(snapshot)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
   // 報到列預配入座的 5 秒復原：桌回空桌、訂位回待到且保留預配（見 seatingService.undoSeatPreassigned）
   const undoSeatPreassigned = (bookingId, tableNumber) => {
     const r = seatingService.undoSeatPreassigned(bookingId, tableNumber)
@@ -669,7 +687,7 @@ export function BookingProvider({ children }) {
   // opts（{ bookingId, date, timeSlot }）只給「建議／候選」用：帶了就排除依時段會撞桌的桌。
   const findSuitableTables = (partySize, opts) => seatingService.findSuitableTables(partySize, opts)
   const suggestTable = (partySize, opts) => seatingService.suggestTable(partySize, opts)
-  const suggestTableCombo = (partySize) => seatingService.suggestTableCombo(partySize)
+  const suggestTableCombo = (partySize, opts) => seatingService.suggestTableCombo(partySize, opts)
   // 鎖桌時機分流（capacity.lockKindFor）：今日訂位挑桌的建議／候選 → { kind:'hold'|'preassign', tables }
   const findReserveCandidates = (partySize, opts) => seatingService.findReserveCandidates(partySize, opts)
   // 預配型的可點選集合（桌子不必此刻空著，只要此刻的佔用不會延續進預配區間）
@@ -876,7 +894,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

@@ -71,7 +71,8 @@ describe('併桌訂位（101＋107）顯示', () => {
     render(mkBooking(), [mkTable('101', { status: 'reserved', currentBookingId: 'B8' }), mkTable('107', { status: 'reserved', currentBookingId: 'B8' })])
     const seat = [...container.querySelectorAll('button')].find(b => b.textContent.includes('客人到了'))
     act(() => { seat.click() })
-    expect(toast.success).toHaveBeenCalledWith('大組 已入座 101 + 107')
+    // 2026-10 起「客人到了」統一帶 5 秒復原（toast.action）
+    expect(toast.action).toHaveBeenCalledWith('大組 已入座 101 + 107', expect.objectContaining({ label: '復原' }), { duration: 5000 })
   })
 
   it('詳情表「改桌」鈕列出所有桌', () => {

@@ -231,7 +231,7 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
           </ActionButton>
         )}
         {act.show.seat && (
-          <ActionButton tone="green" className="col-span-2" onClick={then(async () => { act.seat(); return true })}>客人到了</ActionButton>
+          <ActionButton tone="green" className="col-span-2" onClick={then(async () => { const ok = await act.seat(); return ok !== false })}>客人到了</ActionButton>
         )}
         {act.show.move && (
           <ActionButton tone="indigo" className="col-span-2" disabled={!!act.moveDisabledReason}
@@ -251,7 +251,7 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
           <ActionButton tone="indigo" onClick={() => { onClose?.(); onFocusTable(booking) }}>在地圖標示</ActionButton>
         )}
         {act.show.edit && (
-          <ActionButton tone="neutral" onClick={() => setEditing(true)}>編輯資料</ActionButton>
+          <ActionButton tone="neutral" onClick={() => setEditing(true)}>{booking.status === 'arrived' ? '改人數／備註' : '改人數／時段／備註'}</ActionButton>
         )}
         {act.show.unpreassign && (
           <ActionButton tone="neutral" onClick={then(act.unpreassign)}>解除預配</ActionButton>

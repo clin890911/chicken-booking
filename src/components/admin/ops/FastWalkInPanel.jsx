@@ -1,19 +1,15 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
+import { useState, useEffect, useRef } from 'react'
 import { Input } from '../../ui'
 import { useToast } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 import PartySizeField from '../PartySizeField'
 import { normalizeSplit } from '../../../utils/partySplit'
-import NumericKeypad from './NumericKeypad'
+import FloatingPhoneKeypad from './FloatingPhoneKeypad'
 import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadges'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import Icon from '../../ui/Icon'
 import { todayStr } from '../../../utils/timeSlots'
 import { squeezeSeats } from '../../../utils/capacity'
-
-const KEYPAD_WIDTH = 392
-const KEYPAD_GAP = 12
 
 // 現場常駐「帶位」面板（v3）：順序不拘的狀態機——系統只需要「桌」和「幾位」，
 // 先點桌或先選人數都行，兩者到齊底部的確認鈕才亮；確認＝入座（唯一語意，不再二次確認）。
@@ -31,7 +27,7 @@ const KEYPAD_GAP = 12
 //   warning                 — { text } 預配衝突或團體保留桌的警示；有警示時確認鈕要先解鎖
 //   onSeat(payload)         — 真正入座，回傳 false 代表失敗（維持欄位，方便改人數或改候位）
 export default function FastWalkInPanel({
-  suspended = false, onLocateSuggestion, showNextWaitlist, onNextWaitlist,
+  suspended = false, onLocateSuggestion, onApplySuggestion, showNextWaitlist, onNextWaitlist,
   guests, onGuestsChange, tables = [], onRemoveTable, onClearTables, warning, onSeat, onOpenTable,
   lastParty,
 }) {
@@ -44,34 +40,11 @@ export default function FastWalkInPanel({
   const [notes, setNotes] = useState('')
   const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；預設 0，常態只點大人
   const [keypadOpen, setKeypadOpen] = useState(false) // 漂浮數字鍵盤（點電話欄才跳）
-  const [keypadPos, setKeypadPos] = useState(null)
   const [override, setOverride] = useState(false)   // 有警示時，店員要先明確解鎖才能確認
   const matched = useMatchedCustomer(phone)
   const rootRef = useRef(null)
   const phoneRef = useRef(null)
   useEffect(() => { if (suspended) setKeypadOpen(false) }, [suspended])
-
-  // 漂浮鍵盤定位：錨在電話欄右側、貼齊帶位欄底部（＝主區底部）。
-  // 用 portal + position:fixed 到 body，刻意**不靠**祖先當定位脈絡——現場頁是
-  // h-[100dvh] 串接的一面式版面，在祖先加 transform/relative 會把高度鏈打斷。
-  const placeKeypad = () => {
-    const f = phoneRef.current?.getBoundingClientRect()
-    const r = rootRef.current?.getBoundingClientRect()
-    if (!f || !r) return
-    const width = Math.min(KEYPAD_WIDTH, window.innerWidth - KEYPAD_GAP * 2)
-    const left = Math.max(KEYPAD_GAP, Math.min(f.right + KEYPAD_GAP, window.innerWidth - width - KEYPAD_GAP))
-    const bottom = Math.max(KEYPAD_GAP, window.innerHeight - r.bottom)
-    setKeypadPos({ left, bottom, width })
-  }
-
-  useLayoutEffect(() => {
-    if (!keypadOpen) return
-    placeKeypad()
-    const onResize = () => placeKeypad()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keypadOpen])
 
   // 電話帶到顧客 → 自動帶姓名（不覆蓋店員已點的稱謂/姓氏，也不覆蓋已手打的）
   useEffect(() => {
@@ -106,10 +79,10 @@ export default function FastWalkInPanel({
   } else if (g > 0) {
     // 建議桌看「現在入座」的佔用區間 [現在, 現在+佔位)：避開其間已被別筆預配的桌與團保桌（只影響建議，不擋點選）
     const single = suggestTable(g, { date: todayStr(), mode: 'now' })
-    if (single) { recommendation = single; verdict = { tone: 'ok', icon: 'pointer', text: `${g} 位 · 建議 ${single.floor}・${single.number}（自行選桌）` } }
+    if (single) { recommendation = { ...single, tableNumbers: [String(single.number)] }; verdict = { tone: 'ok', icon: 'pointer', text: `${g} 位 · 建議 ${single.floor}・${single.number}（自行選桌）` } }
     else {
-      const combo = suggestTableCombo(g)
-      if (combo.enough) recommendation = { number: combo.tableNumbers?.[0], floor: combo.floor }
+      const combo = suggestTableCombo(g, { date: todayStr(), mode: 'now' })
+      if (combo.enough) recommendation = { number: combo.tableNumbers?.[0], floor: combo.floor, tableNumbers: (combo.tableNumbers || []).map(String) }
       verdict = combo.enough
         ? { tone: 'multi', icon: 'chair', text: `無單桌可容 → 建議 ${combo.floor}・${(combo.tableNumbers || []).join(' + ')}（自行選 ${combo.tableNumbers?.length || 2} 張桌）` }
         : { tone: 'none', icon: 'hourglass', text: '目前座位不足 → 建議改候位取號' }
@@ -290,58 +263,39 @@ export default function FastWalkInPanel({
             <Icon name={verdict.icon} size={16} className="inline-block align-[-3px] mr-1" />{verdict.text}
           </div>
         )}
-        {recommendation && <button type="button" onClick={() => onLocateSuggestion?.(recommendation.number)} className="tap min-h-[44px] text-sm font-bold underline">定位建議桌 {recommendation.floor}・{recommendation.number}</button>}
+        {/* 「用建議桌」＝切樓層＋選好建議桌（含併桌），店員再按確認入座；不自動勾（PR #137） */}
+        {recommendation && (
+          <div className="flex items-center gap-3 flex-wrap">
+            {onApplySuggestion && (
+              <button type="button" data-testid="walkin-apply-suggestion"
+                onClick={() => onApplySuggestion(recommendation.tableNumbers)}
+                className="tap min-h-[44px] px-3 rounded-xl border-2 border-chicken-green bg-chicken-green/10 text-chicken-green text-sm font-bold">
+                用建議桌 {recommendation.floor}・{recommendation.tableNumbers.join(' + ')}
+              </button>
+            )}
+            <button type="button" onClick={() => onLocateSuggestion?.(recommendation.number)} className="tap min-h-[44px] text-sm font-bold underline">定位建議桌 {recommendation.floor}・{recommendation.number}</button>
+          </div>
+        )}
         <button data-testid="walkin-seat" type="button" onClick={seat} disabled={!ready} className="tap w-full min-h-[60px] rounded-xl bg-chicken-red text-white text-lg font-bold disabled:opacity-40">{ready ? `確認入座 · ${displayName || '現場客'} ${g} 位 · ${tables.map(t => t.number).join(' + ')}` : slideLabel}</button>
         {showNextWaitlist && <button type="button" onClick={onNextWaitlist} className="tap w-full min-h-[44px] rounded-xl border border-chicken-green text-chicken-green font-bold">帶下一組候位</button>}
       </div>
 
-      {/* 漂浮數字鍵盤：遮罩刻意只用 bg-black/20——桌況圖必須全程看得見，
-          領檯是「一邊看桌一邊問電話」，深色遮罩會逼他先收鍵盤才能判斷帶哪桌。
-          portal 到 body：不需要在版面鏈上任何一層加 relative/transform。 */}
-      {keypadOpen && typeof document !== 'undefined' && createPortal(
-        <>
-          <div
-            className="fixed inset-0 z-[70] bg-black/20"
-            onClick={() => setKeypadOpen(false)}
-            aria-hidden="true"
-          />
-          <div
-            role="dialog"
-            aria-label="電話數字鍵盤"
-            className="fixed z-[71] rounded-xl bg-[#2b2320] p-3 shadow-2xl"
-            style={keypadPos
-              ? { left: keypadPos.left, bottom: keypadPos.bottom, width: keypadPos.width }
-              : { left: KEYPAD_GAP, bottom: KEYPAD_GAP, width: KEYPAD_WIDTH, visibility: 'hidden' }}
-          >
-            <div className="flex items-start gap-2.5 px-1.5 pb-3 pt-1">
-              <div className="min-w-0">
-                <div className="text-3xl font-bold tracking-widest tabular-nums text-white">
-                  {phone || <span className="text-white/30">輸入電話</span>}
-                </div>
-                <div className="mt-1 text-[11px] font-bold text-white/60">
-                  {matched ? (
-                    <>
-                      常客・{matched.name || '（未留名）'}
-                      {matched.lastVisit ? `・上次 ${new Date(matched.lastVisit).toLocaleDateString('zh-TW')}` : ''}
-                      {matched.allergies && <b className="text-red-300">・忌{matched.allergies}</b>}
-                    </>
-                  ) : phone.length >= 4 ? '查無顧客檔（新客）' : '輸入 4 碼以上自動比對常客'}
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="收起鍵盤"
-                onClick={() => setKeypadOpen(false)}
-                className="ml-auto flex-none h-8 w-8 rounded-full bg-white/15 text-sm font-bold text-white"
-              >
-                ✕
-              </button>
-            </div>
-            <NumericKeypad value={phone} onChange={setPhone} tone="dark" onDone={() => setKeypadOpen(false)} />
-          </div>
-        </>,
-        document.body,
-      )}
+      {/* 漂浮數字鍵盤（與候位取號共用 FloatingPhoneKeypad）：遮罩只用 bg-black/20，桌況圖全程看得見 */}
+      <FloatingPhoneKeypad
+        open={keypadOpen}
+        onClose={() => setKeypadOpen(false)}
+        value={phone}
+        onChange={setPhone}
+        anchorRef={phoneRef}
+        boundsRef={rootRef}
+        status={matched ? (
+          <>
+            常客・{matched.name || '（未留名）'}
+            {matched.lastVisit ? `・上次 ${new Date(matched.lastVisit).toLocaleDateString('zh-TW')}` : ''}
+            {matched.allergies && <b className="text-red-300">・忌{matched.allergies}</b>}
+          </>
+        ) : phone.length >= 4 ? '查無顧客檔（新客）' : '輸入 4 碼以上自動比對常客'}
+      />
     </div>
   )
 }

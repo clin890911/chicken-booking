@@ -17,13 +17,13 @@ import QuickReservePanel from './QuickReservePanel'
 // flashBookingId：剛新增的那筆，今日訂位籤捲到可見並閃一下。
 export default function OpsRail({
   suspended = false,
-  activeTab, onTabChange, onClickBooking, onAssignTable, onMoveTable, onSeatWaitlist, onFocusTable, onReseatBatch,
+  activeTab, onTabChange, onClickBooking, onOpenDetail, onAssignTable, onArriveSeat, onMoveTable, onSeatWaitlist, onFocusTable, onReseatBatch,
   onAddBooking, reserve = null, flashBookingId = null,
   // 帶位籤（v3）：桌與人數的真相在 OperationsView，這裡純轉發給 FastWalkInPanel
   // canWalkIn：無散客入座權限（唯讀角色 kitchen）時整個帶位籤不渲染——面板底部的「確認入座」會寫 bookings＋tables
   canWalkIn = true,
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
-  walkinWarning, onWalkinSeat, lastParty, onLocateSuggestion, showNextWaitlist, onNextWaitlist,
+  walkinWarning, onWalkinSeat, lastParty, onLocateSuggestion, onApplySuggestion, showNextWaitlist, onNextWaitlist,
 }) {
   const { bookings, waitlist, groupReservations } = useBooking()
   const today = todayStr()
@@ -96,6 +96,7 @@ export default function OpsRail({
         <FastWalkInPanel
           suspended={suspended}
           onLocateSuggestion={onLocateSuggestion}
+          onApplySuggestion={onApplySuggestion}
           showNextWaitlist={showNextWaitlist}
           onNextWaitlist={onNextWaitlist}
           guests={walkinGuests}
@@ -122,7 +123,7 @@ export default function OpsRail({
                   ＋ 新增今日訂位
                 </button>
               )}
-              <UpcomingPanel onClickBooking={onClickBooking} onAssignTable={onAssignTable} onMoveTable={onMoveTable}
+              <UpcomingPanel onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable}
                 flashBookingId={flashBookingId} />
             </>
           )}

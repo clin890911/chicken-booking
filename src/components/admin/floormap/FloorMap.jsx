@@ -7,12 +7,13 @@ import { overdueMinOf } from '../../../utils/bookingPulse'
 import { assignmentKind, diningTablePresentation } from '../../../utils/tableStatus'
 import { GROUP_HOLD_COLOR } from './statusColors'
 
-// 「到了」一鍵入座的出現窗：訂位時間前 30 分 ~ 後 60 分。寫成具名常數方便日後調整。
+// 「到了」一鍵入座的出現窗：訂位時間前 60 分 ~ 後 60 分。寫成具名常數方便日後調整。
+// （2026-10 前緣由 30 放寬到 60：連假早到的客人過去在報到列找不到，要繞去今日訂位籤）
 // ★ 2026-08 二版：鈕本身已從桌況圖搬到地圖下方的「報到列」（見 ArrivalStrip.jsx）——
 //   地圖容器只有數百 px 寬、一張桌換算下來常常 <40px，任何 ≥40px 實體熱區都會壓到鄰桌
 //   甚至壓住「另一顆到了鈕」讓它整個點不到（獨立驗收在相鄰兩桌同時進窗時實測踩到，會
 //   誤觸把不相干的訂位標記入座）。這個判定純函式留在這裡，ArrivalStrip 引用同一份。
-export const ARRIVE_WINDOW_BEFORE_MIN = 30
+export const ARRIVE_WINDOW_BEFORE_MIN = 60
 export const ARRIVE_WINDOW_AFTER_MIN = 60
 
 // 純函式抽出方便單測：桌是否該顯示「到了」入口。
@@ -26,7 +27,7 @@ export function isArriveEligible(table, booking, now = Date.now()) {
 // 「預配」的待到訂位也要能從報到列一下入座（2026-09「接近時段才鎖」之後，早上接的訂位多半只預配、
 // 桌況維持空桌——只看 reserved 桌的話，這些客人到了在報到列上找不到）。
 // 條件：今天、待到（confirmed）、有配桌且是預配（assignmentKind＝'preassign'：桌沒鎖給這筆），
-// 時間窗同上（前 30／後 60 分）。桌此刻被別組佔著也照列——按「到了」時 seatBooking 的佔用守門會擋下，
+// 時間窗同上（前 60／後 60 分）。桌此刻被別組佔著也照列——按「到了」時 seatBooking 的佔用守門會擋下，
 // 由呼叫端給「改桌」出口（不在這裡默默藏起來，否則客人到了店員卻找不到入口）。
 export function isPreassignArriveEligible(table, booking, now = Date.now()) {
   if (!table || !booking || !booking.timeSlot) return false

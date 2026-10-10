@@ -61,11 +61,16 @@ describe('UpcomingPanel 搜尋＋完整電話', () => {
     expect(cards()).toEqual(['b', 'a', 'c'])
   })
 
-  it('卡片顯示完整格式化電話（可點撥）；無電話不顯示', () => {
+  it('卡片顯示完整格式化電話（純文字，撥號只走「聯絡」鈕，避免兩個撥號熱區相鄰誤撥）；無電話不顯示', () => {
     render(data())
     const phone = id => container.querySelector(`[data-booking-id="${id}"] [data-testid="phone-full"]`)
     expect(phone('a').textContent).toBe('0912-345-678')
-    expect(phone('a').getAttribute('href')).toBe('tel:0912345678')
+    expect(phone('a').tagName).toBe('SPAN')
+    expect(phone('a').getAttribute('href')).toBeNull()
+    const telLinks = container.querySelectorAll('[data-booking-id="a"] a[href^="tel:"]')
+    expect(telLinks).toHaveLength(1)
+    expect(telLinks[0].textContent).toContain('聯絡')
+    expect(telLinks[0].getAttribute('href')).toBe('tel:0912345678')
     expect(phone('b').textContent).toBe('0922-111-999')
     expect(phone('c')).toBeNull()
     expect(container.querySelector('[data-testid="phone-tail"]')).toBeNull()

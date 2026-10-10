@@ -72,6 +72,40 @@ describe('AddBookingView continuous（電話訂位連續新增）', () => {
     expect(btn(b => b.textContent.includes('確認新增'))).toBeUndefined()
   })
 
+  it('今天：預選下一個可訂時段（09:00 開表單 → 11:00），只要再填客人就能存', () => {
+    render({ continuous: true })
+    type(phone(), '0933111222'); type(name(), '早鳥')
+    const confirm = btn(b => b.textContent.includes('確認新增'))
+    expect(confirm.textContent).toMatch(/11:00 · 2 位/)
+    click(confirm)
+    expect(bookingCtx.addBooking.mock.calls[0][0]).toMatchObject({ date: '2026-10-09', timeSlot: '11:00' })
+  })
+
+  it('換日期：新日期同一時段仍可訂 → 保留不清空（明天 18:00 → 改後天仍是 18:00）', () => {
+    render({ continuous: true })
+    click(btn(b => b.textContent.startsWith('明天')))
+    click(btn(b => b.textContent.trim().startsWith('18:00')))
+    click(btn(b => b.textContent.startsWith('後天')))
+    type(phone(), '0933111222'); type(name(), '改日客')
+    click(btn(b => b.textContent.includes('確認新增')))
+    expect(bookingCtx.addBooking.mock.calls[0][0]).toMatchObject({ date: '2026-10-11', timeSlot: '18:00' })
+  })
+
+  it('姓名用稱謂＋姓氏快選：點「陳」→ 陳先生；稱謂循環到小姐 → 陳小姐；手打全名不接稱謂', () => {
+    render({ continuous: true })
+    click(btn(b => b.getAttribute('aria-label') === '陳'))
+    expect(container.textContent).toContain('將登記為：陳先生')
+    click(btn(b => (b.getAttribute('aria-label') || '').startsWith('稱謂：先生')))
+    expect(container.textContent).toContain('將登記為：陳小姐')
+    type(phone(), '0933111222')
+    click(btn(b => b.textContent.includes('確認新增')))
+    expect(bookingCtx.addBooking.mock.calls[0][0]).toMatchObject({ name: '陳小姐' })
+    // 手打全名 → 原樣，不變成「王小明小姐」
+    type(phone(), '0944555666'); type(name(), '王小明')
+    expect(container.textContent).toContain('將登記為：王小明')
+    expect(container.textContent).not.toContain('王小明小姐')
+  })
+
   it('日期快選涵蓋 0–6 天：第 4 天起標 M/D(週X)', () => {
     render({})
     const labels = [...container.querySelectorAll('button')].map(b => b.textContent)
