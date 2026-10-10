@@ -8,6 +8,7 @@ import { test, expect } from '@playwright/test'
 //   5) 未配桌訂位的「詳情 ›」開訂位詳情（過去點了沒反應）
 //   6) 帶位面板「用建議桌」：一下切到建議桌樓層並選好，按確認才入座
 //   7) 到了 · 選桌入座：「用建議桌」選好併桌組合（含切樓層），確認後整組入座
+//   8) 「用建議桌」選好後，那張桌才被別筆預配（時段重疊）→ 確認鈕鎖住，勾「仍要帶這桌」才解鎖（帶位面板＋選桌入座模式）
 // 時間用 page.clock 固定、時區固定 Asia/Taipei；後台本機模式以 localStorage 為後端，攔截 admin* 雲端端點。
 
 test.use({ timezoneId: 'Asia/Taipei' })
@@ -226,4 +227,79 @@ test('到了 · 選桌入座：「用建議桌」選好併桌組合（含切樓�
   expect(b.status).toBe('arrived')
   expect([b.assignedTableId, ...b.extraTableIds].sort()).toEqual(['201', '202'])
   expect(tables.filter(t => ['201', '202'].includes(t.number)).every(t => t.status === 'dining' && t.currentBookingId === BIG.id)).toBe(true)
+})
+
+// 模擬別台裝置把這筆預配寫進來：改 localStorage 後發 storage 事件（BookingContext 收到 chicken_* 就 refresh）
+async function preassignFromAnotherDevice(page, bookingId, tableNumber) {
+  await page.evaluate(({ bookingId, tableNumber }) => {
+    const list = JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]')
+    const b = list.find(x => x.id === bookingId)
+    b.assignedTableId = tableNumber
+    b.extraTableIds = []
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify(list))
+    window.dispatchEvent(new StorageEvent('storage', { key: 'chicken_bookings_v1' }))
+  }, { bookingId, tableNumber })
+}
+
+test('帶位面板「用建議桌」後該桌被別筆預配（時段重疊）→ 確認入座鎖住，勾「仍要帶這桌」才解鎖', async ({ page }) => {
+  await page.clock.setFixedTime(at('11:40'))
+  const CHEN = mkBooking({ id: 'E2E-ED-CHEN', name: '陳小姐', guests: 2, timeSlot: '12:30' })
+  await seed(page, {
+    tables: [
+      mkTable('105', { status: 'dining', currentBookingId: 'X', seatedAt: at('11:30').toISOString() }),
+      mkTable('201', { floor: '2F' }),
+    ],
+    bookings: [CHEN],
+  })
+  await loginToOps(page)
+  await page.getByTestId('walkin-apply-suggestion').click()
+  const seat = page.getByTestId('walkin-seat')
+  await expect(seat).toBeEnabled()
+  await expect(seat).toContainText('201')
+
+  await preassignFromAnotherDevice(page, CHEN.id, '201')
+  await expect(page.getByText(/201.*陳小姐/).first()).toBeVisible()
+  await expect(seat).toBeDisabled()
+  await seat.click({ force: true })
+  let { tables } = await readState(page)
+  expect(tables.find(t => t.number === '201').status).toBe('vacant')
+
+  await page.getByLabel('我知道，仍要帶這桌').check()
+  await expect(seat).toBeEnabled()
+  await seat.click()
+  ;({ tables } = await readState(page))
+  expect(tables.find(t => t.number === '201').status).toBe('dining')
+})
+
+test('選桌入座「用建議桌」後其中一張被別筆預配（時段重疊）→ 確認鈕鎖住，勾選確認才解鎖', async ({ page }) => {
+  await page.clock.setFixedTime(at('11:40'))
+  const BIG = mkBooking({ id: 'E2E-ED-BIG2', name: '大組', guests: 8 })
+  const CHEN = mkBooking({ id: 'E2E-ED-CHEN2', name: '陳小姐', guests: 2, timeSlot: '12:30' })
+  await seed(page, {
+    tables: [
+      mkTable('105', { status: 'dining', currentBookingId: 'X', seatedAt: at('11:30').toISOString() }),
+      mkTable('201', { floor: '2F', x: 100 }),
+      mkTable('202', { floor: '2F', x: 220 }),
+    ],
+    bookings: [BIG, CHEN],
+  })
+  await loginToOps(page)
+  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await page.locator(`[data-booking-id="${BIG.id}"]`).getByRole('button', { name: '大組 到了，選桌入座' }).click()
+  await page.getByTestId('mode-apply-suggestion').click()
+  await expect(page.getByText(/已選 8\/8 席 · 2 桌/)).toBeVisible()
+  const confirmBtn = page.getByRole('button', { name: '✓ 確認併桌入座' })
+  await expect(confirmBtn).toBeEnabled()
+
+  await preassignFromAnotherDevice(page, CHEN.id, '201')
+  const ack = page.getByLabel('我已確認上述預配／團體保留，仍要使用所選桌')
+  await expect(ack).toBeVisible()
+  await expect(confirmBtn).toBeDisabled()
+
+  await ack.check()
+  await expect(confirmBtn).toBeEnabled()
+  await confirmBtn.click()
+  await expect(page.getByText(/大組（8 位）已入座/)).toBeVisible()
+  const { bookings } = await readState(page)
+  expect(bookings.find(x => x.id === BIG.id).status).toBe('arrived')
 })

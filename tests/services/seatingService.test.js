@@ -2688,7 +2688,7 @@ describe('assignAndSeatBooking（未配桌訂位選桌即入座）', () => {
     const b = mkBooking({ name: '林先生', guests: 3 })
     const r = seating.assignAndSeatBooking(b.id, ['105'])
     expect(r).toMatchObject({ ok: true, tableNumber: '105', tableNumbers: ['105'] })
-    expect(r.undo).toEqual({ bookingId: b.id, tableNumbers: ['105'], restore: { 105: 'vacant' }, assignment: { assignedTableId: null, extraTableIds: [] } })
+    expect(r.undo).toEqual({ bookingId: b.id, tableNumbers: ['105'], restore: { 105: 'vacant' }, prev: { status: 'confirmed', actualArrivalTime: null }, assignment: { assignedTableId: null, extraTableIds: [] } })
     expect(bookingService.getById(b.id)).toMatchObject({ status: 'arrived', assignedTableId: '105', extraTableIds: [] })
     expect(bookingService.getById(b.id).actualArrivalTime).toBeTruthy()
     expect(tableService.getByNumber('105')).toMatchObject({ status: 'dining', currentBookingId: b.id })
@@ -2739,6 +2739,36 @@ describe('undoSeatBooking（四個「客人到了」入口共用的復原）', (
     expect(seating.undoSeatBooking(r.undo)).toEqual({ ok: true, tableNumbers: ['105'] })
     expect(bookingService.getById(b.id)).toMatchObject({ status: 'confirmed', assignedTableId: '105', actualArrivalTime: null })
     expect(tableService.getByNumber('105')).toMatchObject({ status: 'reserved', currentBookingId: b.id, seatedAt: null })
+  })
+
+  it('pending 訂位入座 → 復原：回到 pending（不一律改成 confirmed），到店時間清回原值', () => {
+    const b = mkBooking({ status: 'pending' })
+    expect(bookingService.getById(b.id).status).toBe('pending')
+    seating.assignBookingToTable(b.id, '105')
+    const r = seating.seatBooking(b.id)
+    expect(r.undo.prev).toEqual({ status: 'pending', actualArrivalTime: null })
+    expect(bookingService.getById(b.id).actualArrivalTime).toBeTruthy()
+    expect(seating.undoSeatBooking(r.undo).ok).toBe(true)
+    expect(bookingService.getById(b.id)).toMatchObject({ status: 'pending', assignedTableId: '105', actualArrivalTime: null })
+    expect(tableService.getByNumber('105')).toMatchObject({ status: 'reserved', currentBookingId: b.id })
+  })
+
+  it('pending 未配桌選桌入座 → 復原：回到 pending＋未配桌', () => {
+    const b = mkBooking({ status: 'pending', guests: 8 })
+    const r = seating.assignAndSeatBooking(b.id, ['105', '106'])
+    expect(r.ok).toBe(true)
+    expect(seating.undoSeatBooking(r.undo).ok).toBe(true)
+    expect(bookingService.getById(b.id)).toMatchObject({ status: 'pending', assignedTableId: null, extraTableIds: [], actualArrivalTime: null })
+  })
+
+  it('舊快照沒有 prev → 退回 confirmed（相容）', () => {
+    const b = mkBooking()
+    seating.assignBookingToTable(b.id, '105')
+    const r = seating.seatBooking(b.id)
+    const { prev, ...legacy } = r.undo
+    expect(prev.status).toBe('confirmed')
+    expect(seating.undoSeatBooking(legacy).ok).toBe(true)
+    expect(bookingService.getById(b.id)).toMatchObject({ status: 'confirmed', actualArrivalTime: null })
   })
 
   it('預配入座 → 復原：桌回空桌、預配保留', () => {

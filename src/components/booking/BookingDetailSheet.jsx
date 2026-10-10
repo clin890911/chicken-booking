@@ -231,7 +231,7 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
           </ActionButton>
         )}
         {act.show.seat && (
-          <ActionButton tone="green" className="col-span-2" onClick={then(async () => { act.seat(); return true })}>客人到了</ActionButton>
+          <ActionButton tone="green" className="col-span-2" onClick={then(async () => { const ok = await act.seat(); return ok !== false })}>客人到了</ActionButton>
         )}
         {act.show.move && (
           <ActionButton tone="indigo" className="col-span-2" disabled={!!act.moveDisabledReason}

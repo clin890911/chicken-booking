@@ -23,7 +23,8 @@ vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => toast, useConf
 const UpcomingPanel = (await import('../../src/components/admin/floormap/UpcomingPanel')).default
 const TableDrawer = (await import('../../src/components/admin/floormap/TableDrawer')).default
 const { default: ArrivalStrip, buildTargets, isUnassignedArriveEligible } = await import('../../src/components/admin/floormap/ArrivalStrip')
-const { toastSeatedWithUndo } = await import('../../src/utils/arriveSeat')
+const { toastSeatedWithUndo, seatAfterArriveConfirm } = await import('../../src/utils/arriveSeat')
+const BookingDetailSheet = (await import('../../src/components/booking/BookingDetailSheet')).default
 
 const TODAY = '2026-09-19'
 const NOW = new Date(2026, 8, 19, 10, 30, 0)
@@ -41,13 +42,14 @@ const mount = (el) => {
   root = createRoot(container)
   act(() => { root.render(el) })
 }
+const btns = () => [...document.querySelectorAll('button')]
 const btn = (text) => [...document.querySelectorAll('button')].find(b => b.textContent.includes(text) || b.getAttribute('aria-label') === text)
 const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve() })
 
 function setCtx({ bookings = [YU], tables = [mkT('105', { status: 'reserved', currentBookingId: 'Y1' })], groups = [] } = {}) {
   Object.keys(ctx).forEach(k => delete ctx[k])
   Object.assign(ctx, {
-    bookings, tables, waitlist: [], groupReservations: groups, settings: {},
+    bookings, tables, waitlist: [], groupReservations: groups, settings: {}, customers: [],
     seatBooking: vi.fn(() => ({ ok: true, tableNumber: '105', undo: UNDO })),
     undoSeatBooking: vi.fn(() => ({ ok: true, tableNumbers: ['105'] })),
     markBookingNoshow: vi.fn(), undoMarkBookingNoshow: vi.fn(), completeWithoutSeating: vi.fn(), undoCompleteWithoutSeating: vi.fn(),
@@ -166,6 +168,102 @@ describe('桌抽屜「客人到了」（A6）', () => {
     action.onClick()
     expect(ctx.undoSeatBooking).toHaveBeenCalledWith(UNDO)
     expect(toast.error).toHaveBeenCalledWith('復原失敗：105 已被別組使用，無法復原')
+  })
+})
+
+// 詳情頁／桌抽屜的「客人到了」與今日訂位卡走同一套預留確認（seatAfterArriveConfirm）：
+// 時段重疊的他筆預配、今日團保才確認；不重疊的不確認。
+const GROUP_105 = [{ id: 'G', schemaVersion: 2, date: TODAY, agencyName: '甲旅行社', status: 'confirmed',
+  batches: [{ id: 'B1', label: '第一梯', timeSlot: '12:30', tableNumbers: ['105'], guests: 4 }] }]
+
+describe('桌抽屜「客人到了」：預配／團保衝突確認（與今日訂位卡同一套）', () => {
+  const drawer = (over = {}) => mount(<TableDrawer table={mkT('105', { status: 'reserved', currentBookingId: 'Y1' })} booking={YU}
+    preassign={null} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} {...over} />)
+
+  it('他筆預配不重疊（18:00）→ 不跳確認、直接入座', async () => {
+    setCtx({ bookings: [YU, other('18:00')] })
+    drawer()
+    act(() => { btn('客人到了 — 入座').click() })
+    await flush()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(ctx.seatBooking).toHaveBeenCalledWith('Y1')
+  })
+
+  it('他筆預配重疊（11:30）→ 跳確認；取消就不入座', async () => {
+    setCtx({ bookings: [YU, other('11:30')] })
+    confirm.mockResolvedValue(false)
+    drawer()
+    act(() => { btn('客人到了 — 入座').click() })
+    await flush()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('105 已預先配給 陳小姐（2 位 · 11:30），用餐時段重疊'), expect.objectContaining({ title: '桌位有預留', confirmLabel: '仍要入座' }))
+    expect(ctx.seatBooking).not.toHaveBeenCalled()
+  })
+
+  it('他筆預配重疊 → 按「仍要入座」才入座', async () => {
+    setCtx({ bookings: [YU, other('11:30')] })
+    drawer()
+    act(() => { btn('客人到了 — 入座').click() })
+    await flush()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(ctx.seatBooking).toHaveBeenCalledWith('Y1')
+    expect(toast.action.mock.calls[0][0]).toBe('余先生 已入座 105')
+  })
+
+  it('預配客人到場（桌仍空）＋今日團保 → 跳確認；取消就不指派也不入座', async () => {
+    setCtx({ bookings: [YU], tables: [mkT('105')], groups: GROUP_105 })
+    confirm.mockResolvedValue(false)
+    mount(<TableDrawer table={mkT('105')} booking={null} preassign={YU} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} />)
+    const b = btns().find(x => x.textContent.includes('余先生'))
+    act(() => { b.click() })
+    await flush()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('105 為今日團體「甲旅行社」預留'), expect.anything())
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+    expect(ctx.seatBooking).not.toHaveBeenCalled()
+  })
+})
+
+describe('訂位詳情「客人到了」：預配／團保衝突確認（與今日訂位卡同一套）', () => {
+  const sheet = (onClose = vi.fn()) => { mount(<BookingDetailSheet bookingId="Y1" onClose={onClose} />); return onClose }
+
+  it('他筆預配不重疊（18:00）→ 不跳確認、直接入座、關閉詳情', async () => {
+    setCtx({ bookings: [YU, other('18:00')] })
+    const onClose = sheet()
+    act(() => { btn('客人到了').click() })
+    await flush()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(ctx.seatBooking).toHaveBeenCalledWith('Y1')
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('他筆預配重疊（11:30）→ 跳確認；取消就不入座、詳情不關', async () => {
+    setCtx({ bookings: [YU, other('11:30')] })
+    confirm.mockResolvedValue(false)
+    const onClose = sheet()
+    act(() => { btn('客人到了').click() })
+    await flush()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('用餐時段重疊'), expect.objectContaining({ title: '桌位有預留' }))
+    expect(ctx.seatBooking).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('今日團保桌 → 跳確認，按「仍要入座」才入座', async () => {
+    setCtx({ bookings: [YU], tables: [mkT('105', { status: 'reserved', currentBookingId: 'Y1' })], groups: GROUP_105 })
+    sheet()
+    act(() => { btn('客人到了').click() })
+    await flush()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('105 為今日團體「甲旅行社」預留'), expect.anything())
+    expect(ctx.seatBooking).toHaveBeenCalledWith('Y1')
+  })
+})
+
+describe('seatAfterArriveConfirm（共用）', () => {
+  it('無衝突 → 同步執行 proceed 並回傳其結果；有衝突取消 → false、不執行', async () => {
+    const proceed = vi.fn(() => 'done')
+    expect(seatAfterArriveConfirm(YU, { confirm, bookings: [YU, other('18:00')] }, proceed)).toBe('done')
+    confirm.mockResolvedValue(false)
+    proceed.mockClear()
+    expect(await seatAfterArriveConfirm(YU, { confirm, bookings: [YU, other('11:30')] }, proceed)).toBe(false)
+    expect(proceed).not.toHaveBeenCalled()
   })
 })
 
