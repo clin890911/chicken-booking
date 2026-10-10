@@ -13,6 +13,7 @@ import PhoneLink from './PhoneLink'
 import { normalizeSplit, splitSuffix } from '../../../utils/partySplit'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import WaitlistHistorySheet from './WaitlistHistorySheet'
+import GlyphText from '../../ui/GlyphText'
 
 // 候位人數上限與散客後台相同（200，見 GuestCountField／PartySizeField）；線上訂位的 12 人上限不在這裡。
 // 超過單桌常見容量（12）＝大組，入座時需併桌（seatingService 的候位入座已支援併桌）。
@@ -161,7 +162,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                   aria-label="棄號"
                   title="棄號"
                 >
-                  ✕
+                  <GlyphText>✕</GlyphText>
                 </button>
               </div>}
             </div>

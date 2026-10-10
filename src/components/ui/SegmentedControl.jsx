@@ -8,7 +8,7 @@ import Icon from './Icon'
 export default function SegmentedControl({ options, value, onChange, size = 'md', fill = false, className = '', ariaLabel }) {
   const h = size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3.5 text-[13px]'
   return (
-    <div className={`inline-flex rounded-[10px] bg-chicken-brown/[0.07] p-0.5 ${fill ? 'w-full' : ''} ${className}`} aria-label={ariaLabel}>
+    <div className={`lg-seg inline-flex rounded-[10px] bg-chicken-brown/[0.07] p-0.5 ${fill ? 'w-full' : ''} ${className}`} aria-label={ariaLabel}>
       {options.map(o => {
         const active = value === o.key
         return (

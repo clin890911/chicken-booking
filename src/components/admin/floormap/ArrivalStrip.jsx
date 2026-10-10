@@ -19,6 +19,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { overdueMinOf } from '../../../utils/bookingPulse'
 import { isArriveEligible, isPreassignArriveEligible } from './FloorMap'
+import GlyphText from '../../ui/GlyphText'
 
 // 遲到判定沿用 UpcomingPanel/BookingCard 既有口徑（graceMin=15，見 utils/bookingPulse.js）。
 const LATE_GRACE_MIN = 15
@@ -184,7 +185,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                              motion-safe:transition-transform motion-safe:active:scale-95"
                   style={{ height: 44, minWidth: 44, paddingLeft: 12, paddingRight: 12 }}
                 >
-                  ✓ 到了
+                  <GlyphText>✓ 到了</GlyphText>
                 </button>
               </div>
             )

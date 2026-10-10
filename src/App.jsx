@@ -4,6 +4,7 @@ import { BookingProvider } from './contexts/BookingContext'
 import { ToastProvider, ConfirmProvider } from './components/ui/Toast'
 import { LoadingScreen } from './components/ui'
 import ErrorBoundary from './components/ErrorBoundary'
+import { GlassProvider } from './contexts/GlassContext'
 import HomePage from './pages/HomePage'
 import BookingPage from './pages/BookingPage'
 import ConfirmPage from './pages/ConfirmPage'
@@ -46,6 +47,7 @@ function AppRoutes() {
 
 export default function App() {
   return (
+    <GlassProvider>
     <ToastProvider>
       <ConfirmProvider>
         <AuthProvider>
@@ -55,5 +57,6 @@ export default function App() {
         </AuthProvider>
       </ConfirmProvider>
     </ToastProvider>
+    </GlassProvider>
   )
 }

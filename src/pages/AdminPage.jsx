@@ -163,7 +163,7 @@ export default function AdminPage() {
   const navTo = (t) => { setTaskSource(null); if (t !== 'bookings') setAddPrefill(null); setTab(t) }
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-chicken-cream flex">
+    <div className="lg-canvas h-[100dvh] overflow-hidden bg-chicken-cream flex">
       {/* 桌面版側邊導航 */}
       <SidebarNav tabs={TABS} active={tab} onChange={navTo} badges={badges} />
 

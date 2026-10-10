@@ -15,6 +15,7 @@ import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
 import PhoneLink from '../ops/PhoneLink'
 import { splitSuffix } from '../../../utils/partySplit'
+import GlyphText from '../../ui/GlyphText'
 
 
 // 搜尋：姓名／電話（含末碼，忽略符號）／桌號（主桌＋副桌）
@@ -270,7 +271,7 @@ export default function UpcomingPanel({ onClickBooking, onAssignTable, onMoveTab
         />
         {query && (
           <button type="button" onClick={() => setQuery('')} aria-label="清除搜尋"
-            className="absolute right-0 top-0 h-full min-w-[44px] text-chicken-brown/60 text-base">✕</button>
+            className="absolute right-0 top-0 h-full min-w-[44px] text-chicken-brown/60 text-base"><GlyphText>✕</GlyphText></button>
         )}
       </div>
       {searching && matchCount === 0 && (

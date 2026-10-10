@@ -1,3 +1,12 @@
+import {
+  Armchair, Map as MapIcon, ClipboardList, Users, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown, Plus, Bus, User,
+  Leaf, Baby, Footprints, Accessibility, TriangleAlert, Printer, Target, Clock, Copy, Utensils, Calendar, UtensilsCrossed,
+  Ban, Search, CalendarCheck, Building2, Globe, Bell, Lock, PawPrint, Wrench, Trash2, Check, CircleCheck, Info, Flag, Phone,
+  Receipt, Inbox, Hourglass, MousePointer2, LayoutPanelTop, ListOrdered, Move, Medal, MapPin, ArrowRight, X, Undo2, ArrowLeftRight,
+  Lightbulb, Delete,
+} from 'lucide-react'
+import { useGlass } from '../../contexts/GlassContext'
+
 // 單色線條圖示（24 格、1.8 描邊、currentColor）。後台導覽與規劃頁以此取代 emoji：
 // emoji 在不同裝置字型不一、無法跟隨文字色，也讓畫面顯得雜；線條圖示可依 className 控色/控大小。
 // 用法：<Icon name="bus" size={18} className="text-chicken-red" />
@@ -57,7 +66,31 @@ const PATHS = {
   arrowRight: <><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></>,
 }
 
+// Liquid Glass 打樣：玻璃模式改用 lucide-react（一致的 2px 線寬、圓角端點、與 SF Symbols 同調）。
+// 未開玻璃時走下方原本的手繪 PATHS，畫面與 main 逐像素相同。
+const LUCIDE = {
+  ops: Armchair, planning: MapIcon, bookings: ClipboardList, roster: Users, settings: Settings, logout: LogOut,
+  chevronLeft: ChevronLeft, chevronRight: ChevronRight, chevronDown: ChevronDown, plus: Plus, bus: Bus, person: User,
+  leaf: Leaf, child: Baby, walk: Footprints, wheelchair: Accessibility, warning: TriangleAlert, print: Printer, map: MapIcon,
+  target: Target, clock: Clock, copy: Copy, utensils: Utensils, calendar: Calendar, table: UtensilsCrossed, ban: Ban,
+  search: Search, today: CalendarCheck, building: Building2, clockSettings: Clock, globe: Globe, bell: Bell, lock: Lock,
+  paw: PawPrint, wrench: Wrench, trash: Trash2, check: Check, checkCircle: CircleCheck, info: Info, flag: Flag, phone: Phone,
+  receipt: Receipt, users: Users, inbox: Inbox, hourglass: Hourglass, pointer: MousePointer2, layout: LayoutPanelTop,
+  traffic: ListOrdered, move: ArrowLeftRight, medal: Medal, chair: Armchair, mark: MapPin, arrowRight: ArrowRight,
+  // 玻璃模式另外用到的（取代 ✕ ↩ ⇄ 💡 ⌫ 等字元圖示）
+  close: X, undo: Undo2, swap: ArrowLeftRight, idea: Lightbulb, backspace: Delete,
+}
+export const hasGlassIcon = (name) => !!LUCIDE[name]
+
 export default function Icon({ name, size = 20, strokeWidth = 1.8, className = '', title }) {
+  const glass = useGlass()
+  if (glass && LUCIDE[name]) {
+    const L = LUCIDE[name]
+    return (
+      <L size={size} strokeWidth={Math.max(strokeWidth, 2)} className={`shrink-0 ${className}`}
+        aria-hidden={title ? undefined : true} role={title ? 'img' : undefined} aria-label={title} />
+    )
+  }
   const d = PATHS[name]
   if (!d) return null
   return (

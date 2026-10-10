@@ -4,11 +4,15 @@
 // tone：
 //   'light'（預設）＝白底，內嵌在表單裡（3 欄 4 排：1–9 / 清除 0 ⌫）
 //   'dark'         ＝深色漂浮鍵盤用（3 欄 4 排：1–9 / ⌫ 0 OK），OK 呼叫 onDone 收起面板
+import Icon from '../../ui/Icon'
+import { useGlass } from '../../../contexts/GlassContext'
+
 const KEYS_LIGHT = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '清除', '0', '⌫']
 const KEYS_DARK = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK']
 
 export default function NumericKeypad({ value = '', onChange, maxLen = 10, tone = 'light', onDone }) {
   const dark = tone === 'dark'
+  const glass = useGlass()
   const keys = dark ? KEYS_DARK : KEYS_LIGHT
   const press = (k) => {
     if (k === 'OK') return onDone?.()
@@ -34,7 +38,7 @@ export default function NumericKeypad({ value = '', onChange, maxLen = 10, tone 
             : `h-12 rounded-xl border border-chicken-brown/10 bg-white font-bold text-chicken-brown active:scale-95 transition-transform ${
               k === '清除' ? 'text-sm text-chicken-brown/60' : 'text-lg'}`}
         >
-          {k}
+          {glass && k === '⌫' ? <Icon name="backspace" size={26} className="mx-auto" /> : k}
         </button>
       ))}
     </div>

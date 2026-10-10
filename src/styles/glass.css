@@ -1,0 +1,266 @@
+/* ==========================================================================
+   Liquid Glass 打樣（spike/liquid-glass，不直接上線）
+   開關：<html data-glass="chrome">（A：只有控制層玻璃）｜"full"（B：卡片/面板也玻璃）｜沒有＝main 原樣。
+   本檔所有規則都掛在 :root[data-glass] 底下 → 沒設屬性時一條都不生效（與 main 逐像素相同）。
+
+   🔴 不可違反的實作約束（現場頁一面式版面）：
+   1. backdrop-filter 一律畫在 ::before 偽元素上，**不直接加在宿主元素**——
+      宿主若帶 backdrop-filter 會變成 position:fixed 子孫的 containing block
+      （FloorMap「放大視圖」是 fixed inset-3、Modal 是 fixed inset-0，未 portal），會被困在面板裡。
+      偽元素的 backdrop-filter 不影響宿主的子孫定位。
+   2. 宿主只加 isolation:isolate（建立堆疊脈絡讓 ::before 的 z-index:-1 留在宿主內），
+      不加 transform / filter / will-change / contain，不改 height、不動 min-h-0。
+   3. position:relative 用 :where() 包成 0 特異度——宿主原本的 sticky/fixed/absolute 一律勝出。
+   4. 進場動畫只動 transform（宿主若帶 opacity<1 會變 backdrop root，玻璃在動畫中會「先糊後清」）。
+   ========================================================================== */
+
+:root[data-glass] {
+  --lg-ink: 58 46 38;                 /* chicken-brown */
+  --lg-tint: 255 255 255;
+  --lg-alpha: .66;                    /* regular glass：控制層（側欄、頂列、分段） */
+  --lg-alpha-strong: .84;             /* 文字多的玻璃：toast、sheet、抽屜（Apple「Regular」變體） */
+  --lg-alpha-panel: .42;              /* B 版內容面板（透得出桌布，才是「全面玻璃」） */
+  --lg-blur: 22px;
+  --lg-sat: 1.7;
+  /* iOS 27：玻璃外緣加一圈「變暗的邊」＋更亮的鏡面高光，增加與背景的分離度 */
+  --lg-edge: rgb(var(--lg-ink) / .12);
+  --lg-spec: rgb(255 255 255 / .9);
+  --lg-shadow: 0 10px 30px rgb(var(--lg-ink) / .12), 0 1px 3px rgb(var(--lg-ink) / .08);
+  --lg-shadow-sm: 0 2px 10px rgb(var(--lg-ink) / .08), 0 0 0 .5px rgb(var(--lg-ink) / .06);
+  /* Apple 預設 UI spring（damping 1.0、response 0.35s）的 CSS linear() 近似；不 overshoot */
+  --lg-spring: linear(0, .075 5%, .227 10%, .39 15%, .536 20%, .656 25%, .75 30%, .821 35%, .873 40%, .911 45%, .938 50%, .957 55%, .971 60%, .98 65%, .986 70%, .991 75%, .994 80%, .996 85%, .998 90%, 1);
+  --lg-spring-dur: 500ms;
+}
+
+/* 背景「桌布」：極淡的暖色光暈，讓半透明材質讀得出來（色相取品牌米/杏，飽和度壓低以免干擾文字） */
+:root[data-glass] .lg-canvas {
+  background-color: #f6f1e8 !important;
+  background-image:
+    radial-gradient(60% 50% at 8% 0%, rgb(242 145 0 / .10), transparent 70%),
+    radial-gradient(50% 60% at 100% 100%, rgb(158 182 58 / .12), transparent 70%),
+    radial-gradient(40% 40% at 60% 30%, rgb(230 0 18 / .04), transparent 70%);
+}
+
+/* B 版桌布：飽和度再拉高一點——全面玻璃要有東西可透，否則面板看起來只是「灰一點的白」 */
+:root[data-glass="full"] .lg-canvas {
+  background-color: #f3ebdd !important;
+  background-image:
+    radial-gradient(55% 55% at 5% 5%, rgb(242 145 0 / .28), transparent 70%),
+    radial-gradient(55% 65% at 100% 100%, rgb(158 182 58 / .30), transparent 70%),
+    radial-gradient(45% 45% at 65% 25%, rgb(230 0 18 / .10), transparent 70%);
+}
+
+/* ---------- 共用玻璃材質（::before 承載） ---------- */
+:where(:root[data-glass]) :where(.lg-chrome, .lg-toolbar, .lg-seg, .lg-sheet, .lg-toast, .lg-mode, .lg-keypad) {
+  position: relative;
+}
+:root[data-glass] :is(.lg-chrome, .lg-toolbar, .lg-seg, .lg-sheet, .lg-toast, .lg-mode, .lg-keypad) {
+  isolation: isolate;
+  background: transparent !important;
+  border-color: transparent !important;
+}
+:root[data-glass] :is(.lg-chrome, .lg-toolbar, .lg-seg, .lg-sheet, .lg-toast, .lg-mode, .lg-keypad)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: rgb(var(--lg-tint) / var(--lg-alpha));
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-sat));
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-sat));
+  box-shadow:
+    inset 0 1px 0 var(--lg-spec),            /* 上緣鏡面高光 */
+    inset 0 -1px 0 rgb(255 255 255 / .35),   /* 下緣折射 */
+    inset 0 0 0 1px var(--lg-edge);          /* iOS 27 暗邊 */
+}
+
+/* ---------- A＋B：控制層 ---------- */
+
+/* 側欄：浮起的玻璃窗格（iPadOS 26 sidebar），四周留 10px 讓桌布透出 */
+:root[data-glass] .lg-sidebar {
+  margin: 10px 0 10px 10px;
+  height: calc(100dvh - 20px) !important;
+  top: 10px !important;
+  border-radius: 28px;
+  border-right: 0 !important;
+  box-shadow: var(--lg-shadow);
+}
+:root[data-glass] .lg-sidebar [aria-current="page"] {
+  background: rgb(230 0 18 / .10) !important;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px rgb(230 0 18 / .12);
+}
+:root[data-glass] .lg-sidebar .border-t { border-color: rgb(var(--lg-ink) / .08) !important; }
+
+/* 底部導覽（手機/直向）：膠囊浮在內容上 */
+:root[data-glass] .lg-bottomnav {
+  margin: 0 12px calc(8px + env(safe-area-inset-bottom));
+  border-radius: 999px;
+  border-top: 0 !important;
+  box-shadow: var(--lg-shadow);
+}
+
+/* 現場頁頂列：一條玻璃膠囊收納統計 pill / 樓層 / 視圖 */
+:root[data-glass] .lg-toolbar {
+  border-radius: 999px;
+  padding: 0 4px 0 12px;              /* 只加水平內距：一面式版面的垂直預算一 px 都不能多吃 */
+  box-shadow: var(--lg-shadow-sm);
+}
+
+/* 分段控制：玻璃軌道＋白色「鏡片」選中段 */
+:root[data-glass] .lg-seg {
+  border-radius: 999px;
+  padding: 2px;                       /* 與原 p-0.5 相同，不多吃高度 */
+}
+:root[data-glass] .lg-seg > button {
+  border-radius: 999px;
+  transition: transform var(--lg-spring-dur) var(--lg-spring), background-color 160ms ease, color 160ms ease;
+}
+:root[data-glass] .lg-seg > button[aria-pressed="true"] {
+  box-shadow: 0 2px 8px rgb(var(--lg-ink) / .12), inset 0 0 0 .5px rgb(var(--lg-ink) / .08) !important;
+}
+
+/* 頂列裡的分段控制：玻璃上不再疊玻璃（Apple：避免 glass on glass），改成淡色軌道 */
+:root[data-glass] .lg-toolbar .lg-seg::before {
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  background: rgb(var(--lg-ink) / .07); box-shadow: none;
+}
+
+/* 帶位欄籤列：改成膠囊分段（內容面板裡的控制，A 版面板本身不透明） */
+:root[data-glass] .lg-tabs {
+  /* 高度與原籤列相同（44px 觸控、0 垂直外距）：左欄常態要一面式不捲，不能被裝飾吃掉高度 */
+  padding: 0 4px;
+  gap: 2px;
+  border: 0 !important;
+  background: rgb(var(--lg-ink) / .045);
+}
+:root[data-glass] .lg-tabs > button {
+  border: 0 !important;
+  margin: 0 !important;
+  transition: transform var(--lg-spring-dur) var(--lg-spring), background-color 160ms ease, color 160ms ease;
+}
+:root[data-glass] .lg-tabs > button { isolation: isolate; background: transparent !important; }
+/* 選中「鏡片」畫在 ::after（內縮 5px），按鈕本身維持 44px 觸控高度 */
+:root[data-glass] .lg-tabs > button[data-active="true"]::after {
+  content: ''; position: absolute; inset: 5px 2px; z-index: -1; border-radius: 999px; pointer-events: none;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(var(--lg-ink) / .12), inset 0 0 0 .5px rgb(var(--lg-ink) / .08);
+}
+
+/* Sheet：modal 面板、確認框、桌抽屜（文字多 → strong 透明度） */
+:root[data-glass] .lg-sheet { border-radius: 28px !important; box-shadow: var(--lg-shadow) !important; }
+:root[data-glass] .lg-sheet::before { background: rgb(var(--lg-tint) / var(--lg-alpha-strong)); }
+:root[data-glass] .lg-sheet .bg-gradient-to-b { background: transparent !important; }
+
+/* Toast：淺色厚玻璃＋深色字；類型靠左側實色圖示膠囊（不再整塊綠底白字 → 綠底白字只有 2.2:1） */
+:root[data-glass] .lg-toast {
+  border-radius: 22px !important;
+  color: rgb(var(--lg-ink)) !important;
+  box-shadow: var(--lg-shadow) !important;
+  padding-left: 10px !important;
+}
+:root[data-glass] .lg-toast::before { background: rgb(var(--lg-tint) / var(--lg-alpha-strong)); }
+:root[data-glass] .lg-toast .lg-toast-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 999px; color: #fff;
+}
+:root[data-glass] .lg-toast[data-type="success"] .lg-toast-icon { background: #047857; } /* emerald-700 */
+:root[data-glass] .lg-toast[data-type="error"]   .lg-toast-icon { background: #c8000f; }
+:root[data-glass] .lg-toast[data-type="info"]    .lg-toast-icon { background: rgb(var(--lg-ink)); }
+:root[data-glass] .lg-toast[data-type="warning"] .lg-toast-icon { background: #b45309; } /* amber-700 */
+:root[data-glass] .lg-toast [data-testid="toast-action"] {
+  background: rgb(var(--lg-ink)) !important; color: #fff !important; border-radius: 999px !important; box-shadow: none !important;
+}
+:root[data-glass] .lg-toast [aria-label="關閉"] { opacity: .7; }
+
+/* ModeBanner：模式色是防誤判的安全語義，保留色相，只改成「有色玻璃」；
+   色階加深一級（sky-600→700、emerald-600→800）才讓白字過 AA（原 sky-600 白字 4.1、emerald-600 3.8 都不過） */
+:root[data-glass] .lg-mode { border-radius: 22px !important; box-shadow: var(--lg-shadow) !important; }
+:root[data-glass] .lg-mode[data-tone="assign"]::before { background: rgb(3 105 161 / .92); }   /* sky-700 */
+:root[data-glass] .lg-mode[data-tone="waitlist"]::before { background: rgb(6 95 70 / .92); }  /* emerald-800 */
+:root[data-glass] .lg-mode[data-tone="move"]::before { background: rgb(67 56 202 / .92); }     /* indigo-700 */
+:root[data-glass] .lg-mode[data-tone="group"]::before { background: rgb(109 40 217 / .92); }   /* violet-700 */
+:root[data-glass] .lg-mode button { border-radius: 999px !important; }
+
+/* 浮動數字鍵盤：深色玻璃（領位一邊看桌一邊打電話，鍵盤底下的桌況要透得出輪廓） */
+:root[data-glass] .lg-keypad { border-radius: 28px !important; padding: 14px !important; }
+:root[data-glass] .lg-keypad::before {
+  background: rgb(43 35 32 / .80);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), inset 0 0 0 1px rgb(0 0 0 / .25), 0 18px 50px rgb(0 0 0 / .35);
+}
+:root[data-glass] .lg-keypad button { border-radius: 18px !important; }
+:root[data-glass] .lg-keypad button:not([class*="bg-chicken-yellow"]) {
+  background: rgb(255 255 255 / .13) !important;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .12);
+}
+:root[data-glass] .lg-keypad [aria-label="收起鍵盤"] { width: 44px !important; height: 44px !important; } /* 原 32px，補到 44 */
+
+/* 按壓回饋：spring 回彈（只動 transform） */
+:root[data-glass] .tap { transition: transform var(--lg-spring-dur) var(--lg-spring), opacity 120ms ease-out; }
+:root[data-glass] .tap:active { transition-duration: 90ms; }
+
+/* 次要文字「vibrancy」：玻璃模式下 brown/40–65 的小字提到 /78（原 /60 即使在白底也只有 3.8:1，不過 AA） */
+:root[data-glass] :is([class*="text-chicken-brown/4"], [class*="text-chicken-brown/5"], [class*="text-chicken-brown/6"]) {
+  color: rgb(var(--lg-ink) / .78) !important;
+}
+
+/* 品牌色實心鈕的字：白字在雞王綠/雞王黃/橘上只有 2.2–2.9:1（main 既有問題）。
+   玻璃模式保留底色（色相＝語義不動），字改深棕 → 5.2–5.7:1。 */
+:root[data-glass] :is(.bg-chicken-green, .bg-chicken-yellow, .bg-orange-500, .bg-amber-500, .bg-amber-400).text-white,
+:root[data-glass] .lg-keypad .bg-chicken-yellow {
+  color: rgb(var(--lg-ink)) !important;
+}
+/* 品牌色當「字色」時加深一階：雞王綠字 2.0:1 → 深橄欖；雞王紅字在淡紅底 3.4–3.9:1 → 深紅 */
+:root[data-glass] .text-chicken-green { color: #4b6310 !important; }
+:root[data-glass] :is(.text-chicken-red, .lg-sidebar [aria-current="page"]) { color: #b8000e !important; }
+
+/* ---------- B 版（full）：內容面板與卡片也玻璃 ---------- */
+:where(:root[data-glass="full"]) :where(.lg-panel, .card, .surface, .list-group) { position: relative; }
+:root[data-glass="full"] :is(.lg-panel, .card, .surface, .list-group) {
+  isolation: isolate;
+  background: transparent !important;
+  border-color: transparent !important;
+  border-radius: 22px !important;
+  box-shadow: var(--lg-shadow-sm) !important;
+}
+:root[data-glass="full"] :is(.lg-panel, .card, .surface, .list-group)::before {
+  content: '';
+  position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: rgb(var(--lg-tint) / var(--lg-alpha-panel));
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-sat));
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-sat));
+  box-shadow: inset 0 1px 0 var(--lg-spec), inset 0 0 0 1px var(--lg-edge);
+}
+/* 面板內的白底列（候位卡、訂位卡、欄位）跟著半透明，才是「全面玻璃」 */
+:root[data-glass="full"] .lg-panel .bg-white { background-color: rgb(255 255 255 / .38) !important; }
+:root[data-glass="full"] .lg-panel .bg-white.flex-none { background-color: transparent !important; } /* 釘底動作列 */
+
+/* ---------- 輔助選項 ---------- */
+/* 降低透明度：材質退回不透明、拿掉模糊（iOS「降低透明度」/ iOS 27 滑桿最右端） */
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-glass] :is(.lg-chrome, .lg-toolbar, .lg-seg, .lg-sheet, .lg-toast, .lg-panel, .card, .surface, .list-group)::before {
+    background: #fff !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  :root[data-glass] .lg-keypad::before { background: #2b2320 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  :root[data-glass] .lg-mode::before { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  :root[data-glass] .lg-mode[data-tone="assign"]::before { background: rgb(3 105 161) !important; }
+  :root[data-glass] .lg-mode[data-tone="waitlist"]::before { background: rgb(6 95 70) !important; }
+  :root[data-glass] .lg-mode[data-tone="move"]::before { background: rgb(67 56 202) !important; }
+  :root[data-glass] .lg-mode[data-tone="group"]::before { background: rgb(109 40 217) !important; }
+  :root[data-glass] .lg-canvas { background-image: none !important; }
+}
+/* 增加對比：玻璃邊框加深成實線 */
+@media (prefers-contrast: more) {
+  :root[data-glass] :is(.lg-chrome, .lg-toolbar, .lg-seg, .lg-sheet, .lg-toast, .lg-panel, .card, .surface, .list-group)::before {
+    background: #fff !important;
+    box-shadow: inset 0 0 0 1.5px rgb(var(--lg-ink) / .55) !important;
+  }
+}
+/* 減少動態：spring 回彈全關（framer 端由 MotionConfig reducedMotion="user" 處理） */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-glass] :is(.tap, .lg-seg > button, .lg-tabs > button) { transition: none !important; }
+  :root[data-glass] .tap:active { transform: none !important; }
+}

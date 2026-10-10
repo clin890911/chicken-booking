@@ -11,7 +11,7 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
   const confirm = useConfirm()
 
   return (
-    <aside className="hidden lg:flex flex-col w-[76px] xl:w-56 bg-[#fbfaf8] border-r border-chicken-brown/10 sticky top-0 h-[100dvh]">
+    <aside className="lg-chrome lg-sidebar hidden lg:flex flex-col w-[76px] xl:w-56 bg-[#fbfaf8] border-r border-chicken-brown/10 sticky top-0 h-[100dvh]">
       {/* Logo */}
       <div className="px-3 py-4 flex items-center justify-center xl:justify-start gap-2.5">
         <img src="/brand/master-of-chicken-logo-transparent.png" alt="雞王涮涮鍋" className="w-10 h-10 object-contain flex-shrink-0" />

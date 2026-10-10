@@ -1,13 +1,14 @@
 import Icon from '../../ui/Icon'
+import GlyphText from '../../ui/GlyphText'
 import { conflictLine } from '../../../utils/preassignOverride'
 import { formatBookingTables } from '../../../utils/bookingTables'
 // 現場營運的「模式 banner」：指派 / 候位入座 / 立即帶位 / 換桌 / 團體改派桌位
 // 依模式不同底色 + emoji 避免誤判；指派類模式帶二步確認列與預配衝突警告
 const BANNER_STYLE = {
-  assign:         { bg: 'bg-sky-600',    btn: 'text-sky-700',     icon: 'bookings' },
-  'seat-waitlist':{ bg: 'bg-emerald-600',btn: 'text-emerald-700', icon: 'traffic' },
-  move:           { bg: 'bg-indigo-600', btn: 'text-indigo-700',  icon: 'move' },
-  'group-reseat': { bg: 'bg-violet-600', btn: 'text-violet-700',  icon: 'bus' },
+  assign:         { bg: 'bg-sky-600',    btn: 'text-sky-700',     icon: 'bookings', tone: 'assign' },
+  'seat-waitlist':{ bg: 'bg-emerald-600',btn: 'text-emerald-700', icon: 'traffic', tone: 'waitlist' },
+  move:           { bg: 'bg-indigo-600', btn: 'text-indigo-700',  icon: 'move', tone: 'move' },
+  'group-reseat': { bg: 'bg-violet-600', btn: 'text-violet-700',  icon: 'bus', tone: 'group' },
 }
 
 const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
@@ -37,7 +38,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
     const bg = isWaitlist ? 'bg-emerald-600' : 'bg-sky-600'
     const cancelBtn = isWaitlist ? 'text-emerald-700' : 'text-sky-700'
     return (
-      <div className={`${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
+      <div data-tone={isWaitlist ? 'waitlist' : 'assign'} className={`lg-mode ${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
             <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
@@ -63,7 +64,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
             disabled={!ready}
             className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
               ready ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-          >✓ {mode.replacing ? '確認改桌' : isWaitlist ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}</button>
+          ><GlyphText>{`✓ ${mode.replacing ? '確認改桌' : isWaitlist ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}`}</GlyphText></button>
         </div>
         {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs">定位建議桌 {suggestionLabel}</button>}
         {!!selected.length && <button onClick={onClearSelection} className="text-xs underline min-h-[44px]">清空已選桌</button>}
@@ -114,7 +115,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
         : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
 
   return (
-    <div className={`${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
+    <div data-tone={style.tone} className={`lg-mode ${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
           <Icon name={style.icon} size={18} />
@@ -181,10 +182,10 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, mode, pend
                 onClick={onConfirm}
                 className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
                   (hasConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-              >{(willRelease || pendingGroupHold) ? (assignPreassign ? '仍要覆蓋預配' : '仍要覆蓋指派')
+              ><GlyphText>{(willRelease || pendingGroupHold) ? (assignPreassign ? '仍要覆蓋預配' : '仍要覆蓋指派')
                 : hasConflict ? (assignPreassign ? '仍要預配（他筆預配保留）' : '仍要指派（預配保留）')
                 : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'move' ? '✓ 確認改桌'
-                : assignPreassign ? '✓ 確認預配' : '✓ 確認指派'}</button>
+                : assignPreassign ? '✓ 確認預配' : '✓ 確認指派'}</GlyphText></button>
             </div>
           </div>
         </div>

@@ -1034,7 +1034,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
       {/* lg 以上＝一條頂列（約 44px）：現場・時間 + 六格 pill + 樓層 + 視圖 + 編輯佈局 + 登入者。
           lg 以下＝改版前的樓層/視圖列（大尺寸、可換行），統計已在上面那塊 grid。 */}
-      <div className="flex items-center gap-2 flex-wrap lg:flex-nowrap">
+      <div className="lg-toolbar flex items-center gap-2 flex-wrap lg:flex-nowrap">
         <div className="hidden lg:flex min-w-0">
           <span className="text-xs font-bold self-center mr-2 text-chicken-brown/60">全店</span>
           <StatusBar tablePresentation={tablePresentation} variant="compact" tables={tables} waitlist={waitlist} bookings={bookings} />
@@ -1107,7 +1107,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
             TableDrawer 是長內容 → 外層捲動；OpsRail 自己管內部捲動與釘底動作列 → 外層只給 flex 容器 */}
         <div className={`h-full min-h-0 ${selectedTableObj ? 'overflow-y-auto space-y-3' : 'flex flex-col'}`}>
           {mode ? (
-            <div role="region" aria-label="目前選桌任務" className="bg-white rounded-xl border border-chicken-brown/15 p-4 space-y-3">
+            <div role="region" aria-label="目前選桌任務" className="lg-panel bg-white rounded-xl border border-chicken-brown/15 p-4 space-y-3">
               <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.type === 'group-reseat' ? '團體改派' : '指派桌位'}</h2>
               <p className="font-bold">{mode.booking?.name || mode.wait?.name || mode.group?.agencyName} · {mode.need || mode.booking?.guests || mode.wait?.partySize || mode.batch?.guests} 位</p>
               {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
@@ -1185,7 +1185,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         </div>
 
         {/* 右欄：桌況（地圖 SVG／摘要／排程）。高度填滿剩餘空間，SVG 自動縮放 */}
-        <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 h-full min-h-[260px] overflow-hidden flex flex-col">
+        <div className="lg-panel bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 h-full min-h-[260px] overflow-hidden flex flex-col">
           {showSchedule ? (
             // 排程視圖＝縱向堆疊卡片，會長 → 內部捲動避免裁切
             <div className="flex-1 min-h-0 overflow-y-auto">

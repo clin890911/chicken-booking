@@ -291,7 +291,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   }
 
   return (
-    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden flex flex-col h-full">
+    <div className="lg-sheet bg-white rounded-xl border border-chicken-brown/10 overflow-hidden flex flex-col h-full">
       {/* Header */}
       <div className="px-5 pt-5 pb-3 border-b border-chicken-brown/10 bg-gradient-to-b from-white to-chicken-cream/30">
         <div className="flex items-start justify-between gap-2">

@@ -61,7 +61,7 @@ export default function OpsRail({
 
   if (reserve) {
     return (
-      <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 flex flex-col">
+      <div className="lg-panel bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 flex flex-col">
         <QuickReservePanel {...reserve} />
       </div>
     )
@@ -69,12 +69,13 @@ export default function OpsRail({
 
   return (
     // h-full min-h-0 flex-col：帶位面板要能把「滑動帶位」釘在欄位底部（捲動發生在面板內部）
-    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 flex flex-col">
-      <div className="flex-none flex border-b border-chicken-brown/10">
+    <div className="lg-panel bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 flex flex-col">
+      <div className="lg-tabs flex-none flex border-b border-chicken-brown/10">
         {tabs.map(t => (
           <button
             key={t.key}
             onClick={() => onTabChange(t.key)}
+            data-active={effective === t.key ? 'true' : undefined}
             className={`flex-1 min-h-[44px] px-2 py-2.5 text-sm font-bold transition-colors relative ${
               effective === t.key
                 ? 'text-chicken-red bg-chicken-red/5 border-b-2 border-chicken-red -mb-px'

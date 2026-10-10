@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Icon from './Icon'
+import GlyphText from './GlyphText'
+import { useGlass, SPRING_UI } from '../../contexts/GlassContext'
 
 // 輕量 Toast 系統：取代 alert/confirm，支援 Undo
 // 使用：
@@ -76,7 +78,24 @@ export function ToastProvider({ children }) {
   )
 }
 
+// 玻璃模式的進出場：spring、只動 transform——進場不從 opacity:0 出發（動畫時鐘凍結時內容仍可見，
+// 也避免宿主 opacity<1 讓 ::before 的 backdrop-filter 在動畫中失效）；退場才淡出。
+const GLASS_MOTION = {
+  initial: { y: -24, scale: 0.92 },
+  animate: { y: 0, scale: 1 },
+  exit: { opacity: 0, y: -16, scale: 0.96, transition: { duration: 0.16 } },
+  transition: SPRING_UI,
+}
+const MAIN_MOTION = {
+  initial: { opacity: 0, y: -12, scale: 0.95 },
+  animate: { opacity: 1, y: 0, scale: 1 },
+  exit: { opacity: 0, y: -12, scale: 0.95 },
+  transition: { duration: 0.18 },
+}
+
 function ToastContainer({ toasts, onDismiss }) {
+  const glass = useGlass()
+  const m = glass ? GLASS_MOTION : MAIN_MOTION
   return (
     // 全尺寸統一頂部置中：iPad 現場頁右下是地圖與報到列，原本 sm 以上的右下角 toast 會蓋住「到了」鈕與桌子。
     <div data-testid="toast-container" className="fixed top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none items-center">
@@ -84,13 +103,16 @@ function ToastContainer({ toasts, onDismiss }) {
         {toasts.map(t => (
           <motion.div
             key={t.id}
-            initial={{ opacity: 0, y: -12, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -12, scale: 0.95 }}
-            transition={{ duration: 0.18 }}
-            className={`pointer-events-auto rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 max-w-md min-w-[260px] ${TYPE_STYLES[t.type]}`}
+            initial={m.initial}
+            animate={m.animate}
+            exit={m.exit}
+            transition={m.transition}
+            data-type={t.type}
+            className={`lg-toast pointer-events-auto rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 max-w-md min-w-[260px] ${TYPE_STYLES[t.type]}`}
           >
-            <Icon name={TYPE_ICONS[t.type]} size={20} className="flex-shrink-0" />
+            {glass
+              ? <span className="lg-toast-icon flex-shrink-0"><Icon name={TYPE_ICONS[t.type]} size={18} /></span>
+              : <Icon name={TYPE_ICONS[t.type]} size={20} className="flex-shrink-0" />}
             <span className="flex-1 text-sm font-bold leading-snug">{t.message}</span>
             {t.action && (
               <button
@@ -98,14 +120,14 @@ function ToastContainer({ toasts, onDismiss }) {
                 data-testid="toast-action"
                 className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-white text-chicken-brown text-sm font-bold shadow-sm hover:bg-white/90 active:scale-95 flex-shrink-0"
               >
-                {t.action.label || '復原'}
+                <GlyphText size={16}>{t.action.label || '復原'}</GlyphText>
               </button>
             )}
             <button
               onClick={() => onDismiss(t.id)}
               className="opacity-60 hover:opacity-100 text-lg leading-none flex-shrink-0 min-h-[44px] min-w-[44px] -mr-2"
               aria-label="關閉"
-            >×</button>
+            ><GlyphText>×</GlyphText></button>
           </motion.div>
         ))}
       </AnimatePresence>
@@ -150,7 +172,7 @@ export function ConfirmProvider({ children }) {
           onClick={() => handle(false)}
         >
           <div
-            className={`animate-soft-enter bg-white rounded-2xl shadow-xl w-full max-w-sm p-6
+            className={`lg-sheet animate-soft-enter bg-white rounded-2xl shadow-xl w-full max-w-sm p-6
               ${state.options.danger ? 'border-l-4 border-chicken-red' : ''}`}
             onClick={e => e.stopPropagation()}
           >

@@ -6,7 +6,7 @@ const COLS = { 4: 'grid-cols-4', 5: 'grid-cols-5', 6: 'grid-cols-6', 7: 'grid-co
 
 export default function BottomNav({ tabs, active, onChange, badges = {} }) {
   return (
-    <nav className="lg:hidden flex-shrink-0 safe-bottom z-30 border-t border-chicken-brown/10 bg-[#fbfaf8]/95 backdrop-blur">
+    <nav className="lg-chrome lg-bottomnav lg:hidden flex-shrink-0 safe-bottom z-30 border-t border-chicken-brown/10 bg-[#fbfaf8]/95 backdrop-blur">
       <div className={`grid ${COLS[tabs.length] || 'grid-cols-5'} gap-1 px-2 pt-1 pb-1`}>
         {tabs.map(t => {
           const isActive = active === t.key

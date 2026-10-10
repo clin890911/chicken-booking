@@ -1,6 +1,7 @@
 import { useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Icon from './Icon'
+import { useGlass, SPRING_SHEET } from '../../contexts/GlassContext'
 
 // 預設 type="button"：避免包進 <form> 時被當成隱式 submit 誤觸送出；呼叫端仍可傳 type="submit" 覆寫。
 export function Button({ variant = 'primary', type = 'button', className = '', children, ...rest }) {
@@ -69,6 +70,11 @@ export function Badge({ color = 'red', children, className = '' }) {
 // 內容區 overscroll-contain：手機上捲到底不會把捲動「穿透」到底下的頁面（bottom sheet 常見的卡頓感來源）。
 export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
   const width = size === 'lg' ? 'sm:max-w-lg' : 'sm:max-w-md'
+  const glass = useGlass()
+  // 玻璃模式：sheet 用 spring、進場只動 transform（不從 opacity:0 出發，關鍵內容可見性不依賴動畫回呼）
+  const panelMotion = glass
+    ? { initial: { y: 40, scale: 0.98 }, animate: { y: 0, scale: 1 }, exit: { y: 40, opacity: 0 }, transition: SPRING_SHEET }
+    : { initial: { y: 30, opacity: 0 }, animate: { y: 0, opacity: 1 }, exit: { y: 30, opacity: 0 }, transition: { duration: 0.2, ease: [0.2, 0.8, 0.2, 1] } }
   return (
     <AnimatePresence>
       {open && (
@@ -79,9 +85,9 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
           onClick={onClose}
         >
           <motion.div
-            initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-            className={`bg-white w-full ${width} rounded-t-3xl sm:rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto overscroll-contain safe-bottom`}
+            initial={panelMotion.initial} animate={panelMotion.animate} exit={panelMotion.exit}
+            transition={panelMotion.transition}
+            className={`lg-sheet bg-white w-full ${width} rounded-t-3xl sm:rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto overscroll-contain safe-bottom`}
             onClick={e => e.stopPropagation()}
           >
             {title && <div className="px-5 pt-5 pb-2 text-lg font-bold text-chicken-brown">{title}</div>}
