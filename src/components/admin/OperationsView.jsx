@@ -15,7 +15,7 @@ import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
-import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor, buildPreassignTableMap } from '../../utils/capacity'
+import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor, buildPreassignTableMap, squeezeSeats } from '../../utils/capacity'
 import { assignmentKind, statusZh } from '../../utils/tableStatus'
 import { isTableUsableOnDate } from '../../utils/tableAvailability'
 import { conflictLine, releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } from '../../utils/preassignOverride'
@@ -489,9 +489,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reserveOpen, reserveSlot, reserveGuests, reserveNow, tables, bookings, groupReservations])
   const reserveCandidateNums = useMemo(() => reserveCalc.tables.map(t => t.number), [reserveCalc])
-  // 沒有任何今日可用單桌坐得下（大組）→ 不選桌（面板說明、存檔後再到今日訂位指派併桌）
+  // 沒有任何今日可用單桌坐得下（含擠一擠，大組）→ 不選桌（面板說明、存檔後再到今日訂位指派併桌）
   const reserveNeedsCombo = reserveOpen && reserveGuests > 0
-    && !tables.some(t => isTableUsableOnDate(t, todayStr()) && (Number(t.capacity) || 0) >= reserveGuests)
+    && !tables.some(t => isTableUsableOnDate(t, todayStr()) && squeezeSeats([t]) >= reserveGuests)
   const reserveTable = useMemo(() => {
     if (!reserveOpen || !reserveSlot || !canReserveAssign || reserveTablePick === 'none') return null
     if (reserveTablePick !== 'auto') return reserveCalc.tables.find(t => t.number === reserveTablePick) || null
@@ -521,7 +521,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (!t) return `${number} 不存在`
     const today = todayStr()
     if (!isTableUsableOnDate(t, today)) return `${number} 今日停用／維修中`
-    if ((Number(t.capacity) || 0) < reserveGuests) return `${number} 只有 ${t.capacity} 席，坐不下 ${reserveGuests} 位`
+    if (squeezeSeats([t]) < reserveGuests) return `${number} 只有 ${t.capacity} 席，擠一擠也坐不下 ${reserveGuests} 位`
     const kind = reserveCalc.kind
     const now = new Date(reserveNow)
     if (kind === 'hold' && t.status !== 'vacant') {
@@ -731,6 +731,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (mode?.type !== 'assign-multi') return 0
     return (mode.selected || []).reduce((s, n) => s + (tables.find(t => t.number === n)?.capacity || 0), 0)
   }, [mode, tables])
+  // 擠一擠後最多可坐幾位（每桌可多坐 1 位，見 capacity.squeezeSeats）；確認門檻看這個
+  const walkinMultiMaxSeats = useMemo(() => {
+    if (mode?.type !== 'assign-multi') return 0
+    return squeezeSeats((mode.selected || []).map(n => tables.find(t => t.number === n)).filter(Boolean))
+  }, [mode, tables])
 
   // 多桌確認：席數夠 → 一筆 booking 佔多桌。
   // kind='booking' → 指派該訂位（桌況 reserved，客人到了再入座）
@@ -761,7 +766,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       }
     }
     if (!multiWarningConfirmed) return toast.error('請先確認所選桌的預配／團體保留警示')
-    if (!mode.selected.length || walkinMultiSeats < mode.need) return toast.error(`還差 ${mode.need - walkinMultiSeats} 席，請再加桌`)
+    if (!mode.selected.length || walkinMultiMaxSeats < mode.need) return toast.error(`擠一擠也還差 ${mode.need - walkinMultiMaxSeats} 位，請再加桌`)
     const opts = { bookingId: mode.booking?.id, date: mode.booking?.date || todayStr(), timeSlot: mode.booking?.timeSlot }
     const current = (mode.kind === 'booking' && mode.lockKind === 'preassign' ? preassignableTables(1, opts) : findSuitableTables(1)).map(t => t.number)
     if (!mode.replacing && mode.selected.some(n => !current.includes(n))) return toast.error('所選桌已不可用，請重新選桌')
@@ -899,7 +904,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const nums = payload?.tableNumbers || []
     if (!nums.length) { toast.error('請先點桌況圖選一張桌'); return false }
     const guestData = {
-      name: payload.name, phone: payload.phone, guests: payload.guests, notes: payload.notes,
+      name: payload.name, phone: payload.phone, guests: payload.guests, children: payload.children, notes: payload.notes,
     }
     // 帶位前記下被覆蓋的預配（面板警示逐桌列出的那幾筆；店員已勾「仍要帶」才滑得動）
     const overridden = nums.flatMap(n => walkinConflictsFor(n))
@@ -914,7 +919,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     setLastSeated(snap)
     // M6：供下一組一鍵沿用。只存店員手打的 staffNotes——payload.notes 還含著
     // 由電話帶出的「過敏：xxx」，沿用會把上一位客人的過敏資訊掛到新客人身上。
-    setLastParty({ guests, notes: payload.staffNotes || '' })
+    setLastParty({ guests, children: Number(payload.children) || 0, notes: payload.staffNotes || '' })
     flashAssigned(nums[0])
     setWalkinTableNumbers([])
     // 不 setSelectedTable：留在帶位面板才能直接帶下一組（舊版會被 TableDrawer 蓋掉）
@@ -1083,6 +1088,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         pendingConflicts={pendingConflicts}
         pendingGroupHold={pendingGroupHold}
         multiSeats={walkinMultiSeats}
+        multiMaxSeats={walkinMultiMaxSeats}
         multiWarnings={multiWarnings}
         multiWarningConfirmed={multiWarningConfirmed}
         onConfirmWarning={(checked) => setMode(m => ({ ...m, confirmedWarning: checked ? multiWarningKey : null }))}

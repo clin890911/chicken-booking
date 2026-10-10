@@ -2,7 +2,8 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useConfirm } from '../../ui/Toast'
-import GuestCountField from '../GuestCountField'
+import PartySizeField from '../PartySizeField'
+import { normalizeSplit } from '../../../utils/partySplit'
 import NumericKeypad from './NumericKeypad'
 import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadges'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
@@ -96,6 +97,9 @@ export default function QuickReservePanel({
   const [phone, setPhone] = useState('')
   const [notes, setNotes] = useState({ child: false, pet: false, mobility: false, text: '' })
   const [showNoteText, setShowNoteText] = useState(false)
+  const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；預設 0
+  // 有小孩 →「兒童」自動勾且鎖住；notes.child 只記店員自己點的（小孩改回 0 時自動勾的會消失、自己勾的保留）
+  const hasKids = normalizeSplit(guests, kids).children > 0
   const [keypadOpen, setKeypadOpen] = useState(false)
   const [keypadPos, setKeypadPos] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -180,8 +184,9 @@ export default function QuickReservePanel({
       phone: phone.trim(),
       source,
       guests: Number(guests),
+      children: normalizeSplit(guests, kids).children,
       timeSlot,
-      notes: { ...notes, text: notes.text.trim() },
+      notes: { ...notes, child: notes.child || hasKids, text: notes.text.trim() },
     })
     // 成功時父層會把面板收起（元件卸載＝清空）；失敗則留著全部欄位讓店員重試
     if (ok === false) setBusy(false)
@@ -213,7 +218,7 @@ export default function QuickReservePanel({
             <span data-testid="reserve-table" className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-sm font-bold ${
               lockKind === 'preassign' ? 'bg-blue-100 text-blue-800' : 'bg-chicken-green/15 text-chicken-green'}`}>
               {lockKind === 'preassign' ? `預配 ${table.number}` : `桌 ${table.number}`}
-              <span className="text-[11px] font-semibold opacity-75">· {table.capacity} 人桌{table.number === suggestedNumber ? ' · 建議' : ''}</span>
+              <span className="text-[11px] font-semibold opacity-75">· {table.capacity} 人桌{Number(guests) > (Number(table.capacity) || 0) ? ' · 擠一擠' : ''}{table.number === suggestedNumber ? ' · 建議' : ''}</span>
             </span>
           ) : (
             <span data-testid="reserve-table" className="text-sm font-bold text-chicken-brown/60">
@@ -284,7 +289,7 @@ export default function QuickReservePanel({
           onCustomChange={setCustomName}
         />
 
-        <GuestCountField value={guests} onChange={onGuestsChange} size="lg" />
+        <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); onGuestsChange(t) }} size="lg" />
 
         <div>
           <label className="label !text-xs !mb-1">時段（今天 · 已過的不列）</label>
@@ -332,19 +337,25 @@ export default function QuickReservePanel({
         {/* 特殊需求：chips 一下點選；備註收合（多數訂位不需要） */}
         <div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            {NOTE_OPTIONS.map(n => (
-              <button key={n.key} type="button" aria-pressed={!!notes[n.key]}
-                onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
-                className={`${chipCls(!!notes[n.key])} inline-flex items-center gap-1`}>
-                <Icon name={n.icon} size={14} />{n.label}
-              </button>
-            ))}
+            {NOTE_OPTIONS.map(n => {
+              const locked = n.key === 'child' && hasKids
+              const active = !!notes[n.key] || locked
+              return (
+                <button key={n.key} type="button" aria-pressed={active} disabled={locked}
+                  title={locked ? '有小孩已自動標記' : undefined}
+                  onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
+                  className={`${chipCls(active)} inline-flex items-center gap-1 disabled:cursor-not-allowed`}>
+                  <Icon name={n.icon} size={14} />{n.label}
+                </button>
+              )
+            })}
             <button type="button" aria-expanded={showNoteText || !!notes.text}
               onClick={() => setShowNoteText(v => !v)}
               className="min-h-[44px] px-2 text-xs font-bold text-chicken-brown/60 underline underline-offset-2">
               {showNoteText || notes.text ? '備註 ▴' : '＋ 備註'}
             </button>
           </div>
+          {hasKids && <p className="mt-1 text-xs font-bold text-chicken-red/80">有小孩，已自動標記「兒童」</p>}
           {(showNoteText || notes.text) && (
             <input type="text" value={notes.text} aria-label="備註"
               onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}

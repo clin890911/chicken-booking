@@ -100,7 +100,7 @@ test('候位 9 位、無單桌可容 → 自動進併桌模式，確認後入座
   await expect(page.getByText('訪客')).toHaveCount(0)
 })
 
-test('併桌模式下把桌減到席數不足 → 確認鈕鎖住並提示還差幾席', async ({ page }) => {
+test('併桌模式下把桌減到席數不足（擠一擠也不夠）→ 確認鈕鎖住並提示還差幾位', async ({ page }) => {
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
   await page.getByRole('button', { name: /模擬登入/ }).click()
@@ -117,7 +117,7 @@ test('併桌模式下把桌減到席數不足 → 確認鈕鎖住並提示還差
   await page.locator('svg g:has(:text-is("105"))').first().click()
   await expect(page.getByRole('button', { name: /確認併桌入座/ })).toBeEnabled()
   await page.locator('svg g:has(:text-is("109"))').first().click()
-  await expect(page.getByText(/還差 \d+ 席/)).toBeVisible()
+  await expect(page.getByText(/擠一擠也還差 \d+ 位/)).toBeVisible()
   await expect(page.getByRole('button', { name: /確認入座/ })).toBeDisabled()
 })
 

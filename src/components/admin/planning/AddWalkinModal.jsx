@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { Modal, Input } from '../../ui'
-import GuestCountField from '../GuestCountField'
+import PartySizeField from '../PartySizeField'
+import { normalizeSplit } from '../../../utils/partySplit'
 import { useToast } from '../../ui/Toast'
 import TimeSlotPicker from '../../booking/TimeSlotPicker'
 import { useBooking } from '../../../contexts/BookingContext'
@@ -17,6 +18,7 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
   const toast = useToast()
 
   const [guests, setGuests] = useState(2)
+  const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；預設 0
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [timeSlot, setTimeSlot] = useState('')
@@ -43,7 +45,7 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
   useEffect(() => { setTimeSlot('') }, [date])
 
   const reset = () => {
-    setGuests(2); setName(''); setPhone(''); setTimeSlot(''); setNotes('')
+    setGuests(2); setKids(0); setName(''); setPhone(''); setTimeSlot(''); setNotes('')
     setAttempted(false)
   }
   const handleClose = () => { reset(); onClose?.() }
@@ -59,7 +61,7 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
     setBusy(true)
     try {
       const b = addBooking({
-        name: name.trim(), phone: phone.trim(), guests, date, timeSlot,
+        name: name.trim(), phone: phone.trim(), guests, children: normalizeSplit(guests, kids).children, date, timeSlot,
         notes: { text: notes.trim() },
         source: 'phone',
         status: 'confirmed',
@@ -85,7 +87,7 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
     }>
       <div className="space-y-4">
         {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
-        <GuestCountField value={guests} onChange={setGuests} />
+        <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); setGuests(t) }} />
 
         {/* 聯絡 */}
         <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐"

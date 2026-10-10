@@ -1,4 +1,5 @@
 import { formatDate, todayStr } from '../utils/timeSlots'
+import { splitFields } from '../utils/partySplit'
 // waitlistService：候位記錄管理
 // 使用情境：客人現場到店、桌位已滿，門口取號加入候位
 // schema: { id, takenAt, name, phone, partySize, lineUserId, estimatedMin,
@@ -50,6 +51,7 @@ export function create(data) {
     name: (data.name || '').trim() || '訪客',
     phone: (data.phone || '').trim(),
     partySize: Number(data.partySize) || 2,
+    ...splitFields(Number(data.partySize) || 2, data.children), // 大人／小孩（選填，partySize = 兩者相加）
     lineUserId: data.lineUserId || null,
     estimatedMin: Number(data.estimatedMin) || 20,
     status: 'waiting',

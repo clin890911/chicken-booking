@@ -6,6 +6,7 @@ import { useToast, useConfirm } from '../../ui/Toast'
 import { Badge } from '../../ui'
 import { batchSeated, sortedBatches } from '../../../utils/groupLive'
 import Icon from '../../ui/Icon'
+import PhoneLink from './PhoneLink'
 
 const STATUS_LABEL = {
   planned: { label: '已預排', color: 'gray' },
@@ -95,8 +96,10 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
             <Icon name={isDone ? 'checkCircle' : 'bus'} size={15} className={`inline-block align-[-2px] mr-1 ${isDone ? 'text-chicken-green' : 'text-chicken-red'}`} />{g.agencyName || '（未填旅行社）'}
             <Badge color={st.color} className="ml-1.5">{st.label}</Badge>
           </div>
-          <div className="text-[11px] text-chicken-brown/60 mt-0.5">
-            導遊 {g.guideName || '—'}{g.guidePhone ? `（${g.guidePhone}）` : ''}
+          {/* 導遊電話：格式化、放大、可點撥（過去是括號小字，忙時看不清） */}
+          <div className="flex items-baseline gap-2 flex-wrap mt-0.5">
+            <span className="text-xs text-chicken-brown/60">導遊 {g.guideName || '—'}</span>
+            <PhoneLink phone={g.guidePhone} className="text-sm" testId="guide-phone" />
           </div>
         </div>
         <button onClick={() => onOpenSheet?.(g)} className="flex-shrink-0 px-2 py-1 rounded-lg text-[11px] font-bold bg-white border border-chicken-brown/15 text-chicken-brown" title="回傳單" aria-label="回傳單"><Icon name="print" size={14} /></button>

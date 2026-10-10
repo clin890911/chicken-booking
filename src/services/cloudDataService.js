@@ -1,6 +1,7 @@
 import { compareWaitlistOrder } from '../utils/waitlistOrder'
 import { getSettings, saveSettings, normalizeSettingsShape } from './settingsService'
 import { changedSettingsKeys } from '../utils/settingsScope'
+import { mergeClosures } from '../utils/closuresMerge'
 
 const DEFAULT_FUNCTION_BASE = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
 
@@ -484,10 +485,13 @@ export async function pullCloudData() {
 // 其餘照寫，並在回應的 rejected 裡如實回報。不送這個旗標時後端維持舊的
 // 「任一集合越權即整包 403」行為（新後端＋舊前端的部署時間窗需要這個相容性）。
 // 🔴 推送閘門放在最底層：所有推送（差異推送、設定頁「上傳本機資料」）都經過這裡。
-export async function pushCloudData(dataset = localDataset(), { partial = false, settingsChangedKeys } = {}) {
+// closuresBase：本機同步基準線內的 closures（＝這台上次同步到的雲端值）。有送時後端改以日期為單位
+// 三方合併休店／關閉（functions/lib/closuresMerge.js），不再整個 closures 物件最後存檔者勝。
+export async function pushCloudData(dataset = localDataset(), { partial = false, settingsChangedKeys, closuresBase } = {}) {
   if (!cloudPulled) return awaitingFirstPullResult()
   const body = partial ? { dataset, partial: true } : { dataset }
   if (Array.isArray(settingsChangedKeys)) body.settingsChangedKeys = settingsChangedKeys
+  if (closuresBase && typeof closuresBase === 'object' && !Array.isArray(closuresBase)) body.closuresBase = closuresBase
   return staffRequest(endpoint('adminPushData'), {
     method: 'POST',
     body: JSON.stringify(body),
@@ -548,10 +552,14 @@ export async function pushChangedData() {
   // 同時告訴後端「相對上次同步基準線改了哪些頂層 key」：訂位專員（settings.closures）後端只套
   // 這裡列出的關閉 key，其餘沿用雲端（避免拿本機可能過時的整份 settings 蓋回雲端）。
   let settingsChangedKeys
+  let closuresBase
   if (settingsChanged) {
     changed.settings = ds.settings
     hasChange = true
-    settingsChangedKeys = changedSettingsKeys(parseSettingsBaseline(lastSynced.settings) || {}, ds.settings)
+    const baseSettings = parseSettingsBaseline(lastSynced.settings)
+    settingsChangedKeys = changedSettingsKeys(baseSettings || {}, ds.settings)
+    // 沒有基準線（從未同步過 settings）就不送：後端退回舊行為，不可拿預設值假裝是基準。
+    closuresBase = baseSettings?.closures
   }
   if (!hasChange) return { ok: true, skipped: true }
   // 先把「已標記待刪」的狀態落地：萬一接下來的網路請求整頁重新整理／中斷，
@@ -562,7 +570,7 @@ export async function pushChangedData() {
   if (Object.keys(deletedIds).length) payload.deletedIds = deletedIds
   let result
   try {
-    result = await pushCloudData(payload, { partial: true, settingsChangedKeys })
+    result = await pushCloudData(payload, { partial: true, settingsChangedKeys, closuresBase })
   } catch (err) {
     // 整包沒寫（基準線一律不推進）；候位衝突時記下夾帶的候位，下一次拉取改以雲端為準。
     if (isWaitlistConflictError(err) && changed.waitlist?.length) {
@@ -600,14 +608,32 @@ export async function pushChangedData() {
     }
   }
   if (settingsChanged) {
-    if (!rejected.settings) lastSynced.settings = stable(ds.settings)
+    // 後端做了休店／關閉三方合併：雲端的 closures＝合併結果（可能含別台同時存的日期），不是本機送出的那份。
+    const writtenSettings = applyClosuresMergeResult(ds.settings, result?.closuresMerge)
+    if (!rejected.settings) lastSynced.settings = stable(writtenSettings)
     // 部分套用（訂位專員改了關閉設定、同時有不能存的其他 key）：只推進已寫入的 key。
     else if (Array.isArray(result?.settingsApplied) && result.settingsApplied.length) {
-      advanceSettingsBaselineKeys(result.settingsApplied, ds.settings)
+      advanceSettingsBaselineKeys(result.settingsApplied, writtenSettings)
     }
   }
   persistSyncState()
   return result
+}
+
+// 後端回傳的休店／關閉合併結果 → (1) 回傳「實際寫進雲端」的 settings（送出值＋合併後 closures）供推進基準線；
+// (2) 把別台同時存的日期 rebase 進本機（推送期間本機若又改了 closures，以「送出值」為 base 再三方合併一次，
+//     保留推送後的本機新修改，不會被當成「本機刪掉了別人的日期」）。
+// 🔴 只有真的寫進雲端的才可推進基準線：基準線用後端回傳的合併結果，不用本機送出值、也不自己猜。
+// 形狀一律走本機正規化（normalizeSettingsShape／saveSettings），與 sync-baseline-keyorder 不變量一致，不會永久 dirty。
+// 舊後端（沒有 closuresMerge）→ 原樣回傳送出值（維持舊行為）。
+function applyClosuresMergeResult(sentSettings, closuresMerge) {
+  const merged = closuresMerge?.closures
+  if (!merged || typeof merged !== 'object' || Array.isArray(merged)) return sentSettings
+  const current = getSettings()
+  const rebased = mergeClosures(sentSettings?.closures, current.closures, merged).merged
+  const next = normalizeSettingsShape({ ...current, closures: rebased })
+  if (stable(next.closures) !== stable(current.closures)) saveSettings({ closures: next.closures })
+  return normalizeSettingsShape({ ...sentSettings, closures: merged })
 }
 
 // 使用者主動「放棄被拒的本機變更、改以雲端為準」。

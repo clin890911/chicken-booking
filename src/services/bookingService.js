@@ -7,6 +7,7 @@
 // 後端：localStorage（v0），未來切到 Firestore 只改本檔
 import * as customerService from './customerService'
 import * as tableService from './tableService'
+import { splitFields, normalizeSplit, forcedChildNotes } from '../utils/partySplit'
 
 const STORAGE_KEY = 'chicken_bookings_v1'
 const NOSHOW_KEY = 'chicken_noshow_v1'
@@ -124,11 +125,14 @@ export function create(data) {
     name: data.name?.trim() || '',
     phone: data.phone?.trim() || '',
     guests: Number(data.guests) || 1,
+    // 大人／小孩（選填）：只在有小孩時寫入，且一律由總人數回推，保證 guests = adults + children
+    ...splitFields(Number(data.guests) || 1, data.children),
     date: data.date,
     timeSlot: data.timeSlot,
     notes: {
       pet: !!data.notes?.pet,
-      child: !!data.notes?.child,
+      // 有小孩一律勾「兒童」（只補 true，不自動取消；鍵順序維持 pet/child/mobility/text）
+      child: !!data.notes?.child || normalizeSplit(Number(data.guests) || 1, data.children).children > 0,
       mobility: !!data.notes?.mobility,
       text: data.notes?.text || ''
     },
@@ -169,7 +173,11 @@ export function update(id, patch) {
   const list = read()
   const idx = list.findIndex(b => b.id === id)
   if (idx < 0) return null
-  list[idx] = { ...list[idx], ...patch, updatedAt: new Date().toISOString() }
+  const merged = { ...list[idx], ...patch }
+  // 有小孩一律勾「兒童」：任何寫入路徑（店員改單、客人改人數…）只要結果 children>0 就補 notes.child=true
+  const childNotes = forcedChildNotes(merged)
+  if (childNotes) merged.notes = childNotes
+  list[idx] = { ...merged, updatedAt: new Date().toISOString() }
   write(list)
   return list[idx]
 }

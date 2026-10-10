@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import MonthCalendar from '../booking/MonthCalendar'
 import TimeSlotPicker from '../booking/TimeSlotPicker'
 import { Card, Input, Textarea, Button } from '../ui'
-import GuestCountField from './GuestCountField'
+import PartySizeField from './PartySizeField'
+import { normalizeSplit, splitSuffix } from '../../utils/partySplit'
 import TablePickField from './TablePickField'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
@@ -11,7 +12,7 @@ import * as customerService from '../../services/customerService'
 import { getNoshowCount } from '../../services/bookingService'
 import { todayStr, dayLabel, formatDate, addDays } from '../../utils/timeSlots'
 import { isTableUsableOnDate } from '../../utils/tableAvailability'
-import { HOLD_LEAD_MIN } from '../../utils/capacity'
+import { HOLD_LEAD_MIN, squeezeSeats } from '../../utils/capacity'
 
 // 後台新增訂位 — 電話為先導鍵，自動帶顧客檔
 // 設計：緊湊單頁、由上而下一路填完；缺漏欄位即時列在底部黏性操作列（點 pill 捲到該欄）；
@@ -44,6 +45,10 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   const [source, setSource] = useState(initial?.source || 'phone')
   const [name, setName] = useState(initial?.name || '')
   const [guests, setGuests] = useState(2)
+  const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；guests 仍是總人數、容量邏輯只讀它
+  // 有小孩 →「兒童」自動勾且鎖住。notes.child 只記店員自己點的；有效值＝自己點的 || 有小孩，
+  // 所以小孩改回 0 時：自動勾的會跟著取消、店員自己勾的保留。
+  const hasKids = normalizeSplit(guests, kids).children > 0
   const [date, setDate] = useState(todayStr())
   const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState('')
@@ -141,7 +146,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   //   有 → 只是此刻沒空桌可鎖（被佔、被預配、團保）→ 預設「先不指派」，接近用餐時間再到現場頁指派
   //   沒有 → 需要併桌 → 預設「到桌況圖選（可併桌）」
   const anySingleFits = useMemo(
-    () => (tables || []).some(t => isTableUsableOnDate(t, date) && (Number(t.capacity) || 0) >= guests),
+    () => (tables || []).some(t => isTableUsableOnDate(t, date) && squeezeSeats([t]) >= guests),
     [tables, date, guests],
   )
   const emptyDefault = anySingleFits ? 'none' : 'map'
@@ -217,7 +222,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
     try {
       const choice = tableChoice
       const b = addBooking({
-        name, phone: phone.trim(), guests, date, timeSlot, notes,
+        name, phone: phone.trim(), guests, children: normalizeSplit(guests, kids).children, date, timeSlot, notes: { ...notes, child: notes.child || hasKids },
         source,
         status: 'confirmed',
         createdBy: user?.email || 'staff',
@@ -263,7 +268,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         toast.action(`${summary} 已建立`, { label: '預配桌位', onClick: () => onAssignTable?.(b) })
       }
       // 重設（保留 source）
-      setPhone(''); setName(''); setGuests(2)
+      setPhone(''); setName(''); setGuests(2); setKids(0)
       if (!continuous) setTimeSlot('')
       setNotes({ pet: false, child: false, mobility: false, text: '' })
       setTablePick('auto'); setTableNotice('')
@@ -354,10 +359,11 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         <div className="space-y-4">
           {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
           <div ref={guestsRef}>
-            <GuestCountField
-              value={guests}
-              onChange={setGuests}
-              hint={`已選：${guests} 位${guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}`}
+            <PartySizeField
+              total={guests}
+              kids={kids}
+              onChange={(t, c) => { setKids(c); setGuests(t) }}
+              hint={`已選：${guests} 位${splitSuffix({ guests, children: kids })}${guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}`}
             />
           </div>
 
@@ -419,6 +425,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
               lockKind={lockKind}
               leadMin={HOLD_LEAD_MIN}
               candidates={tableCandidates}
+              guests={guests}
               choice={tableChoice}
               onPick={pickTable}
               notice={tableNotice}
@@ -433,13 +440,17 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         <h2 className="font-bold text-chicken-brown mb-3">特殊需求（選填）</h2>
         <div className="grid grid-cols-3 gap-2 mb-3">
           {NOTE_OPTIONS.map(n => {
-            const active = notes[n.key]
+            const locked = n.key === 'child' && hasKids
+            const active = notes[n.key] || locked
             return (
               <button
                 type="button"
                 key={n.key}
+                aria-pressed={!!active}
+                disabled={locked}
+                title={locked ? '有小孩已自動標記' : undefined}
                 onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
-                className={`px-3 py-2.5 rounded-xl border-2 transition-all text-sm font-bold ${
+                className={`px-3 py-2.5 rounded-xl border-2 transition-all text-sm font-bold disabled:cursor-not-allowed ${
                   active
                     ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'
                     : 'border-chicken-brown/15 bg-white text-chicken-brown'
@@ -450,6 +461,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
             )
           })}
         </div>
+        {hasKids && <p className="-mt-1 mb-3 text-xs font-bold text-chicken-red/80">有小孩，已自動標記「兒童」</p>}
         <Textarea
           value={notes.text}
           onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}

@@ -3,12 +3,14 @@ import { createPortal } from 'react-dom'
 import { Input } from '../../ui'
 import { useToast } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
-import GuestCountField from '../GuestCountField'
+import PartySizeField from '../PartySizeField'
+import { normalizeSplit } from '../../../utils/partySplit'
 import NumericKeypad from './NumericKeypad'
 import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadges'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import Icon from '../../ui/Icon'
 import { todayStr } from '../../../utils/timeSlots'
+import { squeezeSeats } from '../../../utils/capacity'
 
 const KEYPAD_WIDTH = 392
 const KEYPAD_GAP = 12
@@ -40,6 +42,7 @@ export default function FastWalkInPanel({
   const [customName, setCustomName] = useState('')
   const [phone, setPhone] = useState('')
   const [notes, setNotes] = useState('')
+  const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；預設 0，常態只點大人
   const [keypadOpen, setKeypadOpen] = useState(false) // 漂浮數字鍵盤（點電話欄才跳）
   const [keypadPos, setKeypadPos] = useState(null)
   const [override, setOverride] = useState(false)   // 有警示時，店員要先明確解鎖才能確認
@@ -83,7 +86,10 @@ export default function FastWalkInPanel({
   useEffect(() => { seatFired.current = false }, [tables.map(t => t.number).join(','), guests, warning?.text])
   const g = Number(guests) || 0
   const seats = tables.reduce((sum, t) => sum + (t.capacity || 0), 0)
-  const enough = tables.length > 0 && g > 0 && seats >= g
+  // 擠一擠：每桌可多坐 1 位（6 人桌坐 7 位），超過原席數照樣可入座、但標黃提醒
+  const maxSeats = squeezeSeats(tables)
+  const enough = tables.length > 0 && g > 0 && maxSeats >= g
+  const squeezed = enough && seats < g
 
   // 即時可坐判定（不估時間）。已選桌看合計席數；沒選桌才給建議。
   let verdict = null
@@ -92,9 +98,11 @@ export default function FastWalkInPanel({
     const label = tables.map(t => t.number).join(' + ')
     verdict = g <= 0
       ? { tone: 'idle', icon: 'chair', text: `已選 ${label}（${seats} 席）· 再選人數` }
-      : enough
-        ? { tone: 'ok', icon: 'checkCircle', text: `${g} 位 → ${label}（${seats} 席）` }
-        : { tone: 'none', icon: 'warning', text: `${g} 位坐不下 ${seats} 席 → 再加一桌或換桌` }
+      : squeezed
+        ? { tone: 'multi', icon: 'warning', text: `${g} 位 → ${label}（${seats} 席，擠一擠超坐 ${g - seats} 位）` }
+        : enough
+          ? { tone: 'ok', icon: 'checkCircle', text: `${g} 位 → ${label}（${seats} 席）` }
+          : { tone: 'none', icon: 'warning', text: `${g} 位擠一擠也坐不下 ${seats} 席 → 再加一桌或換桌` }
   } else if (g > 0) {
     // 建議桌看「現在入座」的佔用區間 [現在, 現在+佔位)：避開其間已被別筆預配的桌與團保桌（只影響建議，不擋點選）
     const single = suggestTable(g, { date: todayStr(), mode: 'now' })
@@ -126,21 +134,21 @@ export default function FastWalkInPanel({
   const displayName = composeName(title, surname, customName.trim()) || matched?.name || ''
 
   const reset = () => {
-    onGuestsChange(2); setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
+    onGuestsChange(2); setKids(0); setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
     setPhone(''); setNotes(''); setKeypadOpen(false); setOverride(false)
   }
 
   const seat = () => {
     if (!tables.length) return toast.error('請先點桌況圖選一張桌')
     if (!(g > 0)) return toast.error('請選人數')
-    if (seats < g) return toast.error(`${g} 位坐不下 ${seats} 席`)
+    if (maxSeats < g) return toast.error(`${g} 位擠一擠也坐不下 ${seats} 席`)
     if (seatFired.current || blockedByWarning) return false
     seatFired.current = true
     const nm = displayName
     const allergyNote = matched?.allergies ? `過敏：${matched.allergies}` : ''
     const noteText = [notes.trim(), allergyNote].filter(Boolean).join('；')
     const ok = onSeat?.({
-      name: nm, phone: phone.trim(), guests: g, notes: noteText,
+      name: nm, phone: phone.trim(), guests: g, children: normalizeSplit(g, kids).children, notes: noteText,
       // 🔴 staffNotes＝店員手打的那段，**不含**由電話帶出的「過敏：xxx」。
       // M6「沿用上一組」只能沿用這個；用 noteText 會把上一位客人的過敏資訊
       // 帶到下一組的訂位上（個資外洩＋出餐安全）。
@@ -213,17 +221,17 @@ export default function FastWalkInPanel({
           onCustomChange={setCustomName}
         />
 
-        <GuestCountField value={guests} onChange={onGuestsChange} accent="amber" size="lg" />
+        <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); onGuestsChange(t) }} accent="amber" size="lg" />
 
         {/* M6 沿用上一組：連續同型客人（一直來 2 位）省掉重選。
             只有在「真的會改變什麼」時才出現——人數與註記都已相同就別佔版面、也別讓人白按一下。 */}
-        {lastParty && (g !== lastParty.guests || notes.trim() !== (lastParty.notes || '')) && (
+        {lastParty && (g !== lastParty.guests || kids !== (lastParty.children || 0) || notes.trim() !== (lastParty.notes || '')) && (
           <button
             type="button"
-            onClick={() => { onGuestsChange(lastParty.guests); setNotes(lastParty.notes || '') }}
+            onClick={() => { setKids(lastParty.children || 0); onGuestsChange(lastParty.guests); setNotes(lastParty.notes || '') }}
             className="w-full min-h-[44px] rounded-xl border-2 border-dashed border-chicken-brown/25 bg-chicken-cream/60 text-sm font-bold text-chicken-brown/70"
           >
-            ↩︎ 沿用上一組（{lastParty.guests} 位{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
+            ↩︎ 沿用上一組（{lastParty.guests} 位{lastParty.children > 0 ? `（小${lastParty.children}）` : ''}{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
           </button>
         )}
 

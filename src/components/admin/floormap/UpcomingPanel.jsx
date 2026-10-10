@@ -13,12 +13,9 @@ import { bookingTableNumbers } from '../../../utils/bookingTables'
 import { getNoshowCount } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
+import PhoneLink from '../ops/PhoneLink'
+import { splitSuffix } from '../../../utils/partySplit'
 
-// 電話末 3 碼：分辨同名「陳先生」。無電話（現場散客常見）回空字串 → 不顯示。
-const phoneTail = (phone) => {
-  const d = String(phone || '').replace(/\D/g, '')
-  return d.length >= 3 ? d.slice(-3) : ''
-}
 
 // 搜尋：姓名／電話（含末碼，忽略符號）／桌號（主桌＋副桌）
 function matchesQuery(b, q) {
@@ -78,11 +75,13 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-1.5">
             <span className="text-base font-bold text-chicken-brown tabular-nums">{b.timeSlot}</span>
-            <span className="text-sm font-bold truncate">{b.name}</span>
-            {phoneTail(b.phone) && <span data-testid="phone-tail" className="text-[11px] text-chicken-brown/55 tabular-nums flex-shrink-0">…{phoneTail(b.phone)}</span>}
+            <span className="text-sm font-bold truncate min-w-0">{b.name}</span>
           </div>
-          <div className="text-xs text-chicken-brown/60 mt-0.5 truncate">
-            {b.guests} 位
+          {/* 完整電話（取代過去的「…506」末碼）：店員要能直接照著撥；無電話不顯示。
+              電話不截斷，人數那段在窄欄時可截斷。 */}
+          <div className="flex items-baseline gap-2 mt-0.5 min-w-0">
+            <PhoneLink phone={b.phone} className="text-sm" />
+            <span className="text-xs text-chicken-brown/60 truncate">{b.guests} 位{splitSuffix(b)}</span>
           </div>
         </div>
         <div className="text-right flex-shrink-0">

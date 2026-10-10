@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as tableService from '../../src/services/tableService'
 import { INITIAL_TABLES, TOTAL_CAPACITY } from '../../src/data/tables'
+import { formatDate } from '../../src/utils/timeSlots'
 
 const STORAGE_KEY = 'chicken_tables_v3'
 const FIXED_NOW = new Date('2026-06-15T12:00:00')
@@ -224,7 +225,7 @@ describe('setOutage / clearOutage', () => {
   beforeEach(() => {
     tableService.bulkWrite([mkTable({ number: 'A', isActive: true })])
   })
-  const TODAY = FIXED_NOW.toISOString().slice(0, 10)
+  const TODAY = formatDate(FIXED_NOW) // 本地日，與產品碼 todayStr 同口徑
 
   it('設定合法維修窗並正規化；read 後欄位存在', () => {
     const r = tableService.setOutage('A', { from: TODAY, to: '', reason: ' 桌面破損 ' })

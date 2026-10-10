@@ -1157,3 +1157,29 @@ describe('併桌副桌：客人改期/取消釋放全部桌、單桌指派重設
     expect(r.extraTableIds).toEqual(['102'])
   })
 })
+
+describe('有小孩自動標記「兒童」（notes.child）', () => {
+  it('create：children>0 → notes.child=true，其他 notes 保留', () => {
+    const b = bookingService.create(baseInput({ children: 2, notes: { pet: true, mobility: true, text: '靠窗' } }))
+    expect(b.notes).toEqual({ pet: true, child: true, mobility: true, text: '靠窗' })
+    expect(rawBookings()[0].notes.child).toBe(true)
+  })
+  it('create：children 0／未給 → notes 不動（不自動補 true，也不改掉手動勾的）', () => {
+    expect(bookingService.create(baseInput()).notes.child).toBe(false)
+    expect(bookingService.create(baseInput({ children: 0, notes: { child: true } })).notes.child).toBe(true)
+  })
+  it('update：改成有小孩 → 補 child=true 且保留其他鍵；notes 缺席時補標準形狀；改回 0 不自動取消', () => {
+    const b = bookingService.create(baseInput({ notes: { pet: true, text: 'x' } }))
+    const u = bookingService.update(b.id, { children: 1, adults: 3 })
+    expect(u.notes).toEqual({ pet: true, child: true, mobility: false, text: 'x' })
+    const back = bookingService.update(b.id, { children: 0, adults: 4 })
+    expect(back.notes.child).toBe(true)
+    seedBookings([{ id: 'old', name: 'a', guests: 3, children: 1, date: '2026-06-20', timeSlot: '18:00', status: 'confirmed' }])
+    expect(bookingService.update('old', { status: 'arrived' }).notes).toEqual({ pet: false, child: true, mobility: false, text: '' })
+  })
+  it('updateByStaff：children>0 但送來 child:false → 仍強制 true', () => {
+    const b = bookingService.create(baseInput())
+    const u = bookingService.updateByStaff(b.id, { children: 2, adults: 2, notes: { pet: false, child: false, mobility: false, text: '' } })
+    expect(u.notes.child).toBe(true)
+  })
+})

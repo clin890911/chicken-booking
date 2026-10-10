@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as seatingService from '../../src/services/seatingService'
 import * as waitlistService from '../../src/services/waitlistService'
 import * as tableService from '../../src/services/tableService'
@@ -71,10 +71,19 @@ describe('seatWaitlistMulti（候位併桌入座）', () => {
     expect(w.assignedTableNumber).toBe('105')
   })
 
-  it('合計席數不足 → 拒絕，且不留下半套狀態（桌位與候位都不動）', () => {
+  it('9 位併兩張 4 人桌（8 席）→ 擠一擠（每桌多坐 1 位，最多 10 位）可入座', () => {
     const r = seatingService.seatWaitlistMulti('W1', ['105', '106'])
+    expect(r.ok).toBe(true)
+    expect(bookingService.getById(r.booking.id).guests).toBe(9)
+    expect(tableService.getByNumber('105').status).toBe('dining')
+    expect(tableService.getByNumber('106').status).toBe('dining')
+  })
+
+  it('合計席數擠一擠也不足 → 拒絕，且不留下半套狀態（桌位與候位都不動）', () => {
+    seedWait({ partySize: 11 })
+    const r = seatingService.seatWaitlistMulti('W1', ['105', '106']) // 4+4 擠一擠最多 10 < 11
     expect(r.ok).toBe(false)
-    expect(r.error).toContain('不足 9 位')
+    expect(r.error).toContain('不足 11 位')
     expect(tableService.getByNumber('105').status).toBe('vacant')
     expect(tableService.getByNumber('106').status).toBe('vacant')
     expect(waitlistService.getById('W1').status).toBe('waiting')
@@ -95,13 +104,29 @@ describe('seatWaitlistMulti（候位併桌入座）', () => {
     expect(tableService.getByNumber('105').status).toBe('vacant')
   })
 
-  it('含今日維修停用桌 → 拒絕', () => {
-    const today = todayStr() // 本地日（台北），UTC 會在 00:00–08:00 變成昨天
-    seedTables({ 109: { outage: { from: today, to: today, reason: '桌椅維修' } } })
-    const r = seatingService.seatWaitlistMulti('W1', ['105', '106', '109'])
-    expect(r.ok).toBe(false)
-    expect(r.error).toContain('109')
-    expect(bookingService.listAll()).toHaveLength(0)
+  // 「今天」必須跟產品碼同口徑＝本地日（todayStr）。曾用 toISOString().slice(0,10)（UTC），
+  // 台北 00:00–08:00 UTC 還是昨天 → 維修窗設在昨天、今日可用 → 本測試在凌晨必失敗。
+  // 固定 00:30（UTC 與本地不同日）與 12:00 兩個時點都要綠。
+  describe.each([
+    ['00:30（UTC 仍是前一天）', new Date(2026, 9, 9, 0, 30)],
+    ['12:00', new Date(2026, 9, 9, 12, 0)],
+  ])('含今日維修停用桌 → 拒絕 @ %s', (_label, now) => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(now)
+      seedWait()   // 外層 beforeEach 用真實時鐘取號；換到固定日後要重取，否則候位「不是今天」（只有 10/9 當天會過）
+    })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('拒絕且不建 booking', () => {
+      const today = todayStr()
+      expect(today).toBe('2026-10-09')
+      seedTables({ 109: { outage: { from: today, to: today, reason: '桌椅維修' } } })
+      const r = seatingService.seatWaitlistMulti('W1', ['105', '106', '109'])
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain('109')
+      expect(bookingService.listAll()).toHaveLength(0)
+    })
   })
 
   it('只給一張桌 → 退回單桌路徑 seatWaitlist（維持單一實作）', () => {
@@ -116,11 +141,11 @@ describe('seatWaitlistMulti（候位併桌入座）', () => {
   })
 
   it('重複桌號會去重（點兩次同一張桌不該灌水席數）', () => {
-    seedWait({ partySize: 9 })
+    seedWait({ partySize: 11 })
     const r = seatingService.seatWaitlistMulti('W1', ['105', '105', '106'])
-    // 去重後只剩 105+106 = 8 席 < 9 → 應拒絕，而不是誤算成 12 席放行
+    // 去重後只剩 105+106 = 8 席（擠一擠最多 10 位）< 11 → 應拒絕，而不是誤算成 12 席（擠 15 位）放行
     expect(r.ok).toBe(false)
-    expect(r.error).toContain('不足 9 位')
+    expect(r.error).toContain('不足 11 位')
   })
 
   it('沒選桌 / 候位不存在 → 明確錯誤', () => {

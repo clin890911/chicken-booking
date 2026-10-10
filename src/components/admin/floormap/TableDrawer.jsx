@@ -11,9 +11,11 @@ import { STATUS_ZH as STATUS_LABELS, diningTablePresentation } from '../../../ut
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr } from '../../../utils/timeSlots'
 import { STATUS_COLOR } from './statusColors'
-import { preassignConflicts, assignmentWindow } from '../../../utils/capacity'
+import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
 import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
+import { splitSuffix } from '../../../utils/partySplit'
+import { formatPhone } from '../../../utils/phoneFormat'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -321,8 +323,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
         {booking && (table.status === 'reserved' || table.status === 'dining') && (
           <div className="space-y-1.5">
             <div className="flex justify-between"><span className="text-chicken-brown/60">客人</span><span className="font-bold">{booking.name}</span></div>
-            <div className="flex justify-between"><span className="text-chicken-brown/60">電話</span><span>{booking.phone}</span></div>
-            <div className="flex justify-between"><span className="text-chicken-brown/60">人數</span><span>{booking.guests} 位</span></div>
+            <div className="flex justify-between"><span className="text-chicken-brown/60">電話</span><span className="tabular-nums">{formatPhone(booking.phone)}</span></div>
+            <div className="flex justify-between"><span className="text-chicken-brown/60">人數</span><span>{booking.guests} 位{splitSuffix(booking)}</span></div>
             {isCombo && (
               <div className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-xs font-bold text-amber-800">
                 併桌（{bookingTables.length} 桌）：{bookingTables.join(' + ')}
@@ -579,7 +581,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             label="人數"
             value={walkInForm.guests}
             onChange={e => setWalkInForm(f => ({ ...f, guests: Number(e.target.value) }))}
-            options={Array.from({ length: table.capacity }, (_, i) => ({ value: i + 1, label: `${i + 1} 位` }))}
+            options={Array.from({ length: squeezeSeats([table]) }, (_, i) => ({ value: i + 1, label: i + 1 > table.capacity ? `${i + 1} 位（擠一擠）` : `${i + 1} 位` }))}
           />
           <Input label="備註（選填）" value={walkInForm.notes} onChange={e => setWalkInForm(f => ({ ...f, notes: e.target.value }))} />
         </div>

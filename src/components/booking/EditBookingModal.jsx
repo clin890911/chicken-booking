@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Modal, Input, Button, Textarea } from '../ui'
-import GuestCountField from '../admin/GuestCountField'
+import PartySizeField from '../admin/PartySizeField'
+import { guestSplit, normalizeSplit, splitFields } from '../../utils/partySplit'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import TimeSlotPicker from './TimeSlotPicker'
@@ -29,13 +30,18 @@ export default function EditBookingModal({ booking, onClose }) {
   const [name, setName] = useState(booking.name || '')
   const [phone, setPhone] = useState(booking.phone || '')
   const [guests, setGuests] = useState(Number(booking.guests) || 1)
+  // 舊單沒有拆分 → 預填 大人＝guests、小孩＝0（guestSplit）
+  const [kids, setKids] = useState(() => guestSplit(booking).children)
+  // 有小孩 →「兒童」自動勾且鎖住；notes.child 只記店員自己點的
+  const hasKids = normalizeSplit(guests, kids).children > 0
   const [date, setDate] = useState(booking.date || todayStr())
   const [showCalendar, setShowCalendar] = useState(false)
   const [timeSlot, setTimeSlot] = useState(booking.timeSlot || '')
   const [source, setSource] = useState(booking.source || 'phone')
   const [notes, setNotes] = useState({
     pet: !!booking.notes?.pet,
-    child: !!booking.notes?.child,
+    // 原單已有小孩時「兒童」視為自動勾的（service 會強制補上）→ 小孩改回 0 會跟著取消；店員可再自己勾
+    child: !!booking.notes?.child && guestSplit(booking).children === 0,
     mobility: !!booking.notes?.mobility,
     text: booking.notes?.text || '',
   })
@@ -73,7 +79,9 @@ export default function EditBookingModal({ booking, onClose }) {
     setBusy(true)
     try {
       updateBooking(booking.id, {
-        name: name.trim(), phone: phone.trim(), guests, date, timeSlot, source, notes,
+        name: name.trim(), phone: phone.trim(), guests, date, timeSlot, source, notes: { ...notes, child: notes.child || hasKids },
+        // 有小孩、或原單本來就有拆分（要能改回 0）才寫 adults/children；舊單只有大人時形狀不變
+        ...splitFields(guests, kids, { force: booking.children != null || booking.adults != null }),
       })
       if (structuralChanged && booking.assignedTableId) {
         toast.info(`已更新 ${name.trim()}（日期/時段/人數已變更，原桌位已解除，請重新指派）`)
@@ -104,8 +112,8 @@ export default function EditBookingModal({ booking, onClose }) {
         <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />
         <Input label={phoneOptional ? '電話（選填 · 現場客可不填）' : '電話'} type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder={phoneOptional ? '現場客可不填' : '0912345678'} />
 
-        {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
-        <GuestCountField value={guests} onChange={setGuests} />
+        {/* 人數：大人 1–8 快選 + 9+ 自由輸入＋小孩步進器（總數上限 200） */}
+        <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); setGuests(t) }} />
 
         {/* 日期：快選 chips + 月曆 */}
         <div>
@@ -167,16 +175,20 @@ export default function EditBookingModal({ booking, onClose }) {
           <label className="label">特殊需求（選填）</label>
           <div className="mb-2 grid grid-cols-3 gap-2">
             {NOTE_OPTIONS.map(n => {
-              const active = notes[n.key]
+              const locked = n.key === 'child' && hasKids
+              const active = notes[n.key] || locked
               return (
-                <button key={n.key} type="button" onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
-                  className={`px-3 py-2.5 rounded-xl border-2 text-sm font-bold transition-all ${
+                <button key={n.key} type="button" aria-pressed={!!active} disabled={locked}
+                  title={locked ? '有小孩已自動標記' : undefined}
+                  onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
+                  className={`px-3 py-2.5 rounded-xl border-2 text-sm font-bold transition-all disabled:cursor-not-allowed ${
                     active ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
                   {n.label}
                 </button>
               )
             })}
           </div>
+          {hasKids && <p className="-mt-1 mb-2 text-xs font-bold text-chicken-red/80">有小孩，已自動標記「兒童」</p>}
           <Textarea value={notes.text} onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}
             placeholder="例：靠窗、慶生、長輩需軟食..." />
         </div>

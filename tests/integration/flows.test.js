@@ -9,6 +9,7 @@ import * as bookingService from '../../src/services/bookingService'
 import * as tableService from '../../src/services/tableService'
 import * as waitlistService from '../../src/services/waitlistService'
 import * as customerService from '../../src/services/customerService'
+import { formatDate } from '../../src/utils/timeSlots'
 import {
   calcSlotCapacity,
   occupancyMinutes,
@@ -211,8 +212,8 @@ describe('跨 service 端到端流程', () => {
       expect(booking.assignedTableId).toBe('101')
       expect(booking.createdBy).toBe('waitlist')
       expect(booking.notes.text).toBe('靠窗')
-      // walk-in 用「今天」+ 半小時對齊時段（依固定系統時間）
-      expect(booking.date).toBe(new Date().toISOString().slice(0, 10))
+      // walk-in 用「今天」+ 半小時對齊時段（依固定系統時間）；今天＝本地日，不可用 UTC slice
+      expect(booking.date).toBe(formatDate(FIXED_NOW))
       // booking 確實落地（可由 getById 取回）
       expect(bookingService.getById(booking.id)).toBeTruthy()
 
@@ -234,10 +235,10 @@ describe('跨 service 端到端流程', () => {
       expect(cust.totalGuests).toBe(4)
     })
 
-    it('候位人數超過桌容量 → 拒絕，且不建 booking、不動桌、候位仍 waiting', () => {
-      const wait = waitlistService.create({ name: '大團', phone: '0900111222', partySize: 5 })
+    it('候位人數超過桌容量（擠一擠也坐不下）→ 拒絕，且不建 booking、不動桌、候位仍 waiting', () => {
+      const wait = waitlistService.create({ name: '大團', phone: '0900111222', partySize: 6 })
       const before = bookingService.listAll().length
-      const r = seating.seatWaitlist(wait.id, '101') // 101 容量 4 < 5
+      const r = seating.seatWaitlist(wait.id, '101') // 101 容量 4，擠一擠最多 5 < 6
       expect(r.ok).toBe(false)
       expect(r.error).toMatch(/容量不足/)
       expect(bookingService.listAll().length).toBe(before)
