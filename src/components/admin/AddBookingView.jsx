@@ -13,6 +13,8 @@ import { getNoshowCount } from '../../services/bookingService'
 import { todayStr, dayLabel, formatDate, addDays } from '../../utils/timeSlots'
 import { isTableUsableOnDate } from '../../utils/tableAvailability'
 import { HOLD_LEAD_MIN, squeezeSeats } from '../../utils/capacity'
+import { nextBookableSlot, slotForDateChange } from '../../utils/staffSlots'
+import HonorificNameField, { composeName, DEFAULT_TITLE } from './ops/HonorificNameField'
 
 // 後台新增訂位 — 電話為先導鍵，自動帶顧客檔
 // 設計：緊湊單頁、由上而下一路填完；缺漏欄位即時列在底部黏性操作列（點 pill 捲到該欄）；
@@ -43,7 +45,12 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
 
   const [phone, setPhone] = useState(initial?.phone || '')
   const [source, setSource] = useState(initial?.source || 'phone')
-  const [name, setName] = useState(initial?.name || '')
+  // 姓名＝稱謂＋姓氏快選（與現場帶位同一個元件；免切注音）＋常駐手打欄（全名／罕見姓）。
+  // 單姓接稱謂、全名不接（composeName）。存進訂位的仍是同一個 name 字串，資料結構不變。
+  const [title, setTitle] = useState(DEFAULT_TITLE)
+  const [surname, setSurname] = useState(null)
+  const [customName, setCustomName] = useState(initial?.name || '')
+  const name = composeName(title, surname, customName.trim())
   const [guests, setGuests] = useState(2)
   const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；guests 仍是總人數、容量邏輯只讀它
   // 有小孩 →「兒童」自動勾且鎖住。notes.child 只記店員自己點的；有效值＝自己點的 || 有小孩，
@@ -51,7 +58,12 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   const hasKids = normalizeSplit(guests, kids).children > 0
   const [date, setDate] = useState(todayStr())
   const [showCalendar, setShowCalendar] = useState(false)
-  const [timeSlot, setTimeSlot] = useState('')
+  // 今天 → 預選下一個可訂時段（接電話大多訂接下來的場，多數不必改）
+  const [timeSlot, setTimeSlot] = useState(() => nextBookableSlot({ settings, tables, bookings, groupReservations, date: todayStr(), guests: 2 }))
+  // 店員是否真的點過時段。「今天自動預選」不算：沒點過 → 換到非今天要清空（缺時段提示才會回來，
+  // 否則接電話時預選的今天時段會被默默沿用到別天，訂錯時間）；點過 → 才走「新日期同時段仍可訂就保留」。
+  const slotTouched = useRef(false)
+  const pickSlot = (t) => { slotTouched.current = true; setTimeSlot(t) }
   const [notes, setNotes] = useState({ pet: false, child: false, mobility: false, text: '' })
   // 桌位選擇：'auto'＝跟著建議（第一張候選）｜桌號＝店員點選的桌｜'map'＝到桌況圖選｜'none'＝先不指派
   const [tablePick, setTablePick] = useState('auto')
@@ -76,10 +88,10 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
 
   const noshowCount = phone ? getNoshowCount(phone) : 0
 
-  // 偵測 customer 自動填
+  // 偵測 customer 自動填（不覆蓋店員已點的姓氏／已手打的）
   useEffect(() => {
-    if (matchedCustomer && !name) {
-      setName(matchedCustomer.name || '')
+    if (matchedCustomer && !surname && !customName.trim()) {
+      setCustomName(matchedCustomer.name || '')
       if (matchedCustomer.notes && !notes.text) {
         setNotes(n => ({ ...n, text: matchedCustomer.notes }))
       }
@@ -87,8 +99,17 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchedCustomer?.phone])
 
-  // 換日重設時段
-  useEffect(() => { setTimeSlot('') }, [date])
+  // 換日：店員點過的時段在新日期仍可訂就保留；不行 → 今天預選下一個可訂時段、其他日清空重選（utils/staffSlots）。
+  // 沒點過（只是今天自動預選的）→ 換到非今天一律清空。
+  const lastDateRef = useRef(date)
+  useEffect(() => {
+    if (lastDateRef.current === date) return
+    lastDateRef.current = date
+    setTimeSlot(prev => (!slotTouched.current && date !== todayStr())
+      ? ''
+      : slotForDateChange(prev, { settings, tables, bookings, groupReservations, date, guests }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date])
 
   // 預填來源有兩條：名冊「新增訂位」（phone/name/source 一定會給，含空字串代表刻意清空——
   // 例如現場頁「＋新增今日訂位」傳 null 顧客）／日曆選日期後「＋新增訂位」（只給 date）。
@@ -98,7 +119,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   useEffect(() => {
     if (!initial) return
     if (initial.phone !== undefined) setPhone(initial.phone)
-    if (initial.name !== undefined) setName(initial.name)
+    if (initial.name !== undefined) { setCustomName(initial.name); setSurname(null) }
     if (initial.source) setSource(initial.source)
     if (initial.date) setDate(initial.date)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,8 +289,8 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         toast.action(`${summary} 已建立`, { label: '預配桌位', onClick: () => onAssignTable?.(b) })
       }
       // 重設（保留 source）
-      setPhone(''); setName(''); setGuests(2); setKids(0)
-      if (!continuous) setTimeSlot('')
+      setPhone(''); setCustomName(''); setSurname(null); setTitle(DEFAULT_TITLE); setGuests(2); setKids(0)
+      if (!continuous) { setTimeSlot(''); slotTouched.current = false }
       setNotes({ pet: false, child: false, mobility: false, text: '' })
       setTablePick('auto'); setTableNotice('')
       setAttempted(false); setShowCalendar(false)
@@ -286,9 +307,13 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   }
 
   return (
-    <div className="space-y-3 max-w-3xl mx-auto">
+    <div className="max-w-3xl lg:max-w-6xl mx-auto">
+      {/* 版面：手機／直向單欄（客人 → 人數 → 日期時段 → 備註，與過去同順序）；
+          lg 以上兩欄——左＝客人＋人數＋備註、右＝日期＋時段＋桌位，
+          讓整天的時段在 iPad 橫向 1180×820 一進來就看得到、不必往下捲（接電話時最常改的就是日期時段）。 */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:grid-rows-[auto_auto_1fr] lg:items-start">
       {/* === ① 客人 === */}
-      <Card>
+      <Card className="lg:col-start-1 lg:row-start-1">
         <h2 className="font-bold text-chicken-brown mb-3">客人資訊</h2>
         <div className="space-y-3">
           <div ref={phoneRef} className="relative">
@@ -331,9 +356,21 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
               </div>
             )}
           </div>
-          <div ref={nameRef}>
-            <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐"
-              error={attempted && !name.trim() ? '必填' : ''} />
+          <div ref={nameRef} className={attempted && !name.trim() ? 'rounded-xl ring-2 ring-chicken-red/40 p-2 -m-2' : ''}>
+            <HonorificNameField
+              label="姓名（點姓氏＋稱謂，或直接輸入）"
+              title={title}
+              surname={surname}
+              onChange={({ title: t, surname: s }) => { setTitle(t); setSurname(s); if (s && s !== surname) setCustomName('') }}
+              custom={customName}
+              onCustomChange={(v) => { setCustomName(v); if (v) setSurname(null) }}
+              customAlwaysVisible
+              customPlaceholder="王小姐"
+              customLabel="姓名"
+              dense
+            />
+            {name && <p className="mt-1 text-xs font-bold text-chicken-brown/60">將登記為：{name}</p>}
+            {attempted && !name.trim() && <p className="text-xs text-chicken-red mt-1">必填</p>}
           </div>
           {/* 來源：chips 取代下拉（少一次點擊、省高度） */}
           <div>
@@ -353,19 +390,23 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         </div>
       </Card>
 
-      {/* === ② 人數 · 日期 · 時段 === */}
-      <Card>
+      {/* === ② 人數 === */}
+      <Card className="lg:col-start-1 lg:row-start-2">
+        {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
+        <div ref={guestsRef}>
+          <PartySizeField
+            total={guests}
+            kids={kids}
+            onChange={(t, c) => { setKids(c); setGuests(t) }}
+            hint={`已選：${guests} 位${splitSuffix({ guests, children: kids })}${guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}`}
+          />
+        </div>
+      </Card>
+
+      {/* === ③ 日期 · 時段 · 桌位 === */}
+      <Card className="lg:col-start-2 lg:row-start-1 lg:row-span-3">
         <h2 className="font-bold text-chicken-brown mb-3">用餐資訊</h2>
         <div className="space-y-4">
-          {/* 人數：1–8 快選 + 9+ 自由輸入（上限 200） */}
-          <div ref={guestsRef}>
-            <PartySizeField
-              total={guests}
-              kids={kids}
-              onChange={(t, c) => { setKids(c); setGuests(t) }}
-              hint={`已選：${guests} 位${splitSuffix({ guests, children: kids })}${guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}`}
-            />
-          </div>
 
           {/* 日期：今天/明天/後天 chips + 其他日期（展開緊湊月曆） */}
           <div>
@@ -403,10 +444,12 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
           {/* 時段 */}
           <div ref={slotRef} className={attempted && !timeSlot ? 'rounded-xl ring-2 ring-chicken-red/40 p-2 -m-2' : ''}>
             <label className="label">時段（{dayLabel(date)}）</label>
+            {/* compact：4 欄小晶片（一天 17 個時段約 5 排），兩欄版面下整天的時段都在第一屏 */}
             <TimeSlotPicker
+              variant="compact"
               date={date}
               value={timeSlot}
-              onChange={setTimeSlot}
+              onChange={pickSlot}
               settings={settings}
               tables={tables}
               bookings={bookings}
@@ -414,6 +457,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
               guests={guests}
               hideFull={false}
               ignoreOnlineClosure
+              allowFull
             />
             {attempted && !timeSlot && <p className="text-xs text-chicken-red font-bold mt-1">請選時段</p>}
           </div>
@@ -435,8 +479,8 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         </div>
       </Card>
 
-      {/* === ③ 備註 === */}
-      <Card>
+      {/* === ④ 備註 === */}
+      <Card className="lg:col-start-1 lg:row-start-3">
         <h2 className="font-bold text-chicken-brown mb-3">特殊需求（選填）</h2>
         <div className="grid grid-cols-3 gap-2 mb-3">
           {NOTE_OPTIONS.map(n => {
@@ -468,6 +512,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
           placeholder="例：靠窗、慶生、剪雞肉服務、長輩需軟食..."
         />
       </Card>
+      </div>
 
       {/* === 底部黏性操作列：缺欄時收成一列「還差」pills（點捲到該欄），
              填齊才展開確認鈕——避免手機上整塊蓋住日期/時段。

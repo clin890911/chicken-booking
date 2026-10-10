@@ -2229,6 +2229,62 @@ describe('撞桌止血：S3 建議桌看佔用區間（hold / preassign / now）
   })
 })
 
+// 🐛 併桌建議（suggestTableCombo）過去只看 vacant：會推薦「時段重疊的他筆預配」與團體保留桌，
+// 店員照著選才被警示擋下。改為與單桌建議同一支 timeConflictTableNumbers（mode 'now'）排除。
+describe('併桌建議排除重疊預配與團保（suggestTableCombo）', () => {
+  const TODAY = '2026-06-15'
+  const at = (h, m = 0) => new Date(2026, 5, 15, h, m)
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(at(10, 30))
+    // 1F：101(6)+102(6)+103(4)+104(4)；9 位最佳組成是 6+4
+    tableService.bulkWrite([
+      mkTable('101', 6, '1F'), mkTable('102', 6, '1F'), mkTable('103', 4, '1F'), mkTable('104', 4, '1F'),
+    ])
+  })
+  afterEach(() => vi.useRealTimers())
+  const used = () => seating.suggestTableCombo(9).tableNumbers
+
+  it('時段重疊的他筆預配桌不進建議池（10:30 現在入座 vs 11:00 預配）', () => {
+    const yu = mkBooking({ name: '余先生', date: TODAY, timeSlot: '11:00' })
+    bookingService.assignTable(yu.id, '101')                    // 預配 101（桌況仍 vacant）
+    const r = seating.suggestTableCombo(9)
+    expect(r.enough).toBe(true)
+    expect(r.tableNumbers).not.toContain('101')
+  })
+
+  // 上一支只預配 101，它是否會紅取決於最佳組合的並列排序；這支逐張預配、直接斷言結果不含那張桌，與排序無關。
+  it.each(['101', '102', '103', '104'])('重疊預配 %s（11:00）→ 建議結果一定不含它（不依賴並列排序）', (num) => {
+    const yu = mkBooking({ name: '余先生', date: TODAY, timeSlot: '11:00' })
+    bookingService.assignTable(yu.id, num)
+    const r = seating.suggestTableCombo(9)
+    expect(r.tableNumbers).not.toContain(num)
+    expect(r.tableNumbers.length).toBeGreaterThan(0)
+  })
+
+  it('不重疊的預配（20:30）仍可建議：預配會保留，不必避開', () => {
+    const late = mkBooking({ name: '晚到客', date: TODAY, timeSlot: '20:30' })
+    bookingService.assignTable(late.id, '101')
+    const all = ['101', '102', '103', '104']
+    expect(used().every(n => all.includes(n))).toBe(true)
+    // 101 可被選上：把另一張 6 人桌佔掉，最佳 6+4 就只剩 101
+    tableService.setStatus('102', 'dining', { seatedAt: at(10).toISOString() })
+    expect(used()).toContain('101')
+  })
+
+  it('今日團體保留桌不進建議池', () => {
+    groupService.create({
+      date: TODAY, agencyName: '快樂旅行社', status: 'confirmed',
+      batches: [{ id: 'BT1', label: '第一梯', timeSlot: '18:00', tableNumbers: ['101', '102'], guests: 10 }],
+    })
+    const r = seating.suggestTableCombo(9)
+    expect(r.tableNumbers).not.toContain('101')
+    expect(r.tableNumbers).not.toContain('102')
+    expect(r.enough).toBe(false)                                // 只剩 4+4=8 < 9
+    expect(r.seats).toBe(8)
+  })
+})
+
 // 鎖桌時機（2026-09 店主拍板「接近時段才鎖」）：更早的訂位只預配，候選不必此刻空著，
 // 但要排除「與預配區間 [時段, 時段+佔位) 重疊」的佔用（用餐中推估、鎖桌區間、他筆預配、團保、維修）。
 describe('預配型候選：preassignableTables / findPreassignCandidates / findReserveCandidates', () => {

@@ -122,7 +122,7 @@ describe('現場頁 × 角色：kitchen 無任何寫入入口、其他三角色�
     expect(has('確認入座')).toBe(false)
     // 今日訂位籤：看得到卡片（唯讀資訊），沒有新增／指派／客人到了／No-show／已完成
     expect(has('＋ 新增今日訂位')).toBe(false)
-    for (const t of ['指派桌位', '客人到了', '標 No-show', '✓ 已完成', '改桌']) expect(has(t), t).toBe(false)
+    for (const t of ['指派桌位', '客人到了', '標 No-show', '已完成', '改桌']) expect(has(t), t).toBe(false)
     expect(container.textContent).toContain('未指派客')
     // 候位籤：看得到候位客，沒有入座／叫號／暫過號／棄號；取號鈕 disabled
     click(tab('候位'))

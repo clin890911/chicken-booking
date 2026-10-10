@@ -18,7 +18,9 @@ const NOW = new Date(2026, 6, 1, 18, 0, 0).getTime() // 2026-07-01 18:00
 describe('isArriveEligible（純函式：出現窗口判定）', () => {
   const booking = { id: 'b1', name: '王小明', status: 'confirmed', timeSlot: '18:00' }
 
-  it('訂位時間前 30 分內：符合', () => {
+  it('訂位時間前 60 分內：符合（2026-10 由 30 放寬到 60，早到客也看得到）', () => {
+    expect(ARRIVE_WINDOW_BEFORE_MIN).toBe(60)
+    expect(isArriveEligible(baseTable(), booking, NOW - 45 * 60000)).toBe(true)
     const now = NOW - ARRIVE_WINDOW_BEFORE_MIN * 60000
     expect(isArriveEligible(baseTable(), booking, now)).toBe(true)
   })
@@ -28,7 +30,7 @@ describe('isArriveEligible（純函式：出現窗口判定）', () => {
     expect(isArriveEligible(baseTable(), booking, now)).toBe(true)
   })
 
-  it('超前窗口（前 31 分）：不符合', () => {
+  it('超前窗口（前 61 分）：不符合', () => {
     const now = NOW - (ARRIVE_WINDOW_BEFORE_MIN + 1) * 60000
     expect(isArriveEligible(baseTable(), booking, now)).toBe(false)
   })
@@ -55,17 +57,18 @@ describe('isArriveEligible（純函式：出現窗口判定）', () => {
   })
 })
 
-// 2026-09：預配（桌沒鎖給這筆）的待到訂位也進報到列，時間窗同鎖桌（前 30／後 60 分）
+// 2026-09：預配（桌沒鎖給這筆）的待到訂位也進報到列，時間窗同鎖桌（前 60／後 60 分；2026-10 前緣 30→60）
 describe('isPreassignArriveEligible（預配訂位的報到窗口）', () => {
   const at = (h, m = 0) => new Date(2026, 8, 19, h, m).getTime()
   const t = (over = {}) => ({ number: '105', status: 'vacant', currentBookingId: null, ...over })
   const pre = (over = {}) => ({ id: 'P', name: '余先生', date: '2026-09-19', timeSlot: '12:00', status: 'confirmed', assignedTableId: '105', ...over })
 
-  it('預配 12:00：11:30（前 30）～13:00（後 60）在窗內；11:29／13:01 不在', () => {
+  it('預配 12:00：11:00（前 60）～13:00（後 60）在窗內；10:59／13:01 不在', () => {
     expect(isPreassignArriveEligible(t(), pre(), at(11, 40))).toBe(true)
-    expect(isPreassignArriveEligible(t(), pre(), at(11, 30))).toBe(true)
+    expect(isPreassignArriveEligible(t(), pre(), at(11, 15))).toBe(true)   // 早到 45 分：過去（前 30）不列
+    expect(isPreassignArriveEligible(t(), pre(), at(11, 0))).toBe(true)
     expect(isPreassignArriveEligible(t(), pre(), at(13, 0))).toBe(true)
-    expect(isPreassignArriveEligible(t(), pre(), at(11, 29))).toBe(false)
+    expect(isPreassignArriveEligible(t(), pre(), at(10, 59))).toBe(false)
     expect(isPreassignArriveEligible(t(), pre(), at(13, 1))).toBe(false)
   })
   it('桌此刻被別組佔著仍列（按到了由入座守門擋下並給改桌）', () => {

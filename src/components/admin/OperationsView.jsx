@@ -283,6 +283,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const tablePresentation = useMemo(() => buildOpsTablePresentation({ tables, bookings, groupHoldTables, settings, date: todayStr(), now: opsNow }), [tables, bookings, groupHoldTables, settings, opsNow])
   const floorSeatCount = tables.filter(t => t.floor === floor && tablePresentation[t.number]?.canSeatNow).length
   const rememberModeSource = () => { modeSource.current = { railTab, floor, selectedTable, view } }
+  // 提示列「N 桌待清／超時」→ 直接打開最該先處理的那桌（切到該樓層＋地圖＋抽屜）。
+  // 選桌模式或內嵌新增面板開著時不搶畫面（抽屜會被模式面板擋住、或中斷新增）→ 只切樓層並標出那桌。
+  const openHintTable = (number) => {
+    const t = tables.find(x => String(x.number) === String(number))
+    if (!t) return
+    if (mode || reserveOpenRef.current) return locateSuggestion(t.number)
+    setFloor(t.floor); setView('map'); setSelectedTable(t.number)
+  }
   const locateSuggestion = (number) => { const t = tables.find(t => String(t.number) === String(number)); if (t) { setFloor(t.floor); setView('map'); setLocateTableRequest(prev => ({ number: String(t.number), seq: (prev?.seq || 0) + 1 })) } }
 
   // 今日預配標記：被今日訂位「預先配走」的桌號 → { timeSlot }。
@@ -1077,6 +1085,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       <OpsHintBar
         onOpenUpcoming={() => { setSelectedTable(null); setRailTab('upcoming') }}
         onOpenLog={() => setShowOpsLog(true)}
+        onOpenTable={openHintTable}
       />
 
       {/* Mode banner — 依模式不同底色 + emoji，避免誤判 */}

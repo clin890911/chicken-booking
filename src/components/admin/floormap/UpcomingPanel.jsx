@@ -13,7 +13,7 @@ import { bookingTableNumbers } from '../../../utils/bookingTables'
 import { getNoshowCount } from '../../../services/bookingService'
 import Icon from '../../ui/Icon'
 import { MOVE_COMBO_REASON } from '../../booking/useBookingActions'
-import PhoneLink from '../ops/PhoneLink'
+import { formatPhone } from '../../../utils/phoneFormat'
 import { splitSuffix } from '../../../utils/partySplit'
 
 
@@ -77,10 +77,11 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
             <span className="text-base font-bold text-chicken-brown tabular-nums">{b.timeSlot}</span>
             <span className="text-sm font-bold truncate min-w-0">{b.name}</span>
           </div>
-          {/* 完整電話（取代過去的「…506」末碼）：店員要能直接照著撥；無電話不顯示。
-              電話不截斷，人數那段在窄欄時可截斷。 */}
+          {/* 完整電話（取代過去的「…506」末碼）：店員要能照著撥；無電話不顯示。
+              刻意是純文字、不是 tel: 連結——下方已有「聯絡」鈕，兩個撥號熱區上下相鄰，
+              尖峰時點卡片常誤撥。電話不截斷，人數那段在窄欄時可截斷。 */}
           <div className="flex items-baseline gap-2 mt-0.5 min-w-0">
-            <PhoneLink phone={b.phone} className="text-sm" />
+            {formatPhone(b.phone) && <span data-testid="phone-full" className="text-sm tabular-nums whitespace-nowrap flex-shrink-0 font-bold text-chicken-brown">{formatPhone(b.phone)}</span>}
             <span className="text-xs text-chicken-brown/60 truncate">{b.guests} 位{splitSuffix(b)}</span>
           </div>
         </div>
@@ -102,12 +103,13 @@ function BookingCard({ b, now, kind, onClickBooking, onAssignTable, onMoveTable,
         {b.phone && <a href={`tel:${b.phone.replace(/[^+\d]/g, '')}`} aria-label={`聯絡 ${b.name} ${b.phone}`} className="inline-flex items-center min-h-[44px] px-3 border rounded-md text-xs font-bold">☎ 聯絡</a>}
         {showSeat ? <button onClick={() => onSeat?.(b)} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">客人到了</button>
           : showAssign ? <button onClick={() => onAssignTable?.(b)} className="px-3 min-h-[44px] bg-chicken-red text-white rounded-md text-xs font-bold">指派桌位</button> : null}
-        {(canMove || showNoshow || showComplete) && <details className="relative">
+        {/* 已完成（客人來過、吃完了）：有 5 秒復原、不扣信用 → 直接放卡片上，不藏在「更多」 */}
+        {showComplete && <button onClick={() => onComplete?.(b)} className="px-3 min-h-[44px] border border-chicken-green/50 text-chicken-green rounded-md text-xs font-bold">已完成</button>}
+        {(canMove || showNoshow) && <details className="relative">
           <summary className="cursor-pointer list-none min-h-[44px] px-3 flex items-center rounded-md border text-xs" aria-label={`${b.name} 更多操作`}>⋯ 更多</summary>
           <div className="mt-1 min-w-[220px] bg-white rounded-lg border shadow-lg p-1 flex flex-col" onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
             {canMove && <button aria-disabled={isCombo ? 'true' : undefined} onClick={() => isCombo ? onMoveBlocked?.() : onMoveTable(b)} title={isCombo ? MOVE_COMBO_REASON : '重新選擇桌位'} className="min-h-[44px] px-3 text-left text-xs">{preassigned ? `已預配 ${tableLabel}` : `✓ 已指派 ${tableLabel}`} · ↔ 改桌{isCombo ? '（併桌不支援）' : ''}</button>}
             {showNoshow && <><p className="text-xs px-3 py-2 text-chicken-brown/60">未到客人請先聯絡，確認後再標記。</p><button onClick={() => onNoshow?.(b)} className="min-h-[44px] px-3 text-left text-chicken-red text-xs">標 No-show</button></>}
-            {showComplete && <button onClick={() => onComplete?.(b)} className="min-h-[44px] px-3 text-left text-xs">✓ 已完成</button>}
           </div>
         </details>}
         <button type="button" onClick={() => onClickBooking?.(b)} className="min-h-[44px] px-2 text-xs text-chicken-brown/60">詳情 ›</button>

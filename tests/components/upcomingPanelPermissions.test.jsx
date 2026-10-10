@@ -97,6 +97,16 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     expect(texts.some(t => t.includes('已完成'))).toBe(true)
   })
 
+  it('「已完成」直接放卡片上（不藏在「⋯ 更多」裡）：一下就按得到', () => {
+    render(roleCan('manager'))
+    const done = [...container.querySelectorAll('button')].find(b => b.textContent.trim() === '已完成')
+    expect(done).toBeTruthy()
+    expect(done.closest('details')).toBeNull()
+    // No-show 仍收在「更多」裡（會扣客人信用，不放第一層）
+    const noshow = [...container.querySelectorAll('button')].find(b => b.textContent.includes('標 No-show'))
+    expect(noshow.closest('details')).toBeTruthy()
+  })
+
   it('kitchen（唯讀）：三顆鈕一顆都不渲染', () => {
     render(roleCan('kitchen'))
     const texts = buttonTexts()
