@@ -28,6 +28,7 @@ import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } fr
 import SegmentedControl from '../ui/SegmentedControl'
 import { seatingPerms } from '../../utils/seatingPerms'
 import { formatBookingTables } from '../../utils/bookingTables'
+import { preassignArriveConflictLines, toastSeatedWithUndo } from '../../utils/arriveSeat'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
@@ -42,17 +43,17 @@ function LegendSwatch({ fill, stroke, label, dashed = false }) {
   )
 }
 
-// 「✓ 到了」一鍵入座：抽成不依賴元件 state 的純函式方便單測（注入 seatBooking/setStatus/
-// setTableStatus/toast）。不二次確認——這顆鈕本身就是「已經在合理時間窗內」的防呆。
-// 復原必須同時倒回 booking（confirmed）與 table（reserved + seatedAt:null）兩邊，
-// 不能只復原 booking——那是 repo 內其他復原路徑曾經犯過的不完整實作，這裡刻意都做。
+// 「✓ 到了」一鍵入座：抽成不依賴元件 state 的純函式方便單測（注入 seatBooking/undoSeatBooking/toast）。
+// 不二次確認——這顆鈕本身就是「已經在合理時間窗內」的防呆。
+// 5 秒復原走共用的 toastSeatedWithUndo → undoSeatBooking（utils/arriveSeat.js、seatingService）：
+// booking 與 table 兩邊一起倒（鎖桌倒回 reserved、預配倒回空桌），且只倒仍由本筆用餐中／已空的桌，
+// 被別組佔走就不搶（2026-10 起四個「客人到了」入口統一這一套，不再各自 setStatus＋setTableStatus）。
 // onMove（可選）：入座被擋（桌被別組佔用／停用）時，toast 直接帶「改桌」出口。
-// 預配訂位（2026-09 起報到列也列預配：assignmentKind＝'preassign'，桌沒鎖給這筆）整條另走
-// arrivePreassigned（見下）：團保／他筆預配重疊先確認、大組整組入座、復原走 undoSeatPreassigned。
-// 鎖桌（held）那條——入座與復原——維持原樣不動（已確認安全的例外，見 undo-paths 記錄）。
+// 預配訂位（assignmentKind＝'preassign'，桌沒鎖給這筆）另走 arrivePreassigned：團保／重疊預配先確認、
+// 大組整組入座。未配桌的訂位不走這裡（報到列改進「選桌入座」模式，見 startArriveSeat）。
 export function handleArriveNow(table, booking, deps) {
   if (assignmentKind(booking, table) === 'preassign') return arrivePreassigned(table, booking, deps)   // 入座前判定
-  const { seatBooking, setStatus, setTableStatus, toast, onMove } = deps
+  const { seatBooking, undoSeatBooking, toast, onMove } = deps
   const r = seatBooking(booking.id)
   if (!r?.ok) {
     const msg = '入座失敗：' + (r?.error || '未知錯誤')
@@ -63,45 +64,19 @@ export function handleArriveNow(table, booking, deps) {
     }
     return r
   }
-  toast.action(
-    `${booking.name} 已入座 ${table.number}`,
-    {
-      label: '↩ 復原',
-      onClick: () => {
-        setStatus(booking.id, 'confirmed')
-        setTableStatus(table.number, 'reserved', { seatedAt: null })
-      },
-    },
-    { duration: 5000 },
-  )
+  toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${table.number}`, name: booking.name, undoSeatBooking, toast })
   return r
 }
 
-// 預配訂位「到了」前的防呆（與今日訂位卡「客人到了」同一道：UpcomingPanel.handleSeat）：
-// 桌（大組含額外桌）被今日團體圈桌未入座、或他筆訂位預配且用餐區間與「現在入座」重疊
-// （PR #131 口徑：capacity.preassignConflicts＋assignmentWindow 'now'）→ 逐條列出，要店員確認。
-export function preassignArriveConflictLines(booking, { bookings = [], groupHoldTables = {}, settings = {}, now = new Date() } = {}) {
-  const nums = [...new Set([booking?.assignedTableId, ...(booking?.extraTableIds || [])].filter(Boolean).map(String))]
-  const window = assignmentWindow({ mode: 'now', now }, settings)
-  const lines = []
-  nums.forEach(n => {
-    const hold = groupHoldTables[n]
-    if (hold?.holds?.length) {
-      const h = hold.holds[0]
-      lines.push(`${n} 為今日團體「${hold.agencyName || '旅行社'}」預留${h?.batch ? `（${h.batch.label} ${h.batch.timeSlot}）` : ''}`)
-    }
-    preassignConflicts(bookings, n, { date: booking.date, excludeBookingId: booking.id, window }, settings)
-      .filter(c => c.overlaps)
-      .forEach(c => lines.push(`${n} 已預先配給 ${c.booking.name}（${c.booking.guests} 位${c.booking.timeSlot ? ` · ${c.booking.timeSlot}` : ''}），用餐時段重疊`))
-  })
-  return lines
-}
+// 預配訂位「到了」前的防呆（團保／重疊預配）：搬到 utils/arriveSeat.js——今日訂位卡也要用，
+// 從這裡 import 會循環引用。這裡 re-export 維持既有 import 路徑。
+export { preassignArriveConflictLines }
 
 // 預配訂位的「到了」：
 //   1) 桌此刻都空、但有團保／重疊預配 → 先 confirm（取消就不動）；桌已被別組佔 → 不問，直接嘗試入座讓守門擋下
 //   2) 單桌 seatBooking；大組（有額外桌）seatBookingAllTables——整組都空才一起入座，任一張被佔整組不動
 //   3) 被擋：單桌給「改桌」；大組不給（單桌 move 會留孤兒額外桌）→ 講清楚到今日訂位卡處理
-//   4) 成功 toast 的復原走 undoSeatPreassigned：整組回空桌、訂位回待到且保留預配（只在仍由本筆用餐中時才倒）
+//   4) 成功 toast 的復原走 undoSeatBooking：整組回空桌、訂位回待到且保留預配（只倒仍由本筆用餐中／已空的桌）
 // 需要確認時回 Promise（其餘同步回傳，與鎖桌路徑一致）。
 function arrivePreassigned(table, booking, deps) {
   const { confirm, preassignConflictLines, getTable } = deps
@@ -121,7 +96,7 @@ function arrivePreassigned(table, booking, deps) {
   return seatPreassignedNow(table, booking, label, deps)
 }
 
-function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAllTables, undoSeatPreassigned, toast, onMove }) {
+function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove }) {
   const isCombo = (booking.extraTableIds || []).length > 0
   const r = isCombo && seatBookingAllTables ? seatBookingAllTables(booking.id) : seatBooking(booking.id)
   if (!r?.ok) {
@@ -138,17 +113,7 @@ function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAll
     }
     return r
   }
-  toast.action(
-    `${booking.name} 已入座 ${label}`,
-    {
-      label: '↩ 復原',
-      onClick: () => {
-        const u = undoSeatPreassigned?.(booking.id, table.number)
-        if (!u?.ok) toast.error('復原失敗：' + (u?.error || '未知錯誤'))
-      },
-    },
-    { duration: 5000 },
-  )
+  toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${label}`, name: booking.name, undoSeatBooking, toast })
   return r
 }
 
@@ -217,7 +182,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
     assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, reseatGroupBatchTable,
-    cancelBooking, seatBooking, seatBookingAllTables, undoSeatPreassigned, setStatus, setTableStatus,
+    cancelBooking, seatBooking, seatBookingAllTables, assignAndSeatBooking, undoSeatBooking,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     preassignBookingTable, preassignBookingTables, addBooking,
@@ -355,6 +320,21 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     startMultiMode({ kind: 'waitlist', wait, need: guests, suitable, suggestion: suggestion?.number })
   }
 
+  // 未配桌的訂位到店：「到了 · 選桌入座」（今日訂位卡／報到列）。
+  // 沿用 assign-multi 選桌模式（kind:'arrive'）：可選桌＝此刻空桌（鎖桌型，findSuitableTables），
+  // 佔用區間＝現在入座（assignmentWindow 'now'）；重疊預配／團保綁在選到的桌上、勾選才解鎖；
+  // 確認時重驗桌位，再走 assignAndSeatBooking 一次完成指派＋入座（單桌、併桌同一條）。
+  const startArriveSeat = (booking) => {
+    if (blockedByReserve()) return
+    if (!booking) return
+    if (booking.assignedTableId) return toast.info(`${booking.name} 已有桌，請按「客人到了」`)
+    if (!['confirmed', 'pending'].includes(booking.status)) return toast.error('這筆訂位不是待到狀態')
+    const guests = Number(booking.guests) || 0
+    const suitable = findSuitableTables(1).map(t => t.number)
+    const suggestion = suggestTable(guests, { bookingId: booking.id, date: todayStr(), mode: 'now' })
+    startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number })
+  }
+
   // 改派桌位模式：團體梯次入座被佔桌卡住 → 逐桌挑替代空桌（queue 依序處理）
   const startGroupReseat = (group, batch, blocked) => {
     if (blockedByReserve()) return
@@ -430,7 +410,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 目前模式「新佔用區間」：指派＝現在就鎖桌、候位＝現在入座、改桌＝依原本語意
   const modeWindow = (m) => {
     if (!m) return null
-    if (m.type === 'seat-waitlist' || (m.type === 'assign-multi' && m.kind === 'waitlist')) return assignmentWindow({ mode: 'now' }, settings)
+    if (m.type === 'seat-waitlist' || (m.type === 'assign-multi' && ['waitlist', 'arrive'].includes(m.kind))) return assignmentWindow({ mode: 'now' }, settings)
     const b = m.booking
     const kind = m.type === 'move' ? (m.moveKind || 'hold') : (m.lockKind || 'hold')
     return assignmentWindow({ mode: kind, timeSlot: b?.timeSlot, date: b?.date || todayStr() }, settings)
@@ -445,6 +425,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   }
 
   const cancelMode = () => { setMode(null); setPendingConfirm(null) }
+  // 完成選桌入座後回到進模式前的籤／視圖（今日訂位、帶位…），方便接著處理下一組；不開抽屜
+  const returnToModeSource = () => {
+    cancelMode()
+    const source = modeSource.current
+    if (source) { setRailTab(source.railTab); setView(source.view) }
+    setSelectedTable(null)
+    modeSource.current = null
+  }
 
   // seatedToWalkin（純函式，見上方）綁上這個畫面的真實 setter——三條候位入座路徑共用
   // toast「查看」開抽屜會把左欄（含新增面板）換掉 → 面板開著時擋下（清空選取 null 不擋）
@@ -749,8 +737,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // kind='booking' → 指派該訂位（桌況 reserved，客人到了再入座）
   // kind='waitlist' → 候位直接入座（桌況 dining，客人已在現場）
   // （現場帶位併桌是另一條路徑，走 handleWalkinSeat）
+  // 選桌入座（kind:'arrive'）只列與「現在入座」重疊的預配（不重疊的會保留，不必多勾一下；與報到列口徑一致）
   const multiWarnings = mode?.type === 'assign-multi' ? mode.selected.flatMap(n => {
-    const lines = preassignConflictsFor(n).map(c => conflictLine(n, c, '確認'))
+    const lines = preassignConflictsFor(n).filter(c => mode.kind !== 'arrive' || c.overlaps).map(c => conflictLine(n, c, mode.kind === 'arrive' ? '入座' : '確認'))
     const hold = groupHoldTables[n]
     if (hold?.holds?.length) lines.push(`${n} 為今日團體 ${hold.agencyName || '旅行社'} 預留，確認後散客將佔用團體桌`)
     return lines
@@ -795,6 +784,24 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       setSelectedTable(mode.selected[0])
       cancelMode()
       onMoveDone?.()
+      return
+    }
+    // 未配桌訂位「到了 · 選桌入座」：上面已重驗（此刻空桌、同樓層、席數、警示已勾）→ 一次指派＋入座。
+    // 單桌、併桌同一條（assignAndSeatBooking 內部走 assignBookingTablesMulti＋seatBooking 的既有守門）。
+    if (mode.kind === 'arrive') {
+      const b = mode.booking
+      const overridden = mode.selected.flatMap(n => preassignConflictsFor(n))
+      const r = assignAndSeatBooking(b.id, mode.selected)
+      if (!r?.ok) return toast.error('入座失敗：' + (r?.error || '未知錯誤'))
+      // 只解除與「現在入座」重疊的他筆預配；快照帶進復原，按「復原」時一併還回去
+      const releasedPreassigns = releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
+      const label = (r.tableNumbers || mode.selected).join(' + ')
+      toastSeatedWithUndo(r, {
+        message: `${b.name}（${b.guests} 位）已入座 ${label}`, name: b.name,
+        undoSeatBooking, toast, releasedPreassigns, restoreOverriddenAssignment,
+      })
+      flashAssigned(mode.selected[0])
+      returnToModeSource()
       return
     }
     if (mode.selected.length === 1) {
@@ -1016,7 +1023,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     // 只有「訂位指派」是跨頁來的（BookingsView 的指派桌 → pendingAssign），取消時要回報消耗掉；
     // 候位併桌是現場頁內互動，沒有待消耗的跨頁請求。
     const isBookingAssign = mode?.type === 'assign'
-      || (mode?.type === 'assign-multi' && mode.kind !== 'waitlist' && !mode.replacing)
+      || (mode?.type === 'assign-multi' && !['waitlist', 'arrive'].includes(mode.kind) && !mode.replacing)
     if (isBookingAssign) onAssignDone?.()
     if (mode?.type === 'move' || mode?.replacing) onMoveDone?.()
     cancelMode()
@@ -1117,11 +1124,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         <div className={`h-full min-h-0 ${selectedTableObj ? 'overflow-y-auto space-y-3' : 'flex flex-col'}`}>
           {mode ? (
             <div role="region" aria-label="目前選桌任務" className="bg-white rounded-xl border border-chicken-brown/15 p-4 space-y-3">
-              <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.type === 'group-reseat' ? '團體改派' : '指派桌位'}</h2>
+              <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.kind === 'arrive' ? '選桌入座' : mode.type === 'group-reseat' ? '團體改派' : '指派桌位'}</h2>
               <p className="font-bold">{mode.booking?.name || mode.wait?.name || mode.group?.agencyName} · {mode.need || mode.booking?.guests || mode.wait?.partySize || mode.batch?.guests} 位</p>
               {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
               <p>目標桌：{(mode.selected?.length ? mode.selected.join(' + ') : pendingConfirm) || '尚未選桌'}</p>
-              <p className="text-sm text-chicken-brown/60">在地圖選桌，上方確認後才儲存。</p>
+              <p className="text-sm text-chicken-brown/60">{mode.kind === 'arrive' ? '在地圖點空桌，上方按「確認入座」即入座（5 秒內可復原）。' : '在地圖選桌，上方確認後才儲存。'}</p>
               {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">保留原入座時間；撤出的原桌需清桌。</p>}
               <button type="button" className="tap min-h-[44px] px-4 rounded-lg border" onClick={cancelModeAndNotify}>取消並返回</button>
             </div>
@@ -1160,6 +1167,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 if (b.assignedTableId) setSelectedTable(b.assignedTableId)
               }}
               onAssignTable={startAssign}
+              onArriveSeat={startArriveSeat}
               onMoveTable={can('booking.update') && can('table.update') ? startMove : null}
               onSeatWaitlist={startSeatWaitlist}
               onReseatBatch={startGroupReseat}
@@ -1272,8 +1280,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                     if (t) setFloor(t.floor)
                     setSelectedTable(n)
                   }}
+                  onArriveUnassigned={startArriveSeat}
                   onArrive={(table, booking) => handleArriveNow(table, booking, {
-                    seatBooking, seatBookingAllTables, setStatus, setTableStatus, undoSeatPreassigned, toast, onMove: startMove,
+                    seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove: startMove,
                     // 預配那條的防呆（團保／他筆預配重疊先確認）；鎖桌那條不用這些
                     confirm,
                     getTable: (n) => tables.find(t => String(t.number) === String(n)),
