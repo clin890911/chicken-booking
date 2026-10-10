@@ -28,8 +28,9 @@ import { todayStr, nowSlot } from '../../utils/timeSlots'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
 import SegmentedControl from '../ui/SegmentedControl'
 import { seatingPerms } from '../../utils/seatingPerms'
-import { formatBookingTables } from '../../utils/bookingTables'
+import { formatBookingTables, bookingTableNumbers } from '../../utils/bookingTables'
 import { preassignArriveConflictLines, toastSeatedWithUndo } from '../../utils/arriveSeat'
+import { resolveSuggestedTables } from '../../utils/suggestionApply'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
@@ -330,20 +331,21 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (suggestedTable) setFloor(suggestedTable.floor)
   }
 
-  // 「用建議桌」：切到建議桌樓層並選好（含併桌組合），店員再按確認。只選仍可點的桌（與手點同一個可選集合）。
+  // 「用建議桌」：切到建議桌樓層並選好（含併桌組合），店員再按確認。整組都仍可點（與手點同一個可選集合）才選；
+  // 有任一張已變動就一張都不選、請店員自行選桌（resolveSuggestedTables）——不只選一部分。
   // 預配／團保桌不因一鍵套用跳過防呆：選好後 multiWarnings／pendingConflicts 照常出現、要勾選或按「仍要」才放行。
   const applyModeSuggestion = () => {
     if (!mode) return
     if (mode.type === 'assign-multi') {
-      const pool = new Set((mode.suitable || []).map(String))
-      const nums = (mode.suggestionTables || []).map(String).filter(n => pool.has(n))
-      if (!nums.length) return toast.error('建議桌已不可用，請自行選桌')
-      setMode({ ...mode, selected: nums, confirmedWarning: null })
-      locateSuggestion(nums[0])
+      const r = resolveSuggestedTables(mode.suggestionTables, mode.suitable)
+      if (!r.ok) return toast.error(r.error)
+      setMode({ ...mode, selected: r.tables, confirmedWarning: null })
+      locateSuggestion(r.tables[0])
       return
     }
     if (['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode.type) && mode.suggestion) {
-      if (!(mode.suitable || []).map(String).includes(String(mode.suggestion))) return toast.error('建議桌已不可用，請自行選桌')
+      const r = resolveSuggestedTables([mode.suggestion], mode.suitable)
+      if (!r.ok) return toast.error(r.error)
       setPendingConfirm(mode.suggestion)
       locateSuggestion(mode.suggestion)
     }
@@ -951,14 +953,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   }
 
   // 帶位面板「用建議桌」：切樓層＋把建議桌（單桌或併桌組合）放進已選，店員再按確認入座。
-  // 只放此刻可帶位的桌（walkinSelectable，與手點同一個集合）；預配／團保桌照樣由 walkinWarning 要求勾選解鎖。
+  // 整組都仍是此刻可帶位的桌（walkinSelectable，與手點同一個集合）才放；任一張已變動就一張都不放（不只選一部分）。
+  // 預配／團保桌照樣由 walkinWarning 要求勾選解鎖。
   const applyWalkinSuggestion = (numbers) => {
-    const pool = new Set(walkinSelectable.map(String))
-    const nums = [...new Set((numbers || []).map(String))].filter(n => pool.has(n))
-    if (!nums.length) return toast.error('建議桌已不可用，請自行選桌')
-    setWalkinTableNumbers(nums)
+    const r = resolveSuggestedTables(numbers, walkinSelectable)
+    if (!r.ok) return toast.error(r.error)
+    setWalkinTableNumbers(r.tables)
     setSelectedTable(null)
-    locateSuggestion(nums[0])
+    locateSuggestion(r.tables[0])
   }
 
   // 帶位入座：一桌走 walkInSeat、多桌走 walkInSeatMulti（同一個手勢靠陣列長度分派）。
@@ -1363,12 +1365,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
       {/* 系統自動處理紀錄（自動清檯留痕） */}
       <OpsLogModal open={showOpsLog} onClose={() => setShowOpsLog(false)} />
+      {/* 詳情「在地圖標示」：關掉詳情、切到那筆主桌的樓層並在桌況圖上定位（與「定位建議桌」同一支 locateSuggestion） */}
       {detailBookingId && (
         <BookingDetailSheet
           bookingId={detailBookingId}
           onClose={() => setDetailBookingId(null)}
           onAssign={(b) => { setDetailBookingId(null); startAssign(b) }}
           onMove={can('booking.update') && can('table.update') ? (b) => { setDetailBookingId(null); startMove(b) } : undefined}
+          onFocusTable={(b) => { setDetailBookingId(null); const n = bookingTableNumbers(b)[0]; if (n) locateSuggestion(n) }}
         />
       )}
     </div>

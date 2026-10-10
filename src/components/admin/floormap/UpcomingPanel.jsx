@@ -7,7 +7,7 @@ import { useToast, useConfirm } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
-import { preassignArriveConflictLines, toastSeatedWithUndo } from '../../../utils/arriveSeat'
+import { seatAfterArriveConfirm, toastSeatedWithUndo } from '../../../utils/arriveSeat'
 import { assignmentKind } from '../../../utils/tableStatus'
 import { bookingTableNumbers } from '../../../utils/bookingTables'
 import { getNoshowCount } from '../../../services/bookingService'
@@ -242,18 +242,12 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
   }
 
   // 客人到了（含遲到後才到）：對已指派的訂位直接入座（status→arrived、桌→用餐中）。
-  // 防呆與報到列同一個口徑（utils/arriveSeat.preassignArriveConflictLines）：主桌＋副桌每張都查，
+  // 防呆與報到列同一個口徑（utils/arriveSeat.seatAfterArriveConfirm → preassignArriveConflictLines）：主桌＋副桌每張都查，
   //   今日團體保留 → 確認；他筆預配「與現在入座的用餐區間重疊」→ 確認；不重疊的預配（晚上那輪）不擋。
   //   （過去用 seatTableWarnings 不看時段，12:00 入座也會為 20:30 的預配跳確認，白多一下。）
   // 成功 toast 帶 5 秒復原（共用 toastSeatedWithUndo：booking 與桌一起倒、被別組佔走不搶）。
-  const handleSeat = async (b) => {
+  const handleSeat = (b) => seatAfterArriveConfirm(b, { confirm, bookings, groupHoldTables, settings, now: new Date() }, () => {
     const tableNo = bookingTableNumbers(b).join('、')
-    const lines = preassignArriveConflictLines(b, { bookings, groupHoldTables, settings, now: new Date() })
-    if (lines.length) {
-      const ok = await confirm(`${lines.join('；')}。\n仍要讓 ${b.name} 入座 ${tableNo}？`,
-        { title: '桌位有預留', confirmLabel: '仍要入座', danger: true })
-      if (!ok) return
-    }
     const r = seatBooking(b.id)
     if (!r?.ok) {
       const msg = '入座失敗：' + (r?.error || '未知錯誤')
@@ -264,7 +258,7 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
       return toast.error(msg)
     }
     toastSeatedWithUndo(r, { message: `${b.name} 已入座 ${tableNo}`, name: b.name, undoSeatBooking, toast })
-  }
+  })
 
   if (pulse.overdue.length + pulse.soon.length + pulse.later.length === 0) {
     return (
