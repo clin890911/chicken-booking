@@ -10,6 +10,7 @@ import OpsHintBar from './ops/OpsHintBar'
 import OpsLogModal from './ops/OpsLogModal'
 import TableScheduleView from './ops/TableScheduleView'
 import TableSummaryView from './ops/TableSummaryView'
+import BookingDetailSheet from '../booking/BookingDetailSheet'
 import { nextBookableSlot, pastSlotFix } from './ops/QuickReservePanel'
 import LayoutEditor from './LayoutEditor'
 import { useBooking } from '../../contexts/BookingContext'
@@ -222,6 +223,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const reserveOpenRef = useRef(false)
   reserveOpenRef.current = reserveOpen
   const [flashBookingId, setFlashBookingId] = useState(null)   // 剛新增的那筆（今日訂位籤閃一下）
+  // 今日訂位卡「詳情 ›」：原地開訂位詳情（改人數／備註、取消、指派都在裡面），不必換頁
+  const [detailBookingId, setDetailBookingId] = useState(null)
 
   // === 現場帶位 v3（順序不拘）===
   // 系統只需要「桌」和「人數」：先點桌或先選人數都行，兩者到齊由面板的滑動手勢入座。
@@ -298,18 +301,52 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     //   hold＝此刻空桌；preassign＝桌子不必此刻空著，只要此刻的佔用不延續進預配區間
     const suitable = (lockKind === 'preassign' ? preassignableTables(1, reserveOpts) : findSuitableTables(1)).map(t => t.number)
     const suggestion = findReserveCandidates(guests, reserveOpts).tables[0]
-    startMultiMode({ kind: 'booking', booking, need: guests, lockKind, suitable, suggestion: suggestion?.number })
+    const suggestionTables = suggestion ? [] : comboSuggestionFor(guests, suitable, { ...reserveOpts, mode: lockKind })
+    startMultiMode({ kind: 'booking', booking, need: guests, lockKind, suitable, suggestion: suggestion?.number, suggestionTables })
+  }
+
+  // 無單桌可容時的併桌建議（suggestTableCombo：此刻空桌、排除時段重疊的他筆預配與今日團保桌）。
+  // 只採用「每張都在可選集合內、且至少兩張」的組合——「用建議桌」選到的桌一定點得到；
+  // 選到的桌若仍有預配／團保，照樣走 multiWarnings 勾選解鎖（防呆不因一鍵套用而跳過）。
+  const comboSuggestionFor = (need, suitable, opts) => {
+    if (!(need > 0)) return []
+    const combo = suggestTableCombo(need, opts)
+    const nums = (combo?.enough ? combo.tableNumbers || [] : []).map(String)
+    const pool = new Set((suitable || []).map(String))
+    return nums.length > 1 && nums.every(n => pool.has(n)) ? nums : []
   }
 
   // 單桌與多桌共用人工選桌；推薦只提示，不自動勾桌。
-  const startMultiMode = ({ kind, booking = null, wait = null, need, lockKind = 'hold', suitable, suggestion, replacing = false }) => {
+  // suggestionTables：建議的整組桌（單桌建議＝[suggestion]；無單桌可容時為併桌組合）——
+  // 只給「用建議桌」一鍵套用，進模式時仍不自動勾（PR #137：要店員自己決定）。
+  const startMultiMode = ({ kind, booking = null, wait = null, need, lockKind = 'hold', suitable, suggestion, suggestionTables = [], replacing = false }) => {
     rememberModeSource()
+    const sugTables = suggestion ? [String(suggestion)] : (suggestionTables || []).map(String)
     setMode({ type: 'assign-multi', kind, booking, wait, need, lockKind,
-      selected: [], suitable, suggestion, replacing, confirmedWarning: null })
+      selected: [], suitable, suggestion: suggestion || sugTables[0], suggestionTables: sugTables, replacing, confirmedWarning: null })
     setSelectedTable(null)
     setPendingConfirm(null)
-    const suggestedTable = tables.find(t => t.number === suggestion)
+    const suggestedTable = tables.find(t => String(t.number) === String(suggestion || sugTables[0]))
     if (suggestedTable) setFloor(suggestedTable.floor)
+  }
+
+  // 「用建議桌」：切到建議桌樓層並選好（含併桌組合），店員再按確認。只選仍可點的桌（與手點同一個可選集合）。
+  // 預配／團保桌不因一鍵套用跳過防呆：選好後 multiWarnings／pendingConflicts 照常出現、要勾選或按「仍要」才放行。
+  const applyModeSuggestion = () => {
+    if (!mode) return
+    if (mode.type === 'assign-multi') {
+      const pool = new Set((mode.suitable || []).map(String))
+      const nums = (mode.suggestionTables || []).map(String).filter(n => pool.has(n))
+      if (!nums.length) return toast.error('建議桌已不可用，請自行選桌')
+      setMode({ ...mode, selected: nums, confirmedWarning: null })
+      locateSuggestion(nums[0])
+      return
+    }
+    if (['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode.type) && mode.suggestion) {
+      if (!(mode.suitable || []).map(String).includes(String(mode.suggestion))) return toast.error('建議桌已不可用，請自行選桌')
+      setPendingConfirm(mode.suggestion)
+      locateSuggestion(mode.suggestion)
+    }
   }
 
   const startSeatWaitlist = (wait) => {
@@ -317,7 +354,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const guests = Number(wait.partySize) || 0
     const suitable = findSuitableTables(1).map(t => t.number)
     const suggestion = suggestTable(guests, { date: todayStr(), mode: 'now' })
-    startMultiMode({ kind: 'waitlist', wait, need: guests, suitable, suggestion: suggestion?.number })
+    const suggestionTables = suggestion ? [] : comboSuggestionFor(guests, suitable, { date: todayStr(), mode: 'now' })
+    startMultiMode({ kind: 'waitlist', wait, need: guests, suitable, suggestion: suggestion?.number, suggestionTables })
   }
 
   // 未配桌的訂位到店：「到了 · 選桌入座」（今日訂位卡／報到列）。
@@ -332,7 +370,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const guests = Number(booking.guests) || 0
     const suitable = findSuitableTables(1).map(t => t.number)
     const suggestion = suggestTable(guests, { bookingId: booking.id, date: todayStr(), mode: 'now' })
-    startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number })
+    const suggestionTables = suggestion ? [] : comboSuggestionFor(guests, suitable, { bookingId: booking.id, date: todayStr(), mode: 'now' })
+    startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number, suggestionTables })
   }
 
   // 改派桌位模式：團體梯次入座被佔桌卡住 → 逐桌挑替代空桌（queue 依序處理）
@@ -911,6 +950,17 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     toast.info(`↩️ 已復原：${snap.tableNumbers.join(' + ')} 回到空桌${note}`)
   }
 
+  // 帶位面板「用建議桌」：切樓層＋把建議桌（單桌或併桌組合）放進已選，店員再按確認入座。
+  // 只放此刻可帶位的桌（walkinSelectable，與手點同一個集合）；預配／團保桌照樣由 walkinWarning 要求勾選解鎖。
+  const applyWalkinSuggestion = (numbers) => {
+    const pool = new Set(walkinSelectable.map(String))
+    const nums = [...new Set((numbers || []).map(String))].filter(n => pool.has(n))
+    if (!nums.length) return toast.error('建議桌已不可用，請自行選桌')
+    setWalkinTableNumbers(nums)
+    setSelectedTable(null)
+    locateSuggestion(nums[0])
+  }
+
   // 帶位入座：一桌走 walkInSeat、多桌走 walkInSeatMulti（同一個手勢靠陣列長度分派）。
   // 回傳 false = 失敗（面板保留欄位，方便改人數或改走候位）。
   const handleWalkinSeat = (payload) => {
@@ -1100,6 +1150,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         mode={mode}
         tables={tables}
         onLocateSuggestion={locateSuggestion}
+        onApplySuggestion={applyModeSuggestion}
         pendingConfirm={pendingConfirm}
         pendingConflicts={pendingConflicts}
         pendingGroupHold={pendingGroupHold}
@@ -1161,11 +1212,15 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               onWalkinSeat={handleWalkinSeat}
               lastParty={lastParty}
               onLocateSuggestion={locateSuggestion}
+              onApplySuggestion={applyWalkinSuggestion}
               showNextWaitlist={waitlistNext && waitlist.some(w => ['waiting', 'called'].includes(w.status))}
               onNextWaitlist={() => { setSelectedTable(null); setRailTab('waitlist'); setWaitlistNext(false) }}
               onClickBooking={(b) => {
+                // 有桌 → 開那張桌的抽屜；沒桌 → 開訂位詳情（過去點了沒反應）
                 if (b.assignedTableId) setSelectedTable(b.assignedTableId)
+                else setDetailBookingId(b.id)
               }}
+              onOpenDetail={(b) => setDetailBookingId(b.id)}
               onAssignTable={startAssign}
               onArriveSeat={startArriveSeat}
               onMoveTable={can('booking.update') && can('table.update') ? startMove : null}
@@ -1308,6 +1363,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
       {/* 系統自動處理紀錄（自動清檯留痕） */}
       <OpsLogModal open={showOpsLog} onClose={() => setShowOpsLog(false)} />
+      {detailBookingId && (
+        <BookingDetailSheet
+          bookingId={detailBookingId}
+          onClose={() => setDetailBookingId(null)}
+          onAssign={(b) => { setDetailBookingId(null); startAssign(b) }}
+          onMove={can('booking.update') && can('table.update') ? (b) => { setDetailBookingId(null); startMove(b) } : undefined}
+        />
+      )}
     </div>
   )
 }

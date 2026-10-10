@@ -17,6 +17,7 @@ import { seatingPerms } from '../../../utils/seatingPerms'
 import { toastSeatedWithUndo } from '../../../utils/arriveSeat'
 import { splitSuffix } from '../../../utils/partySplit'
 import { formatPhone } from '../../../utils/phoneFormat'
+import EditBookingModal from '../../booking/EditBookingModal'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -66,6 +67,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [showBlock, setShowBlock] = useState(false)
   const [showOutage, setShowOutage] = useState(false)
+  const [editingBooking, setEditingBooking] = useState(false) // 用餐中「改人數／備註」
   const [walkInForm, setWalkInForm] = useState({ name: '散客', phone: '', guests: 2, notes: '' })
   // 散客入座會解除時段重疊的他筆預配 → 與現場帶位／選桌模式同口徑：先勾「仍要帶這桌」才解鎖
   const [walkInOverride, setWalkInOverride] = useState(false)
@@ -555,7 +557,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
               </button>
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={onStartMove} className="btn-secondary text-sm disabled:opacity-45">↔ 換桌</button>
-                <button onClick={() => toast.info('（v1 預留）訂單明細整合中')} className="btn-secondary text-sm">訂單明細</button>
+                {/* 用餐中加人／補過敏備註：原地改（只開放人數＋備註，桌位不動）；取代原本空殼的「訂單明細」 */}
+                <button onClick={() => setEditingBooking(true)} className="btn-secondary text-sm">改人數／備註</button>
               </div>
             </>
           )}
@@ -578,6 +581,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
           )}
         </div>
       )}
+
+      {editingBooking && booking && <EditBookingModal booking={booking} onClose={() => setEditingBooking(false)} />}
 
       {/* Walk-in Modal */}
       <Modal open={showWalkIn} onClose={() => setShowWalkIn(false)} title={`${table.number} · 散客入座`} footer={
