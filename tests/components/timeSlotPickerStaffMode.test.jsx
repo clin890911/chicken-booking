@@ -97,6 +97,35 @@ describe.each(['cards', 'compact'])('TimeSlotPicker 員工模式（variant=%s）
   })
 })
 
+// 2026-10 尖峰優化：員工（後台）選時段，「已滿」改黃字提示、仍可選（allowFull）；
+// 客人線上訂位不用本元件（走 guestGetAvailability），不傳 allowFull 的呼叫點維持硬擋。公休、已過時段照擋。
+describe.each(['cards', 'compact'])('TimeSlotPicker allowFull（variant=%s）', (variant) => {
+  const full = [{ id: 'b1', date: DATE, timeSlot: '11:00', guests: 10, status: 'confirmed' }]
+  it('allowFull：已滿時段可選、標「已滿」黃字；點了 onChange 收得到', () => {
+    const picked = []
+    render({ variant, ignoreOnlineClosure: true, allowFull: true, bookings: full, onChange: (t) => picked.push(t) })
+    expect(btn('11:00').disabled).toBe(false)
+    expect(btn('11:00').textContent).toContain('已滿')
+    expect(btn('11:00').innerHTML).toContain('text-amber-700')
+    act(() => { btn('11:00').click() })
+    expect(picked).toEqual(['11:00'])
+  })
+  it('不傳 allowFull（預設）→ 已滿仍禁用', () => {
+    render({ variant, ignoreOnlineClosure: true, bookings: full })
+    expect(btn('11:00').disabled).toBe(true)
+  })
+  it('allowFull 不放寬公休日：仍「已關閉」禁用', () => {
+    render({ variant, ignoreOnlineClosure: true, allowFull: true, bookings: full, settings: withClosures({ closedDates: [DATE] }) })
+    expect(btn('11:00').disabled).toBe(true)
+    expect(btn('11:00').textContent).toContain('已關閉')
+  })
+  it('allowFull 不放寬已過時段：今天早於目前時段的不顯示', () => {
+    render({ variant, ignoreOnlineClosure: true, allowFull: true, date: '2026-10-06', now: new Date(2026, 9, 6, 11, 40) })
+    expect(btn('11:00')).toBeUndefined()
+    expect(btn('11:30')).toBeTruthy()
+  })
+})
+
 describe('calcSlotCapacity ignoreOnlineClosure', () => {
   const bookings = [{ id: 'b1', date: DATE, timeSlot: '11:00', guests: 4, status: 'confirmed' }]
   it('預設（線上口徑）：關閉場次/時段/公休都回 0', () => {

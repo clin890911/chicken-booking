@@ -970,7 +970,11 @@ export function undoAssignBooking(bookingId, tableNumber) {
 }
 
 // === 大組多桌組合建議（單桌裝不下時的併桌建議）===
-// 候選 = 今日可用 + vacant 桌。★ 併桌一律「同一樓層」（一組客人不可能分坐兩層）。
+// 候選 = 今日可用 + vacant 桌，再排除「依佔用區間會撞桌」的桌（timeConflictTableNumbers：時段重疊的他筆
+// 預配／鎖桌、今日團保）——與單桌建議 suggestTable 同一支 helper。過去只看 vacant，會推薦有預配的桌和
+// 團體保留桌，店員照著選才被警示擋下（尖峰時白走一趟）。只影響「建議」；可點選集合不縮小（預配/團保靠警示＋勾選解鎖）。
+// opts 同 findSuitableTables（預設 mode 'now'＝現在入座的佔用區間 [現在, 現在＋佔位)）。
+// ★ 併桌一律「同一樓層」（一組客人不可能分坐兩層）。
 // 每個樓層內：
 //   1) 桌數最少 → 2) 空位（浪費）最少 → 3) 桌與桌在平面圖上最靠近（真的併得起來）。
 //   過去用「容量大優先」貪婪湊，9 位會給 6+6（12 席、浪費 3），明明 4+6（10 席）就夠、
@@ -978,11 +982,13 @@ export function undoAssignBooking(bookingId, tableNumber) {
 // 跨樓層：桌數少 → 浪費少 → 1F 優先。
 // 沒有任何單一樓層能湊夠 → 回座位最多的單層（該層全部可用桌，enough:false），由 UI 提示改候位/分桌。
 // 回傳 { tableNumbers, seats, enough, floor }。
-export function suggestTableCombo(partySize) {
+export function suggestTableCombo(partySize, opts = {}) {
   const need = Math.max(0, Number(partySize) || 0)
-  const today = todayStr()
+  const today = opts?.now ? formatDate(opts.now) : todayStr()
+  const conflicts = timeConflictTableNumbers({ date: today, mode: 'now', ...opts })
   const pool = tableService.listAll()
     .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && (Number(t.capacity) || 0) > 0)
+    .filter(t => !conflicts.has(String(t.number)))
 
   const floors = [...new Set(pool.map(t => t.floor))]
   const perFloor = floors.map(f => bestComboOnFloor(pool.filter(t => t.floor === f), need, f))

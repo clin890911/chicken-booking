@@ -88,7 +88,9 @@ describe('AddBookingView：今日訂位選桌', () => {
 
   it('U1：選完時段出現「桌位」區，第一張預選並標「建議」，確認列帶出桌號；舊 checkbox 已移除', () => {
     render()
-    expect(container.textContent).toContain('選好時段後')          // 沒選時段：只給提示
+    // 今天：預選下一個可訂時段（10:40 → 11:00），一進來就看得到桌位區、不必先點時段
+    expect(container.textContent).not.toContain('選好時段後')
+    expect(pickArea()).toBeTruthy()
     fillBasics()
     expect(pickArea()).toBeTruthy()
     expect(chip('105').getAttribute('aria-pressed')).toBe('true')

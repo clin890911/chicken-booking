@@ -75,7 +75,8 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
   await page.getByRole('button', { name: '來源：現場' }).click()
   await expect(page.getByPlaceholder('現場客可不填')).toBeVisible()
   await page.getByPlaceholder('王小姐').fill('余先生')
-  await expect(page.getByText('選好時段後')).toBeVisible()
+  // 今天會預選下一個可訂時段（10:40 → 11:00），桌位區一進來就在；再點一次 11:00 維持選取
+  await expect(page.getByText('選好時段後')).toHaveCount(0)
   await page.getByRole('button', { name: /^11:00/ }).click()
 
   // 桌位區：預選建議桌（2 位 → 1F 四人桌 105），改選 106，確認列帶出桌號

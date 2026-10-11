@@ -669,7 +669,7 @@ export function BookingProvider({ children }) {
   // opts（{ bookingId, date, timeSlot }）只給「建議／候選」用：帶了就排除依時段會撞桌的桌。
   const findSuitableTables = (partySize, opts) => seatingService.findSuitableTables(partySize, opts)
   const suggestTable = (partySize, opts) => seatingService.suggestTable(partySize, opts)
-  const suggestTableCombo = (partySize) => seatingService.suggestTableCombo(partySize)
+  const suggestTableCombo = (partySize, opts) => seatingService.suggestTableCombo(partySize, opts)
   // 鎖桌時機分流（capacity.lockKindFor）：今日訂位挑桌的建議／候選 → { kind:'hold'|'preassign', tables }
   const findReserveCandidates = (partySize, opts) => seatingService.findReserveCandidates(partySize, opts)
   // 預配型的可點選集合（桌子不必此刻空著，只要此刻的佔用不會延續進預配區間）

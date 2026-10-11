@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
 import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
+import { resolveAdminTab } from '../utils/landingTab'
 import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
 
 const TABS = [
@@ -28,8 +29,10 @@ export default function AdminPage() {
   // URL 作為分頁的單一真實來源：重整/上一頁/下一頁/書籤皆能還原（?tab=settings&section=...）。
   // tab 為衍生值（非另存 state），故無雙向同步 useEffect、無迴圈。
   const [searchParams, setSearchParams] = useSearchParams()
+  const { user, usingFirebase, can } = useAuth()
   const rawTab = searchParams.get('tab')
-  const tab = VALID_TABS.includes(rawTab) ? rawTab : 'bookings'
+  // 沒指定分頁時依角色落點（外場／領位→現場，其他→訂位），見 utils/landingTab
+  const tab = resolveAdminTab(rawTab, user?.role, VALID_TABS)
   // useCallback：底下的跨頁 handler（指派桌 / 開團單）會一路傳進 React.memo 化的訂位卡，
   // 參考穩定才能讓卡片在清單重繪時真的跳過。
   const setTab = useCallback((next) => setSearchParams(prev => {
@@ -64,7 +67,6 @@ export default function AdminPage() {
   const [pendingRosterPhone, setPendingRosterPhone] = useState(null)
   // addPrefill：名冊「新增訂位」帶入的預填（電話/姓名），導到訂位頁新增子分頁
   const [addPrefill, setAddPrefill] = useState(null)
-  const { user, usingFirebase, can } = useAuth()
   const { bookings, waitlist, cloudStatus, hydrated } = useBooking()
   const toast = useToast()
 

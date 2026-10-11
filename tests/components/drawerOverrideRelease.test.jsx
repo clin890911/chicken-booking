@@ -48,6 +48,7 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
     act(() => { root.render(el) })
   }
   const btn = (text) => [...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith(text))
+  const overrideBox = () => [...document.querySelectorAll('label')].find(l => l.textContent.includes('我知道，仍要帶這桌'))?.querySelector('input[type="checkbox"]')
 
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); vi.clearAllMocks() })
   afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
@@ -58,6 +59,12 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
     mount(<TableDrawer table={T105} booking={null} preassign={yu} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} />)
     expect(container.textContent).toContain('入座後這筆預配將解除')
     act(() => { btn('散客直接入座').click() })
+    // 與現場帶位同口徑：會解除重疊預配 → 先勾「仍要帶這桌」才解鎖（未勾：確認鈕停用、按了也不動）
+    expect(btn('確認入座').disabled).toBe(true)
+    act(() => { btn('確認入座').click() })
+    expect(ctx.walkInSeat).not.toHaveBeenCalled()
+    act(() => { overrideBox().click() })
+    expect(btn('確認入座').disabled).toBe(false)
     act(() => { btn('確認入座').click() })
     expect(ctx.walkInSeat).toHaveBeenCalled()
     expect(ctx.releaseOverriddenAssignment).toHaveBeenCalledWith('YU')
@@ -70,14 +77,34 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
     mount(<TableDrawer table={T105} booking={null} preassign={yu} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} />)
     expect(container.textContent).toContain('這筆預配會保留')
     act(() => { btn('散客直接入座').click() })
+    expect(overrideBox()).toBeUndefined()                         // 不會解除任何人 → 不必勾選
     act(() => { btn('確認入座').click() })
     expect(ctx.walkInSeat).toHaveBeenCalled()
     expect(ctx.releaseOverriddenAssignment).not.toHaveBeenCalled()
   })
 
-  it('TableCandidatePanel「入座」（現在入座）：12:30 的預配重疊 → 解除', () => {
+  it('TableDrawer 散客直接入座：姓名選填——清空姓名照樣入座，交給 walkInSeat 補「散客」', () => {
+    setCtx([])
+    mount(<TableDrawer table={T105} booking={null} preassign={null} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} />)
+    act(() => { btn('散客直接入座').click() })
+    const nameInput = [...document.querySelectorAll('input')].find(i => i.getAttribute('placeholder') === '散客')
+    act(() => {
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(nameInput, '   ')
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => { btn('確認入座').click() })
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(ctx.walkInSeat).toHaveBeenCalledWith('105', expect.objectContaining({ name: '' }))
+  })
+
+  it('TableCandidatePanel「入座」（現在入座）：12:30 的預配重疊 → 未勾選鎖住、不解除；勾「仍要帶這桌」後才入座＋解除', () => {
     setCtx([yuAt('12:30'), CHEN])
     mount(<TableCandidatePanel table={T105} onPicked={() => {}} />)
+    expect(btn('入座').disabled).toBe(true)
+    act(() => { btn('入座').click() })
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+    expect(ctx.releaseOverriddenAssignment).not.toHaveBeenCalled()
+    act(() => { overrideBox().click() })
     act(() => { btn('入座').click() })
     expect(ctx.assignBookingToTable).toHaveBeenCalledWith('CHEN', '105')
     expect(ctx.releaseOverriddenAssignment).toHaveBeenCalledWith('YU')
@@ -86,6 +113,7 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
   it('TableCandidatePanel「預訂」（現在就鎖桌）：20:30 的預配不重疊 → 保留', () => {
     setCtx([yuAt('20:30'), CHEN])
     mount(<TableCandidatePanel table={T105} onPicked={() => {}} />)
+    expect(overrideBox()).toBeUndefined()                         // 沒有任何動作會解除 → 不出現勾選
     act(() => { btn('預訂').click() })
     expect(ctx.assignBookingToTable).toHaveBeenCalledWith('CHEN', '105')
     expect(ctx.releaseOverriddenAssignment).not.toHaveBeenCalled()
@@ -95,6 +123,9 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
     setCtx([yuAt('12:30')])
     ctx.waitlist = [{ id: 'W9', name: '候位客', partySize: 2, status: 'waiting', queueNumber: 9, takenAt: NOW.toISOString() }]
     mount(<TableCandidatePanel table={T105} onPicked={() => {}} />)
+    act(() => { btn('入座').click() })
+    expect(ctx.seatWaitlist).not.toHaveBeenCalled()             // 未勾選：鎖住
+    act(() => { overrideBox().click() })
     act(() => { btn('入座').click() })
     expect(ctx.seatWaitlist).toHaveBeenCalledWith('W9', '105')
     expect(ctx.releaseOverriddenAssignment).toHaveBeenCalledWith('YU')
@@ -111,6 +142,7 @@ describe('抽屜「入座」與「預訂」分開據實（12:00，P 18:00 預配
   const Q2 = { ...CHEN, id: 'Q2', name: 'Q2', timeSlot: '12:30' }
   const rowOf = (name) => [...container.querySelectorAll('.rounded-lg.p-2')]
     .find(r => r.querySelector('span.truncate')?.textContent === name)
+  const overrideBox = () => [...document.querySelectorAll('label')].find(l => l.textContent.includes('我知道，仍要帶這桌'))?.querySelector('input[type="checkbox"]')
   const rowBtn = (name, label) => [...rowOf(name).querySelectorAll('button')].find(b => b.textContent.startsWith(label))
 
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOON); vi.clearAllMocks() })
@@ -132,8 +164,11 @@ describe('抽屜「入座」與「預訂」分開據實（12:00，P 18:00 預配
     expect(rowBtn('Q2', '預訂').textContent).toBe('預訂')            // 12:30 鎖到 14:10，不撞 18:00
   })
 
-  it('按標了「將解除」的預訂 → 真的解除 P，toast 帶「↩ 復原」：撤回預訂並寫回 P 的預配', () => {
+  it('按標了「將解除」的預訂 → 先勾選才解鎖；勾後真的解除 P，toast 帶「↩ 復原」：撤回預訂並寫回 P 的預配', () => {
     mountDrawer()
+    expect(rowBtn('Q', '預訂').disabled).toBe(true)
+    expect(rowBtn('Q2', '預訂').disabled).toBe(false)             // 不會解除任何人的照常一下完成
+    act(() => { overrideBox().click() })
     act(() => { rowBtn('Q', '預訂').click() })
     expect(ctx.assignBookingToTable).toHaveBeenCalledWith('Q', '105')
     expect(ctx.releaseOverriddenAssignment).toHaveBeenCalledWith('P')

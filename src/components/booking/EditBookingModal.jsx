@@ -7,6 +7,7 @@ import { useBooking } from '../../contexts/BookingContext'
 import TimeSlotPicker from './TimeSlotPicker'
 import MonthCalendar from './MonthCalendar'
 import { dayLabel, todayStr, formatDate, addDays } from '../../utils/timeSlots'
+import { slotForDateChange } from '../../utils/staffSlots'
 
 const SOURCE_OPTIONS = [
   { value: 'phone',  label: '電話' },
@@ -47,9 +48,14 @@ export default function EditBookingModal({ booking, onClose }) {
   })
   const [busy, setBusy] = useState(false)
 
-  // 改日期就清空時段，逼使重選（舊時段對新日期可能已滿/關閉）；初始載入不清。
+  // 改日期：原時段在新日期仍可訂（非公休、席數夠、未過）就保留；否則今天預選下一個可訂時段、
+  // 其他日清空重選（與新增表單同一個 helper，utils/staffSlots）。初始載入不動。
+  // 席數以「扣掉這筆自己」的佔用計算——不然改到同一時段的別天時，這筆自己會把自己算成「已滿」。
   const pickDate = (d) => {
-    if (d !== date) setTimeSlot('')
+    if (d !== date) {
+      const others = bookings.filter(b => b.id !== booking.id)
+      setTimeSlot(prev => slotForDateChange(prev, { settings, tables, bookings: others, groupReservations, date: d, guests }))
+    }
     setDate(d)
     setShowCalendar(false)
   }
@@ -167,6 +173,7 @@ export default function EditBookingModal({ booking, onClose }) {
             guests={guests}
             hideFull={false}
             ignoreOnlineClosure
+            allowFull
           />
         </div>
 
