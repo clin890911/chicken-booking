@@ -8,6 +8,7 @@
 import * as customerService from './customerService'
 import * as tableService from './tableService'
 import { splitFields, normalizeSplit, forcedChildNotes } from '../utils/partySplit'
+import { squeezeSeats } from '../utils/capacity'
 
 const STORAGE_KEY = 'chicken_bookings_v1'
 const NOSHOW_KEY = 'chicken_noshow_v1'
@@ -184,13 +185,29 @@ export function update(id, patch) {
 
 // === 員工後台編輯訂位 ===
 // 與客人自助改（updateBookingByGuest）不同：不需 token、不限可編輯時段（店員可隨時改）。
-// 但同樣在「結構性變更」(日期/時段/人數) 時解除並釋放原桌，避免留下指向舊綁定的孤兒 reserved 桌。
+// 解除桌位的規則（2026-10 前台尖峰優化 A3：過去只要人數一變就解除，店員改完還得重新指派）：
+//   - 改日期或時段 → 解除並釋放原桌（原桌是為舊時段排的，避免留下指向舊綁定的孤兒 reserved 桌）
+//   - 只改人數 → 新人數 ≤ 指派桌（主桌＋併桌副桌）的「擠一擠」上限（capacity.squeezeSeats）就保留；
+//     坐不下才解除（呼叫端比對回傳的 assignedTableId 提示「已解除桌位，請重新指派」）
+//   - 已入座（arrived）改人數 → 一律不動桌（客人已經坐著；超過容量由 UI 黃字提示）
+// 釋桌只放仍由這筆持有的桌（releaseTableIfHeldBy）。
 // ★ 不寫 lastGuestEditAt/guestEditHistory（那是客人專用欄位，寫了會誤觸卡片「客人自行修改」標記）。
+export function guestsFitHeldTables(booking, guests) {
+  const held = heldTableNumbers(booking)
+  if (!held.length) return false
+  const tables = held.map(n => tableService.getByNumber(n)).filter(Boolean)
+  if (tables.length !== held.length) return false   // 桌已不存在 → 無從判斷，照舊解除
+  return Number(guests) <= squeezeSeats(tables)
+}
+
 export function updateByStaff(id, patch) {
   const booking = getById(id)
   if (!booking) return null
-  const structuralKeys = ['date', 'timeSlot', 'guests']
-  const shouldUnassign = structuralKeys.some(k => patch[k] !== undefined && String(patch[k]) !== String(booking[k]))
+  const changed = k => patch[k] !== undefined && String(patch[k]) !== String(booking[k])
+  const slotChanged = changed('date') || changed('timeSlot')
+  const guestsChanged = changed('guests')
+  const shouldUnassign = slotChanged
+    || (guestsChanged && booking.status !== 'arrived' && !guestsFitHeldTables(booking, patch.guests))
   const cleanPatch = { ...patch }
   let releasedTables = []
   if (shouldUnassign && booking.assignedTableId) {
