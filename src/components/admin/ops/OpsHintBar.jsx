@@ -54,8 +54,10 @@ export function pickHints({ pulse, tables, settings, groups, autoCount, now }) {
   return hints.slice(0, 2)
 }
 
+// 底色一律不透明：提示列直接放在後台桌布上（Liquid Glass 的桌布帶暖色光暈），
+// 半透明的 red/10 會吃到桌布顏色，紅字掉到 4.4:1；red-50 實心底 ≥5.5:1。
 const LEVEL_CLS = {
-  danger: 'bg-chicken-red/10 border-chicken-red/30 text-chicken-red',
+  danger: 'bg-red-50 border-chicken-red/30 text-chicken-red',
   warn: 'bg-amber-50 border-amber-300 text-amber-800',
   info: 'bg-sky-50 border-sky-200 text-sky-800',
   calm: 'bg-white border-chicken-brown/10 text-chicken-brown/65',

@@ -36,20 +36,21 @@ describe('ModeBanner：預配衝突據實', () => {
   })
 
   // 鎖桌時機（capacity.lockKindFor）：確認句據實講「指派並鎖桌」還是「預配（桌子現在仍可帶位）」
-  it('lockKind hold（或舊呼叫點沒帶）→「確認指派 陳小姐 至桌 105 並鎖桌？」＋「✓ 確認指派」', () => {
+  // 按鈕上的 ✓ 已改成線條圖示（GlyphText，aria-hidden），按鈕文字＝純文字
+  it('lockKind hold（或舊呼叫點沒帶）→「確認指派 陳小姐 至桌 105 並鎖桌？」＋「確認指派」鈕', () => {
     render(null, { ...mode, lockKind: 'hold' })
     expect(container.textContent).toContain('確認指派 陳小姐 至桌 105 並鎖桌？')
     expect(container.textContent).toContain('指派即鎖桌')
-    expect(buttons()).toContain('✓ 確認指派')
+    expect(buttons()).toContain('確認指派')
   })
 
-  it('lockKind preassign →「確認預配 陳小姐 到 105？（桌子現在仍可帶位）」＋「✓ 確認預配」，banner 標出時段預配', () => {
+  it('lockKind preassign →「確認預配 陳小姐 到 105？（桌子現在仍可帶位）」＋「確認預配」鈕，banner 標出時段預配', () => {
     render(null, { ...mode, lockKind: 'preassign' })
     expect(container.textContent).toContain('確認預配 陳小姐 到 105？（桌子現在仍可帶位）')
     expect(container.textContent).toContain('13:30 預配 · 桌子先不鎖')
     expect(container.textContent).not.toContain('並鎖桌')
     expect(container.textContent).not.toContain('確認指派')
-    expect(buttons()).toContain('✓ 確認預配')
+    expect(buttons()).toContain('確認預配')
   })
 
   it('lockKind preassign ＋他筆預配衝突 → 按鈕也講「預配」（覆蓋／保留）', () => {

@@ -4,6 +4,7 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useConfirm } from '../../ui/Toast'
 import PartySizeField from '../PartySizeField'
 import { normalizeSplit } from '../../../utils/partySplit'
+import { X } from 'lucide-react'
 import NumericKeypad from './NumericKeypad'
 import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadges'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
@@ -377,7 +378,7 @@ export default function QuickReservePanel({
           <div
             role="dialog"
             aria-label="電話數字鍵盤"
-            className="fixed z-[71] rounded-xl bg-[#2b2320] p-3 shadow-2xl"
+            className="lg-float lg-keypad fixed z-[71] rounded-[28px] p-3"
             style={keypadPos
               ? { left: keypadPos.left, bottom: keypadPos.bottom, width: keypadPos.width }
               : { left: KEYPAD_GAP, bottom: KEYPAD_GAP, width: KEYPAD_WIDTH, visibility: 'hidden' }}
@@ -398,8 +399,8 @@ export default function QuickReservePanel({
                 </div>
               </div>
               <button type="button" aria-label="收起鍵盤" onClick={() => setKeypadOpen(false)}
-                className="ml-auto flex-none h-8 w-8 rounded-full bg-white/15 text-sm font-bold text-white">
-                ✕
+                className="ml-auto -my-1 -mr-1 flex-none inline-flex items-center justify-center h-11 w-11 rounded-full bg-white/15 text-white">
+                <X size={20} strokeWidth={2.4} aria-hidden="true" />
               </button>
             </div>
             <NumericKeypad value={phone} onChange={setPhone} tone="dark" onDone={() => setKeypadOpen(false)} />

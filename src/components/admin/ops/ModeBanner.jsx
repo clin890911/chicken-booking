@@ -1,10 +1,14 @@
 import Icon from '../../ui/Icon'
+import GlyphText from '../../ui/GlyphText'
 import { conflictLine } from '../../../utils/preassignOverride'
 import { formatBookingTables } from '../../../utils/bookingTables'
 // 現場營運的「模式 banner」：指派 / 候位入座 / 立即帶位 / 換桌 / 團體改派桌位
-// 依模式不同底色 + emoji 避免誤判；指派類模式帶二步確認列與預配衝突警告
+// 依模式不同底色 + 圖示避免誤判；指派類模式帶二步確認列與預配衝突警告
 // 2026-10 對比 AA：底色各加深一階（sky/emerald 600→800、indigo/violet 600→700）——banner 內有 bg-white/15 確認列
 // 與 opacity-90 說明字，600 階疊上去白字只剩 3.4–3.9:1；加深後 ≥4.8:1。色相＝模式語義不變。
+// 2026-10 Liquid Glass：.lg-mode＝有色材質（實心模式色＋鏡面高光邊＋陰影，styles/glass.css）。
+// 模式色刻意不透明：實測 94% 不透明度時，白字疊在 bg-white/15–20 的確認列上會掉到 4.3–4.4:1（不過 AA）。
+// 按鈕標籤的 ✓ 經 GlyphText 換成線條圖示，無障礙名稱＝純文字（例「確認入座」）。
 const BANNER_STYLE = {
   assign:         { bg: 'bg-sky-800',    btn: 'text-sky-700',     icon: 'bookings' },
   'seat-waitlist':{ bg: 'bg-emerald-800',btn: 'text-emerald-700', icon: 'traffic' },
@@ -45,7 +49,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
     const bg = seatsNow ? 'bg-emerald-800' : 'bg-sky-800'
     const cancelBtn = seatsNow ? 'text-emerald-700' : 'text-sky-700'
     return (
-      <div className={`${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
+      <div className={`lg-mode ${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
             <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
@@ -72,7 +76,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
             disabled={!ready}
             className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
               ready ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-          >✓ {mode.replacing ? '確認改桌' : seatsNow ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}</button>
+          ><GlyphText>{`✓ ${mode.replacing ? '確認改桌' : seatsNow ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}`}</GlyphText></button>
         </div>
         {mode.suggestion && onApplySuggestion && (
           <button type="button" data-testid="mode-apply-suggestion" onClick={onApplySuggestion}
@@ -129,7 +133,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
         : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
 
   return (
-    <div className={`${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
+    <div className={`lg-mode ${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
           <Icon name={style.icon} size={18} />
@@ -140,7 +144,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
               {assignPreassign ? `${mode.booking?.timeSlot || ''} 預配 · 桌子先不鎖`.trim() : '指派即鎖桌'}
             </span>
           )}
-          {/* C5：建議桌以底色塊 + 💡 突出 */}
+          {/* C5：建議桌以白色底色塊突出 */}
           {CONFIRMABLE.includes(mode.type) && (
             mode.suggestion ? (
               <span className="inline-flex items-center gap-1 bg-white/95 text-chicken-brown px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm">
@@ -202,10 +206,10 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
                 onClick={onConfirm}
                 className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
                   (hasConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
-              >{(willRelease || pendingGroupHold) ? (assignPreassign ? '仍要覆蓋預配' : '仍要覆蓋指派')
+              ><GlyphText>{(willRelease || pendingGroupHold) ? (assignPreassign ? '仍要覆蓋預配' : '仍要覆蓋指派')
                 : hasConflict ? (assignPreassign ? '仍要預配（他筆預配保留）' : '仍要指派（預配保留）')
                 : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'move' ? '✓ 確認改桌'
-                : assignPreassign ? '✓ 確認預配' : '✓ 確認指派'}</button>
+                : assignPreassign ? '✓ 確認預配' : '✓ 確認指派'}</GlyphText></button>
             </div>
           </div>
         </div>
