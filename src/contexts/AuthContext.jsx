@@ -195,7 +195,10 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       user, loading, signIn, signOut, can,
-      getToken: getIdToken,
+      // 本機模擬登入沒有 Firebase Auth，getIdToken 永遠回 null；照樣注入的話，
+      // cloudDataService.staffRequest（#168）會把它當成「token 暫時取不到」→ 員工端點一律不送、
+      // 無限補推。沒有 token 來源就不提供提供者，讓請求照舊不帶 Authorization 送出。
+      getToken: isFirebaseConfigured ? getIdToken : null,
       usingFirebase: isFirebaseConfigured,
       allowedEmails: ALLOWED_EMAILS,
       roleLabels: ROLE_LABELS,
