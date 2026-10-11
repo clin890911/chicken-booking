@@ -53,7 +53,7 @@ describe('TableDrawer 預配客人到了：併桌整組入座、不走單桌指�
     act(() => { btn('余先生 到了，入座 105').click() })
     expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
     expect(ctx.seatBooking).toHaveBeenCalledWith('YU')
-    expect(toast.success).toHaveBeenCalledWith('余先生（10 位）入座 105、106')
+    expect(toast.action).toHaveBeenCalledWith('余先生（10 位）入座 105、106', expect.objectContaining({ label: '復原' }), { duration: 5000 })
   })
 
   it('單桌預配 → 照舊先 assignBookingToTable 再 seatBooking', () => {

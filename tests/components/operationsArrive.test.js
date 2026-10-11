@@ -10,12 +10,14 @@ import { handleArriveNow, preassignArriveConflictLines } from '../../src/compone
 const table = { number: 'A2' }
 const booking = { id: 'bk1', name: '王小明' }
 
+// 2026-10 起四個「客人到了」入口的復原統一走 undoSeatBooking(r.undo)（service 拍的入座前快照），
+// 不再由呼叫端各自 setStatus＋setTableStatus。
+const UNDO = { bookingId: 'bk1', tableNumbers: ['A2'], restore: { A2: 'reserved' } }
 function makeDeps(overrides = {}) {
   return {
-    seatBooking: vi.fn(() => ({ ok: true })),
-    setStatus: vi.fn(),
-    setTableStatus: vi.fn(),
-    toast: { success: vi.fn(), error: vi.fn(), action: vi.fn() },
+    seatBooking: vi.fn(() => ({ ok: true, undo: UNDO })),
+    undoSeatBooking: vi.fn(() => ({ ok: true })),
+    toast: { success: vi.fn(), error: vi.fn(), action: vi.fn(), info: vi.fn() },
     ...overrides,
   }
 }
@@ -28,32 +30,38 @@ describe('handleArriveNow', () => {
     expect(deps.seatBooking).toHaveBeenCalledWith('bk1')
   })
 
-  it('入座成功：toast.action 帶訊息、「↩ 復原」標籤、5 秒 duration', () => {
+  it('入座成功：toast.action 帶訊息、「復原」標籤（純文字，不用 emoji）、5 秒 duration', () => {
     const deps = makeDeps()
     handleArriveNow(table, booking, deps)
     expect(deps.toast.action).toHaveBeenCalledTimes(1)
     const [message, action, opts] = deps.toast.action.mock.calls[0]
     expect(message).toBe('王小明 已入座 A2')
-    expect(action.label).toBe('↩ 復原')
+    expect(action.label).toBe('復原')
     expect(opts).toEqual({ duration: 5000 })
   })
 
-  it('復原：同時把 booking 改回 confirmed、table 改回 reserved 且 seatedAt 清 null', () => {
+  it('復原：把 seatBooking 回傳的入座前快照原封交給 undoSeatBooking（booking 與 table 由 service 一起倒）', () => {
     const deps = makeDeps()
     handleArriveNow(table, booking, deps)
     const [, action] = deps.toast.action.mock.calls[0]
     action.onClick()
-    expect(deps.setStatus).toHaveBeenCalledWith('bk1', 'confirmed')
-    expect(deps.setTableStatus).toHaveBeenCalledWith('A2', 'reserved', { seatedAt: null })
+    expect(deps.undoSeatBooking).toHaveBeenCalledWith(UNDO)
+    expect(deps.toast.info).toHaveBeenCalledWith('已復原：王小明 回到待到')
   })
 
-  it('入座失敗（例如桌被搶走）：不彈 toast.action，改用 toast.error，不呼叫 setStatus/setTableStatus', () => {
+  it('復原被擋（桌已被別組佔走）→ toast.error 說明，不硬搶', () => {
+    const deps = makeDeps({ undoSeatBooking: vi.fn(() => ({ ok: false, error: 'A2 已被別組使用，無法復原' })) })
+    handleArriveNow(table, booking, deps)
+    deps.toast.action.mock.calls[0][1].onClick()
+    expect(deps.toast.error).toHaveBeenCalledWith('復原失敗：A2 已被別組使用，無法復原')
+  })
+
+  it('入座失敗（例如桌被搶走）：不彈 toast.action，改用 toast.error，不呼叫復原', () => {
     const deps = makeDeps({ seatBooking: vi.fn(() => ({ ok: false, error: '桌位已被佔用' })) })
     handleArriveNow(table, booking, deps)
     expect(deps.toast.error).toHaveBeenCalledWith('入座失敗：桌位已被佔用')
     expect(deps.toast.action).not.toHaveBeenCalled()
-    expect(deps.setStatus).not.toHaveBeenCalled()
-    expect(deps.setTableStatus).not.toHaveBeenCalled()
+    expect(deps.undoSeatBooking).not.toHaveBeenCalled()
   })
 })
 
@@ -69,8 +77,7 @@ describe('handleArriveNow：入座被擋時給改桌出口', () => {
     expect(opts.type).toBe('error')
     action.onClick()
     expect(onMove).toHaveBeenCalledWith(booking)
-    expect(deps.setStatus).not.toHaveBeenCalled()
-    expect(deps.setTableStatus).not.toHaveBeenCalled()
+    expect(deps.undoSeatBooking).not.toHaveBeenCalled()
   })
 
   it('併桌訂位不給改桌（單桌 move 會留孤兒額外桌）→ 退回 toast.error', () => {
@@ -81,40 +88,35 @@ describe('handleArriveNow：入座被擋時給改桌出口', () => {
   })
 })
 
-// 2026-09：報到列也列「預配」訂位（桌沒鎖給這筆）。入座的 5 秒復原要把桌倒回空桌、訂位回待到且保留預配，
-// 走 undoSeatPreassigned（只在桌仍由這筆用餐中時才倒）；不可沿用鎖桌那條把桌寫回 reserved。
+// 2026-09：報到列也列「預配」訂位（桌沒鎖給這筆）。復原一律走 undoSeatBooking(r.undo)——
+// 快照裡預配的桌記成 vacant（倒回空桌、預配保留）、鎖桌的記成 reserved，由 service 決定，呼叫端不分岔。
 describe('handleArriveNow：預配訂位的入座與復原', () => {
   const vacant = { number: '105', status: 'vacant', currentBookingId: null }
   const pre = { id: 'bkP', name: '余先生', assignedTableId: '105' }
+  const PRE_UNDO = { bookingId: 'bkP', tableNumbers: ['105'], restore: { 105: 'vacant' } }
 
-  it('預配桌空著 → 照常 seatBooking；復原走 undoSeatPreassigned，不碰 setStatus/setTableStatus', () => {
-    const undoSeatPreassigned = vi.fn(() => ({ ok: true }))
-    const deps = makeDeps({ undoSeatPreassigned })
+  it('預配桌空著 → 照常 seatBooking；復原把快照交給 undoSeatBooking', () => {
+    const deps = makeDeps({ seatBooking: vi.fn(() => ({ ok: true, undo: PRE_UNDO })) })
     handleArriveNow(vacant, pre, deps)
     expect(deps.seatBooking).toHaveBeenCalledWith('bkP')
     const [msg, action] = deps.toast.action.mock.calls[0]
     expect(msg).toBe('余先生 已入座 105')
     action.onClick()
-    expect(undoSeatPreassigned).toHaveBeenCalledWith('bkP', '105')
-    expect(deps.setStatus).not.toHaveBeenCalled()
-    expect(deps.setTableStatus).not.toHaveBeenCalled()
+    expect(deps.undoSeatBooking).toHaveBeenCalledWith(PRE_UNDO)
   })
 
   it('復原被擋（桌已被更動）→ toast.error 說明，不硬倒', () => {
-    const deps = makeDeps({ undoSeatPreassigned: vi.fn(() => ({ ok: false, error: '這筆訂位或桌位已被更動，無法復原' })) })
+    const deps = makeDeps({ undoSeatBooking: vi.fn(() => ({ ok: false, error: '這筆訂位的桌位已被更動，無法復原' })) })
     handleArriveNow(vacant, pre, deps)
     deps.toast.action.mock.calls[0][1].onClick()
-    expect(deps.toast.error).toHaveBeenCalledWith('復原失敗：這筆訂位或桌位已被更動，無法復原')
+    expect(deps.toast.error).toHaveBeenCalledWith('復原失敗：這筆訂位的桌位已被更動，無法復原')
   })
 
-  it('鎖桌（held：桌 reserved 且 currentBookingId＝這筆）→ 復原維持原本那條（setStatus＋setTableStatus reserved）', () => {
-    const undoSeatPreassigned = vi.fn()
-    const deps = makeDeps({ undoSeatPreassigned })
+  it('鎖桌（held：桌 reserved 且 currentBookingId＝這筆）→ 同一套復原', () => {
+    const deps = makeDeps()
     handleArriveNow({ number: '105', status: 'reserved', currentBookingId: 'bkP' }, pre, deps)
     deps.toast.action.mock.calls[0][1].onClick()
-    expect(undoSeatPreassigned).not.toHaveBeenCalled()
-    expect(deps.setStatus).toHaveBeenCalledWith('bkP', 'confirmed')
-    expect(deps.setTableStatus).toHaveBeenCalledWith('105', 'reserved', { seatedAt: null })
+    expect(deps.undoSeatBooking).toHaveBeenCalledWith(UNDO)
   })
 })
 
@@ -126,7 +128,7 @@ describe('handleArriveNow：預配訂位遇團保／重疊預配先確認', () =
 
   it('有衝突 → 先 confirm；取消 → 不入座、不 toast', async () => {
     const confirm = vi.fn(async () => false)
-    const deps = makeDeps({ confirm, preassignConflictLines: lines, undoSeatPreassigned: vi.fn() })
+    const deps = makeDeps({ confirm, preassignConflictLines: lines })
     const r = await handleArriveNow(vacant, pre, deps)
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('105 為今日團體「甲旅行社」預留（第一梯 12:30）'),
       expect.objectContaining({ title: '桌位有預留', confirmLabel: '仍要入座' }))
@@ -135,13 +137,12 @@ describe('handleArriveNow：預配訂位遇團保／重疊預配先確認', () =
     expect(deps.toast.action).not.toHaveBeenCalled()
   })
 
-  it('有衝突 → 確認後才入座，成功 toast 帶預配的復原', async () => {
-    const undoSeatPreassigned = vi.fn(() => ({ ok: true }))
-    const deps = makeDeps({ confirm: vi.fn(async () => true), preassignConflictLines: lines, undoSeatPreassigned })
+  it('有衝突 → 確認後才入座，成功 toast 帶復原', async () => {
+    const deps = makeDeps({ confirm: vi.fn(async () => true), preassignConflictLines: lines })
     await handleArriveNow(vacant, pre, deps)
     expect(deps.seatBooking).toHaveBeenCalledWith('bkP')
     deps.toast.action.mock.calls[0][1].onClick()
-    expect(undoSeatPreassigned).toHaveBeenCalledWith('bkP', '105')
+    expect(deps.undoSeatBooking).toHaveBeenCalledWith(UNDO)
   })
 
   it('桌已被別組佔 → 不問（讓入座守門擋下並給改桌）', () => {
@@ -189,17 +190,17 @@ describe('handleArriveNow：預配大組', () => {
   const combo = { id: 'bkC', name: '大組', assignedTableId: '106', extraTableIds: ['105'] }
   const t106 = { number: '106', status: 'vacant', currentBookingId: null }
 
-  it('整組都空 → seatBookingAllTables；toast 寫整組桌號；復原交給 undoSeatPreassigned（主桌號）', () => {
-    const seatBookingAllTables = vi.fn(() => ({ ok: true }))
-    const undoSeatPreassigned = vi.fn(() => ({ ok: true }))
-    const deps = makeDeps({ seatBookingAllTables, undoSeatPreassigned, getTable: () => ({ number: '105', status: 'vacant' }) })
+  it('整組都空 → seatBookingAllTables；toast 寫整組桌號；復原交給 undoSeatBooking（整組快照）', () => {
+    const COMBO_UNDO = { bookingId: 'bkC', tableNumbers: ['106', '105'], restore: { 106: 'vacant', 105: 'vacant' } }
+    const seatBookingAllTables = vi.fn(() => ({ ok: true, undo: COMBO_UNDO }))
+    const deps = makeDeps({ seatBookingAllTables, getTable: () => ({ number: '105', status: 'vacant' }) })
     handleArriveNow(t106, combo, deps)
     expect(seatBookingAllTables).toHaveBeenCalledWith('bkC')
     expect(deps.seatBooking).not.toHaveBeenCalled()
     const [msg, action] = deps.toast.action.mock.calls[0]
     expect(msg).toBe('大組 已入座 106 + 105')
     action.onClick()
-    expect(undoSeatPreassigned).toHaveBeenCalledWith('bkC', '106')
+    expect(deps.undoSeatBooking).toHaveBeenCalledWith(COMBO_UNDO)
   })
 
   it('任一張被佔 → 不入座，toast.error 說明（不給改桌）', () => {

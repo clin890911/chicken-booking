@@ -8,6 +8,7 @@ import { bookingDayKind, todayStr } from '../../utils/timeSlots'
 import { diffMin, stageOf } from '../../utils/diningStage'
 import { formatBookingTables } from '../../utils/bookingTables'
 import { markNoshow, restoreFromNoshow, cancelWithUndo, releaseAfterCheckout } from '../../utils/bookingActions'
+import { toastSeatedWithUndo } from '../../utils/arriveSeat'
 
 // 用餐已坐分鐘數。分鐘級顯示只需要 30 秒 tick——原本每張「用餐中」卡片各自每秒 setState
 // 一次，十張卡就是每秒十次重繪，手機上捲清單會明顯頓（後台卡頓根因之一）。
@@ -31,7 +32,7 @@ export const MOVE_COMBO_REASON = '已入座的併桌客人本輪不支援整組�
 //   onMove(booking)：今日待到或已入座、已有桌時「改桌」的跨頁導向（→ 現場頁 move 模式），由容器決定；沒給就不顯示改桌。
 export function useBookingActions(booking, { onAssign, onMove } = {}) {
   const {
-    tables, bookings, groupReservations, settings, seatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking,
+    tables, bookings, groupReservations, settings, seatBooking, undoSeatBooking, checkoutBooking, finalizeBooking, cancelBooking, undoCancelBooking,
     setStatus, markBookingNoshow, undoMarkBookingNoshow, releaseCheckedOutTables, findReserveCandidates, clearBookingPreassign,
   } = useBooking()
   const toast = useToast()
@@ -113,8 +114,9 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
       }
       return toast.error('入座失敗：' + r.error)
     }
-    toast.success(`${booking.name} 已入座 ${formatBookingTables(booking)}`)
-  }, [booking, onAssign, onMove, isCombo, seatBooking, toast])
+    // 5 秒復原：與現場四個「客人到了」入口共用（booking 與桌一起倒、被別組佔走不搶）
+    toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${formatBookingTables(booking)}`, name: booking.name, undoSeatBooking, toast })
+  }, [booking, onAssign, onMove, isCombo, seatBooking, undoSeatBooking, toast])
 
   const checkout = useCallback(async () => {
     const ok = await confirm(`${booking.name} 已離席？\n桌位將進入「等待清桌」狀態`,
