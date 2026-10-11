@@ -260,6 +260,37 @@ describe('設定頁 SettingsView', () => {
     expect(btns().find(b => b.textContent.trim() === '登出').closest('fieldset[disabled]')).toBeNull()
   })
 
+  // 「不透明模式」只寫這台裝置的 localStorage。歷史上整份 settings 推送曾洗掉 LINE 設定——這個開關絕不可碰雲端。
+  it.each(['kitchen', 'manager'])('%s：「不透明模式」開關可切（aria-checked 變 true）、且不寫任何雲端 settings', (role) => {
+    currentRole = role
+    let sw = null
+    for (const cat of CATEGORIES) {
+      settingsSection = cat
+      mount(<SettingsView />)
+      sw = container.querySelector('button[role="switch"]')
+      if (sw) break
+      act(() => root.unmount()); container.remove()
+    }
+    expect(sw, '找不到不透明模式開關').not.toBeNull()
+    expect(sw.closest('fieldset[disabled]')).toBeNull()
+    expect(sw.disabled).toBe(false)
+    expect(sw.getAttribute('aria-checked')).toBe('false')
+    click(sw)
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    expect(container.querySelector('button[role="switch"]').getAttribute('aria-checked')).toBe('true')
+    // 任何雲端寫入路徑都不能被呼叫
+    expect(ctx.updateSettings).not.toHaveBeenCalled()
+    expect(ctx.flushCloudNow).not.toHaveBeenCalled()
+    expect(ctx.migrateLocalToCloud).not.toHaveBeenCalled()
+    // 切回去也一樣；並清掉全域狀態不影響其他測試
+    click(sw)
+    expect(sw.getAttribute('aria-checked')).toBe('false')
+    expect(ctx.updateSettings).not.toHaveBeenCalled()
+    expect(ctx.flushCloudNow).not.toHaveBeenCalled()
+    try { localStorage.clear() } catch { /* noop */ }
+    delete document.documentElement.dataset.material
+  })
+
   it.each(['manager', 'host', 'floor'])('%s：資料匯出區塊在、匯出鈕可用（既有行為不動）', (role) => {
     currentRole = role
     settingsSection = 'data'
