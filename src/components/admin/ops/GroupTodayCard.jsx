@@ -7,6 +7,7 @@ import { Badge } from '../../ui'
 import { batchSeated, sortedBatches } from '../../../utils/groupLive'
 import Icon from '../../ui/Icon'
 import PhoneLink from './PhoneLink'
+import GlyphText from '../../ui/GlyphText'
 
 const STATUS_LABEL = {
   planned: { label: '已預排', color: 'gray' },
@@ -150,7 +151,7 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
                 {isDone ? (
                   <span className="text-[10px] font-bold text-chicken-brown/45">已完成</span>
                 ) : released ? (
-                  <span className="text-[10px] font-bold text-chicken-green">✓ 此梯完成</span>
+                  <span className="text-[10px] font-bold text-chicken-green"><GlyphText size={11} className="!gap-0.5">✓ 此梯完成</GlyphText></span>
                 ) : seated ? (
                   perms.table && <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
                 ) : cleaning ? (

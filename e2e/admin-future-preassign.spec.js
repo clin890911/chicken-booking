@@ -88,7 +88,7 @@ test('日曆點明天 → 收合週條 → 日期 guard → 預配導到規劃�
 
   // 點空桌 101（6 人桌，容量足夠；102 已被陳已配佔用）完成預配
   await page.locator('svg g:has(:text-is("101"))').first().click()
-  await page.getByRole('button', { name: '✓ 確認預配' }).click()
+  await page.getByRole('button', { name: '確認預配', exact: true }).click() // ✓ 已改線條圖示（GlyphText）
   await expect(page.getByText(/林未來（4 位）已預配到 101/)).toBeVisible()
 })
 

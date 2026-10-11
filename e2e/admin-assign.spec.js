@@ -172,7 +172,7 @@ test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、�
 
 // PR #138：訂位卡的次要動作收進「⋯ 更多」原生選單，改桌要先展開才點得到。
 async function openMove(page) {
-  const move = page.getByRole('button', { name: '↔ 改桌', exact: true })
+  const move = page.getByRole('button', { name: '改桌', exact: true }) // ↔ 已改線條圖示，可及名稱＝純文字
   // <details> 的開合狀態可能跨分頁切換保留（已展開時再點 summary 會收起），故先判斷再展開。
   if (!(await move.isVisible())) await page.locator('summary', { hasText: '更多' }).first().click()
   await move.click()

@@ -17,6 +17,8 @@ import { formatPhone } from '../../../utils/phoneFormat'
 import { splitSuffix } from '../../../utils/partySplit'
 import { cancelWithUndo } from '../../../utils/bookingActions'
 import EditBookingModal from '../../booking/EditBookingModal'
+import GlyphText from '../../ui/GlyphText'
+import { ArrowLeftRight, Phone, X } from 'lucide-react'
 
 
 // 搜尋：姓名／電話（含末碼，忽略符號）／桌號（主桌＋副桌）
@@ -105,9 +107,9 @@ function BookingCard({ b, now, kind, onClickBooking, onOpenDetail, onAssignTable
         </div>
       </div>
 
-      {assigned && <div className={`text-[11px] font-bold mt-1 ${preassigned ? 'text-blue-800' : 'text-chicken-green'}`}>{preassigned ? `已預配 ${tableLabel}` : `✓ 已指派 ${tableLabel}`}</div>}
+      {assigned && <div className={`text-[11px] font-bold mt-1 ${preassigned ? 'text-blue-800' : 'text-chicken-green'}`}>{preassigned ? `已預配 ${tableLabel}` : <GlyphText size={12} className="!gap-1">{`✓ 已指派 ${tableLabel}`}</GlyphText>}</div>}
       <div className="mt-2 flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
-        {b.phone && <a href={`tel:${b.phone.replace(/[^+\d]/g, '')}`} aria-label={`聯絡 ${b.name} ${b.phone}`} className="inline-flex items-center min-h-[44px] px-3 border rounded-md text-xs font-bold">☎ 聯絡</a>}
+        {b.phone && <a href={`tel:${b.phone.replace(/[^+\d]/g, '')}`} aria-label={`聯絡 ${b.name} ${b.phone}`} className="inline-flex items-center gap-1 min-h-[44px] px-3 border rounded-md text-xs font-bold"><Phone size={14} strokeWidth={2.2} aria-hidden="true" />聯絡</a>}
         {showSeat ? <button onClick={() => onSeat?.(b)} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">客人到了</button>
           : showArriveSeat ? <>
             <button onClick={() => onArriveSeat(b)} aria-label={`${b.name} 到了，選桌入座`} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">到了 · 選桌入座</button>
@@ -120,7 +122,7 @@ function BookingCard({ b, now, kind, onClickBooking, onOpenDetail, onAssignTable
           <summary className="cursor-pointer list-none min-h-[44px] px-3 flex items-center rounded-md border text-xs" aria-label={`${b.name} 更多操作`}>⋯ 更多</summary>
           <div className="mt-1 min-w-[220px] bg-white rounded-lg border shadow-lg p-1 flex flex-col" onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
             {canEdit && <button onClick={e => { e.currentTarget.closest('details').open = false; onEdit(b) }} className="min-h-[44px] px-3 text-left text-xs font-bold">改人數／時段／備註</button>}
-            {canMove && <button aria-disabled={isCombo ? 'true' : undefined} onClick={() => isCombo ? onMoveBlocked?.() : onMoveTable(b)} title={isCombo ? MOVE_COMBO_REASON : '重新選擇桌位'} className="min-h-[44px] px-3 text-left text-xs">{preassigned ? `已預配 ${tableLabel}` : `✓ 已指派 ${tableLabel}`} · ↔ 改桌{isCombo ? '（併桌不支援）' : ''}</button>}
+            {canMove && <button aria-disabled={isCombo ? 'true' : undefined} onClick={() => isCombo ? onMoveBlocked?.() : onMoveTable(b)} title={isCombo ? MOVE_COMBO_REASON : '重新選擇桌位'} className="min-h-[44px] px-3 text-left text-xs inline-flex items-center gap-1">{preassigned ? `已預配 ${tableLabel}` : `已指派 ${tableLabel}`} · <ArrowLeftRight size={14} strokeWidth={2.4} aria-hidden="true" className="shrink-0" />改桌{isCombo ? '（併桌不支援）' : ''}</button>}
             {showNoshow && <><p className="text-xs px-3 py-2 text-chicken-brown/60">未到客人請先聯絡，確認後再標記。</p><button onClick={() => onNoshow?.(b)} className="min-h-[44px] px-3 text-left text-chicken-red text-xs">標 No-show</button></>}
             {canCancel && <button onClick={e => { e.currentTarget.closest('details').open = false; onCancel(b) }} className="min-h-[44px] px-3 text-left text-chicken-red text-xs border-t border-chicken-brown/10">取消訂位</button>}
           </div>
@@ -285,7 +287,7 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
         />
         {query && (
           <button type="button" onClick={() => setQuery('')} aria-label="清除搜尋"
-            className="absolute right-0 top-0 h-full min-w-[44px] text-chicken-brown/60 text-base">✕</button>
+            className="absolute right-0 top-0 h-full min-w-[44px] inline-flex items-center justify-center text-chicken-brown/60"><X size={18} strokeWidth={2.4} aria-hidden="true" /></button>
         )}
       </div>
       {searching && matchCount === 0 && (

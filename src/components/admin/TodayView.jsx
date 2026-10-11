@@ -132,7 +132,8 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
             <span>隱藏已離</span>
           </label>
         </div>
-        <div className="overflow-x-auto no-scrollbar -mx-1 px-1">
+        {/* py-2 !mt-0 -mb-2：overflow 容器會裁掉分段控制 ::after 外擴的 44px 可點區，上下各留 8px padding 讓它露出；父層 space-y-2 的 8px mt 與 py-2 抵銷（!mt-0），底部 -mb-2 抵銷 padding → 版面不變 */}
+        <div className="overflow-x-auto no-scrollbar -mx-1 px-1 py-2 !mt-0 -mb-2">
           <SegmentedControl size="sm" options={SOURCE_FILTERS} value={source} onChange={setSource} ariaLabel="來源篩選" />
         </div>
       </div>

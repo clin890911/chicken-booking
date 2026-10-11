@@ -11,6 +11,7 @@ import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures, CAPACITY
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import SegmentedControl from '../../ui/SegmentedControl'
 import Icon from '../../ui/Icon'
+import GlyphText from '../../ui/GlyphText'
 
 // 排位地圖（自 SlotOverviewView 拆出、嵌入規劃主控台）：
 // 依「日期（受控 prop）+ 場次」呈現散客（暖色）×團客（冷色）佔位，
@@ -261,7 +262,7 @@ export default function SlotMapPanel({
                 disabled={assignSelectedSeats < guestsNeeded}
                 className={`tap text-xs px-4 h-8 rounded-lg font-semibold whitespace-nowrap ${
                   assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-              >✓ {assignSelected.length > 1 ? '確認併桌預配' : '確認預配'}</button>
+              ><GlyphText size={14}>{`✓ ${assignSelected.length > 1 ? '確認併桌預配' : '確認預配'}`}</GlyphText></button>
             </div>
           )}
         </div>

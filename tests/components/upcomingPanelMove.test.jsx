@@ -48,12 +48,12 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); vi.clearAllMocks(); confirm.mockResolvedValue(true) })
   afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
 
-  it('host：「✓ 已指派 105 · ↔ 改桌」是按鈕，點了呼叫 onMoveTable（且不觸發卡片本身的點擊）', () => {
+  it('host：「已指派 105 · 改桌」是按鈕（↔ 已改線條圖示），點了呼叫 onMoveTable（且不觸發卡片本身的點擊）', () => {
     render(roleCan('host'))
     act(() => container.querySelector('summary').click())
     expect(container.querySelector('details').open).toBe(true)
     const b = btn('改桌')
-    expect(b.textContent).toContain('✓ 已指派 105')
+    expect(b.textContent).toContain('已指派 105')
     act(() => { b.click() })
     expect(onMoveTable).toHaveBeenCalledWith(YU)
   })
@@ -66,7 +66,7 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
   it('kitchen（唯讀）：徽章維持唯讀、沒有改桌', () => {
     render(roleCan('kitchen'))
     expect(btn('改桌')).toBeUndefined()
-    expect(container.textContent).toContain('✓ 已指派 105')
+    expect(container.textContent).toContain('已指派 105')
   })
 
   it('未到併桌訂位：更多改桌交整組onMoveTable，原安排保留', () => {

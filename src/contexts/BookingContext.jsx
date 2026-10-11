@@ -317,7 +317,7 @@ export function BookingProvider({ children }) {
       if (done.length) {
         done.forEach(a => opsLogService.append({ kind: 'day-rollover', ...a, message: sweepActionMsg(a) }))
         doneCount += done.length
-        toastRef.current?.info?.(`🌅 換日掃除：已自動清理 ${done.length} 筆昨日殘留（詳見現場提示列）`)
+        toastRef.current?.info?.(`換日掃除：已自動清理 ${done.length} 筆昨日殘留（詳見現場提示列）`)
       }
     }
 
@@ -330,7 +330,7 @@ export function BookingProvider({ children }) {
       done.forEach(a => opsLogService.append({ kind: 'auto-release', ...a, message: sweepActionMsg(a) }))
       doneCount += done.length
       const hrs = Math.round((Number(settings.autoReleaseAfterMin) || 300) / 6) / 10
-      toastRef.current?.warning?.(`⏱ ${done.length} 桌用餐逾 ${hrs} 小時，已自動處理（疑似忘記清桌，詳見現場提示列）`)
+      toastRef.current?.warning?.(`${done.length} 桌用餐逾 ${hrs} 小時，已自動處理（疑似忘記清桌，詳見現場提示列）`)
     }
 
     if (doneCount) { refresh(); syncCloudSoon() }

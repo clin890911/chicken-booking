@@ -131,16 +131,16 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
   describe('已指派徽章分辨「桌況已鎖」與「只是預配」', () => {
     const table = (over = {}) => ({ number: '101', status: 'vacant', currentBookingId: null, ...over })
 
-    it('現場指派（桌況 reserved 且指向這筆）→「✓ 已指派 101」', () => {
+    it('現場指派（桌況 reserved 且指向這筆）→「已指派 101」（✓ 已改線條圖示）', () => {
       render(roleCan('manager'), [OVERDUE_ASSIGNED], [table({ status: 'reserved', currentBookingId: 'b1' })])
-      expect(container.textContent).toContain('✓ 已指派 101')
+      expect(container.textContent).toContain('已指派 101')
       expect(container.textContent).not.toContain('已預配')
     })
 
     it('規劃頁預配（桌況仍是空桌）→「已預配 101」', () => {
       render(roleCan('manager'), [OVERDUE_ASSIGNED], [table()])
       expect(container.textContent).toContain('已預配 101')
-      expect(container.textContent).not.toContain('✓ 已指派')
+      expect(container.textContent).not.toContain('已指派 101') // 客人姓名就叫「已指派客」，比對要帶桌號
     })
 
     it('預配的桌被別筆訂位鎖走 →仍是「已預配」（桌並不屬於這筆）', () => {

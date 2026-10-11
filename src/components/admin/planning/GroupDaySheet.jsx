@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { groupTableNumbers } from '../../../utils/capacity'
 import { dayLabel } from '../../../utils/timeSlots'
+import GlyphText from '../../ui/GlyphText'
+import { ImageDown, Printer, TriangleAlert } from 'lucide-react'
 
 // 當日團體預排總表（給廚房 / 外場當天備餐用的紙本）。
 // 沿用 GroupSheet.jsx 模板手法：自包含 A4 SVG、@media print（A4）、SVG→PNG 匯出。
@@ -112,8 +114,8 @@ export default function GroupDaySheet({ date, daySummary, groups = [], store = {
       `}</style>
       <div className="min-h-full flex flex-col items-center py-6 px-3" onClick={e => e.stopPropagation()}>
         <div id="group-day-sheet-actions" className="mb-3 flex gap-2">
-          <button onClick={() => window.print()} className="px-4 py-2 rounded-xl bg-chicken-red text-white font-bold text-sm shadow">🖨 列印 / 存 PDF</button>
-          <button onClick={exportPng} className="px-4 py-2 rounded-xl bg-chicken-brown text-white font-bold text-sm shadow">📷 存成圖片</button>
+          <button onClick={() => window.print()} className="px-4 py-2 rounded-xl bg-chicken-red text-white font-bold text-sm shadow"><GlyphText icon={Printer} size={16} strokeWidth={2.2}>列印 / 存 PDF</GlyphText></button>
+          <button onClick={exportPng} className="px-4 py-2 rounded-xl bg-chicken-brown text-white font-bold text-sm shadow"><GlyphText icon={ImageDown} size={16} strokeWidth={2.2}>存成圖片</GlyphText></button>
           <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white border border-chicken-brown/10 text-chicken-brown font-bold text-sm">關閉</button>
         </div>
 
@@ -153,7 +155,9 @@ export default function GroupDaySheet({ date, daySummary, groups = [], store = {
 
             {/* 抵達高峰提醒 */}
             <rect x={M + 524} y={126} width={SHEET_W - M - (M + 524)} height={136} rx={12} fill={collisions.length ? '#fff7ed' : C.cream} stroke={collisions.length ? '#fed7aa' : C.line} />
-            <text x={M + 540} y={150} fontSize={12} fontWeight="800" fill={collisions.length ? '#c2410c' : C.brown}>⚠ 抵達高峰</text>
+            {/* 線條警示圖示（巢狀 svg，匯出 PNG 時同樣被序列化；顏色寫死在 stroke，不靠 CSS） */}
+            <TriangleAlert x={M + 540} y={139} size={13} strokeWidth={2.4} color={collisions.length ? '#c2410c' : C.brown} aria-hidden="true" />
+            <text x={M + 557} y={150} fontSize={12} fontWeight="800" fill={collisions.length ? '#c2410c' : C.brown}>抵達高峰</text>
             {collisions.length ? collisions.slice(0, 5).map((c, i) => (
               <text key={i} x={M + 540} y={172 + i * 18} fontSize={11} fill="#9a3412">{c.timeSlot} {c.count}團/{c.guests}位</text>
             )) : <text x={M + 540} y={172} fontSize={11} fill={C.brownSoft}>無同時段多團</text>}

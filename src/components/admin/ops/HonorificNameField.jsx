@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import GlyphText from '../../ui/GlyphText'
 
 // 稱謂＋姓氏快選：領檯免切輸入法。
 // 版面（iPad v2）：稱謂不再獨佔一排 chips，而是併進姓氏格——7×2 的格子裡，
@@ -98,7 +99,7 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
         >
           <span className={`${dense ? 'text-[18px]' : 'text-[22px]'} font-bold leading-none`}>{activeTitle}</span>
           <span className="text-[10px] font-bold opacity-70 leading-none">
-            {applies ? `⇄ 點一下換${upcoming}` : '全名不接稱謂'}
+            {applies ? <GlyphText size={10} className="!gap-0.5">{`⇄ 點一下換${upcoming}`}</GlyphText> : '全名不接稱謂'}
           </span>
         </button>
       </div>

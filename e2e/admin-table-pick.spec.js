@@ -93,7 +93,7 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
   // 今日清單：卡片是綠色「桌 106」（現場指派已鎖桌），有「改桌」
   await expect(page.getByText('桌 106', { exact: true })).toBeVisible()
   await page.locator('summary[aria-label="余先生 更多操作"]').click()
-  await page.getByRole('button', { name: '↔ 改桌' }).click()
+  await page.getByTestId('admin-content').getByRole('button', { name: '改桌', exact: true }).click() // ↔ 已改線條圖示；限定內容區，避開 toast 的「改桌」
 
   // 未到客人用自由重選整組；原桌可重新選入、取消選取，確認前不更動原安排。
   await expect(page.getByText(/重新選桌：余先生/)).toBeVisible()

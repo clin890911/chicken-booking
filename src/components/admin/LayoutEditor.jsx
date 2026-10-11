@@ -8,6 +8,20 @@ import {
 } from '../../data/tables'
 import Icon from '../ui/Icon'
 import SegmentedControl from '../ui/SegmentedControl'
+import {
+  Check, AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal,
+  AlignEndHorizontal, AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
+} from 'lucide-react'
+
+// 多選對齊鈕：原本是 ← ↔ → ↑ ↕ ↓ 字元（↔↕ 在 iOS 會變彩色 emoji），改 lucide 對齊圖示＋可及名稱
+const ALIGN_BUTTONS = [
+  ['left', '靠左對齊', AlignStartVertical],
+  ['centerH', '水平置中對齊', AlignCenterVertical],
+  ['right', '靠右對齊', AlignEndVertical],
+  ['top', '靠上對齊', AlignStartHorizontal],
+  ['centerV', '垂直置中對齊', AlignCenterHorizontal],
+  ['bottom', '靠下對齊', AlignEndHorizontal],
+]
 
 // 全螢幕桌位佈局編輯器（2026-06 升級）
 // 三種模式：
@@ -637,20 +651,20 @@ export default function LayoutEditor({ open, onClose }) {
             <div className="w-px h-6 bg-chicken-brown/10 mx-1" />
             <SegmentedControl size="sm" options={['1F', '2F'].map(f => ({ key: f, label: `${f}（${f === '1F' ? stats.f1 : stats.f2}）` }))} value={floor} onChange={(f) => { setFloor(f); setSelectedFixtureId(null) }} ariaLabel="樓層" />
             {mode === 'tables' && (
-              <button onClick={() => setShowZoneColor(v => !v)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border-2 ${showZoneColor ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
-                {showZoneColor ? '✓ 顯示分區色' : '顯示分區色'}
+              <button onClick={() => setShowZoneColor(v => !v)} aria-pressed={showZoneColor}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border-2 ${showZoneColor ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
+                {showZoneColor && <Check size={13} strokeWidth={2.6} aria-hidden="true" />}顯示分區色
               </button>
             )}
             {/* 對齊 / 等距（多選時） */}
             {mode === 'tables' && multi && (
               <div className="flex items-center gap-1 ml-1 px-2 py-1 bg-chicken-cream rounded-lg">
                 <span className="text-[11px] font-bold text-chicken-brown/60 mr-1">已選 {selectedNumbers.size}</span>
-                {[['left', '←'], ['centerH', '↔'], ['right', '→'], ['top', '↑'], ['centerV', '↕'], ['bottom', '↓']].map(([k, ic]) => (
-                  <button key={k} title={`對齊 ${k}`} onClick={() => alignSelected(k)} className="w-7 h-7 rounded bg-white border border-chicken-brown/15 text-xs hover:bg-chicken-brown/5">{ic}</button>
+                {ALIGN_BUTTONS.map(([k, label, AlignIcon]) => (
+                  <button key={k} title={label} aria-label={label} onClick={() => alignSelected(k)} className="w-7 h-7 inline-flex items-center justify-center rounded bg-white border border-chicken-brown/15 hover:bg-chicken-brown/5"><AlignIcon size={15} strokeWidth={2} aria-hidden="true" /></button>
                 ))}
-                <button title="水平等距" onClick={() => distributeSelected('h')} className="px-1.5 h-7 rounded bg-white border border-chicken-brown/15 text-[11px] font-bold hover:bg-chicken-brown/5">⇔等距</button>
-                <button title="垂直等距" onClick={() => distributeSelected('v')} className="px-1.5 h-7 rounded bg-white border border-chicken-brown/15 text-[11px] font-bold hover:bg-chicken-brown/5">⇕等距</button>
+                <button title="水平等距" onClick={() => distributeSelected('h')} className="inline-flex items-center gap-0.5 px-1.5 h-7 rounded bg-white border border-chicken-brown/15 text-[11px] font-bold hover:bg-chicken-brown/5"><AlignHorizontalDistributeCenter size={14} strokeWidth={2} aria-hidden="true" />等距</button>
+                <button title="垂直等距" onClick={() => distributeSelected('v')} className="inline-flex items-center gap-0.5 px-1.5 h-7 rounded bg-white border border-chicken-brown/15 text-[11px] font-bold hover:bg-chicken-brown/5"><AlignVerticalDistributeCenter size={14} strokeWidth={2} aria-hidden="true" />等距</button>
               </div>
             )}
             <div className="text-[11px] text-chicken-brown/55 ml-1">

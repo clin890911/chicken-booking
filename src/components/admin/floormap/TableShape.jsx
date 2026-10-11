@@ -18,6 +18,7 @@
 import { memo } from 'react'
 import { diffMin, stageOf } from '../../../utils/diningStage'
 import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './statusColors'
+import { Check, TriangleAlert } from 'lucide-react'
 
 // 配色層級「可坐醒目 vs 佔用降噪」（2026-07 依店家反饋反轉 PR#52）：
 //   可入座＝實心綠跳出（領檯第一眼要找的就是空桌）；用餐中/預訂/團保＝低彩度降噪；
@@ -143,10 +144,14 @@ function TableShape({
                 fontSize={small ? 13 : 14} fontWeight={700} fill={P.text} opacity={0.95} textAnchor="middle" pointerEvents="none">
             {capacity} 人
           </text>
-          <text x={cx} y={y + h - 8}
-                fontSize={9} fontWeight={700} fill={P.text} opacity={0.9} textAnchor="middle" pointerEvents="none">
-            {planState === 'selected' ? '✓ 已選' : P.label}
-          </text>
+          {planState === 'selected'
+            ? <IconLabel icon={Check} text="已選" cx={cx} y={y + h - 8} fontSize={9} fontWeight={700} fill={P.text} opacity={0.9} />
+            : (
+              <text x={cx} y={y + h - 8}
+                    fontSize={9} fontWeight={700} fill={P.text} opacity={0.9} textAnchor="middle" pointerEvents="none">
+                {P.label}
+              </text>
+            )}
         </g>
       </g>
     )
@@ -318,16 +323,44 @@ function TableShape({
                 {stateLabel}
               </text>
             )}
-            {status === 'vacant' && (
-              <text x={cx} y={y + h - 8}
-                    fontSize={9} fontWeight={groupHoldLabel || preassignLabel ? 800 : 600} fill={textColor} textAnchor="middle" pointerEvents="none">
-                {presentation?.hasTimeConflict ? '⚠ 時段衝突' : groupHoldLabel || preassignLabel || (presentation?.nextReservation?.timeSlot ? `下組 ${presentation.nextReservation.timeSlot}` : presentation?.statusLabel) || '✓ 可入座'}
-              </text>
-            )}
+            {status === 'vacant' && (() => {
+              const weight = groupHoldLabel || preassignLabel ? 800 : 600
+              if (presentation?.hasTimeConflict) {
+                return <IconLabel icon={TriangleAlert} text="時段衝突" cx={cx} y={y + h - 8} fontSize={9} fontWeight={weight} fill={textColor} />
+              }
+              const label = groupHoldLabel || preassignLabel || (presentation?.nextReservation?.timeSlot ? `下組 ${presentation.nextReservation.timeSlot}` : presentation?.statusLabel)
+              if (!label) return <IconLabel icon={Check} text="可入座" cx={cx} y={y + h - 8} fontSize={9} fontWeight={weight} fill={textColor} />
+              return (
+                <text x={cx} y={y + h - 8}
+                      fontSize={9} fontWeight={weight} fill={textColor} textAnchor="middle" pointerEvents="none">
+                  {label}
+                </text>
+              )
+            })()}
           </>
         )}
       </g>
     </g>
+  )
+}
+
+// 桌面底列「線條圖示＋字」：SVG <text> 內放不了元件，改把 lucide 圖示（巢狀 <svg>）擺在文字左側、
+// 整組以 cx 置中。原本是 ⚠／✓ 字元——⚠ 在 iOS 會變彩色 emoji。只估寬度（CJK≈1em、其餘≈0.6em），
+// 圖示比字大 1px、顏色＝文字色，不改桌面填色與版面高度。
+function IconLabel({ icon: I, text, cx, y, fontSize, fontWeight, fill, opacity }) {
+  const textW = [...text].reduce((w, c) => w + (/[\u2E80-\uFFFF]/.test(c) ? fontSize : fontSize * 0.6), 0)
+  const iconSize = fontSize + 1
+  const gap = 1.5
+  const left = cx - (iconSize + gap + textW) / 2
+  return (
+    <>
+      <I x={left} y={y - fontSize * 0.85 - 0.5} size={iconSize} strokeWidth={2.8} color={fill} opacity={opacity}
+         aria-hidden="true" pointerEvents="none" />
+      <text x={left + iconSize + gap} y={y} fontSize={fontSize} fontWeight={fontWeight} fill={fill} opacity={opacity}
+            pointerEvents="none">
+        {text}
+      </text>
+    </>
   )
 }
 

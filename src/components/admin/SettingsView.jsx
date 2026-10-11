@@ -15,6 +15,8 @@ import TelegramSettings from './TelegramSettings'
 import StaffAdminSection from './StaffAdminSection'
 import ExportCenter from './ExportCenter'
 import Icon from '../ui/Icon'
+import GlyphText from '../ui/GlyphText'
+import { Ban, Check, Repeat, TriangleAlert, X } from 'lucide-react'
 import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
 import { validateLineReadiness } from '../../utils/lineReadiness'
 import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds, openSeatingIdsOn, effectiveClosedSeatings, describeWeeklyClosures } from '../../utils/weeklyClosures'
@@ -894,8 +896,8 @@ export default function SettingsView({ onOpenCustomer }) {
             <ul className="space-y-1.5">
               {lineReadiness.checks.map(item => (
                 <li key={item.label} className="flex items-start gap-2 text-sm">
-                  <span aria-hidden className={item.ok ? 'text-chicken-green' : 'text-chicken-red'}>
-                    {item.ok ? '✓' : '✕'}
+                  <span aria-hidden className={`mt-0.5 ${item.ok ? 'text-chicken-green' : 'text-chicken-red'}`}>
+                    {item.ok ? <Check size={16} strokeWidth={2.6} /> : <X size={16} strokeWidth={2.6} />}
                   </span>
                   <span className={item.ok ? 'text-chicken-brown/70' : 'font-bold text-chicken-brown'}>
                     {item.label}
@@ -1386,7 +1388,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
       >
         <span className="text-sm leading-tight">{t}</span>
         <span className={`mt-0.5 flex items-center gap-1 text-[11px] leading-tight ${on ? 'text-white' : 'text-emerald-700'}`}>
-          {on ? <>⛔ 已關閉</> : <><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />開放</>}
+          {on ? <><Ban size={11} strokeWidth={2.6} aria-hidden="true" />已關閉</> : <><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />開放</>}
         </span>
       </button>
     )
@@ -1402,7 +1404,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
 
       {unsaved && (
         <div className="flex items-center gap-2 rounded-xl border-2 border-amber-400 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-800">
-          <span aria-hidden>⚠️</span>
+          <TriangleAlert size={18} strokeWidth={2.4} aria-hidden="true" className="shrink-0" />
           關閉時段已修改但尚未儲存，請按頁面下方「儲存全部變更」。
         </div>
       )}
@@ -1494,7 +1496,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
             <div className="mb-2 text-sm font-bold text-chicken-brown">近期已關閉（{upcoming.length}）</div>
             {weeklyLines.length > 0 && (
               <div className="mb-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs font-bold leading-5 text-amber-800">
-                {weeklyLines.map(l => <div key={l}>🔁 {l}</div>)}
+                {weeklyLines.map(l => <div key={l} className="flex items-start gap-1.5"><Repeat size={13} strokeWidth={2.4} aria-hidden="true" className="mt-1 shrink-0" /><span>{l}</span></div>)}
               </div>
             )}
             {upcoming.length === 0 ? (
@@ -1527,7 +1529,9 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
               <div className="min-w-0">
                 <div className="text-base font-black text-chicken-brown">{dayLabel(date)}</div>
                 <div className={`mt-0.5 text-sm font-bold ${dayClosed ? 'text-chicken-red' : hasAnyClosure ? 'text-amber-800' : 'text-emerald-700'}`}>
-                  {dayClosed ? '⛔ 整天公休' : hasAnyClosure ? `⚠️ 部分關閉：${describeDay(date)}` : '✓ 全天開放訂位'}
+                  <GlyphText icon={dayClosed ? Ban : hasAnyClosure ? TriangleAlert : Check} size={15} className="!justify-start">
+                    {dayClosed ? '整天公休' : hasAnyClosure ? `部分關閉：${describeDay(date)}` : '全天開放訂位'}
+                  </GlyphText>
                 </div>
               </div>
               <input type="date" value={date} min={todayStr()} onChange={e => e.target.value && pickDate(e.target.value)}
@@ -1543,7 +1547,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                   dayClosed ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-red/40 bg-white text-chicken-red hover:bg-red-50'
                 }`}
               >
-                {dayClosed ? '⛔ 整天公休中 · 點此恢復營業' : '設為整天公休'}
+                {dayClosed ? <GlyphText icon={Ban} size={16}>整天公休中 · 點此恢復營業</GlyphText> : '設為整天公休'}
               </button>
               {hasAnyClosure && !dayClosed && (
                 <button type="button" onClick={reopenDay} className="btn-secondary min-h-[44px] whitespace-nowrap text-sm">
@@ -1597,9 +1601,9 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                         <div className="min-w-0">
                           <span className="text-sm font-bold text-chicken-brown">{s.name}</span>
                           <span className="ml-1.5 text-xs text-chicken-brown/50">{s.start}–{s.end}</span>
-                          <span className="ml-1.5 inline-block rounded-full bg-chicken-brown/10 px-2 py-0.5 text-[11px] font-bold text-chicken-brown/70">🔁 每週{WEEKDAY_LABELS[dateDow]}預設關閉</span>
+                          <span className="ml-1.5 inline-block rounded-full bg-chicken-brown/10 px-2 py-0.5 text-[11px] font-bold text-chicken-brown/70"><GlyphText icon={Repeat} size={11} strokeWidth={2.6} className="align-[-1px] !gap-1">每週{WEEKDAY_LABELS[dateDow]}預設關閉</GlyphText></span>
                           <div className={`mt-0.5 text-xs font-bold ${weeklyClosed ? 'text-chicken-red' : closedInSeating ? 'text-amber-700' : 'text-emerald-700'}`}>
-                            {weeklyClosed ? '⛔ 本日依每週預設關閉' : closedInSeating ? `✓ 本日特別開放 · 已關閉 ${closedInSeating} / ${slots.length} 個時段` : '✓ 本日特別開放'}
+                            <GlyphText icon={weeklyClosed ? Ban : Check} size={13} className="!gap-1">{weeklyClosed ? '本日依每週預設關閉' : closedInSeating ? `本日特別開放 · 已關閉 ${closedInSeating} / ${slots.length} 個時段` : '本日特別開放'}</GlyphText>
                           </div>
                         </div>
                         <button
@@ -1629,7 +1633,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                         <span className="text-sm font-bold text-chicken-brown">{s.name}</span>
                         <span className="ml-1.5 text-xs text-chicken-brown/50">{s.start}–{s.end}</span>
                         <div className={`mt-0.5 text-xs font-bold ${seatingClosed ? 'text-chicken-red' : closedInSeating ? 'text-amber-700' : 'text-emerald-700'}`}>
-                          {seatingClosed ? '⛔ 整場次已關閉' : closedInSeating ? `已關閉 ${closedInSeating} / ${slots.length} 個時段` : '全部開放'}
+                          {seatingClosed ? <GlyphText icon={Ban} size={13} className="!gap-1">整場次已關閉</GlyphText> : closedInSeating ? `已關閉 ${closedInSeating} / ${slots.length} 個時段` : '全部開放'}
                         </div>
                       </div>
                       <button

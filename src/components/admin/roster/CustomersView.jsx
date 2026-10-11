@@ -6,6 +6,8 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import { getNoshowCount, noshowRisk } from '../../../services/bookingService'
 import SegmentedControl from '../../ui/SegmentedControl'
+import GlyphText from '../../ui/GlyphText'
+import { X } from 'lucide-react'
 
 const VIP_LABEL = { none: '一般', bronze: '銅卡', silver: '銀卡', gold: '金卡' }
 const VIP_COLOR = {
@@ -123,7 +125,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
               onClick={() => setQuery('')}
               aria-label="清除搜尋"
               className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-full text-chicken-brown/50 hover:bg-chicken-brown/10 hover:text-chicken-brown"
-            >✕</button>
+            ><X size={14} strokeWidth={2.4} aria-hidden="true" /></button>
           )}
         </div>
         <SegmentedControl size="sm" ariaLabel="顧客篩選" value={filter} onChange={setFilter} options={[
@@ -220,7 +222,7 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                     <button
                       onClick={() => updateCustomer(c.phone, { archived: !c.archived })}
                       className="text-xs px-3 min-h-[44px] rounded-lg font-bold bg-white border border-chicken-brown/15 text-chicken-brown/70 hover:bg-chicken-brown/5"
-                    >{c.archived ? '↩ 取消歸檔' : '歸檔'}</button>
+                    ><GlyphText size={14}>{c.archived ? '↩ 取消歸檔' : '歸檔'}</GlyphText></button>
                   </div>}
                 </div>
               </Card>
