@@ -1100,8 +1100,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       </div>
 
       {/* lg 以上＝一條頂列（約 44px）：現場・時間 + 六格 pill + 樓層 + 視圖 + 編輯佈局 + 登入者。
-          lg 以下＝改版前的樓層/視圖列（大尺寸、可換行），統計已在上面那塊 grid。 */}
-      <div className="flex items-center gap-2 flex-wrap lg:flex-nowrap">
+          lg 以下＝改版前的樓層/視圖列（大尺寸、可換行），統計已在上面那塊 grid。
+          Liquid Glass：.lg-toolbar＝玻璃膠囊（只加水平內距、不加高度；不帶 transform/filter，見 styles/glass.css）。 */}
+      <div className="lg-toolbar flex items-center gap-2 flex-wrap lg:flex-nowrap">
         <div className="hidden lg:flex min-w-0">
           <span className="text-xs font-bold self-center mr-2 text-chicken-brown/60">全店</span>
           <StatusBar tablePresentation={tablePresentation} variant="compact" tables={tables} waitlist={waitlist} bookings={bookings} />
@@ -1147,7 +1148,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         onOpenTable={openHintTable}
       />
 
-      {/* Mode banner — 依模式不同底色 + emoji，避免誤判 */}
+      {/* Mode banner — 依模式不同底色 + 圖示，避免誤判 */}
       <ModeBanner
         mode={mode}
         tables={tables}

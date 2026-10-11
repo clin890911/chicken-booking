@@ -6,12 +6,13 @@ import Icon from '../ui/Icon'
 // 2026-09 改版：iPad 橫向（1024–1279px）是主要使用情境，側欄縮成「圖示 + 小字」的 76px 圖示欄，
 // ≥1280px 才展開成含文字的 224px 側欄。選中態改用淡紅底 + 紅字（不再整塊實心紅），
 // 圖示改單色線條（Icon），讓側欄退到背景、內容區才是主角。
+// 2026-10 Liquid Glass：側欄是浮起的玻璃窗格（.lg-chrome .lg-sidebar，見 styles/glass.css）；外框尺寸不變。
 export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
   const { user, signOut } = useAuth()
   const confirm = useConfirm()
 
   return (
-    <aside className="hidden lg:flex flex-col w-[76px] xl:w-56 bg-[#fbfaf8] border-r border-chicken-brown/10 sticky top-0 h-[100dvh]">
+    <aside className="lg-chrome lg-sidebar hidden lg:flex flex-col w-[76px] xl:w-56 sticky top-0 h-[100dvh]">
       {/* Logo */}
       <div className="px-3 py-4 flex items-center justify-center xl:justify-start gap-2.5">
         <img src="/brand/master-of-chicken-logo-transparent.png" alt="雞王涮涮鍋" className="w-10 h-10 object-contain flex-shrink-0" />

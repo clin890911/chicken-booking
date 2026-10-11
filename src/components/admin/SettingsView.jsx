@@ -21,6 +21,7 @@ import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds
 import { onlineLeadLabel } from '../../utils/guestPolicy'
 import { CLOSURE_SETTING_KEYS, isClosureSettingKey, settingsWriteScope } from '../../utils/settingsScope'
 import { describeClosureConflicts } from '../../utils/closuresMerge'
+import { useOpaqueMode } from '../../utils/opaqueMode'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -56,7 +57,7 @@ const FIELD_LABELS = {
 const SETTINGS_CATEGORIES = [
   { key: 'ops-rules', label: '營運規則',   icon: 'clock', sections: ['hours', 'seatings', 'closures'] },
   { key: 'online',    label: '線上訂位',   icon: 'globe', sections: ['online-guard', 'hero', 'contact'] },
-  { key: 'floor',     label: '現場與桌位', icon: 'chair', sections: ['automation', 'layout', 'table-enable'] },
+  { key: 'floor',     label: '現場與桌位', icon: 'chair', sections: ['device-display', 'automation', 'layout', 'table-enable'] },
   { key: 'line',      label: '通知與 LINE', icon: 'bell', sections: ['line', 'telegram'] },
   { key: 'data',      label: '資料與權限', icon: 'lock', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
 ]
@@ -68,7 +69,8 @@ const CategoryContext = createContext([])
 // 完全唯讀角色（kitchen）：所有「可編輯」區塊用 <fieldset disabled> 整段鎖住，輸入框／按鈕一律不可操作。
 // 下列區塊本質是讀取或帳號操作（查 No-show、登出），維持可用；資料匯出（含電話個資）不在其內——kitchen 直接不渲染；雲端同步區改由按鈕層級處理。
 const ReadOnlyContext = createContext(false)
-const READONLY_EXEMPT_SECTIONS = ['noshow', 'account', 'firestore']
+// device-display：這台裝置自己的顯示偏好（存 localStorage、不寫雲端），任何角色都能切。
+const READONLY_EXEMPT_SECTIONS = ['noshow', 'account', 'firestore', 'device-display']
 
 export default function SettingsView({ onOpenCustomer }) {
   const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud, discardRejectedChanges, localPersistDegraded } = useBooking()
@@ -637,6 +639,8 @@ export default function SettingsView({ onOpenCustomer }) {
         </div>
       </SettingsSection>
 
+      <DeviceDisplaySection />
+
       <SettingsSection sectionKey="automation" title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。" badge={autoReleaseOn ? '啟用' : '未啟用'} summary={automationSummary}>
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
@@ -1105,6 +1109,39 @@ function readBannerFile(file) {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+// 這台裝置的顯示：Liquid Glass「不透明模式」開關（每台裝置自己記，見 utils/opaqueMode）。
+// iPad Safari 可能不支援系統「降低透明度」的 CSS 偵測 → 給一個 app 內開關；立即生效、不用按儲存。
+function DeviceDisplaySection() {
+  const [opaque, setOpaque] = useOpaqueMode()
+  const toast = useToast()
+  const toggle = () => {
+    const next = !opaque
+    const saved = setOpaque(next)
+    if (!saved) toast.warning('這台裝置無法記住設定（可能是私密瀏覽），重新整理後會回到預設')
+  }
+  return (
+    <SettingsSection sectionKey="device-display" title="這台裝置的顯示" description="只影響這台裝置，不會同步到其他裝置。" badge={opaque ? '不透明' : '玻璃'} summary={opaque ? '不透明模式：導覽、鍵盤、通知改成實心底' : '玻璃效果（預設）'} defaultOpen>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={opaque}
+        onClick={toggle}
+        className="tap w-full flex items-center justify-between gap-4 min-h-[56px] rounded-xl border border-chicken-brown/15 bg-white px-4 py-3 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block font-bold text-chicken-brown">不透明模式</span>
+          <span className="block text-xs text-chicken-brown/70 mt-0.5 leading-5">
+            把導覽列、浮動數字鍵盤、通知、桌抽屜的半透明玻璃改成實心底。看不清楚、覺得畫面變慢，或 iPad 已開「降低透明度」卻仍是半透明時打開。
+          </span>
+        </span>
+        <span aria-hidden="true" className={`relative flex-none w-[52px] h-8 rounded-full transition-colors ${opaque ? 'bg-emerald-700' : 'bg-chicken-brown/25'}`}>
+          <span className={`absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow transition-transform ${opaque ? 'translate-x-5' : ''}`} />
+        </span>
+      </button>
+    </SettingsSection>
+  )
 }
 
 // 首頁廣告單張卡片：Reorder.Item（右上握把拖曳排序）+ 圖上疊標題副標（前台預覽）+ 非 16:9 提示。

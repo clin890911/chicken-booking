@@ -49,6 +49,7 @@ describe('Toast 疊加上限', () => {
 })
 
 // iPad 現場頁：右下是地圖與報到列，toast 不可再出現在右下角；復原鈕要是 ≥44px 的實心按鈕。
+// （2026-10 Liquid Glass：toast 改淺色玻璃底 → 復原鈕改成深棕實心膠囊；label 的 ↩ 改線條圖示，按鈕文字＝「復原」）
 describe('Toast 位置與動作鈕', () => {
   let container, root
   afterEach(() => { act(() => root?.unmount()); container?.remove(); api = null })
@@ -74,7 +75,9 @@ describe('Toast 位置與動作鈕', () => {
     act(() => api.action('已標記', { label: '↩ 復原', onClick: () => { clicked++ } }, { duration: 0 }))
     const btn = document.querySelector('[data-testid="toast-action"]')
     expect(btn.className).toContain('min-h-[44px]')
-    expect(btn.className).toMatch(/\bbg-white\b/)
+    expect(btn.className).toMatch(/\bbg-chicken-brown\b/)
+    expect(btn.textContent).toBe('復原')
+    expect(btn.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
     expect(btn.className).not.toContain('underline')
     act(() => btn.click())
     expect(clicked).toBe(1)

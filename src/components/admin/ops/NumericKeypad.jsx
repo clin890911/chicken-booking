@@ -4,6 +4,9 @@
 // tone：
 //   'light'（預設）＝白底，內嵌在表單裡（3 欄 4 排：1–9 / 清除 0 ⌫）
 //   'dark'         ＝深色漂浮鍵盤用（3 欄 4 排：1–9 / ⌫ 0 OK），OK 呼叫 onDone 收起面板
+// 退格鍵畫 lucide 的 Delete 圖示（無障礙名稱仍是「退格」）；按鍵 key 值仍用 '⌫' 當內部代號。
+import { Delete } from 'lucide-react'
+
 const KEYS_LIGHT = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '清除', '0', '⌫']
 const KEYS_DARK = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK']
 
@@ -25,16 +28,16 @@ export default function NumericKeypad({ value = '', onChange, maxLen = 10, tone 
           onClick={() => press(k)}
           aria-label={k === '⌫' ? '退格' : k}
           className={dark
-            ? `h-[66px] rounded-xl font-bold active:scale-95 transition-transform ${
+            ? `h-[66px] rounded-[18px] font-bold active:scale-95 transition-transform ${
               k === 'OK'
                 ? 'bg-chicken-yellow text-white text-xl'
                 : k === '⌫'
-                  ? 'bg-white/10 text-white text-xl'
-                  : 'bg-white/10 text-white text-[27px]'}`
+                  ? 'bg-white/[0.13] shadow-[inset_0_1px_0_rgb(255_255_255/0.12)] text-white text-xl'
+                  : 'bg-white/[0.13] shadow-[inset_0_1px_0_rgb(255_255_255/0.12)] text-white text-[27px]'}`
             : `h-12 rounded-xl border border-chicken-brown/10 bg-white font-bold text-chicken-brown active:scale-95 transition-transform ${
               k === '清除' ? 'text-sm text-chicken-brown/60' : 'text-lg'}`}
         >
-          {k}
+          {k === '⌫' ? <Delete size={dark ? 28 : 22} strokeWidth={2.2} aria-hidden="true" className="mx-auto" /> : k}
         </button>
       ))}
     </div>

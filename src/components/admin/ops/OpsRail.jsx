@@ -70,14 +70,17 @@ export default function OpsRail({
   return (
     // h-full min-h-0 flex-col：帶位面板要能把「滑動帶位」釘在欄位底部（捲動發生在面板內部）
     <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 flex flex-col">
-      <div className="flex-none flex border-b border-chicken-brown/10">
+      {/* 籤列＝膠囊分段（Liquid Glass 控制樣式）：選中鏡片畫在按鈕 ::after（styles/glass.css .lg-tabs），
+          按鈕本身維持 44px 觸控高度、0 垂直外距——左欄常態要一面式不捲，裝飾不能吃高度 */}
+      <div className="lg-tabs flex-none flex gap-0.5 px-1 bg-chicken-brown/[0.045]">
         {tabs.map(t => (
           <button
             key={t.key}
             onClick={() => onTabChange(t.key)}
-            className={`flex-1 min-h-[44px] px-2 py-2.5 text-sm font-bold transition-colors relative ${
+            data-active={effective === t.key ? 'true' : undefined}
+            className={`flex-1 min-h-[44px] px-2 py-2.5 text-sm font-bold relative ${
               effective === t.key
-                ? 'text-chicken-red bg-chicken-red/5 border-b-2 border-chicken-red -mb-px'
+                ? 'text-chicken-red'
                 : 'text-chicken-brown/55 hover:text-chicken-brown'
             }`}
           >

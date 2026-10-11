@@ -68,7 +68,7 @@ test('報到列列出未配桌的訂位 → 到了·選桌 → 點桌 → 確認
   await strip.getByRole('button', { name: '林先生 到了，選桌入座' }).click(); taps++
   await expect(page.getByText(/到了 · 選桌入座：林先生 3 位/)).toBeVisible()
   await mapTable(page, '105').click(); taps++
-  await page.getByRole('button', { name: '✓ 確認入座' }).click(); taps++
+  await page.getByRole('button', { name: '確認入座', exact: true }).click(); taps++
   expect(taps).toBeLessThanOrEqual(3)
 
   await expect(page.getByText('林先生（3 位）已入座 105')).toBeVisible()
@@ -95,7 +95,7 @@ test('今日訂位卡：未配桌訂位「到了 · 選桌入座」→ 點桌 �
   await expect(card.getByRole('button', { name: '指派桌位' })).toBeVisible()
   await card.getByRole('button', { name: '林先生 到了，選桌入座' }).click()
   await mapTable(page, '106').click()
-  await page.getByRole('button', { name: '✓ 確認入座' }).click()
+  await page.getByRole('button', { name: '確認入座', exact: true }).click()
 
   await expect(page.getByText('林先生（3 位）已入座 106')).toBeVisible()
   const { bookings, tables } = await readState(page)
@@ -118,7 +118,7 @@ test('選到的桌有重疊預配 → 勾選才解鎖；入座解除那筆預配
   await strip.getByRole('button', { name: '林先生 到了，選桌入座' }).click()
   await mapTable(page, '105').click()
   await expect(page.getByText(/105 已於排位規劃預留給 陳小姐.*入座後 12:30 陳小姐 的預配將解除/)).toBeVisible()
-  const ok = page.getByRole('button', { name: '✓ 確認入座' })
+  const ok = page.getByRole('button', { name: '確認入座', exact: true })
   await expect(ok).toBeDisabled()
   await page.getByRole('checkbox', { name: /我已確認上述預配／團體保留/ }).check()
   await ok.click()

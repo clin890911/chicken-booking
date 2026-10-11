@@ -1,13 +1,14 @@
 import Icon from '../ui/Icon'
 
 // 手機 / iPad 直向底部導航（lg 以下顯示）。
+// 2026-10 Liquid Glass：膠囊玻璃窗格（.lg-chrome .lg-bottomnav）。上下 4px 透明邊框取代 grid 原本的 pt-1 pb-1 → 總高度不變。
 // Tailwind 無法動態拼 class 字串，欄數需顯式對照；依分頁數選欄數讓所有籤保持單行
 const COLS = { 4: 'grid-cols-4', 5: 'grid-cols-5', 6: 'grid-cols-6', 7: 'grid-cols-7' }
 
 export default function BottomNav({ tabs, active, onChange, badges = {} }) {
   return (
-    <nav className="lg:hidden flex-shrink-0 safe-bottom z-30 border-t border-chicken-brown/10 bg-[#fbfaf8]/95 backdrop-blur">
-      <div className={`grid ${COLS[tabs.length] || 'grid-cols-5'} gap-1 px-2 pt-1 pb-1`}>
+    <nav className="lg-chrome lg-bottomnav lg:hidden flex-shrink-0 safe-bottom z-30">
+      <div className={`grid ${COLS[tabs.length] || 'grid-cols-5'} gap-1 px-1`}>
         {tabs.map(t => {
           const isActive = active === t.key
           const badge = t.badgeKey ? badges[t.badgeKey] : 0

@@ -190,7 +190,8 @@ describe('設定頁 SettingsView', () => {
   const CATEGORIES = ['ops-rules', 'online', 'floor', 'line', 'data']
   // 本質是讀取／帳號操作而保持可用的區塊（標題）：No-show 查詢、帳號（登出）、Firestore 資料同步（另驗上傳鈕）
   // 資料匯出（含電話個資）不在其內——kitchen 根本不渲染（見下方專測）
-  const EXEMPT_TITLES = ['No-show 查詢', '帳號', 'Firestore 資料同步']
+  // 這台裝置的顯示（不透明模式）：只存這台裝置的 localStorage、不寫雲端 → 唯讀角色也能切
+  const EXEMPT_TITLES = ['No-show 查詢', '帳號', 'Firestore 資料同步', '這台裝置的顯示']
   beforeEach(() => {
     Object.assign(ctx, {
       bookings: [], updateSettings: vi.fn((s) => s), flushCloudNow: vi.fn(async () => ({ ok: true })),

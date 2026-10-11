@@ -158,7 +158,7 @@ test('今日訂位卡取消：有確認框；復原把訂位與桌一起倒回',
   expect(bookings.find(b => b.id === WANG.id).status).toBe('cancelled')
   expect(tables.find(t => t.number === '105')).toMatchObject({ status: 'vacant', currentBookingId: null })
 
-  await page.getByRole('button', { name: '↩ 復原' }).click()
+  await page.getByRole('button', { name: '復原', exact: true }).click()
   await expect(page.getByText(/已復原 王先生 的訂位/)).toBeVisible()
   ;({ bookings, tables } = await readState(page))
   expect(bookings.find(b => b.id === WANG.id)).toMatchObject({ status: 'confirmed', assignedTableId: '105' })
@@ -219,7 +219,7 @@ test('到了 · 選桌入座：「用建議桌」選好併桌組合（含切樓�
   await page.getByTestId('mode-apply-suggestion').click()
   await expect(page.getByLabel('2F 桌況圖')).toBeVisible()
   await expect(page.getByText(/已選 8\/8 席 · 2 桌/)).toBeVisible()
-  await page.getByRole('button', { name: '✓ 確認併桌入座' }).click()
+  await page.getByRole('button', { name: '確認併桌入座', exact: true }).click()
 
   await expect(page.getByText(/大組（8 位）已入座 20[12] \+ 20[12]/)).toBeVisible()
   const { bookings, tables } = await readState(page)
@@ -288,7 +288,7 @@ test('選桌入座「用建議桌」後其中一張被別筆預配（時段重�
   await page.locator(`[data-booking-id="${BIG.id}"]`).getByRole('button', { name: '大組 到了，選桌入座' }).click()
   await page.getByTestId('mode-apply-suggestion').click()
   await expect(page.getByText(/已選 8\/8 席 · 2 桌/)).toBeVisible()
-  const confirmBtn = page.getByRole('button', { name: '✓ 確認併桌入座' })
+  const confirmBtn = page.getByRole('button', { name: '確認併桌入座', exact: true })
   await expect(confirmBtn).toBeEnabled()
 
   await preassignFromAnotherDevice(page, CHEN.id, '201')

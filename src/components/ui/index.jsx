@@ -1,6 +1,7 @@
 import { useId } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Icon from './Icon'
+import { SPRING_SHEET } from './springs'
 
 // 預設 type="button"：避免包進 <form> 時被當成隱式 submit 誤觸送出；呼叫端仍可傳 type="submit" 覆寫。
 export function Button({ variant = 'primary', type = 'button', className = '', children, ...rest }) {
@@ -67,26 +68,38 @@ export function Badge({ color = 'red', children, className = '' }) {
 
 // size：md（預設，表單）/ lg（詳情頁等資訊較多的表）。手機一律全寬 bottom sheet。
 // 內容區 overscroll-contain：手機上捲到底不會把捲動「穿透」到底下的頁面（bottom sheet 常見的卡頓感來源）。
+// Liquid Glass：面板是浮動玻璃（.lg-float，模糊畫在 ::before）。
+//   - 面板本身不捲動、裡層才捲：::before 是 absolute inset:0，若宿主自己捲動，玻璃底會跟著捲走、下半段變透明。
+//   - 進場只動 transform（spring）；外層不做 opacity 進場——外層 opacity<1 會變成 backdrop root，
+//     面板的模糊在進場時只取得到遮罩、看起來先灰後清。遮罩的淡入放在獨立的子層。退場整層淡出。
 export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
   const width = size === 'lg' ? 'sm:max-w-lg' : 'sm:max-w-md'
   return (
     <AnimatePresence>
       {open && (
         <motion.div
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          exit={{ opacity: 0 }}
           transition={{ duration: 0.16 }}
-          className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
           onClick={onClose}
         >
           <motion.div
-            initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
-            className={`bg-white w-full ${width} rounded-t-3xl sm:rounded-2xl shadow-xl max-h-[90vh] overflow-y-auto overscroll-contain safe-bottom`}
+            aria-hidden="true"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+            transition={{ duration: 0.16 }}
+            className="absolute inset-0 bg-black/40"
+          />
+          <motion.div
+            initial={{ y: 40, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: 40 }}
+            transition={SPRING_SHEET}
+            className={`lg-float lg-sheet w-full ${width} rounded-t-[28px] sm:rounded-[28px] max-h-[90vh] flex flex-col overflow-hidden safe-bottom`}
             onClick={e => e.stopPropagation()}
           >
-            {title && <div className="px-5 pt-5 pb-2 text-lg font-bold text-chicken-brown">{title}</div>}
-            <div className="px-5 py-4">{children}</div>
-            {footer && <div className="px-5 pb-5 pt-2 flex gap-2 justify-end">{footer}</div>}
+            <div className="min-h-0 overflow-y-auto overscroll-contain">
+              {title && <div className="px-5 pt-5 pb-2 text-lg font-bold text-chicken-brown">{title}</div>}
+              <div className="px-5 py-4">{children}</div>
+              {footer && <div className="px-5 pb-5 pt-2 flex gap-2 justify-end">{footer}</div>}
+            </div>
           </motion.div>
         </motion.div>
       )}

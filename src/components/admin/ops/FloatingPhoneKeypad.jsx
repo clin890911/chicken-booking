@@ -1,5 +1,6 @@
 import { useState, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { X } from 'lucide-react'
 import NumericKeypad from './NumericKeypad'
 
 const KEYPAD_WIDTH = 392
@@ -13,6 +14,8 @@ const KEYPAD_MIN_WIDTH = 300
 // 用 portal + position:fixed 到 body，刻意**不靠**祖先當定位脈絡——現場頁是
 // h-[100dvh] 串接的一面式版面，在祖先加 transform/relative 會把高度鏈打斷。
 // 遮罩刻意只用 bg-black/20：桌況圖必須全程看得見（領檯是「一邊看桌一邊問電話」）。
+// Liquid Glass：鍵盤是深色浮動玻璃（.lg-float .lg-keypad，模糊畫在 ::before；宿主仍是 fixed）。
+// 收起鈕 44px（觸控下限），用 -my-1 -mr-1 吃回多出來的高度 → 鍵盤外框尺寸與位置不變。
 // 注意：React 事件會沿元件樹（不是 DOM 樹）冒泡——放在 Modal 內使用時，點鍵盤／遮罩
 // 會冒泡到 Modal 面板的 stopPropagation，不會誤關 Modal。
 //
@@ -52,7 +55,7 @@ export default function FloatingPhoneKeypad({ open, onClose, value, onChange, an
       <div
         role="dialog"
         aria-label="電話數字鍵盤"
-        className="fixed z-[71] rounded-xl bg-[#2b2320] p-3 shadow-2xl"
+        className="lg-float lg-keypad fixed z-[71] rounded-[28px] p-3"
         style={pos
           ? { left: pos.left, bottom: pos.bottom, width: pos.width }
           : { left: KEYPAD_GAP, bottom: KEYPAD_GAP, width: KEYPAD_WIDTH, visibility: 'hidden' }}
@@ -68,9 +71,9 @@ export default function FloatingPhoneKeypad({ open, onClose, value, onChange, an
             type="button"
             aria-label="收起鍵盤"
             onClick={onClose}
-            className="ml-auto flex-none h-8 w-8 rounded-full bg-white/15 text-sm font-bold text-white"
+            className="ml-auto -my-1 -mr-1 flex-none inline-flex items-center justify-center h-11 w-11 rounded-full bg-white/15 text-white"
           >
-            ✕
+            <X size={20} strokeWidth={2.4} aria-hidden="true" />
           </button>
         </div>
         <NumericKeypad value={value} onChange={onChange} tone="dark" onDone={onClose} />

@@ -18,6 +18,8 @@ import { toastSeatedWithUndo, seatAfterArriveConfirm } from '../../../utils/arri
 import { splitSuffix } from '../../../utils/partySplit'
 import { formatPhone } from '../../../utils/phoneFormat'
 import EditBookingModal from '../../booking/EditBookingModal'
+import { X } from 'lucide-react'
+import GlyphText from '../../ui/GlyphText'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -312,9 +314,11 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   }
 
   return (
-    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden flex flex-col h-full">
+    // Liquid Glass：抽屜是靜態玻璃（.lg-drawer＝半透明填色＋邊緣光，不模糊、不建立堆疊脈絡）——
+    // 抽屜裡的 Modal 沒有 portal，宿主若加 isolation/transform/backdrop-filter 會困住它的 z-index 或定位。
+    <div className="lg-drawer rounded-[28px] overflow-hidden flex flex-col h-full">
       {/* Header */}
-      <div className="px-5 pt-5 pb-3 border-b border-chicken-brown/10 bg-gradient-to-b from-white to-chicken-cream/30">
+      <div className="px-5 pt-5 pb-3 border-b border-chicken-brown/10">
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="text-3xl font-bold text-chicken-red leading-none">{table.number}</div>
@@ -325,7 +329,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
               {table.floor === '1F' ? '一樓' : '二樓'}
             </div>
           </div>
-          <button onClick={onClose} className="text-chicken-brown/40 hover:text-chicken-brown text-2xl leading-none">×</button>
+          <button onClick={onClose} aria-label="關閉" className="-mt-2 -mr-2 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-full text-chicken-brown/70 hover:text-chicken-brown hover:bg-chicken-brown/[0.06]"><X size={22} strokeWidth={2.2} aria-hidden="true" /></button>
         </div>
         <span className="inline-block mt-3 px-3 py-1 rounded-full text-xs font-bold text-white"
               style={{ background: STATUS_PILL_BG[displayStatus] }}>
@@ -543,9 +547,9 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
               <button
                 onClick={onStartMove}
                 className="btn-secondary w-full text-sm min-h-[44px]"
-              >↔ 改桌（{booking.name} 換到別桌）</button>
+              ><GlyphText>{`↔ 改桌（${booking.name} 換到別桌）`}</GlyphText></button>
 
-              <button onClick={handleCancel} className="w-full text-sm rounded-xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
+              <button onClick={handleCancel} className="w-full text-sm rounded-xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5"><GlyphText>✕ 取消訂位</GlyphText></button>
             </>
           )}
 
@@ -563,7 +567,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
                 直接釋出（已清桌完成）
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={onStartMove} className="btn-secondary text-sm disabled:opacity-45">↔ 換桌</button>
+                <button onClick={onStartMove} className="btn-secondary text-sm disabled:opacity-45"><GlyphText>↔ 換桌</GlyphText></button>
                 {/* 用餐中加人／補過敏備註：原地改（只開放人數＋備註，桌位不動）；取代原本空殼的「訂單明細」 */}
                 <button onClick={() => setEditingBooking(true)} className="btn-secondary text-sm">改人數／備註</button>
               </div>

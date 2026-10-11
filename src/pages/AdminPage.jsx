@@ -165,7 +165,7 @@ export default function AdminPage() {
   const navTo = (t) => { setTaskSource(null); if (t !== 'bookings') setAddPrefill(null); setTab(t) }
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-chicken-cream flex">
+    <div className="lg-canvas h-[100dvh] overflow-hidden flex">
       {/* 桌面版側邊導航 */}
       <SidebarNav tabs={TABS} active={tab} onChange={navTo} badges={badges} />
 
@@ -190,7 +190,7 @@ export default function AdminPage() {
             在 iPad 橫向卻是 66px 的實體高度（左欄會因此捲動）→ ops 不渲染，
             右邊的登入者/角色改由 OperationsView 接在統計條最右端。其他分頁完全不變。 */}
         {tab !== 'ops' && (
-        <div className="hidden lg:block flex-shrink-0 bg-[#fbfaf8] border-b border-chicken-brown/10 px-6 py-2">
+        <div className="lg-chrome lg-topbar hidden lg:block flex-shrink-0 px-6 py-2">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-baseline gap-2.5">
               <h1 className="text-lg font-semibold tracking-tight text-chicken-brown">{tabInfo.label}</h1>
