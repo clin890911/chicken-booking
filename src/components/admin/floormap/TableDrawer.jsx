@@ -367,7 +367,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
                   </div>
                   <div className={`flex items-center justify-between rounded-xl px-3 py-2 mt-2
                     ${stage === 'buffer-overtime' ? 'bg-chicken-red text-white animate-pulse'
-                      : stage === 'overtime' ? 'bg-chicken-red/90 text-white'
+                      : stage === 'overtime' ? 'bg-chicken-red text-white'
                       : stage === 'late' ? 'bg-orange-100 text-orange-700'
                       : 'bg-chicken-cream text-chicken-brown'}`}>
                     <span className="text-xs font-bold">已用餐</span>

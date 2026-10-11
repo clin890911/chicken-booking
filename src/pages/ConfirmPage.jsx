@@ -198,11 +198,12 @@ export default function ConfirmPage() {
           <div className="bg-chicken-red text-white px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="leading-tight">
-                <div className="text-xs opacity-90">雞王涮涮鍋 · 訂位券</div>
+                <div className="text-xs">雞王涮涮鍋 · 訂位券</div>
                 <div className="font-black text-sm">Master of Chicken</div>
               </div>
             </div>
-            <Badge color="yellow" className="bg-chicken-yellow text-white">{statusLabel}</Badge>
+            {/* 2026-10 對比：原 Badge yellow（黃淡底疊在紅 header）配白字只有 4.4:1；改深一階紅底白字 ≥5.9:1 */}
+            <span className="badge bg-black/15 text-white">{statusLabel}</span>
           </div>
 
           {/* 訂位編號區塊 */}

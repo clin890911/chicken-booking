@@ -154,7 +154,7 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
                 ) : seated ? (
                   perms.table && <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
                 ) : cleaning ? (
-                  perms.group && <button onClick={() => onRelease(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-sky-600 text-white">整梯清桌釋出</button>
+                  perms.group && <button onClick={() => onRelease(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-sky-700 text-white">整梯清桌釋出</button>
                 ) : (
                   perms.group && <button onClick={() => onSeat(b)} disabled={!(b.tableNumbers || []).length}
                     className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-chicken-green text-white disabled:opacity-40">梯次入座</button>

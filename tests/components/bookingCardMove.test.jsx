@@ -125,7 +125,7 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
     const badge = container.querySelector('[data-kind]')
     expect(badge.dataset.kind).toBe('held')
     expect(badge.textContent.trim()).toBe('桌 105')
-    expect(badge.className).toContain('bg-emerald-600')
+    expect(badge.className).toContain('bg-emerald-700')
   })
 
   it('U3：預配（桌況仍空）→ 藍色「預配 105」（與現場頁同一支藍）', () => {
@@ -139,11 +139,11 @@ describe('BookingCard：改桌入口與桌號徽章', () => {
   // 驗收問題 2：只有待到類（confirmed/pending）才分 held／預配；其他狀態維持原本的綠「桌 N」
   // （已到店維持原本的橘），不能出現「別人仍坐得進去」的藍色預配徽章。
   it.each([
-    ['completed', mkTable({ status: 'cleaning', currentBookingId: 'B1' }), 'bg-emerald-600'],
-    ['completed', mkTable(), 'bg-emerald-600'],
-    ['noshow', mkTable(), 'bg-emerald-600'],
-    ['cancelled', mkTable(), 'bg-emerald-600'],
-    ['arrived', mkTable({ status: 'dining', currentBookingId: 'B1' }), 'bg-orange-600'],
+    ['completed', mkTable({ status: 'cleaning', currentBookingId: 'B1' }), 'bg-emerald-700'],
+    ['completed', mkTable(), 'bg-emerald-700'],
+    ['noshow', mkTable(), 'bg-emerald-700'],
+    ['cancelled', mkTable(), 'bg-emerald-700'],
+    ['arrived', mkTable({ status: 'dining', currentBookingId: 'B1' }), 'bg-orange-700'],
   ])('U3：%s（桌況 %#）→ 原本的「桌 105」徽章，不顯示預配', (status, table, cls) => {
     render(mkBooking({ status }), { tables: [table] })
     const badge = container.querySelector('[data-kind]')
