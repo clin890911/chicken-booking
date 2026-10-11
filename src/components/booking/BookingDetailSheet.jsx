@@ -11,6 +11,7 @@ import { dayLabel, seatingForSlot } from '../../utils/timeSlots'
 import { copyText } from '../../utils/clipboard'
 import { bookingTableNumbers, formatBookingTables } from '../../utils/bookingTables'
 import Icon from '../ui/Icon'
+import GlyphText from '../ui/GlyphText'
 
 // 散客訂位詳情（bottom sheet）。
 // 店主回饋：規劃頁的散客列只看得到「姓名 · 人數 · 時間 · 狀態 · 桌號」，點下去沒反應——
@@ -236,7 +237,7 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
         {act.show.move && (
           <ActionButton tone="indigo" className="col-span-2" disabled={!!act.moveDisabledReason}
             title={act.moveDisabledReason || undefined}
-            onClick={() => { onClose?.(); act.move() }}>↔ 改桌（目前 {formatBookingTables(booking)}）</ActionButton>
+            onClick={() => { onClose?.(); act.move() }}><GlyphText size={16}>{`↔ 改桌（目前 ${formatBookingTables(booking)}）`}</GlyphText></ActionButton>
         )}
         {act.show.move && act.moveDisabledReason && (
           <div className="col-span-2 text-[11px] font-bold text-chicken-brown/50 text-center -mt-1">{act.moveDisabledReason}</div>
@@ -257,13 +258,13 @@ function SheetBody({ booking, onClose, onAssign, onFocusTable, onMove }) {
           <ActionButton tone="neutral" onClick={then(act.unpreassign)}>解除預配</ActionButton>
         )}
         {act.show.restore && (
-          <ActionButton tone="neutral" className="col-span-2" onClick={then(async () => { act.restore(); return true })}>↩ 恢復為待到</ActionButton>
+          <ActionButton tone="neutral" className="col-span-2" onClick={then(async () => { act.restore(); return true })}><GlyphText size={16}>↩ 恢復為待到</GlyphText></ActionButton>
         )}
         {act.show.noshow && (
           <ActionButton tone="danger" onClick={then(act.noshow)}>標 No-show</ActionButton>
         )}
         {act.show.cancel && (
-          <ActionButton tone="danger" className={act.show.noshow ? '' : 'col-span-2'} onClick={then(act.cancel)}>✕ 取消訂位</ActionButton>
+          <ActionButton tone="danger" className={act.show.noshow ? '' : 'col-span-2'} onClick={then(act.cancel)}><GlyphText size={16}>✕ 取消訂位</GlyphText></ActionButton>
         )}
       </div>
       {act.show.futureAssignedNote && (

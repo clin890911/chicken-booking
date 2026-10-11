@@ -4,6 +4,8 @@
 import { useMemo, useState } from 'react'
 import { INITIAL_TABLES, FLOOR_VIEWBOX, FIXTURES } from '../data/tables'
 import StatsCard from '../components/admin/StatsCard'
+import GlyphText from '../components/ui/GlyphText'
+import { Ban, Map as MapIcon, TriangleAlert } from 'lucide-react'
 
 // ── Mock：場次設定（正式版會放 settings.seatings，老闆可在後台自訂）──
 const SEATINGS = [
@@ -128,7 +130,7 @@ export default function SlotMapDemoPage() {
         {/* 標題 */}
         <div className="bg-white rounded-2xl border border-chicken-brown/10 p-4">
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-lg font-black text-chicken-brown">🗺️ 統一座位地圖</h1>
+            <h1 className="text-lg font-black text-chicken-brown"><GlyphText icon={MapIcon} size={18} strokeWidth={2.2}>統一座位地圖</GlyphText></h1>
             <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-chicken-yellow/20 text-chicken-brown">概念 Demo · mock 資料</span>
           </div>
           <p className="text-xs text-chicken-brown/60 mt-1">依「日期 + 場次」切換，同時看散客（暖色）與團客（冷色）佔位。此頁為概念展示，未接後端。</p>
@@ -157,7 +159,7 @@ export default function SlotMapDemoPage() {
                     className={`px-3 py-2 rounded-xl text-sm font-bold border-2 transition-all ${seatingId === s.id ? 'bg-indigo-600 border-indigo-600 text-white shadow' : c ? 'bg-slate-100 border-slate-200 text-slate-400 line-through' : 'bg-white border-chicken-brown/15 text-chicken-brown'}`}>
                     {s.name}
                     <span className="ml-1 text-[10px] opacity-70">{s.start}–{s.end}</span>
-                    {c && <span className="ml-1 text-[10px]">🚫</span>}
+                    {c && <Ban size={11} strokeWidth={2.6} aria-label="已關閉" className="ml-1 inline-block align-[-1px]" />}
                   </button>
                 )
               })}
@@ -168,7 +170,7 @@ export default function SlotMapDemoPage() {
         {/* 關閉徽章 */}
         {closed && (
           <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl px-4 py-3 flex items-center gap-2">
-            <span className="text-xl">🚫</span>
+            <Ban size={22} strokeWidth={2.2} aria-hidden="true" className="shrink-0 text-rose-700" />
             <div>
               <div className="font-black text-rose-700 text-sm">此場次已關閉訂位</div>
               <div className="text-xs text-rose-600/80">{dateLabel(date)} · {seating.name}（{seating.start}–{seating.end}）— 停止接收新散客 / 團體訂位，既有訂位不受影響。</div>
@@ -178,14 +180,14 @@ export default function SlotMapDemoPage() {
 
         {/* 容量摘要卡 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <StatsCard icon="🪑" label="全店座位" value={summary.totalSeats} color="brown" />
-          <StatsCard icon="🧍" label="散客已訂(人)" value={summary.walkinGuests} color="yellow" />
-          <StatsCard icon="🚌" label="團客保留(席)" value={summary.groupHeldSeats} color="red" />
-          <StatsCard icon="✅" label="剩餘可訂(席)" value={closed ? 0 : summary.remaining} color="green" />
+          <StatsCard icon="chair" label="全店座位" value={summary.totalSeats} color="brown" />
+          <StatsCard icon="walk" label="散客已訂(人)" value={summary.walkinGuests} color="yellow" />
+          <StatsCard icon="bus" label="團客保留(席)" value={summary.groupHeldSeats} color="red" />
+          <StatsCard icon="checkCircle" label="剩餘可訂(席)" value={closed ? 0 : summary.remaining} color="green" />
         </div>
         {summary.unassignedWalkinGuests > 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-700">
-            ⚠️ 尚有 <span className="text-base">{summary.unassignedWalkinGuests}</span> 位散客已訂位但未配桌（到店才指派／可在地圖預先配桌）
+            <TriangleAlert size={14} strokeWidth={2.4} aria-hidden="true" className="mr-1 inline-block align-[-2px]" />尚有 <span className="text-base">{summary.unassignedWalkinGuests}</span> 位散客已訂位但未配桌（到店才指派／可在地圖預先配桌）
           </div>
         )}
 

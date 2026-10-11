@@ -10,6 +10,10 @@ import { lineLoginStartUrl, lineOfficialUrl } from '../services/lineService'
 import { useLineAuthorizeUrl } from '../hooks/useLineAuthorizeUrl'
 import { guestGetBooking } from '../services/cloudDataService'
 import { isGuestLineReady } from '../utils/lineReadiness'
+import {
+  LoaderCircle, SearchX, Check, Copy, CalendarDays, Clock, Users, User, Phone, Sparkles, NotebookPen,
+  PawPrint, Baby, Accessibility, TriangleAlert, CalendarPlus, MapPin, Timer, Hourglass, Drumstick,
+} from 'lucide-react'
 
 export default function ConfirmPage() {
   const { id } = useParams()
@@ -120,7 +124,7 @@ export default function ConfirmPage() {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-chicken-cream">
         <Card className="text-center max-w-sm">
-          <div className="text-5xl mb-2 animate-bounce">🐔</div>
+          <LoaderCircle size={44} strokeWidth={2} aria-hidden="true" className="mx-auto mb-3 animate-spin text-chicken-red" />
           <p className="font-bold text-chicken-brown/70">正在讀取訂位...</p>
         </Card>
       </div>
@@ -131,7 +135,7 @@ export default function ConfirmPage() {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-chicken-cream">
         <Card className="text-center max-w-sm">
-          <div className="text-5xl mb-2">🤔</div>
+          <SearchX size={44} strokeWidth={1.8} aria-hidden="true" className="mx-auto mb-3 text-chicken-brown/60" />
           <p className="font-bold text-chicken-brown">找不到此訂位</p>
           <p className="text-sm text-chicken-brown/60 mt-2">連結可能已失效，或需要從原本訂位的裝置開啟。可改用「查詢訂位」找回。</p>
           <Link to="/lookup" className="text-chicken-red text-sm mt-3 inline-block underline">查詢我的訂位</Link>
@@ -143,7 +147,7 @@ export default function ConfirmPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-chicken-red/5 via-chicken-cream to-white p-4 flex flex-col relative overflow-hidden">
-      {/* 品牌感的成功動畫：彩帶 + 飛舞的雞 */}
+      {/* 品牌感的成功動畫：品牌色彩帶紙片 */}
       <AnimatePresence>
         {showConfetti && b.status === 'confirmed' && (
           <div className="pointer-events-none absolute inset-0 overflow-hidden z-0" aria-hidden>
@@ -154,11 +158,9 @@ export default function ConfirmPage() {
                 animate={{ y: '110vh', opacity: [0, 1, 1, 0], rotate: p.rotate }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: p.duration, delay: p.delay, ease: 'easeIn' }}
-                className="absolute top-0 text-2xl"
+                className={`absolute top-0 ${p.shape} ${p.color}`}
                 style={{ left: 0 }}
-              >
-                {p.glyph}
-              </motion.div>
+              />
             ))}
           </div>
         )}
@@ -187,7 +189,7 @@ export default function ConfirmPage() {
           <h1 className="text-2xl font-black text-chicken-brown">{b.status === 'confirmed' ? '訂位成功！' : `訂位${statusLabel}`}</h1>
           <p className="text-sm text-chicken-brown/70 mt-1">{activeBooking ? '訂位已建立，到店出示訂位編號即可' : '已取回原訂位紀錄，請依目前狀態查閱；不會重新建立訂位。'}</p>
           <p className="mt-1.5 text-xs font-bold leading-5 text-chicken-brown/55">
-            {lineReady && activeBooking ? '📸 建議截圖保存此頁；或綁定下方 LINE 通知，之後在 LINE 隨時可查詢、修改訂位' : '📸 請保存此頁或管理連結，之後可查閱訂位紀錄。'}
+            {lineReady && activeBooking ? '建議截圖保存此頁；或綁定下方 LINE 通知，之後在 LINE 隨時可查詢、修改訂位' : '請保存此頁或管理連結，之後可查閱訂位紀錄。'}
           </p>
         </div>
 
@@ -216,7 +218,9 @@ export default function ConfirmPage() {
               onClick={copyId}
               className="mt-2 inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-white border border-chicken-brown/15 hover:border-chicken-red/40 active:scale-95 transition-all"
             >
-              {copied ? '✓ 已複製' : '📋 複製編號'}
+              {copied
+                ? <><Check size={14} strokeWidth={2.4} aria-hidden="true" />已複製</>
+                : <><Copy size={14} strokeWidth={2.2} aria-hidden="true" />複製編號</>}
             </button>
           </div>
 
@@ -229,21 +233,21 @@ export default function ConfirmPage() {
 
           {/* 訂位摘要 */}
           <div className="px-5 py-4 space-y-3">
-            <Row icon="📅" label="日期" value={dayLabel(b.date)} />
-            <Row icon="⏰" label="時段" value={<span className="text-lg font-black text-chicken-red">{b.timeSlot}</span>} />
-            <Row icon="👥" label="人數" value={`${b.guests} 位`} />
-            <Row icon="🙋" label="姓名" value={b.name} />
-            <Row icon="📞" label="電話" value={<span className="font-mono">{b.phone}</span>} />
+            <Row icon={CalendarDays} label="日期" value={dayLabel(b.date)} />
+            <Row icon={Clock} label="時段" value={<span className="text-lg font-black text-chicken-red">{b.timeSlot}</span>} />
+            <Row icon={Users} label="人數" value={`${b.guests} 位`} />
+            <Row icon={User} label="姓名" value={b.name} />
+            <Row icon={Phone} label="電話" value={<span className="font-mono">{b.phone}</span>} />
             {(b.notes?.pet || b.notes?.child || b.notes?.mobility) && (
-              <Row icon="✨" label="特殊需求" value={
+              <Row icon={Sparkles} label="特殊需求" value={
                 <div className="flex gap-1 flex-wrap justify-end">
-                  {b.notes.pet && <Badge color="yellow">🐾 寵物</Badge>}
-                  {b.notes.child && <Badge color="green">👶 兒童</Badge>}
-                  {b.notes.mobility && <Badge color="brown">♿ 行動不便</Badge>}
+                  {b.notes.pet && <Badge color="yellow"><PawPrint size={12} strokeWidth={2.4} aria-hidden="true" />寵物</Badge>}
+                  {b.notes.child && <Badge color="green"><Baby size={12} strokeWidth={2.4} aria-hidden="true" />兒童</Badge>}
+                  {b.notes.mobility && <Badge color="brown"><Accessibility size={12} strokeWidth={2.4} aria-hidden="true" />行動不便</Badge>}
                 </div>
               } />
             )}
-            {b.notes?.text && <Row icon="📝" label="備註" value={<span className="text-sm">{b.notes.text}</span>} />}
+            {b.notes?.text && <Row icon={NotebookPen} label="備註" value={<span className="text-sm">{b.notes.text}</span>} />}
           </div>
         </div>
 
@@ -272,12 +276,12 @@ export default function ConfirmPage() {
               <div className="text-sm">此訂位{statusLabel}，請查閱下方管理連結。</div>
             ) : b.lineUserId && !b.linePushBlocked ? (
               <div className="rounded-xl bg-white/80 px-3 py-2.5 text-sm font-black text-[#06A848]">
-                ✓ 已綁定 LINE{b.lineDisplayName ? `（${b.lineDisplayName}）` : ''}；{b.lineLastNotify?.status === 'sent' ? '最近通知已送出，請到 LINE 確認' : b.lineLastNotify?.status === 'pending' ? '通知待送出' : b.lineLastNotify?.status === 'failed' ? '最近通知未能送出，請聯絡店家' : '通知是否送達請到 LINE 確認'}
+                <Check size={16} strokeWidth={2.6} aria-hidden="true" className="mr-1 inline-block align-[-3px]" />已綁定 LINE{b.lineDisplayName ? `（${b.lineDisplayName}）` : ''}；{b.lineLastNotify?.status === 'sent' ? '最近通知已送出，請到 LINE 確認' : b.lineLastNotify?.status === 'pending' ? '通知待送出' : b.lineLastNotify?.status === 'failed' ? '最近通知未能送出，請聯絡店家' : '通知是否送達請到 LINE 確認'}
               </div>
             ) : b.linePushBlocked ? (
               <>
                 <div className="rounded-xl bg-chicken-yellow/15 px-3 py-2.5 text-sm font-black text-chicken-brown">
-                  ⚠ LINE 通知暫時無法送達，請重新加入官方帳號好友（加入後會自動補發）
+                  <TriangleAlert size={16} strokeWidth={2.4} aria-hidden="true" className="mr-1 inline-block align-[-3px]" />LINE 通知暫時無法送達，請重新加入官方帳號好友（加入後會自動補發）
                 </div>
                 {lineFriendUrl && (
                   <a href={lineFriendUrl} target="_blank" rel="noreferrer" className="btn-primary w-full text-center !bg-[#06C755]">
@@ -312,34 +316,34 @@ export default function ConfirmPage() {
         >
           {calendarUrl ? (
             <a href={calendarUrl} target="_blank" rel="noreferrer" className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
-              <div className="text-xl">📅</div>
+              <CalendarPlus size={22} strokeWidth={2} aria-hidden="true" className="mx-auto text-chicken-brown" />
               <div className="mt-1 text-xs font-black text-chicken-brown">加到行事曆</div>
             </a>
           ) : (
             <button disabled className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center opacity-45 shadow-sm">
-              <div className="text-xl">📅</div>
+              <CalendarPlus size={22} strokeWidth={2} aria-hidden="true" className="mx-auto text-chicken-brown" />
               <div className="mt-1 text-xs font-black text-chicken-brown">加到行事曆</div>
             </button>
           )}
           {mapUrl ? (
             <a href={mapUrl} target="_blank" rel="noreferrer" className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
-              <div className="text-xl">📍</div>
+              <MapPin size={22} strokeWidth={2} aria-hidden="true" className="mx-auto text-chicken-brown" />
               <div className="mt-1 text-xs font-black text-chicken-brown">導航到店</div>
             </a>
           ) : (
             <button disabled className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center opacity-45 shadow-sm">
-              <div className="text-xl">📍</div>
+              <MapPin size={22} strokeWidth={2} aria-hidden="true" className="mx-auto text-chicken-brown" />
               <div className="mt-1 text-xs font-black text-chicken-brown">導航到店</div>
             </button>
           )}
           {telUrl ? (
             <a href={telUrl} className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center shadow-sm transition hover:border-chicken-red/30">
-              <div className="text-xl">📞</div>
+              <Phone size={22} strokeWidth={2} aria-hidden="true" className="mx-auto text-chicken-brown" />
               <div className="mt-1 text-xs font-black text-chicken-brown">撥電話</div>
             </a>
           ) : (
             <button disabled className="rounded-2xl border border-chicken-brown/10 bg-white px-3 py-3 text-center opacity-45 shadow-sm">
-              <div className="text-xl">📞</div>
+              <Phone size={22} strokeWidth={2} aria-hidden="true" className="mx-auto text-chicken-brown" />
               <div className="mt-1 text-xs font-black text-chicken-brown">撥電話</div>
             </button>
           )}
@@ -350,7 +354,7 @@ export default function ConfirmPage() {
           className="animate-soft-enter mt-4 rounded-2xl border border-chicken-brown/10 bg-white/80 p-4"
         >
           <p className="mb-3 text-center text-xs font-bold text-chicken-brown/60">
-            📸 到店時出示訂位編號；需要改期或取消可用下方管理連結
+            到店時出示訂位編號；需要改期或取消可用下方管理連結
           </p>
           <div className="grid gap-2">
             <Link to={`/manage/${b.id}?token=${encodeURIComponent(b.manageToken || '')}`} className="btn-yellow w-full text-center">
@@ -371,14 +375,14 @@ export default function ConfirmPage() {
           className="animate-soft-enter mt-5 rounded-2xl border-2 border-chicken-yellow/40 bg-chicken-yellow/5 overflow-hidden"
         >
           <div className="px-4 py-2 bg-chicken-yellow/15 flex items-center gap-2">
-            <span>⚠️</span>
+            <TriangleAlert size={16} strokeWidth={2.4} aria-hidden="true" className="shrink-0 text-chicken-brown" />
             <span className="font-bold text-chicken-brown text-sm">用餐前請留意</span>
           </div>
           <ul className="px-4 py-3 space-y-2 text-sm text-chicken-brown leading-relaxed">
-            <Tip icon="⏱">請於用餐時段前 <strong>5 分鐘</strong> 抵達現場</Tip>
-            <Tip icon="⌛">用餐時間 <strong>{diningDuration} 分鐘</strong>，保留 <strong>{cleanupBuffer} 分鐘</strong> 翻桌緩衝</Tip>
-            <Tip icon="📞">用餐前 2 小時以前可用管理連結修改或取消；更近時間請來電</Tip>
-            <Tip icon="🐔">本店使用 <strong>48 小時冷藏文昌雞</strong>，當日限量供應</Tip>
+            <Tip icon={Timer}>請於用餐時段前 <strong>5 分鐘</strong> 抵達現場</Tip>
+            <Tip icon={Hourglass}>用餐時間 <strong>{diningDuration} 分鐘</strong>，保留 <strong>{cleanupBuffer} 分鐘</strong> 翻桌緩衝</Tip>
+            <Tip icon={Phone}>用餐前 2 小時以前可用管理連結修改或取消；更近時間請來電</Tip>
+            <Tip icon={Drumstick}>本店使用 <strong>48 小時冷藏文昌雞</strong>，當日限量供應</Tip>
           </ul>
         </div>
 
@@ -394,11 +398,11 @@ export default function ConfirmPage() {
   )
 }
 
-function Row({ icon, label, value }) {
+function Row({ icon: RowIcon, label, value }) {
   return (
     <div className="flex justify-between items-center py-1">
       <span className="text-sm text-chicken-brown/70 flex items-center gap-1.5">
-        <span>{icon}</span>
+        <RowIcon size={16} strokeWidth={2} aria-hidden="true" className="shrink-0" />
         {label}
       </span>
       <span className="text-chicken-brown font-bold text-right">{value}</span>
@@ -406,21 +410,24 @@ function Row({ icon, label, value }) {
   )
 }
 
-function Tip({ icon, children }) {
+function Tip({ icon: TipIcon, children }) {
   return (
     <li className="flex items-start gap-2">
-      <span className="leading-6">{icon}</span>
+      <TipIcon size={16} strokeWidth={2} aria-hidden="true" className="mt-1 shrink-0 text-chicken-brown/70" />
       <span className="flex-1">{children}</span>
     </li>
   )
 }
 
 function generateConfetti(n) {
-  const glyphs = ['🐔', '✨', '🎉', '🍲']
+  // 品牌色紙片（原本是 🐔✨🎉🍲 emoji——彩色 emoji 與線條風格衝突，改純色幾何）
+  const colors = ['bg-chicken-red', 'bg-chicken-yellow', 'bg-chicken-green', 'bg-chicken-brown/70']
+  const shapes = ['w-2 h-3 rounded-[2px]', 'w-2.5 h-2.5 rounded-full', 'w-1.5 h-4 rounded-full']
   const out = []
   for (let i = 0; i < n; i++) {
     out.push({
-      glyph: glyphs[i % glyphs.length],
+      color: colors[i % colors.length],
+      shape: shapes[i % shapes.length],
       x: Math.random() * 95,
       rotate: (Math.random() - 0.5) * 720,
       duration: 1.6 + Math.random() * 1.0,

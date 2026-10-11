@@ -4,6 +4,7 @@ import MonthCalendar from '../../booking/MonthCalendar'
 import { useBooking } from '../../../contexts/BookingContext'
 import { dayLabel, todayStr } from '../../../utils/timeSlots'
 import { remainingTablesForSeating } from '../../../utils/capacity'
+import GlyphText from '../../ui/GlyphText'
 
 // 團體「📅 改期」第一步：選新日期。
 // 只選日期＋預覽新日各場次可用度；確認後把整團（清空圈桌）交給編輯器在新日重新圈桌（第二步）。
@@ -51,7 +52,7 @@ export default function GroupRescheduleModal({ open, group, onClose, onConfirm }
         <button onClick={handleClose} className="btn-secondary px-4 py-2">取消</button>
         <button onClick={handleConfirm} disabled={!canConfirm}
           className="btn-primary px-4 py-2 disabled:opacity-50">
-          {!newDate ? '請先選新日期' : closedDate ? '該日公休' : '下一步：重新圈桌 →'}
+          <GlyphText size={16}>{!newDate ? '請先選新日期' : closedDate ? '該日公休' : '下一步：重新圈桌 →'}</GlyphText>
         </button>
       </>
     }>

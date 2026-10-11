@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Input, Button, Card } from '../components/ui'
+import GlyphText from '../components/ui/GlyphText'
+import { KeyRound, LockKeyhole, TriangleAlert } from 'lucide-react'
 
 export default function LoginPage() {
   const { signIn, usingFirebase, user } = useAuth()
@@ -41,7 +43,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-gradient-to-b from-chicken-cream to-white flex items-center justify-center p-6">
       <div className="max-w-sm w-full">
         <div className="text-center mb-6">
-          <div className="text-6xl mb-2">🔐</div>
+          <LockKeyhole size={52} strokeWidth={1.8} aria-hidden="true" className="mx-auto mb-3 text-chicken-red" />
           <h1 className="text-2xl font-black text-chicken-brown">同仁登入</h1>
           <p className="text-sm text-chicken-brown/60 mt-1">雞王涮涮鍋管理後台</p>
         </div>
@@ -68,10 +70,10 @@ export default function LoginPage() {
                 error={err}
               />
               <Button type="submit" disabled={busy} className="w-full">
-                {busy ? '登入中...' : '🔑 模擬登入（僅本機開發）'}
+                {busy ? '登入中...' : <GlyphText icon={KeyRound} size={18}>模擬登入（僅本機開發）</GlyphText>}
               </Button>
               <p className="text-xs text-chicken-red bg-red-50 border border-chicken-red/40 rounded-lg px-3 py-2 leading-5">
-                ⚠️ 未設定 Firebase，目前為本機開發模式，登入後資料<b>不會上傳雲端</b>。
+                <TriangleAlert size={14} strokeWidth={2.4} aria-hidden="true" className="mr-1 inline-block align-[-2px]" />未設定 Firebase，目前為本機開發模式，登入後資料<b>不會上傳雲端</b>。
                 正式環境請設定 VITE_FIREBASE_* 後重新部署，登入會改用 Google。
               </p>
             </form>

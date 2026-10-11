@@ -1,5 +1,6 @@
 import Icon from '../../ui/Icon'
 import { seatCompareText } from './groupEditorFields'
+import { X } from 'lucide-react'
 
 // 圈桌區的「區域側欄」：只講**目前這一梯**（整單的席位/檢查清單在右側 GroupEditorSummary，兩者並存）。
 // 店員腦中的順序是「這一場能給他哪幾桌」，圈桌當下要一眼看到「已圈 30 席、夠坐 20 人、多 10 席」
@@ -71,7 +72,7 @@ export default function BatchSeatPanel({
                   badSet.has(n)
                     ? 'bg-chicken-red/10 text-chicken-red'
                     : 'bg-chicken-brown/[0.07] text-chicken-brown hover:bg-chicken-brown/15'}`}>
-                {n}<span className="opacity-45">✕</span>
+                {n}<X size={12} strokeWidth={2.4} aria-hidden="true" className="opacity-45" />
               </button>
             ))}
           </div>

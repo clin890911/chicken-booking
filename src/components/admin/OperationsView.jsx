@@ -949,7 +949,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const note = restoreNote(restoreReleasedPreassigns(snap.releasedPreassigns, { restoreOverriddenAssignment }))
     setLastSeated(null)
     setWalkinTableNumbers(snap.tableNumbers || []) // 桌回到已選狀態，方便馬上改帶別組
-    toast.info(`↩️ 已復原：${snap.tableNumbers.join(' + ')} 回到空桌${note}`)
+    toast.info(`已復原：${snap.tableNumbers.join(' + ')} 回到空桌${note}`)
   }
 
   // 帶位面板「用建議桌」：切樓層＋把建議桌（單桌或併桌組合）放進已選，店員再按確認入座。

@@ -5,6 +5,8 @@ import { isReadOnlyRole, canExportData } from '../../../utils/seatingPerms'
 import { useToast } from '../../ui/Toast'
 import { Modal, Input, Textarea, Button, EmptyState } from '../../ui'
 import AgencyDetailModal from './AgencyDetailModal'
+import GlyphText from '../../ui/GlyphText'
+import { Flag } from 'lucide-react'
 
 // 旅行社 / 導遊名冊 + 即時彙算歷史 + 貢獻排名（依業績）
 export default function AgencyDirectoryView({ onGoPlanning }) {
@@ -119,7 +121,7 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
                   {guidesByAgency(a.id).map(g => (
                     <button key={g.id} onClick={() => editable && setGuideModal({ agencyId: a.id, data: { ...g } })}
                       className="text-xs px-2.5 py-1 rounded-full bg-chicken-cream border border-chicken-brown/10 text-chicken-brown font-bold">
-                      ‍✈️ {g.name}{g.phone ? `（${g.phone}）` : ''}
+                      <GlyphText icon={Flag} size={12} strokeWidth={2.4} className="!gap-1">{g.name}{g.phone ? `（${g.phone}）` : ''}</GlyphText>
                     </button>
                   ))}
                 </div>

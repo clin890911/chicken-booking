@@ -21,6 +21,8 @@ import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import { suggestTablesForBatch } from '../../../utils/suggestTables'
 import * as groupReservationService from '../../../services/groupReservationService'
 import { buildGroupEditorChecks, canSaveGroup, groupSaveErrorMessage, seatingCardState } from './groupEditorChecks'
+import GlyphText from '../../ui/GlyphText'
+import { Bus, Coins, NotebookPen, X } from 'lucide-react'
 
 const BATCH_LABELS = ['一', '二', '三', '四', '五', '六']
 
@@ -705,7 +707,7 @@ export default function GroupEditorStage({
                           value={draft.counts?.[f.key] ?? 0} onChange={v => patchCount(f.key, v)} />
                         <button type="button" aria-label={`移除${f.label}`}
                           onClick={() => { setOpenSpecials(s => s.filter(k => k !== f.key)); patchCount(f.key, 0) }}
-                          className="tap flex h-6 w-6 items-center justify-center rounded-md text-chicken-brown/40 hover:bg-chicken-brown/10 hover:text-chicken-red">✕</button>
+                          className="tap flex h-6 w-6 items-center justify-center rounded-md text-chicken-brown/40 hover:bg-chicken-brown/10 hover:text-chicken-red"><X size={14} strokeWidth={2.4} aria-hidden="true" /></button>
                       </div>
                     )
                   })}
@@ -866,19 +868,19 @@ export default function GroupEditorStage({
           <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">
             <h3 className="mb-2.5 text-sm font-semibold text-chicken-brown">其他</h3>
             <div className="space-y-2">
-              <Disclosure title="🚌 遊覽車資訊" defaultOpen={!!(bus.plate || bus.phone || bus.eta)}>
+              <Disclosure title={<GlyphText icon={Bus} size={15} strokeWidth={2.2}>遊覽車資訊</GlyphText>} defaultOpen={!!(bus.plate || bus.phone || bus.eta)}>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <Input label="車號" placeholder="例：KAA-1234" value={bus.plate} onChange={e => patchBus({ plate: e.target.value })} />
                   <Input label="司機電話" inputMode="tel" placeholder="09xx-xxx-xxx" value={bus.phone} onChange={e => patchBus({ phone: e.target.value })} />
                   <Input label="預計抵達" type="time" value={bus.eta} onChange={e => patchBus({ eta: e.target.value })} />
                 </div>
               </Disclosure>
-              <Disclosure title="📝 備註（過敏、包場、加菜…）" defaultOpen={!!(draft.notes || '').trim()}>
+              <Disclosure title={<GlyphText icon={NotebookPen} size={15} strokeWidth={2.2}>備註（過敏、包場、加菜…）</GlyphText>} defaultOpen={!!(draft.notes || '').trim()}>
                 <Textarea value={draft.notes || ''} onChange={e => patchDraft({ notes: e.target.value })} placeholder="會印在當日總表上" />
               </Disclosure>
               {/* 消費金額：建單時還沒結帳，只有「編輯既有已落地團單」才出現 */}
               {!isNew && draft.id && (
-                <Disclosure title="💰 消費金額（結帳後回填）" defaultOpen={(Number(draft.spend) || 0) > 0}>
+                <Disclosure title={<GlyphText icon={Coins} size={15} strokeWidth={2.2}>消費金額（結帳後回填）</GlyphText>} defaultOpen={(Number(draft.spend) || 0) > 0}>
                   <NumberStepper ariaLabel="消費金額" max={99999} step={100}
                     value={draft.spend ?? 0} onChange={v => patchDraft({ spend: v })} />
                 </Disclosure>

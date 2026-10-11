@@ -630,7 +630,7 @@ function SuccessPanel({ booking, settings, onBack }) {
       <div className="mt-5 grid gap-2">
         {booking.lineUserId && !booking.linePushBlocked ? (
           <p className="rounded-xl bg-[#06C755]/10 px-3 py-2 text-sm font-black text-[#06A848]">
-            ✓ 已綁定 LINE{booking.lineDisplayName ? `（${booking.lineDisplayName}）` : ''}，最新訂位卡片已自動傳送
+            <Check size={16} strokeWidth={2.6} aria-hidden="true" className="mr-1 inline-block align-[-3px]" />已綁定 LINE{booking.lineDisplayName ? `（${booking.lineDisplayName}）` : ''}，最新訂位卡片已自動傳送
           </p>
         ) : (
           <>

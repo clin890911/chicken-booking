@@ -190,7 +190,7 @@ test('規劃：散客名單出現在當日總覽，「→ 配桌」跳排位地�
 
   // 點地圖上的空桌 101（六人桌、容量足夠）完成預配
   await page.locator('svg g:has(:text-is("101"))').first().click()
-  await page.getByRole('button', { name: '✓ 確認預配' }).click()
+  await page.getByRole('button', { name: '確認預配', exact: true }).click() // ✓ 已改線條圖示（GlyphText）
   await expect(page.getByText(/已預配到 101/)).toBeVisible()
 })
 

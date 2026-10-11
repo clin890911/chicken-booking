@@ -10,6 +10,8 @@ import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameF
 import Icon from '../../ui/Icon'
 import { todayStr } from '../../../utils/timeSlots'
 import { squeezeSeats } from '../../../utils/capacity'
+import GlyphText from '../../ui/GlyphText'
+import { History } from 'lucide-react'
 
 // 現場常駐「帶位」面板（v3）：順序不拘的狀態機——系統只需要「桌」和「幾位」，
 // 先點桌或先選人數都行，兩者到齊底部的確認鈕才亮；確認＝入座（唯一語意，不再二次確認）。
@@ -204,7 +206,9 @@ export default function FastWalkInPanel({
             onClick={() => { setKids(lastParty.children || 0); onGuestsChange(lastParty.guests); setNotes(lastParty.notes || '') }}
             className="w-full min-h-[44px] rounded-xl border-2 border-dashed border-chicken-brown/25 bg-chicken-cream/60 text-sm font-bold text-chicken-brown/70"
           >
-            ↩︎ 沿用上一組（{lastParty.guests} 位{lastParty.children > 0 ? `（小${lastParty.children}）` : ''}{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
+            <GlyphText icon={History} size={16}>
+              沿用上一組（{lastParty.guests} 位{lastParty.children > 0 ? `（小${lastParty.children}）` : ''}{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
+            </GlyphText>
           </button>
         )}
 
@@ -276,7 +280,7 @@ export default function FastWalkInPanel({
             <button type="button" onClick={() => onLocateSuggestion?.(recommendation.number)} className="tap min-h-[44px] text-sm font-bold underline">定位建議桌 {recommendation.floor}・{recommendation.number}</button>
           </div>
         )}
-        <button data-testid="walkin-seat" type="button" onClick={seat} disabled={!ready} className="tap w-full min-h-[60px] rounded-xl bg-chicken-red text-white text-lg font-bold disabled:opacity-40">{ready ? `確認入座 · ${displayName || '現場客'} ${g} 位 · ${tables.map(t => t.number).join(' + ')}` : slideLabel}</button>
+        <button data-testid="walkin-seat" type="button" onClick={seat} disabled={!ready} className="tap w-full min-h-[60px] rounded-xl bg-chicken-red text-white text-lg font-bold disabled:opacity-40">{ready ? `確認入座 · ${displayName || '現場客'} ${g} 位 · ${tables.map(t => t.number).join(' + ')}` : <GlyphText>{slideLabel}</GlyphText>}</button>
         {showNextWaitlist && <button type="button" onClick={onNextWaitlist} className="tap w-full min-h-[44px] rounded-xl border border-chicken-green text-chicken-green font-bold">帶下一組候位</button>}
       </div>
 
