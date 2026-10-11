@@ -3,11 +3,13 @@ import { conflictLine } from '../../../utils/preassignOverride'
 import { formatBookingTables } from '../../../utils/bookingTables'
 // 現場營運的「模式 banner」：指派 / 候位入座 / 立即帶位 / 換桌 / 團體改派桌位
 // 依模式不同底色 + emoji 避免誤判；指派類模式帶二步確認列與預配衝突警告
+// 2026-10 對比 AA：底色各加深一階（sky/emerald 600→800、indigo/violet 600→700）——banner 內有 bg-white/15 確認列
+// 與 opacity-90 說明字，600 階疊上去白字只剩 3.4–3.9:1；加深後 ≥4.8:1。色相＝模式語義不變。
 const BANNER_STYLE = {
-  assign:         { bg: 'bg-sky-600',    btn: 'text-sky-700',     icon: 'bookings' },
-  'seat-waitlist':{ bg: 'bg-emerald-600',btn: 'text-emerald-700', icon: 'traffic' },
-  move:           { bg: 'bg-indigo-600', btn: 'text-indigo-700',  icon: 'move' },
-  'group-reseat': { bg: 'bg-violet-600', btn: 'text-violet-700',  icon: 'bus' },
+  assign:         { bg: 'bg-sky-800',    btn: 'text-sky-700',     icon: 'bookings' },
+  'seat-waitlist':{ bg: 'bg-emerald-800',btn: 'text-emerald-700', icon: 'traffic' },
+  move:           { bg: 'bg-indigo-700', btn: 'text-indigo-700',  icon: 'move' },
+  'group-reseat': { bg: 'bg-violet-700', btn: 'text-violet-700',  icon: 'bus' },
 }
 
 const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
@@ -40,7 +42,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
     const name = isWaitlist
       ? `${mode.wait?.name || '候位'}${mode.wait?.queueNumber ? ` #${mode.wait.queueNumber}` : ''}`
       : (mode.booking?.name || '訂位')
-    const bg = seatsNow ? 'bg-emerald-600' : 'bg-sky-600'
+    const bg = seatsNow ? 'bg-emerald-800' : 'bg-sky-800'
     const cancelBtn = seatsNow ? 'text-emerald-700' : 'text-sky-700'
     return (
       <div className={`${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>

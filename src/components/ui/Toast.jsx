@@ -103,7 +103,7 @@ function ToastContainer({ toasts, onDismiss }) {
             )}
             <button
               onClick={() => onDismiss(t.id)}
-              className="opacity-60 hover:opacity-100 text-lg leading-none flex-shrink-0 min-h-[44px] min-w-[44px] -mr-2"
+              className="opacity-90 hover:opacity-100 text-lg leading-none flex-shrink-0 min-h-[44px] min-w-[44px] -mr-2"
               aria-label="關閉"
             >×</button>
           </motion.div>

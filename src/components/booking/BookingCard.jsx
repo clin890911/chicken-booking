@@ -79,8 +79,8 @@ function BookingCard({ booking, onAssign, onMove }) {
                   <span data-kind={tableKind}
                     className={`text-xs font-bold px-2.5 py-0.5 rounded-full
                     ${booking.status === 'arrived'
-                      ? 'bg-orange-600 text-white'
-                      : 'bg-emerald-600 text-white'}`}>
+                      ? 'bg-orange-700 text-white'
+                      : 'bg-emerald-700 text-white'}`}>
                     桌 {formatBookingTables(booking)}
                   </span>
                 )
@@ -90,7 +90,7 @@ function BookingCard({ booking, onAssign, onMove }) {
                   ${stage === 'buffer-overtime'
                     ? 'bg-chicken-red text-white animate-pulse'
                     : stage === 'overtime'
-                    ? 'bg-chicken-red/90 text-white'
+                    ? 'bg-chicken-red text-white'
                     : stage === 'late'
                     ? 'bg-chicken-yellow text-white'
                     : 'bg-chicken-brown/10 text-chicken-brown'}`}>

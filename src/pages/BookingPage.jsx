@@ -590,11 +590,12 @@ function CalendarPicker({ dates, value, onChange }) {
                 cell.isToday ? 'bg-chicken-yellow/10 text-chicken-brown hover:bg-chicken-red/5' :
                 cell.isWeekend ? 'bg-white text-chicken-red hover:bg-chicken-red/5' :
                 'bg-white text-chicken-brown hover:bg-chicken-red/5'
-              } ${!cell.inMonth ? 'opacity-35' : ''}`}
+              }`}
             >
               <div className="flex h-full flex-col items-center justify-center">
-                <div className="text-lg font-black tabular-nums sm:text-xl">{cell.day}</div>
-                <div className={`mt-0.5 text-[10px] font-black ${active ? 'text-white/80' : disabled ? 'text-chicken-brown/20' : cell.isToday ? 'text-chicken-yellow' : 'text-chicken-brown/45'}`}>
+                {/* 非本月日期：只淡化日期數字（大字 ≥3:1），「可訂」小字維持可讀——整格 opacity-35 會讓仍可預訂的日子只剩 1.7:1 */}
+                <div className={`text-lg font-black tabular-nums sm:text-xl ${!cell.inMonth && !active ? 'opacity-60' : ''}`}>{cell.day}</div>
+                <div className={`mt-0.5 text-[10px] font-black ${active ? 'text-white' : disabled ? 'text-chicken-brown/20' : cell.isToday ? 'text-chicken-yellow' : 'text-chicken-brown/45'}`}>
                   {cell.isToday ? '今天' : disabled ? '—' : '可訂'}
                 </div>
               </div>
@@ -669,7 +670,7 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
                         }`}
                       >
                         <div className="text-lg font-black tabular-nums">{slot.time}</div>
-                        <div className={`mt-1 text-[11px] font-black ${active ? 'text-white/85' : scarce ? 'text-chicken-yellow' : 'text-chicken-green'}`}>
+                        <div className={`mt-1 text-[11px] font-black ${active ? 'text-white' : scarce ? 'text-chicken-yellow' : 'text-chicken-green'}`}>
                           {scarce ? '少量名額' : '可訂位'}
                         </div>
                         {active && (

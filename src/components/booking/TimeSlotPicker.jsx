@@ -92,7 +92,7 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
               >
                 <span className="text-[17px] font-bold leading-none tabular-nums">{s.time}</span>
                 {(disabled || fullWarn || low || s.onlineClosed) && (
-                  <span className={`mt-1 text-[10px] font-bold leading-none ${active ? 'text-white/85' : fullWarn || (s.onlineClosed && !disabled) ? 'text-amber-700' : low ? 'text-chicken-yellow' : ''}`}>
+                  <span className={`mt-1 text-[10px] font-bold leading-none ${active ? 'text-white' : fullWarn || (s.onlineClosed && !disabled) ? 'text-amber-700' : low ? 'text-chicken-yellow' : ''}`}>
                     {s.closed ? '已關閉' : s.full ? '已滿' : s.onlineClosed ? '線上已關' : '少量'}
                   </span>
                 )}
@@ -133,14 +133,14 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
               }`}
             >
               <div className="text-base font-bold leading-tight">{s.time}</div>
-              <div className={`mt-1 text-[11px] font-bold ${active ? 'text-white/90' : s.closed ? 'text-slate-400' : fullWarn ? 'text-amber-700' : s.remaining <= Math.max(guests * 2, 12) ? 'text-chicken-yellow' : 'text-chicken-green'}`}>
+              <div className={`mt-1 text-[11px] font-bold ${active ? 'text-white' : s.closed ? 'text-slate-400' : fullWarn ? 'text-amber-700' : s.remaining <= Math.max(guests * 2, 12) ? 'text-chicken-yellow' : 'text-chicken-green'}`}>
                 {s.closed ? '已關閉' : tone}
               </div>
               <div className={`mt-0.5 text-[10px] ${active ? 'text-white/70' : fullWarn ? 'text-amber-700' : 'text-chicken-brown/45'}`}>
                 {s.closed ? '店家暫停此時段訂位' : fullWarn ? '仍可訂（請確認坐得下）' : s.full ? '請改選其他時段' : `符合 ${guests} 位用餐`}
               </div>
               {s.onlineClosed && (
-                <div className={`mt-0.5 text-[10px] font-bold ${active ? 'text-white/85' : 'text-amber-700'}`}>線上已關</div>
+                <div className={`mt-0.5 text-[10px] font-bold ${active ? 'text-white' : 'text-amber-700'}`}>線上已關</div>
               )}
             </button>
           )
