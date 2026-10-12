@@ -24,6 +24,11 @@ function endpoint(name) {
 // admin 端點（pull/push）需要帶 Firebase ID Token。
 // AuthContext / BookingContext 在啟動時呼叫 setAuthTokenProvider 注入取 token 的函式，
 // 避免本檔案直接依賴 React context（這是純 service 模組）。
+let operationalGeneration = 0
+let operationalInFlight = 0
+let pendingSyncAck = null
+const snapshotGeneration = Symbol('operationalGeneration')
+
 let _tokenProvider = null
 export function setAuthTokenProvider(fn) {
   _tokenProvider = typeof fn === 'function' ? fn : null
@@ -159,6 +164,10 @@ const waitlistConflictIds = new Set()
 // 本機候位 item 推上去會不會被後端拒（409）：判準逐條比照 protectQueueUpsert（previous＝雲端版本，可為 null）。
 // ⚠️ 後端判準改了這裡要跟著改。
 export function waitlistUpsertConflicts(item, previous) {
+  if (!previous || item.status !== previous.status) return true
+  if (previous.serverManaged) {
+    return ['queueNumber','takenAt','partySize','children','adults','phone','name','calledAt','seatedAt','leftAt','assignedTableNumber','bookingId','tableNumbers','seatCommandId','undoUntil'].some(key => JSON.stringify(item[key] ?? null) !== JSON.stringify(previous[key] ?? null))
+  }
   if (previous && ['seated', 'left'].includes(previous.status) && item.status !== previous.status) return true
   if ((item.queueVersion || 0) !== (previous?.queueVersion || 0)) return true
   if (item.status === 'skipped' && previous?.status !== 'skipped') return true
@@ -354,6 +363,7 @@ export function markLocalAsSynced() {
 }
 
 export function applyCloudSnapshot(data = {}) {
+  if (data[snapshotGeneration] !== undefined && data[snapshotGeneration] !== operationalGeneration) return { stale: true }
   // 首次拉取：以雲端為準，並 seed lastSynced（之後才做合併）。
   // initialized=false 代表模組載入時本機沒有任何集合資料（或落地了「尚未首拉」標記），
   // 所以此刻本機的東西只有兩種來源：tableService 種的出廠佔位桌、首拉前在這台新建的文件。
@@ -391,6 +401,7 @@ export function applyCloudSnapshot(data = {}) {
   // 後續拉取：合併。本機尚未推送的 dirty 文件保留本機版本，其餘採雲端最新值。
   // 回傳 { waitlistConflictsResolved }：這次放棄掉的 409 衝突候位筆數（呼叫端據此退避歸零、立刻補推）。
   let waitlistConflictsResolved = 0
+  let operationalConflictsResolved = 0
   for (const col of DIFF_COLLECTIONS) {
     const cloudArr = data[col]
     if (!Array.isArray(cloudArr)) continue
@@ -402,7 +413,20 @@ export function applyCloudSnapshot(data = {}) {
     pendingDeletes[col].forEach(id => { delete merged[id] })
     for (const [id, doc] of Object.entries(localMap)) {
       const dirty = lastSynced[col][id] !== stable(doc)
-      if (dirty && col === 'waitlist' && waitlistConflictIds.has(id) && waitlistUpsertConflicts(doc, cloudMap[id] || null)) {
+      if (cloudMap[id] && (doc.operationalVersion || 0) > (cloudMap[id].operationalVersion || 0)) { merged[id] = doc; continue }
+      if (dirty && ['tables','bookings'].includes(col) && cloudMap[id] && (cloudMap[id].operationalVersion || 0) > (doc.operationalVersion || 0)) {
+        const canonical=cloudMap[id]
+        let baseline={}
+        try { baseline=JSON.parse(lastSynced[col][id] || '{}') } catch {}
+        const critical=operationalCriticalFields(col)
+        const restored={...canonical}
+        for(const key of new Set([...Object.keys(baseline),...Object.keys(doc)])) {
+          if (critical.includes(key) || ['operationalVersion','waitlistId','waitlistCommandId','manageToken'].includes(key)) continue
+          if (stable(doc[key])!==stable(baseline[key])) { if(Object.hasOwn(doc,key))restored[key]=doc[key];else delete restored[key] }
+        }
+        if(critical.some(key=>stable(doc[key] ?? null)!==stable(baseline[key] ?? null))) operationalConflictsResolved += 1
+        merged[id]=restored;lastSynced[col][id]=stable(canonical)
+      } else if (dirty && col === 'waitlist' && waitlistConflictIds.has(id) && waitlistUpsertConflicts(doc, cloudMap[id] || null)) {
         // 候位 409 真正衝突的那筆：放棄本機變更（見上方說明）。merged 本來就是雲端版本／雲端已無此筆。
         waitlistConflictsResolved += 1
         if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id])
@@ -431,7 +455,7 @@ export function applyCloudSnapshot(data = {}) {
   }
   cloudPulled = true // 舊裝置（已 initialized、落地狀態沒有 cloudPulled）在第一次成功拉取時開閘
   persistSyncState()
-  return { waitlistConflictsResolved }
+  return { waitlistConflictsResolved, ...(operationalConflictsResolved ? { operationalConflictsResolved } : {}) }
 }
 
 // 雲端請求逾時：平板在弱網／Wi‑Fi 切換時 fetch 可能永遠不回，呼叫端（設定頁「儲存」）
@@ -476,9 +500,10 @@ async function requestJson(url, options = {}) {
 }
 
 export async function pullCloudData() {
-  return staffRequest(endpoint('adminPullData'), {
-    method: 'GET',
-  })
+  const generation = operationalGeneration
+  const data = await staffRequest(endpoint('adminPullData'), { method: 'GET' })
+  Object.defineProperty(data, snapshotGeneration, { value: generation })
+  return data
 }
 
 // partial=true 告訴後端「這個客戶端看得懂部分成功的回應」：越權的集合會被剔除、
@@ -489,6 +514,7 @@ export async function pullCloudData() {
 // 三方合併休店／關閉（functions/lib/closuresMerge.js），不再整個 closures 物件最後存檔者勝。
 export async function pushCloudData(dataset = localDataset(), { partial = false, settingsChangedKeys, closuresBase } = {}) {
   if (!cloudPulled) return awaitingFirstPullResult()
+  if (operationalInFlight) return { ok:true, skipped:true, reason:'operational-command-pending' }
   const body = partial ? { dataset, partial: true } : { dataset }
   if (Array.isArray(settingsChangedKeys)) body.settingsChangedKeys = settingsChangedKeys
   if (closuresBase && typeof closuresBase === 'object' && !Array.isArray(closuresBase)) body.closuresBase = closuresBase
@@ -517,6 +543,8 @@ function recordLocalDeletes(ds) {
 // P1-2：只推送與雲端不一致的文件（dirty），避免整份覆寫蓋掉其他裝置的變更。
 // 後端 adminPushData 本就逐筆 merge-upsert，接受「部分資料集」。
 export async function pushChangedData() {
+  if (pendingSyncAck) return finishChangedPushAck(pendingSyncAck)
+  if (operationalInFlight) return { ok: true, skipped: true, reason: 'operational-command-pending' }
   // 推送閘門：首拉成功前不發請求、不動基準線（lastSynced）。
   if (!cloudPulled) {
     // 已 initialized 的舊裝置（升級後尚未成功拉取，例如開機就離線）：本機刪除仍要記進
@@ -579,16 +607,39 @@ export async function pushChangedData() {
     }
     throw err
   }
+  if (result?.skipped) return result
+  pendingSyncAck = { result, changed, deletedIds, settingsChanged, ds }
+  return finishChangedPushAck(pendingSyncAck)
+}
+
+function finishChangedPushAck({ result, changed, deletedIds, settingsChanged, ds }) {
   // 推送後推進基準線。
   // 🔴 只有**真的被寫進雲端**的部分才可以推進。被拒的集合若也標記為已同步，
   //    那些本機變更會被當成「已上雲」→ 下一次拉取不再保護它們 → 直接被雲端值覆蓋
   //    → 靜默資料遺失。這是整個部分推送機制最容易寫錯、後果也最嚴重的一步。
+  for (const col of ['tables','bookings']) {
+    const records=col==='tables'?result.tableUpdates:result.bookingUpdates
+    for(const sent of (changed[col] || []).filter(doc=>doc.operationalVersion>0)) {
+      const id=idOf(col,sent),record=records?.find(doc=>idOf(col,doc)===id),written=result.writtenVersions?.[col]?.[id]
+      if (!record || !Number.isInteger(written) || (record.operationalVersion || 0) < written) {
+        pendingSyncAck=null
+        const error=new Error('雲端尚未確認桌位版本，請重新整理確認；未將本機操作標記為成功')
+        error.status=409;error.code='operational-ack-missing';throw error
+      }
+    }
+  }
+  const conflicts = applyOperationalSyncAck(result, changed)
   const rejected = result?.rejected || {}
   const rejectedWrites = new Set(rejected.writes || [])
   const rejectedDeletes = new Set(rejected.deletes || [])
   for (const col of DIFF_COLLECTIONS) {
     if (changed[col] && !rejectedWrites.has(col)) {
-      changed[col].forEach(doc => { lastSynced[col][idOf(col, doc)] = stable(doc) })
+      changed[col].forEach(doc => {
+        const canonical = (col === 'tables' ? result.tableUpdates : col === 'bookings' ? result.bookingUpdates : [])?.find(record => idOf(col, record) === idOf(col, doc))
+        const current = localArrayOf(col).find(record=>idOf(col,record)===idOf(col,doc))
+        if (canonical && (current?.operationalVersion || 0) > (canonical.operationalVersion || 0)) return
+        lastSynced[col][idOf(col, doc)] = stable(canonical || doc)
+      })
     }
     if (deletedIds[col] && !rejectedDeletes.has(col)) {
       deletedIds[col].forEach(id => {
@@ -617,6 +668,8 @@ export async function pushChangedData() {
     }
   }
   persistSyncState()
+  pendingSyncAck = null
+  if (conflicts.length) { const error = new Error('另一台已變更桌位或訂位；後續本機操作未套用，請確認最新桌況'); error.status = 409; error.code = 'operational-sync-changed'; throw error }
   return result
 }
 
@@ -750,4 +803,93 @@ export function acceptWaitlistRecord(item) {
   writeJson(KEYS.waitlist,next)
   lastSynced.waitlist[item.id]=stable(item)
   persistSyncState()
+}
+
+// Prevent an older poll from undoing an acknowledged command; commands do not enter generic dirty sync.
+export function beginWaitlistCommand() { operationalInFlight += 1; operationalGeneration += 1 }
+export function endWaitlistCommand() { operationalInFlight = Math.max(0, operationalInFlight - 1); operationalGeneration += 1 }
+export function acceptWaitlistCommandResult(result) {
+  if (!result?.item?.id) throw new Error('invalid-command-response')
+  operationalGeneration += 1
+  // Reject an older replay as a whole, rather than accepting just its tables/bookings.
+  const previous = localArrayOf('waitlist').find(w => w.id === result.item.id)
+  if ((previous?.queueVersion || 0) > (result.item.queueVersion || 0)) return
+  const updates = { waitlist: [result.item], bookings: result.bookings || [], tables: result.tables || [] }
+  const staged = {}
+  for (const [col, records] of Object.entries(updates)) {
+    const merged = indexDocs(col, localArrayOf(col))
+    for (const record of records) {
+      const id = idOf(col, record)
+      if ((merged[id]?.operationalVersion || 0) > (record.operationalVersion || 0)) continue
+      merged[id] = record
+    }
+    if (col === 'bookings') for (const id of (result.deletedBookingIds || [])) delete merged[id]
+    staged[col] = merged
+  }
+  const before = Object.fromEntries(Object.keys(staged).map(col => [col, localStorage.getItem(KEYS[col])]))
+  try {
+    for (const [col, merged] of Object.entries(staged)) writeArrayOf(col, Object.values(merged))
+  } catch (error) {
+    // Keep the durable command pending; no sync baseline is advanced on a partial local write.
+    for (const [col, raw] of Object.entries(before)) {
+      try { if (raw === null) localStorage.removeItem(KEYS[col]); else localStorage.setItem(KEYS[col], raw) } catch { syncPersistDegraded = true }
+    }
+    throw error
+  }
+  for (const [col, records] of Object.entries(updates)) {
+    for (const record of records) {
+      const id = idOf(col, record)
+      lastSynced[col][id] = stable(staged[col][id])
+      pendingDeletes[col].delete(id)
+    }
+  }
+  for (const id of (result.deletedBookingIds || [])) { delete lastSynced.bookings[id]; pendingDeletes.bookings.delete(id) }
+  persistSyncState()
+}
+
+function applyOperationalSyncAck(result, changed) {
+  const conflicts = []
+  const staged = {}
+  for (const [col, records, deleted] of [['tables',result.tableUpdates,result.deletedTableIds],['bookings',result.bookingUpdates,result.deletedBookingIds]]) {
+    if (!Array.isArray(records) && !Array.isArray(deleted)) continue
+    const merged = indexDocs(col, localArrayOf(col))
+    const critical = operationalCriticalFields(col)
+    for (const canonical of (records || [])) {
+      const id = idOf(col, canonical), current = merged[id], sent = (changed[col] || []).find(doc=>idOf(col,doc)===id)
+      // A locally deleted record stays deleted; next diff can explicitly request deletion.
+      if (!current && sent) continue
+      if ((current?.operationalVersion || 0) > (canonical.operationalVersion || 0)) continue
+      const next = { ...canonical }
+      if (sent && current) {
+        const writtenVersion = result.writtenVersions?.[col]?.[id]
+        const ahead = writtenVersion !== undefined && (canonical.operationalVersion || 0) > writtenVersion
+        const authorityChanged = ahead || critical.some(key=>stable(canonical[key] ?? null)!==stable(sent[key] ?? null))
+        const criticalDirty = critical.some(key=>stable(current[key] ?? null)!==stable(sent[key] ?? null))
+        if (authorityChanged && criticalDirty) conflicts.push({col,id})
+        for (const key of new Set([...Object.keys(sent),...Object.keys(current)])) {
+          if (['operationalVersion','waitlistId','waitlistCommandId','manageToken'].includes(key)) continue
+          if (authorityChanged && critical.includes(key)) continue
+          if (stable(current[key]) !== stable(sent[key])) {
+            if (Object.hasOwn(current,key)) next[key] = current[key]
+            else delete next[key]
+          }
+        }
+      }
+      merged[id] = next
+    }
+    for (const id of (deleted || [])) { if (!(localArrayOf(col).some(doc=>idOf(col,doc)===id))) delete merged[id] }
+    staged[col] = merged
+  }
+  const before = Object.fromEntries(Object.keys(staged).map(col=>[col,localStorage.getItem(KEYS[col])]))
+  try { for (const [col,merged] of Object.entries(staged)) writeArrayOf(col,Object.values(merged)) }
+  catch (error) {
+    for (const [col,raw] of Object.entries(before)) { try { if(raw===null)localStorage.removeItem(KEYS[col]);else localStorage.setItem(KEYS[col],raw) } catch {syncPersistDegraded=true} }
+    throw error
+  }
+  if (Object.keys(staged).length) operationalGeneration += 1
+  return conflicts
+}
+
+function operationalCriticalFields(col) {
+  return col==='tables'?['status','currentBookingId','currentRef','seatedAt','waitlistId']:['status','assignedTableId','extraTableIds','actualArrivalTime']
 }

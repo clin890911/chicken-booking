@@ -45,7 +45,6 @@ describe('候位過號/回來與stale generic保護',()=>{
  it('generic不能复原skipped/伪造日期号码，版本匹配也必须专用命令',()=>{
   const previous={...queue,status:'skipped',queueVersion:1}
   expect(()=>protectQueueUpsert({...previous,status:'waiting'},previous)).toThrow('use-queue-command')
-  const saved=protectQueueUpsert({...previous,status:'left',takenAt:'2099-01-01',queueNumber:999},previous)
-  expect(saved).toMatchObject({queueNumber:1,takenAt:queue.takenAt,queueVersion:2,status:'left'})
+  expect(()=>protectQueueUpsert({...previous,status:'left',takenAt:'2099-01-01',queueNumber:999},previous)).toThrow('use-queue-command')
  })
 })

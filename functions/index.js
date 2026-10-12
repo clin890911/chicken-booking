@@ -3,6 +3,9 @@ import { guardSettingsPush, settingsReplaceOptions, buildClosuresSettingsReport 
 import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, verifyReceipt } from './lib/guestReliability.js'
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
+import { createWaitlistHandler } from './lib/waitlistCommands.js'
+import { guardOperationalSync } from './lib/waitlistSyncGuard.js'
+import { commitOrdinaryBulk, readOperationalUpdates } from './lib/operationalBulk.js'
 import crypto from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, FieldValue } from 'firebase-admin/firestore'
@@ -187,7 +190,7 @@ const operationalEndpoint = (kind) => onRequest({cors:PUBLIC_CORS,invoker:'publi
   }catch(err){return res.status(err.status||500).json({ok:false,error:err.message||'operation-failed'})}
 })
 export const adminHandoff = operationalEndpoint('handoff')
-export const adminWaitlistTransition = operationalEndpoint('waitlist')
+export const adminWaitlistTransition = onRequest({cors:PUBLIC_CORS,invoker:'public'},createWaitlistHandler({db,requireStaff}))
 
 export const adminPullData = onRequest({ cors: PUBLIC_CORS, invoker: 'public' }, async (req, res) => {
   if (req.method !== 'GET') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
@@ -243,6 +246,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     // closuresBase：新前端送「該裝置上次同步基準線內的 closures」→ 休店／關閉改以日期為單位三方合併
     // （lib/closuresMerge.js），在 transaction 內讀雲端、合併、寫回。舊前端不送 → 維持 PR #162 整欄替換。
     const { dataset = {}, partial = false, settingsChangedKeys, closuresBase } = req.body || {}
+    if(dataset.deletedIds?.waitlist?.length) throw errorWithStatus('use-queue-command',409)
     const closuresMergeBase = closuresBase && typeof closuresBase === 'object' && !Array.isArray(closuresBase) ? closuresBase : null
     if(dataset.handoffTasks || dataset.deletedIds?.handoffTasks) return res.status(403).json({ok:false,error:'use-handoff-command'})
     // 後端 RBAC：依角色把關每個集合的「寫入/刪除」與「改設定」。
@@ -262,6 +266,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     //   絕不落到「全判新單 → 重鑄 manageToken → 輪替（毀掉）所有既有客人管理連結」的災難分支。
     const pushedBookingIds = (writable.bookings || []).map(b => b?.id)
     const beforeBookings = await snapshotBookingsByIds(pushedBookingIds, { strict: true })
+    if((writable.bookings||[]).some(b=>!beforeBookings.has(String(b.id))&&(b.createdBy==='waitlist'||b.waitlistId||b.waitlistCommandId||String(b.id).startsWith('WLB_'))))throw errorWithStatus('use-queue-command',409)
     // 泛型遍歷所有同步集合做 merge-upsert（接受「部分資料集」，未帶的集合略過）。
     const ops = []
     const waitlistUpdates = []
@@ -418,12 +423,20 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       if (settingsReport?.audit) settingsReport.audit.closuresMerge = { conflicts: merged.conflicts.length }
     }
     // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
-    if(queueItems.length){
+    let writtenVersions={bookings:{},tables:{}}
+    if(!queueItems.length && ops.length>450){
+      writtenVersions=await commitOrdinaryBulk(db,ops)
+    }else if(queueItems.length || ops.some(op=>['bookings','tables'].includes(op.ref.path.split('/')[0]))){
       if(new Set(queueItems.map(item=>String(item?.id||'').trim())).size!==queueItems.length) throw errorWithStatus('duplicate-waitlist-id',400)
       // 含候位時一起原子提交。過大的單批拒絕，不能默默降成部分寫入。
       if(ops.length+queueItems.length*2>450) throw errorWithStatus('operational-sync-too-large',413)
       const syncHash=crypto.createHash('sha256').update(JSON.stringify(writable)).digest('hex')
-      await db.runTransaction(async tx=>{
+      writtenVersions=await db.runTransaction(async tx=>{
+        const guardedOps=await Promise.all(ops.map(async op=>{
+          if(!['bookings','tables'].includes(op.ref.path.split('/')[0]))return op
+          const stored=await tx.get(op.ref)
+          return guardOperationalSync(op,stored.exists?stored.data():null)
+        }))
         const snapshots=await Promise.all(queueItems.map(async item=>{
           const id=String(item?.id||'').trim()
           if(!id||id.includes('/')) throw errorWithStatus('invalid-waitlist-id',400)
@@ -433,16 +446,20 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
           if(receipt.exists&&(!previous.exists||(previous.data().queueVersion||0)!==(receipt.data().item?.queueVersion||0))) throw errorWithStatus('waitlist-changed',409)
           return {ref,receiptRef,data:receipt.exists?previous.data():protectQueueUpsert(item,previous.exists?previous.data():null),retry:receipt.exists}
         }))
-        const repeated=snapshots.every(s=>s.retry)
+        const repeated=queueItems.length>0 && snapshots.every(s=>s.retry)
         queueRepeated=repeated
         if(!repeated && snapshots.some(s=>s.retry)) throw errorWithStatus('sync-changed',409)
-        if(!repeated) for(const op of ops) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,op.options||{merge:true}) }
+        if(!repeated || !queueItems.length) for(const op of guardedOps) { if(op.delete) tx.delete(op.ref); else tx.set(op.ref,op.data,op.options||{merge:true}) }
         for(const saved of snapshots){
           if(!saved.retry){tx.set(saved.ref,saved.data,{merge:true});tx.set(saved.receiptRef,{item:saved.data,createdAt:new Date().toISOString()})}
         }
-        waitlistUpdates.splice(0,waitlistUpdates.length,...snapshots.map(s=>s.data))
+        waitlistUpdates.splice(0,waitlistUpdates.length,...snapshots.map(s=>projectForRead('waitlist',s.data,staff.role)))
+        const versions={bookings:{},tables:{}}
+        for(const op of guardedOps){const [kind,id]=op.ref.path.split('/');if(versions[kind])versions[kind][id]=op.delete?null:(op.data.operationalVersion||0)}
+        return versions
       })
     }else await commitInChunks(ops)
+    const operationalUpdates=await readOperationalUpdates(db,ops,staff.role)
     // settings 稽核／LINE 守門告警：合併路徑每次都真的寫了 settings（不受候位重送影響），故 queueRepeated 時也要報；
     // 舊路徑的 settings 隨 ops 寫入，重送時 ops 被跳過，維持不報。
     if (settingsReport && (closuresPlan || !queueRepeated)) await reportSettingsGuard(settingsReport)
@@ -456,9 +473,9 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     // closuresMerge：{ closures（合併後實際在雲端的值）, conflicts }——前端據此推進基準線、rebase 本機並提示衝突。
     const appliedPart = { ...(settingsApplied ? { settingsApplied } : {}), ...(closuresMerge ? { closuresMerge } : {}) }
     if (hasRejection) {
-      return res.json({ ok: true, rejected, rejectedMessage, role, waitlistUpdates, ...appliedPart })
+      return res.json({ ok: true, rejected, rejectedMessage, role, waitlistUpdates, ...operationalUpdates, writtenVersions, ...appliedPart })
     }
-    return res.json({ ok: true, waitlistUpdates, ...appliedPart })
+    return res.json({ ok: true, waitlistUpdates, ...operationalUpdates, writtenVersions, ...appliedPart })
   } catch (err) {
     console.error('adminPushData failed:', err)
     return res.status(err.status || 500).json({ ok: false, error: err.message || 'admin-push-failed' })

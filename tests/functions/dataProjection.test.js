@@ -66,9 +66,9 @@ describe('projectWaitlistForRead', () => {
     expect(k.name).toBe('王')
     expect(k.partySize).toBe(2)
   })
-  it('非 kitchen 原樣回傳', () => {
+  it('非 kitchen 保留公共欄位但建立獨立投影', () => {
     for (const role of ['manager', 'floor', 'host']) {
-      expect(projectWaitlistForRead(W, role)).toBe(W)
+      expect(projectWaitlistForRead(W, role)).toEqual(W)
     }
   })
 })

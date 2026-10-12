@@ -119,16 +119,16 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
     expect(ctx.releaseOverriddenAssignment).not.toHaveBeenCalled()
   })
 
-  it('TableCandidatePanel 候位入座：12:30 的預配重疊 → 解除', () => {
+  it('TableCandidatePanel 候位入座：確認重疊預配交給雲端交易，不另推本機解除', async () => {
     setCtx([yuAt('12:30')])
     ctx.waitlist = [{ id: 'W9', name: '候位客', partySize: 2, status: 'waiting', queueNumber: 9, takenAt: NOW.toISOString() }]
     mount(<TableCandidatePanel table={T105} onPicked={() => {}} />)
-    act(() => { btn('入座').click() })
+    await act(async () => { btn('入座').click() })
     expect(ctx.seatWaitlist).not.toHaveBeenCalled()             // 未勾選：鎖住
     act(() => { overrideBox().click() })
-    act(() => { btn('入座').click() })
-    expect(ctx.seatWaitlist).toHaveBeenCalledWith('W9', '105')
-    expect(ctx.releaseOverriddenAssignment).toHaveBeenCalledWith('YU')
+    await act(async () => { btn('入座').click() })
+    expect(ctx.seatWaitlist).toHaveBeenCalledWith('W9', '105', {confirmedConflictTables:['105']})
+    expect(ctx.releaseOverriddenAssignment).not.toHaveBeenCalled()
   })
 })
 
