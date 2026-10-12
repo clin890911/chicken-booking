@@ -523,7 +523,7 @@ describe('候位 409 衝突自癒（R3）', () => {
     const w1 = read(WAITLIST).find(w => w.id === 'w1')
     expect(w1.status).toBe('seated')                       // 以雲端為準
     expect(w1.queueVersion).toBe(2)
-    expect(read(WAITLIST).some(w => w.id === 'w2')).toBe(true)   // 雲端沒有的新候位保留
+    expect(read(WAITLIST).some(w => w.id === 'w2')).toBe(false)  // generic 新取號已禁止，放棄未確認本機票
     expect(read(BOOKINGS).some(b => b.id === 'b1')).toBe(true)   // 其他集合 dirty 照保留
     expect(read(TABLES)[0].status).toBe('reserved')
 
@@ -535,7 +535,7 @@ describe('候位 409 衝突自癒（R3）', () => {
     const r = await pushChangedData()
     expect(r.ok).toBe(true)
     const ds = calls[0].dataset
-    expect((ds.waitlist || []).map(w => w.id)).toEqual(['w2'])   // ★ 不再夾帶衝突的 w1
+    expect((ds.waitlist || []).map(w => w.id)).toEqual([])       // 不夾帶衝突票或未經command的新票
     expect(ds.bookings.map(b => b.id)).toEqual(['b1'])
     expect(ds.tables.map(t => t.number)).toEqual(['101'])
     // 基準線推進：再推一次已無東西可送
@@ -563,11 +563,11 @@ describe('候位 409 衝突自癒（R3）', () => {
     expect(calls[0].dataset.waitlist.map(w => w.id).sort()).toEqual(['w1', 'w2'])
   })
 
-  it('同一包 #5 衝突、#8 不衝突：只放棄 #5，#8 的本機入座下一輪推上去', async () => {
+  it('同一包 #5 非法狀態變更、#8 合法備註：只放棄 #5，保留 #8 備註', async () => {
     const w5 = { id: 'w5', queueNumber: 5, name: '五號', partySize: 2, status: 'waiting', queueVersion: 1, takenAt: '2026-10-09T03:00:00.000Z' }
     const w8 = { id: 'w8', queueNumber: 8, name: '八號', partySize: 4, status: 'called', queueVersion: 3, takenAt: '2026-10-09T03:10:00.000Z' }
     applyCloudSnapshot({ bookings: [], waitlist: [w5, w8], tables: [table], settings: cloudSettingsPayload() })
-    localStorage.setItem(WAITLIST, JSON.stringify([{ ...w5, status: 'called' }, { ...w8, status: 'seated', seatedTable: '101' }]))
+    localStorage.setItem(WAITLIST, JSON.stringify([{ ...w5, status: 'called' }, { ...w8, notes: '更新備註' }]))
     global.fetch = vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ ok: false, error: 'waitlist-changed' }) }))
     await pushChangedData().catch(() => {})
 
@@ -575,7 +575,7 @@ describe('候位 409 衝突自癒（R3）', () => {
     const applied = applyCloudSnapshot({ bookings: [], waitlist: [{ ...w5, status: 'seated', queueVersion: 2 }, w8], tables: [table], settings: cloudSettingsPayload() })
     expect(applied).toEqual({ waitlistConflictsResolved: 1 })              // M2：回報處理掉的衝突筆數
     expect(read(WAITLIST).find(w => w.id === 'w5').status).toBe('seated')   // 衝突 → 雲端
-    expect(read(WAITLIST).find(w => w.id === 'w8').status).toBe('seated')   // ★ 不衝突 → 保留本機入座
+    expect(read(WAITLIST).find(w => w.id === 'w8').notes).toBe('更新備註') // 合法備註仍保留dirty
 
     const calls = []
     global.fetch = vi.fn(async (_url, options) => {
@@ -583,7 +583,7 @@ describe('候位 409 衝突自癒（R3）', () => {
       return { ok: true, json: async () => ({ ok: true }) }
     })
     await pushChangedData()
-    expect(calls[0].dataset.waitlist.map(w => [w.id, w.status])).toEqual([['w8', 'seated']])
+    expect(calls[0].dataset.waitlist.map(w => [w.id, w.status])).toEqual([['w8', 'called']])
   })
 
   it('雲端已刪除＋本機版本號 > 0：丟棄本機那筆，不再重推（也不發刪除）', async () => {

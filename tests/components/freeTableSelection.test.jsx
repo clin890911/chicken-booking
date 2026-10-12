@@ -50,22 +50,22 @@ beforeEach(() => {
 afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
 
 for (const flow of ['planning','booking','waitlist']) describe(`${flow} 人工選桌`, () => {
-  it.each([['B','C'], ['D','B']])('有 8 席大桌時仍可選 %s + %s，推薦不自動勾桌', (a,b) => {
+  it.each([['B','C'], ['D','B']])('有 8 席大桌時仍可選 %s + %s，推薦不自動勾桌', async (a,b) => {
     begin(flow)
     expect(container.textContent).toContain('已選 0/8 席')
     expect(confirm().disabled).toBe(true)
     pick(a); expect(confirm().disabled).toBe(true)
     pick(b); expect(confirm().disabled).toBe(false)
     expect(container.querySelector('[data-table="A"]').dataset.selected).toBe('false')
-    act(() => confirm().click())
-    expect(saveSpy(flow)).toHaveBeenCalledWith(flow === 'waitlist' ? 'W1' : 'B1', [a,b])
+    await act(async () => confirm().click())
+    expect(saveSpy(flow)).toHaveBeenCalledWith(flow === 'waitlist' ? 'W1' : 'B1', [a,b], ...(flow==='waitlist'?[{confirmedConflictTables:[]}]:[]))
   })
-  it('單張 6 席不足、可移除與改選單張 8 席後確認', () => {
+  it('單張 6 席不足、可移除與改選單張 8 席後確認', async () => {
     begin(flow); pick('D'); expect(confirm().disabled).toBe(true)
     pick('D'); expect(container.textContent).toContain('已選 0/8 席')
-    pick('A'); expect(confirm().disabled).toBe(false); act(() => confirm().click())
+    pick('A'); expect(confirm().disabled).toBe(false); await act(async () => confirm().click())
     const spy = flow === 'planning' ? harness.ctx.preassignBookingTable : flow === 'booking' ? harness.ctx.assignBookingToTable : harness.ctx.seatWaitlist
-    expect(spy).toHaveBeenCalledWith(flow === 'waitlist' ? 'W1' : 'B1','A')
+    expect(spy).toHaveBeenCalledWith(flow === 'waitlist' ? 'W1' : 'B1','A', ...(flow==='waitlist'?[{confirmedConflictTables:[]}]:[]))
   })
   it('無大桌時也可 4 + 4，取消不寫資料', () => {
     harness.ctx.tables = harness.ctx.tables.filter(t => t.number !== 'A')
@@ -90,9 +90,9 @@ it('現場多桌選擇保留預配警示確認，選桌改變後重新鎖確認'
   pick('C'); pick('D'); expect(confirm().disabled).toBe(true)
 })
 
-it('確認前桌被佔用時不寫入', () => {
+it('確認前桌被佔用時不寫入', async () => {
   begin('booking'); pick('B'); pick('C'); harness.ctx.tables.find(t=>t.number==='B').status='dining'
-  act(() => confirm().click())
+  await act(async () => confirm().click())
   expect(harness.ctx.assignBookingTablesMulti).not.toHaveBeenCalled()
   expect(harness.toast.error).toHaveBeenCalledWith('所選桌已不可用，請重新選桌')
 })
@@ -170,9 +170,9 @@ it('餐中選桌任務隱藏散客表單，取消恢復候位來源；建議定�
   expect(container.textContent).toContain('散客表單')
 })
 
-it('候位成功維持回帶位並可一鍵到下一組候位', () => {
+it('候位成功維持回帶位並可一鍵到下一組候位', async () => {
   harness.ctx.waitlist[0].status = 'waiting'
-  mount(<OperationsView />); click('開始候位'); pick('A'); act(() => confirm().click())
+  mount(<OperationsView />); click('開始候位'); pick('A'); await act(async () => confirm().click())
   expect(container.querySelector('[data-rail]').dataset.rail).toBe('walkin')
   click('帶下一組候位')
   expect(container.querySelector('[data-rail]').dataset.rail).toBe('waitlist')

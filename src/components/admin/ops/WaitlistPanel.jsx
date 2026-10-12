@@ -4,7 +4,7 @@ import { seatingPerms } from '../../../utils/seatingPerms'
 import { waitlistDay } from '../../../services/waitlistService'
 import { todayStr } from '../../../utils/timeSlots'
 import { commandId } from '../../../services/handoffService'
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { Modal, Input } from '../../ui'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
@@ -31,7 +31,7 @@ function diffMin(d) {
 // 現場右側欄「候位」籤：取號 → 叫號 → 入座全程在現場頁完成。
 // 歷史與統計屬低頻查閱，收在 WaitlistHistorySheet（Modal）不佔常駐欄位。
 export default function WaitlistPanel({ onSeatWaitlist }) {
-  const { waitlist, skipWaitlist, returnWaitlist, addWaitlist, callWaitlist, leaveWaitlist } = useBooking()
+  const { waitlist, skipWaitlist, returnWaitlist, addWaitlist, callWaitlist, leaveWaitlist, pendingWaitlistCommands = [], waitlistCommandOwner = '', retryWaitlistCommands } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
   const [showAdd, setShowAdd] = useState(false)
@@ -50,6 +50,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
 
   const {can}=useAuth()
   const canEdit=can('waitlist.update')
+  const canCreate=can('waitlist.create')
   // 候位「入座」會連動建 walk-in 訂位並佔桌（寫 waitlist＋bookings＋tables），不只 waitlist.update；
   // 叫號／棄號／暫過只寫 waitlist，維持 canEdit。見 utils/seatingPerms.js。
   const canSeat=seatingPerms(can).waitlistSeat
@@ -60,11 +61,12 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
     const key=w.id+':'+(w.queueVersion||0)+':'+action
     if(!pending.current.has(key))pending.current.set(key,commandId())
     setBusy(w.id)
-    const result=await (action==='skip'?skipWaitlist:returnWaitlist)(w.id,pending.current.get(key))
+    const handler={skip:skipWaitlist,return:returnWaitlist,call:callWaitlist,leave:leaveWaitlist}[action]
+    const result=await handler(w.id,pending.current.get(key))
     setBusy(null)
     if(!result.ok)return toast.error(result.error)
     pending.current.delete(key)
-    toast.success(action==='skip'?`#${w.queueNumber} 暫過號，號碼保留`:`#${w.queueNumber} 已回來，依原順位恢復候位`)
+    toast.success({skip:`#${w.queueNumber} 暫過號，號碼保留`,return:`#${w.queueNumber} 已回來，依原順位恢復候位`,call:`#${w.queueNumber} 已叫號`,leave:`#${w.queueNumber} 已棄號`}[action])
   }
   const skipped=waitlist.filter(w=>w.status==='skipped'&&waitlistDay(w)===todayStr()).sort(compareWaitlistOrder)
   const active = waitlist.filter(w => ['waiting','called'].includes(w.status)&&waitlistDay(w)===todayStr()).sort(compareWaitlistOrder)
@@ -94,12 +96,28 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
     setKeypadOpen(false)
   }
 
-  const handleAdd = () => {
+  const restoredDraft = useRef(null)
+  useEffect(() => { resetForm(); restoredDraft.current = null }, [waitlistCommandOwner])
+  useEffect(() => {
+    const draft = pendingWaitlistCommands.find(entry => entry.command.action === 'create')
+    if (draft && restoredDraft.current !== draft.command.commandId) {
+      restoredDraft.current = draft.command.commandId
+      setForm(draft.command.payload); setKids(draft.command.payload.children || 0)
+      setSurname(null); setCustomName(draft.command.payload.name || '')
+    }
+  }, [pendingWaitlistCommands])
+
+  const handleAdd = async () => {
+    if (busy) return
     const size = Number(form.partySize)
     if (!size || size < 1 || size > WAITLIST_MAX) return toast.warning(`人數需介於 1～${WAITLIST_MAX} 位`)
     // 快選組出來的稱呼優先；沒選就沿用手打的 name（兩者都空＝匿名取號，靠號碼叫人）
     const name = composeName(title, surname, customName.trim()) || form.name.trim()
-    const w = addWaitlist({ ...form, name, partySize: size, children: normalizeSplit(size, kids).children, estimatedMin: estimatedWaitMin })
+    setBusy('add')
+    const result = await addWaitlist({ ...form, name, partySize: size, children: normalizeSplit(size, kids).children, estimatedMin: estimatedWaitMin })
+    setBusy(null)
+    const w = result?.item || (result?.queueNumber ? result : null)
+    if (!w || result?.ok === false) return toast.error(result?.error || '取號未確認，請保留表單後重試')
     setShowAdd(false)
     resetForm()
     if (w?.queueNumber) toast.success(`已取號 #${w.queueNumber}，預估等待 ${w.estimatedMin} 分`)
@@ -107,12 +125,18 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
 
   return (
     <div>
+      {!!pendingWaitlistCommands.length && <div role="status" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+        <p className="font-bold">有 {pendingWaitlistCommands.length} 筆候位操作待確認</p>
+        {pendingWaitlistCommands.map(entry => <p key={entry.command.commandId}>{({create:'取號',call:'叫號',seat:'入座',leave:'棄號',skip:'暫過號',return:'回來了',undo:'復原入座'})[entry.command.action]} · {entry.command.payload?.name || waitlist.find(w=>w.id===entry.command.id)?.name || '原候位'}{entry.command.payload?.tableNumbers?.length ? ` · 桌 ${entry.command.payload.tableNumbers.join(' + ')}` : ''}</p>)}
+        <p>尚未顯示成功。確認會重送原操作，請勿另建同一組。</p>
+        <button disabled={!!busy} className="min-h-[44px] underline font-bold" onClick={async()=>{setBusy('retry');try{await retryWaitlistCommands?.()}finally{setBusy(null)}}}>確認／重試原操作</button>
+      </div>}
       <div className="flex items-center justify-end gap-1.5 mb-2">
         <button
           onClick={() => setShowHistory(true)}
           className="text-xs px-2.5 py-1.5 min-h-[32px] bg-white border border-chicken-brown/15 text-chicken-brown rounded-md font-bold"
         >歷史</button>
-        <button disabled={!canEdit} onClick={() => setShowAdd(true)} className="text-xs px-2.5 py-1.5 min-h-[32px] bg-chicken-red text-white rounded-md font-bold">
+        <button disabled={!canCreate || !!busy} onClick={() => setShowAdd(true)} className="text-xs px-2.5 py-1.5 min-h-[32px] bg-chicken-red text-white rounded-md font-bold">
           + 新增取號
         </button>
       </div>
@@ -155,7 +179,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                 </button>}
                 {w.status === 'waiting' && (
                   <button
-                    disabled={!!busy} onClick={() => callWaitlist(w.id)}
+                    disabled={!!busy} onClick={() => changeQueue(w,'call')}
                     className="flex-1 min-h-[44px] text-[11px] py-1 bg-chicken-yellow text-white rounded-md font-bold"
                   >
                     叫號
@@ -163,7 +187,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                 )}
                 <button disabled={!!busy} onClick={()=>changeQueue(w,'skip')} className="min-h-[44px] text-xs px-2 border rounded-md">{busy===w.id?'儲存中…':'暫過號'}</button>
                 <button
-                  disabled={!!busy} onClick={async () => { if (await confirm(`確定讓 ${w.name || `#${w.queueNumber}`} 棄號？此動作會將其移出候位。`, { title: '棄號', danger: true, confirmLabel: '棄號' })) leaveWaitlist(w.id) }}
+                  disabled={!!busy} onClick={async () => { if (await confirm(`確定讓 ${w.name || `#${w.queueNumber}`} 棄號？此動作會將其移出候位。`, { title: '棄號', danger: true, confirmLabel: '棄號' })) await changeQueue(w,'leave') }}
                   className="min-h-[44px] text-[11px] px-3 py-1 bg-white border border-chicken-red/40 text-chicken-red rounded-md font-bold hover:bg-chicken-red/5"
                   aria-label="棄號"
                   title="棄號"
@@ -176,12 +200,12 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
         </div>
       )}
 
-      {!!skipped.length&&<section aria-label="暫過號候位" className="mt-3 space-y-2"><h3 className="font-bold text-sm">暫過號 · 保留原號</h3>{skipped.map(w=><div key={w.id} className="p-2 border rounded-lg text-sm"><div className="flex items-baseline gap-2 flex-wrap"><b>#{w.queueNumber} {w.name}</b><span>{w.partySize} 位{splitSuffix(w)}</span><PhoneLink phone={w.phone} className="text-sm" /></div>{canEdit&&<div className="flex gap-2"><button disabled={!!busy} onClick={()=>changeQueue(w,'return')} className="min-h-[44px] px-3 border rounded-lg">{busy===w.id?'儲存中…':'回來了'}</button><button disabled={!!busy} onClick={async()=>{if(await confirm(`確定讓 #${w.queueNumber} 棄號？`,{title:'棄號',danger:true}))leaveWaitlist(w.id)}} className="min-h-[44px] px-3 border rounded-lg">棄號</button></div>}</div>)}</section>}
+      {!!skipped.length&&<section aria-label="暫過號候位" className="mt-3 space-y-2"><h3 className="font-bold text-sm">暫過號 · 保留原號</h3>{skipped.map(w=><div key={w.id} className="p-2 border rounded-lg text-sm"><div className="flex items-baseline gap-2 flex-wrap"><b>#{w.queueNumber} {w.name}</b><span>{w.partySize} 位{splitSuffix(w)}</span><PhoneLink phone={w.phone} className="text-sm" /></div>{canEdit&&<div className="flex gap-2"><button disabled={!!busy} onClick={()=>changeQueue(w,'return')} className="min-h-[44px] px-3 border rounded-lg">{busy===w.id?'儲存中…':'回來了'}</button><button disabled={!!busy} onClick={async()=>{if(await confirm(`確定讓 #${w.queueNumber} 棄號？`,{title:'棄號',danger:true}))await changeQueue(w,'leave')}} className="min-h-[44px] px-3 border rounded-lg">棄號</button></div>}</div>)}</section>}
       {/* 取號 Modal */}
-      <Modal open={showAdd} onClose={() => { setShowAdd(false); resetForm() }} title="候位取號" footer={
+      <Modal open={showAdd} onClose={() => { if(!busy) setShowAdd(false) }} title="候位取號" footer={
         <>
-          <button onClick={() => { setShowAdd(false); resetForm() }} className="btn-secondary px-4 py-2">取消</button>
-          <button onClick={handleAdd} className="btn-primary px-4 py-2">取號</button>
+          <button disabled={!!busy} onClick={() => setShowAdd(false)} className="btn-secondary px-4 py-2">取消</button>
+          <button disabled={!!busy} onClick={handleAdd} className="btn-primary px-4 py-2">{busy==='add'?'確認取號中…':pendingWaitlistCommands.some(e=>e.command.action==='create')?'確認原取號':'取號'}</button>
         </>
       }>
         {/* 人數擺第一個：它是唯一必填，滿場尖峰「點人數 → 取號」兩下就走完 */}

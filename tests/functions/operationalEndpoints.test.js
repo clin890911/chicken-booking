@@ -1,6 +1,10 @@
 import {describe,it,expect,beforeEach,afterEach,vi} from 'vitest'
 import {readFileSync} from 'node:fs'
 import crypto from 'node:crypto'
+import {createWaitlistHandler} from '../../functions/lib/waitlistCommands.js'
+import {projectForRead} from '../../functions/lib/dataProjection.js'
+import {readOperationalUpdates} from '../../functions/lib/operationalBulk.js'
+import {guardOperationalSync} from '../../functions/lib/waitlistSyncGuard.js'
 import {roleCan,classifyDatasetByPermission} from '../../functions/lib/staffAccess'
 import {buildHandoffCommand,buildQueueCommand,protectQueueUpsert,checkCommand} from '../../functions/lib/operationalCommands'
 // 執行真handler source，所有Firestore/Auth/通知均注入in-memory fake，無Firebase/HTTP。
@@ -32,12 +36,12 @@ beforeEach(()=>{
  // API block ends at its next declaration; avoid importing Firebase runtime or running any real service.
  const pushStart=source.indexOf('export const adminPushData'),pushEnd=source.indexOf('\n})',pushStart)+3
  const push=source.slice(pushStart,pushEnd).replace('export const','const')
- handlers=new Function('onRequest','db','requireStaff','listCollection','roleCan','buildHandoffCommand','buildQueueCommand','protectQueueUpsert','checkCommand','errorWithStatus','crypto','PUBLIC_CORS','TELEGRAM_BOT_TOKEN','TELEGRAM_CHAT_ID','LINE_CHANNEL_ACCESS_TOKEN','SYNC_COLLECTION_IDKEYS','classifyDatasetByPermission','snapshotBookingsByIds','COLLECTIONS','buildBookingUpsertData','createServerToken','stripServerOwnedCustomerFields','upsertOps','deleteOps','normalizeStoreSettings','readSettingsForAdminNotify','commitInChunks','notifyAdminBookingChanges','notifyAdminBookingTelegram',opSource+'\n'+push+'\nreturn {adminHandoff,adminWaitlistTransition,adminPushData}')(
-  (_,fn)=>fn,db,requireStaff,async name=>[...records.entries()].filter(([p])=>p.startsWith(name+'/')&&p.split('/').length===2).map(([,v])=>structuredClone(v)),roleCan,buildHandoffCommand,buildQueueCommand,protectQueueUpsert,checkCommand,errorWithStatus,crypto,true,'','', '',collectionNames,classifyDatasetByPermission,async()=>new Map(),{bookings:'bookings',tables:'tables',waitlist:'waitlist',customers:'customers'},item=>item,()=>'',item=>item,(name,items,idKey)=>(items||[]).map(item=>({ref:ref(name+'/'+item[idKey]),data:item})),(name,ids)=>(ids||[]).map(id=>({ref:ref(name+'/'+id),delete:true})),s=>s,async()=>({}),async ops=>{for(const op of ops){if(op.delete)records.delete(op.ref.path);else records.set(op.ref.path,op.data)}writes+=ops.length},async()=>{notifications++},async()=>{notifications++})
+ handlers=new Function('createWaitlistHandler','projectForRead','readOperationalUpdates','guardOperationalSync','onRequest','db','requireStaff','listCollection','roleCan','buildHandoffCommand','buildQueueCommand','protectQueueUpsert','checkCommand','errorWithStatus','crypto','PUBLIC_CORS','TELEGRAM_BOT_TOKEN','TELEGRAM_CHAT_ID','LINE_CHANNEL_ACCESS_TOKEN','SYNC_COLLECTION_IDKEYS','classifyDatasetByPermission','snapshotBookingsByIds','COLLECTIONS','buildBookingUpsertData','createServerToken','stripServerOwnedCustomerFields','upsertOps','deleteOps','normalizeStoreSettings','readSettingsForAdminNotify','commitInChunks','notifyAdminBookingChanges','notifyAdminBookingTelegram',opSource+'\n'+push+'\nreturn {adminHandoff,adminWaitlistTransition,adminPushData}')(
+  createWaitlistHandler,projectForRead,readOperationalUpdates,guardOperationalSync,(_,fn)=>fn,db,requireStaff,async name=>[...records.entries()].filter(([p])=>p.startsWith(name+'/')&&p.split('/').length===2).map(([,v])=>structuredClone(v)),roleCan,buildHandoffCommand,buildQueueCommand,protectQueueUpsert,checkCommand,errorWithStatus,crypto,true,'','', '',collectionNames,classifyDatasetByPermission,async()=>new Map(),{bookings:'bookings',tables:'tables',waitlist:'waitlist',customers:'customers'},item=>item,()=>'',item=>item,(name,items,idKey)=>(items||[]).map(item=>({ref:ref(name+'/'+item[idKey]),data:item})),(name,ids)=>(ids||[]).map(id=>({ref:ref(name+'/'+id),delete:true})),s=>s,async()=>({}),async ops=>{for(const op of ops){if(op.delete)records.delete(op.ref.path);else records.set(op.ref.path,op.data)}writes+=ops.length},async()=>{notifications++},async()=>{notifications++})
  records.set('tables/103',{number:'103'});records.set('bookings/B1',{id:'B1'})
 })
 afterEach(()=>vi.useRealTimers())
-const command=(action,expectedVersion=0,extra={})=>({id:'T1',action,expectedVersion,commandId:'command_'+action+'_'+expectedVersion,...extra})
+const command=(action,expectedVersion=0,extra={})=>({date:'2026-10-05',id:'T1',action,expectedVersion,commandId:'command_'+action+'_'+expectedVersion,...extra})
 describe('專用交班/過號真API transaction',()=>{
  it('server權限與認證不能繞過UI',async()=>{
   expect((await call(handlers.adminHandoff,command('create',0,{label:'需回電',tableNumber:'103'}),{auth:false})).code).toBe(401)
@@ -78,6 +82,23 @@ describe('專用交班/過號真API transaction',()=>{
  })
 })
 describe('generic候位與帶位同transaction、重試與通知去重',()=>{
+ it('generic waitlist ACK also sanitizes legacy private undo snapshots',async()=>{
+  const item={...w('W1'),serverManaged:true,notes:''}
+  records.set('waitlist/W1',{...item,releasedPreassigns:[{id:'PRE',manageToken:'FAKE_PRIVATE'}]})
+  const reply=await call(handlers.adminPushData,{dataset:{waitlist:[item]}})
+  expect(reply.code).toBe(200);expect(JSON.stringify(reply.body)).not.toMatch(/FAKE_PRIVATE|releasedPreassigns/)
+ })
+ it('returns committed canonical versions after checkout then clear, rather than echoing old payload versions',async()=>{
+  records.set('tables/103',{number:'103',status:'dining',currentBookingId:'B1',operationalVersion:1,capacity:6})
+  records.set('bookings/B1',{id:'B1',status:'arrived',operationalVersion:1,manageToken:'PRIVATE',name:'Test',waitlistId:'W1'})
+  const first=await call(handlers.adminPushData,{dataset:{tables:[{number:'103',status:'cleaning',currentBookingId:'B1',operationalVersion:1}],bookings:[{id:'B1',status:'completed',operationalVersion:1}]}})
+  expect(first.code).toBe(200)
+  expect(first.body.tableUpdates[0]).toMatchObject({operationalVersion:2,capacity:6});expect(first.body.writtenVersions.tables['103']).toBe(2)
+  expect(first.body.bookingUpdates[0]).toMatchObject({operationalVersion:2,name:'Test',waitlistId:'W1'})
+  expect(first.body.bookingUpdates[0]).not.toHaveProperty('manageToken')
+  const second=await call(handlers.adminPushData,{dataset:{tables:[{...first.body.tableUpdates[0],status:'vacant',currentBookingId:null}]}})
+  expect(second.code).toBe(200);expect(second.body.tableUpdates[0].operationalVersion).toBe(3)
+ })
  const w=(id,status='waiting',version=0)=>({id,status,queueVersion:version,takenAt:'2026-10-05T03:00:00Z',queueNumber:1})
  it('任一候位版本衝突整包不寫tables/bookings/其他候位',async()=>{
   records.set('waitlist/W1',w('W1'));records.set('waitlist/W2',w('W2','seated',1))
@@ -85,13 +106,11 @@ describe('generic候位與帶位同transaction、重試與通知去重',()=>{
   const response=await call(handlers.adminPushData,{dataset:{tables:[{number:'103',status:'dining'}],bookings:[{id:'B1',status:'arrived'}],waitlist:[w('W1','called'),w('W2')]}})
   expect(response.code).toBe(409);expect([...records]).toEqual(before);expect(notifications).toBe(0)
  })
- it('正常帶位+queue提交、lostresponse相同payload重試零write零通知；前進後舊receipt409',async()=>{
+ it('舊客戶端叫號與衍生桌位整包拒絕、重送仍零寫入',async()=>{
   records.set('waitlist/W1',w('W1'))
   const body={dataset:{tables:[{number:'103',status:'dining'}],bookings:[{id:'B1',status:'arrived'}],waitlist:[w('W1','called')]}}
-  expect((await call(handlers.adminPushData,body)).code).toBe(200)
-  const count=writes,notify=notifications
-  expect((await call(handlers.adminPushData,body)).body.waitlistUpdates[0].queueVersion).toBe(1);expect(writes).toBe(count);expect(notifications).toBe(notify)
-  records.set('waitlist/W1',w('W1','seated',2));expect((await call(handlers.adminPushData,body)).code).toBe(409);expect(writes).toBe(count)
+  expect((await call(handlers.adminPushData,body)).code).toBe(409)
+  expect((await call(handlers.adminPushData,body)).code).toBe(409);expect(writes).toBe(0);expect(notifications).toBe(0)
  })
  it('duplicate canonical queueID拒绝整包，0版terminal仍不可被stale復活',async()=>{
   expect((await call(handlers.adminPushData,{dataset:{waitlist:[w('W1'),w(' W1 ')]}})).code).toBe(400);expect(writes).toBe(0)

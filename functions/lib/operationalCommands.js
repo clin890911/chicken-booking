@@ -36,6 +36,14 @@ export function buildQueueCommand(command, previous, { role, now }) {
 }
 // 專用過號啟用後，舊裝置的全量快照不能覆蓋或復活候位；generic push也走逐筆transaction。
 export function protectQueueUpsert(item, previous) {
+  if (previous && ['seated','left'].includes(previous.status) && item.status!==previous.status) fail('waitlist-ended',409)
+  if (!previous || item.status !== previous.status) fail('use-queue-command',409)
+  if (previous.serverManaged) {
+    for (const key of ['queueNumber','takenAt','partySize','children','adults','phone','name','calledAt','seatedAt','leftAt','assignedTableNumber','bookingId','tableNumbers','seatCommandId','undoUntil']) {
+      if (JSON.stringify(item[key] ?? null) !== JSON.stringify(previous[key] ?? null)) fail('use-queue-command',409)
+    }
+    return {...previous,notes:typeof item.notes==='string'?item.notes:previous.notes}
+  }
   if (!['waiting','called','seated','left','skipped'].includes(item.status)) fail('invalid-waitlist-status')
   if (previous && ['seated','left'].includes(previous.status) && item.status!==previous.status) fail('waitlist-ended',409)
   if ((item.queueVersion||0)!==(previous?.queueVersion||0)) fail('waitlist-changed',409)

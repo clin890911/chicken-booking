@@ -1,3 +1,6 @@
+import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
+import { waitlistDay } from '../../../services/waitlistService'
+import { toastWaitlistSeat } from '../../../utils/waitlistSeatToast'
 import { useMemo, useState, useEffect } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -17,7 +20,7 @@ import { releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } 
 //   - 候位列：[入座]
 export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated }) {
   const {
-    bookings, waitlist, settings, assignBookingToTable, seatBooking, seatWaitlist,
+    bookings, waitlist, groupReservations = [], tables = [], settings, assignBookingToTable, seatBooking, seatWaitlist, undoWaitlistSeat,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
   } = useBooking()
   const toast = useToast()
@@ -73,7 +76,7 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
     const rank = (w) => (w.status === 'waiting' ? 0 : 1)
     return waitlist
       .filter(w =>
-        (w.status === 'waiting' || w.status === 'called') &&
+        (w.status === 'waiting' || w.status === 'called') && waitlistDay(w) === today &&
         Number(w.partySize) <= squeezeSeats([table])
       )
       .sort((a, b) =>
@@ -101,7 +104,9 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
   // 會解除他筆預配的動作要先勾「我知道，仍要帶這桌」才解鎖——與現場帶位面板（FastWalkInPanel）、
   // 選桌模式（ModeBanner）、抽屜散客入座同一個口徑（過去這裡按下去就直接解除，無勾選、入座也無復原）。
   // 只鎖「標了將解除」的那幾顆鈕；不會解除任何人的動作照常一下完成。換桌就重置。
+  const groupHold = buildGroupHolds(todayActiveGroups(groupReservations, today), tables)[table.number]
   const [override, setOverride] = useState(false)
+  const [waitBusy, setWaitBusy] = useState(false)
   useEffect(() => { setOverride(false) }, [table.number])
   const lockedBy = (conflicts) => conflicts.some(c => c.willRelease) && !override
   const needOverrideMsg = () => toast.warning('請先勾選「我知道，仍要帶這桌」')
@@ -145,15 +150,20 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
     onPicked?.()
   }
 
-  const seatWait = (wait) => {
+  const seatWait = async (wait) => {
+    if (waitBusy) return
     const overridden = conflictsFor('now', null)
-    if (lockedBy(overridden)) return needOverrideMsg()
-    const r = seatWaitlist(wait.id, table.number)
+    if (lockedBy(overridden) || (groupHold?.holds?.length && !override)) return needOverrideMsg()
+    setWaitBusy(true)
+    const r = await seatWaitlist(wait.id, table.number, { confirmedConflictTables: override && (overridden.some(c=>c.overlaps) || groupHold?.holds?.length) ? [table.number] : [] })
+    setWaitBusy(false)
     if (!r.ok) return toast.error('入座失敗：' + r.error)
-    releaseOverlappingPreassigns(overridden, releaseOpts)
+    // 預配釋放與復原由雲端交易完成，不能另推本機解除。
     // 候位入座＝客人已在現場，不留在桌況抽屜——切回帶位籤讓店員接著帶下一組
     // （由父層 OperationsView 的 seatedToWalkin 統一收尾：關抽屜＋切籤＋toast 帶「查看」）
-    onWaitlistSeated?.(table.number, `${wait.name}（候位 #${wait.queueNumber}）入座 ${table.number}`)
+    const message = `${wait.name}（候位 #${wait.queueNumber}）入座 ${table.number}`
+    if (!onWaitlistSeated) toastWaitlistSeat(r, { message, toast, undoWaitlistSeat })
+    onWaitlistSeated?.(table.number, message, r)
   }
 
   const totalCount = pendingBookings.length + pendingWaitlist.length
@@ -244,10 +254,10 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
       </div>
       <button
         onClick={() => seatWait(w)}
-        disabled={!!waitRel && !override}
+        disabled={waitBusy || ((!!waitRel || groupHold?.holds?.length) && !override)}
         className="w-full min-h-[44px] mt-1.5 text-[11px] py-1.5 bg-chicken-green text-white rounded font-bold hover:opacity-90 disabled:opacity-40"
       >
-        入座{waitRel ? <span className="block text-[10px] font-bold text-amber-100">（{waitRel}）</span> : null}
+        {waitBusy?'確認入座中…':'入座'}{waitRel ? <span className="block text-[10px] font-bold text-amber-100">（{waitRel}）</span> : null}
       </button>
     </div>
   )
@@ -261,9 +271,10 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
       <div className="text-[11px] font-bold text-chicken-brown/60 mb-2">
         可入座 {table.number}（{totalCount} 組候選 · 容量 {table.capacity} 人）
       </div>
-      {anyRelease && (
+      {(anyRelease || (pendingWaitlist.length > 0 && groupHold?.holds?.length)) && (
         <div className="mb-2 rounded-lg border border-chicken-red/40 bg-chicken-red/10 px-3 py-2">
           <div className="text-xs font-bold text-chicken-red">標「將解除」的動作會解除時段重疊的他筆預配（需重新指派）。</div>
+          {!!groupHold?.holds?.length && <p className="text-xs">此桌為今日團體預留；候位入座將使用團體保留桌。</p>}
           <label className="mt-1.5 flex items-center gap-2 text-xs font-bold text-chicken-red cursor-pointer">
             <input type="checkbox" checked={override} onChange={e => setOverride(e.target.checked)} className="w-4 h-4 accent-current" />
             我知道，仍要帶這桌

@@ -133,7 +133,10 @@ describe('adminPushData：closures 合併與主要寫入／通知的順序', () 
       partial: true, settingsChangedKeys: ['closures'], closuresBase: base.closures,
       dataset: { settings: settingsWith({ '2026-10-12': ['lunch1', 'lunch2'], '2026-10-16': ['lunch1'] }), bookings: [{ id: 'H1', name: '電話客', status: 'confirmed', date: '2026-10-16' }] },
     }
-    fake.failures.batch = 1
+    // Booking writes now use a fenced transaction; fail the second transaction after closures commits.
+    const originalTransaction=fake.db.runTransaction
+    let transactionCount=0
+    fake.db.runTransaction=async fn=>{if(++transactionCount===2)throw Error('injected-main-transaction-failure');return originalTransaction(fn)}
     const fail = await call('host', body)
     expect(fail.code).toBe(500)
     expect(fake.records.has('bookings/H1')).toBe(false)

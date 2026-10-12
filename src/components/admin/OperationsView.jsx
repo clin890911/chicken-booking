@@ -1,3 +1,4 @@
+import { toastWaitlistSeat } from '../../utils/waitlistSeatToast'
 import HandoffPanel from './ops/HandoffPanel'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import FloorMap from './floormap/FloorMap'
@@ -183,7 +184,7 @@ export function saveQuickReserve(payload, { date, kind, table, needsCombo, creat
 export default function OperationsView({ pendingAssign, onAssignDone, pendingMove, onMoveDone, onMoveConsumed, onAddBooking }) {
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
-    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, reseatGroupBatchTable,
+    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, undoWaitlistSeat, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, reseatGroupBatchTable,
     cancelBooking, seatBooking, seatBookingAllTables, assignAndSeatBooking, undoSeatBooking,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
@@ -201,6 +202,13 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const [railTab, setRailTab] = useState('walkin') // 左側操作欄籤（預設帶位）；ESC/關閉抽屜不重設
   const [mode, setMode] = useState(null)
   const modeSource = useRef(null)
+  const waitlistSeatBusy = useRef(false)
+  const [waitlistSeatPending, setWaitlistSeatPending] = useState(false)
+  const awaitWaitlistSeat = async fn => {
+    if (waitlistSeatBusy.current) return { ok:false, error:'原入座仍在確認中，請稍候' }
+    waitlistSeatBusy.current = true; setWaitlistSeatPending(true)
+    try { return await fn() } finally { waitlistSeatBusy.current = false; setWaitlistSeatPending(false) }
+  }
   const [opsNow, setOpsNow] = useState(() => Date.now())
   const [locateTableRequest, setLocateTableRequest] = useState(null)
   const [waitlistNext, setWaitlistNext] = useState(false)
@@ -478,8 +486,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // seatedToWalkin（純函式，見上方）綁上這個畫面的真實 setter——三條候位入座路徑共用
   // toast「查看」開抽屜會把左欄（含新增面板）換掉 → 面板開著時擋下（清空選取 null 不擋）
   const selectTableGuarded = (n) => { if (n != null && blockedByReserve()) return; setSelectedTable(n) }
-  const finishWaitlistSeat = (tableNumber, msg) => {
-    seatedToWalkin(tableNumber, msg, { setSelectedTable: selectTableGuarded, setMode, setPendingConfirm, setRailTab, toast })
+  const finishWaitlistSeat = (tableNumber, msg, result) => {
+    if (result) {
+      setSelectedTable(null); setMode(null); setPendingConfirm(null); setRailTab('walkin')
+      toastWaitlistSeat(result, { message: msg, toast, undoWaitlistSeat, onView: selectTableGuarded })
+    } else seatedToWalkin(tableNumber, msg, { setSelectedTable: selectTableGuarded, setMode, setPendingConfirm, setRailTab, toast })
     setWaitlistNext(true)
   }
 
@@ -673,7 +684,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   }
 
   // 真正執行指派/候位入座/換桌（由二步確認的第二步或確認鈕觸發）
-  const executeAssign = (number, selectionMode = mode) => {
+  const executeAssign = async (number, selectionMode = mode) => {
     const mode = selectionMode
     if (!mode || !number) return
     // 動手前先記下這張桌上的預配與「會不會被解除」（指派後 bookings 會變；警示講什麼就做什麼）
@@ -711,11 +722,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       return
     }
     if (mode.type === 'seat-waitlist') {
-      const r = seatWaitlist(mode.wait.id, number)
+      const r = await awaitWaitlistSeat(()=>seatWaitlist(mode.wait.id, number, { confirmedConflictTables: (overridden.some(c=>c.overlaps) || groupHoldTables[number]?.holds?.length) ? [number] : [] }))
       if (!r.ok) return toast.error('入座失敗：' + r.error)
-      releaseOverlappingPreassigns(overridden, releaseOpts)
       flashAssigned(number)
-      finishWaitlistSeat(number, `${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`)
+      finishWaitlistSeat(number, `${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`, r)
       return
     }
     if (mode.type === 'move') {
@@ -789,7 +799,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const multiWarningKey = multiWarnings.length ? multiWarnings.join('；') + (seatedWarningSignature || '') : ''
   const multiWarningConfirmed = !multiWarningKey || mode?.confirmedWarning === multiWarningKey
 
-  const confirmWalkinMulti = () => {
+  const confirmWalkinMulti = async () => {
     if (mode?.type !== 'assign-multi') return
     // 選桌期間跨過鎖桌門檻：先更新語意／警示再讓店員確認，不以舊文案直接鎖桌。
     if (mode.kind === 'booking' && mode.booking.status !== 'arrived') {
@@ -852,11 +862,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const overridden = mode.selected.flatMap(n => preassignConflictsFor(n))
     const tablesText = mode.selected.join(' + ')
     if (mode.kind === 'waitlist') {
-      const r = seatWaitlistMulti(mode.wait.id, mode.selected)
+      const r = await awaitWaitlistSeat(()=>seatWaitlistMulti(mode.wait.id, mode.selected, { confirmedConflictTables: mode.selected.filter(n=>preassignConflictsFor(n).some(c=>c.overlaps) || groupHoldTables[n]?.holds?.length) }))
       if (!r.ok) return toast.error('入座失敗：' + r.error)
-      releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
       flashAssigned(mode.selected[0])
-      finishWaitlistSeat(mode.selected[0], `${mode.wait.name}（候位 #${mode.wait.queueNumber}・${mode.need} 位）併桌入座 ${tablesText} · 可指派下一組`)
+      finishWaitlistSeat(mode.selected[0], `${mode.wait.name}（候位 #${mode.wait.queueNumber}・${mode.need} 位）併桌入座 ${tablesText} · 可指派下一組`, r)
       return
     }
     if (mode.lockKind === 'preassign') {
@@ -1141,6 +1150,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         </div>
       </div>
 
+      {waitlistSeatPending && <p role="status" className="px-4 py-2 bg-amber-50 text-amber-800 font-bold">正在確認候位入座，雲端確認後才會占桌；請稍候。</p>}
       {/* 「現在該做什麼」提示列：過時未到 / 超時 / 待清 / 自動處理紀錄 / 節奏單句 */}
       <OpsHintBar
         onOpenUpcoming={() => { setSelectedTable(null); setRailTab('upcoming') }}

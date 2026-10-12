@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import crypto from 'node:crypto'
+import {readOperationalUpdates} from '../../functions/lib/operationalBulk.js'
 import { guardSettingsPush, settingsReplaceOptions } from '../../functions/lib/settingsGuard'
 import { classifyDatasetByPermission } from '../../functions/lib/staffAccess'
 import { DEFAULT_LINE_LOGIN_START_ENDPOINT } from '../../functions/lib/lineReadiness'
@@ -67,12 +68,12 @@ function harness(cloudSettings) {
   const start = source.indexOf('export const adminPushData')
   const push = source.slice(start, source.indexOf('\n})', start) + 3).replace('export const', 'const')
   const adminPushData = new Function(
-    'onRequest', 'db', 'requireStaff', 'errorWithStatus', 'crypto', 'PUBLIC_CORS', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'LINE_CHANNEL_ACCESS_TOKEN',
+    'readOperationalUpdates','onRequest', 'db', 'requireStaff', 'errorWithStatus', 'crypto', 'PUBLIC_CORS', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'LINE_CHANNEL_ACCESS_TOKEN',
     'SYNC_COLLECTION_IDKEYS', 'classifyDatasetByPermission', 'snapshotBookingsByIds', 'COLLECTIONS', 'buildBookingUpsertData', 'createServerToken',
     'stripServerOwnedCustomerFields', 'upsertOps', 'deleteOps', 'normalizeStoreSettings', 'readSettingsForAdminNotify', 'commitInChunks',
     'notifyAdminBookingChanges', 'notifyAdminBookingTelegram', 'guardSettingsPush', 'settingsReplaceOptions', 'reportSettingsGuard', 'protectQueueUpsert',
     push + '\nreturn adminPushData',
-  )((_, fn) => fn, db, async () => ({ uid: 'u1', role: 'manager', email: 'm@example.com' }), (m, s) => Object.assign(Error(m), { status: s }), crypto, true, '', '', '',
+  )(readOperationalUpdates,(_, fn) => fn, db, async () => ({ uid: 'u1', role: 'manager', email: 'm@example.com' }), (m, s) => Object.assign(Error(m), { status: s }), crypto, true, '', '', '',
     { bookings: 'id' }, classifyDatasetByPermission, async () => new Map(), { bookings: 'bookings', waitlist: 'waitlist', customers: 'customers' }, x => x, () => '',
     x => x, () => [], () => [], normalizeStoreSettings, async () => ({}), commitInChunks,
     async () => {}, async () => {}, guardSettingsPush, settingsReplaceOptions, async () => {}, x => x)
