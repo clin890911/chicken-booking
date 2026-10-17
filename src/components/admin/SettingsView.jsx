@@ -25,6 +25,7 @@ import { onlineLeadLabel } from '../../utils/guestPolicy'
 import { CLOSURE_SETTING_KEYS, isClosureSettingKey, settingsWriteScope } from '../../utils/settingsScope'
 import { describeClosureConflicts } from '../../utils/closuresMerge'
 import { useOpaqueMode } from '../../utils/opaqueMode'
+import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -1120,14 +1121,18 @@ function readBannerFile(file) {
 // iPad Safari 可能不支援系統「降低透明度」的 CSS 偵測 → 給一個 app 內開關；立即生效、不用按儲存。
 function DeviceDisplaySection() {
   const [opaque, setOpaque] = useOpaqueMode()
+  const [hideStrip, setHideStrip] = useDeviceFlag(HIDE_ARRIVAL_STRIP_KEY)
   const toast = useToast()
+  const toggleStrip = () => {
+    if (!setHideStrip(!hideStrip)) toast.warning('這台裝置無法記住設定（可能是私密瀏覽），重新整理後會回到預設')
+  }
   const toggle = () => {
     const next = !opaque
     const saved = setOpaque(next)
     if (!saved) toast.warning('這台裝置無法記住設定（可能是私密瀏覽），重新整理後會回到預設')
   }
   return (
-    <SettingsSection sectionKey="device-display" title="這台裝置的顯示" description="只影響這台裝置，不會同步到其他裝置。" badge={opaque ? '不透明' : '玻璃'} summary={opaque ? '不透明模式：導覽、鍵盤、通知改成實心底' : '玻璃效果（預設）'} defaultOpen>
+    <SettingsSection sectionKey="device-display" title="這台裝置的顯示" description="只影響這台裝置，不會同步到其他裝置。" badge={opaque ? '不透明' : '玻璃'} summary={`${opaque ? '不透明模式' : '玻璃效果（預設）'} · 等報到列${hideStrip ? '已關閉' : '顯示'}`} defaultOpen>
       <button
         type="button"
         role="switch"
@@ -1143,6 +1148,23 @@ function DeviceDisplaySection() {
         </span>
         <span aria-hidden="true" className={`relative flex-none w-[52px] h-8 rounded-full transition-colors ${opaque ? 'bg-emerald-700' : 'bg-chicken-brown/25'}`}>
           <span className={`absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow transition-transform ${opaque ? 'translate-x-5' : ''}`} />
+        </span>
+      </button>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={!hideStrip}
+        onClick={toggleStrip}
+        className="tap mt-2 w-full flex items-center justify-between gap-4 min-h-[56px] rounded-xl border border-chicken-brown/15 bg-white px-4 py-3 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block font-bold text-chicken-brown">現場地圖下方「等報到」列</span>
+          <span className="block text-xs text-chicken-brown/70 mt-0.5 leading-5">
+            關掉後桌況圖更大；客人到店改從「今日訂位」卡片按「客人到了」。
+          </span>
+        </span>
+        <span aria-hidden="true" className={`relative flex-none w-[52px] h-8 rounded-full transition-colors ${!hideStrip ? 'bg-emerald-700' : 'bg-chicken-brown/25'}`}>
+          <span className={`absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow transition-transform ${!hideStrip ? 'translate-x-5' : ''}`} />
         </span>
       </button>
     </SettingsSection>

@@ -182,11 +182,7 @@ export default function FastWalkInPanel({
               </button>
             )}
           </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-chicken-brown/25 bg-chicken-brown/5 px-3 py-2.5 text-sm font-bold text-chicken-brown/60 text-center">
-            點右邊桌況圖選一張桌
-          </div>
-        )}
+        ) : null /* 未選桌不放提示框（Barry 2026-10-17：多佔一列；底部「還差桌位」與建議列已足夠提示） */}
 
         <HonorificNameField
           title={title}

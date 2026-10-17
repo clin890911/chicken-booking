@@ -25,15 +25,14 @@ import { overdueMinOf } from '../../../utils/bookingPulse'
 import { formatDate } from '../../../utils/timeSlots'
 import { isArriveEligible, isPreassignArriveEligible, ARRIVE_WINDOW_BEFORE_MIN, ARRIVE_WINDOW_AFTER_MIN } from './FloorMap'
 import GlyphText from '../../ui/GlyphText'
+import { formatPhone } from '../../../utils/phoneFormat'
 
 // 遲到判定沿用 UpcomingPanel/BookingCard 既有口徑（graceMin=15，見 utils/bookingPulse.js）。
 const LATE_GRACE_MIN = 15
 
-// 電話末 3 碼（小字）：同名「陳先生」靠它分辨；無電話不顯示。
-const phoneTail = (phone) => {
-  const d = String(phone || '').replace(/\D/g, '')
-  return d.length >= 3 ? d.slice(-3) : ''
-}
+// 完整電話（Barry 2026-10-17：iPad 上電話一律完整顯示，不再只秀末 3 碼）：同名「陳先生」靠它分辨、
+// 也能直接照著撥；whitespace-nowrap＋shrink-0 不截斷（姓名才 truncate）；無電話不顯示。
+const phoneFull = (phone) => (String(phone || '').replace(/\D/g, '').length >= 3 ? formatPhone(phone) : '')
 
 // 未配桌的待到訂位：今天、confirmed/pending、沒有任何桌號、時間窗同鎖桌／預配（前 60／後 60 分）。
 export function isUnassignedArriveEligible(booking, now = Date.now()) {
@@ -174,7 +173,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                     {booking.timeSlot}
                   </span>
                   <span className="text-sm font-bold text-chicken-brown truncate max-w-[7rem]">{booking.name}</span>
-                  {phoneTail(booking.phone) && <span data-testid="phone-tail" className="text-[10px] text-chicken-brown/50 tabular-nums shrink-0 -ml-1">…{phoneTail(booking.phone)}</span>}
+                  {phoneFull(booking.phone) && <span data-testid="phone-full" className="text-xs font-bold text-chicken-brown/70 tabular-nums whitespace-nowrap shrink-0 -ml-1">{phoneFull(booking.phone)}</span>}
                   <span className="text-[11px] font-bold text-chicken-brown/50 tabular-nums">{booking.guests} 位</span>
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-800"
                     title="還沒配桌：按到了在桌況圖選一張空桌，確認即入座">
@@ -217,7 +216,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                   {booking.timeSlot}
                 </span>
                 <span className="text-sm font-bold text-chicken-brown truncate max-w-[7rem]">{booking.name}</span>
-                {phoneTail(booking.phone) && <span data-testid="phone-tail" className="text-[10px] text-chicken-brown/50 tabular-nums shrink-0 -ml-1">…{phoneTail(booking.phone)}</span>}
+                {phoneFull(booking.phone) && <span data-testid="phone-full" className="text-xs font-bold text-chicken-brown/70 tabular-nums whitespace-nowrap shrink-0 -ml-1">{phoneFull(booking.phone)}</span>}
                 <span
                   className={`text-[11px] font-bold ${crossFloor ? 'text-chicken-brown/70' : 'text-chicken-brown/50'}`}
                   title={crossFloor ? `此桌在 ${table.floor}，點選會自動切換樓層` : undefined}

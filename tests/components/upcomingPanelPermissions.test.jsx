@@ -94,15 +94,16 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     expect(texts.some(t => t.includes('指派桌位'))).toBe(true)
     expect(texts.some(t => t.includes('客人到了'))).toBe(true)
     expect(texts.some(t => t.includes('標 No-show'))).toBe(true)
-    expect(texts.some(t => t.includes('已完成'))).toBe(true)
+    expect(texts.some(t => t.includes('已吃完'))).toBe(true)
   })
 
-  it('「已完成」直接放卡片上（不藏在「⋯ 更多」裡）：一下就按得到', () => {
+  it('2026-10-17 卡片減量：「補登：來過、已吃完」與 No-show 都收在「⋯ 更多」，第一層只留主動作', () => {
     render(roleCan('manager'))
-    const done = [...container.querySelectorAll('button')].find(b => b.textContent.trim() === '已完成')
+    const done = [...container.querySelectorAll('button')].find(b => b.textContent.includes('已吃完'))
     expect(done).toBeTruthy()
-    expect(done.closest('details')).toBeNull()
-    // No-show 仍收在「更多」裡（會扣客人信用，不放第一層）
+    expect(done.closest('details')).toBeTruthy()
+    // 第一層不再有與「客人到了」看起來同義的「已完成」
+    expect([...container.querySelectorAll('button')].some(b => b.textContent.trim() === '已完成')).toBe(false)
     const noshow = [...container.querySelectorAll('button')].find(b => b.textContent.includes('標 No-show'))
     expect(noshow.closest('details')).toBeTruthy()
   })
@@ -113,7 +114,7 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     expect(texts.some(t => t.includes('指派桌位'))).toBe(false)
     expect(texts.some(t => t.includes('客人到了'))).toBe(false)
     expect(texts.some(t => t.includes('標 No-show'))).toBe(false)
-    expect(texts.some(t => t.includes('已完成'))).toBe(false)
+    expect(texts.some(t => t.includes('已吃完'))).toBe(false)
   })
 
   it('kitchen：訂位資訊本身照常看得到（是隱藏動作，不是隱藏整張卡）', () => {
@@ -182,15 +183,15 @@ describe('UpcomingPanel 動作鈕的前端權限門', () => {
     expect(texts.some(t => t.includes('客人到了'))).toBe(false)
   })
 
-  it.each([OVERDUE_UNASSIGNED, OVERDUE_ASSIGNED])('kitchen：$name 可聯絡與看詳情，不能執行任何寫入動作', (b) => {
+  it.each([OVERDUE_UNASSIGNED, OVERDUE_ASSIGNED])('kitchen：$name 看得到電話與詳情，不能執行任何寫入動作', (b) => {
     render(roleCan('kitchen'), [b])
     const texts = buttonTexts()
-    for (const action of ['指派桌位', '客人到了', '標 No-show', '已完成', '改桌']) {
+    for (const action of ['指派桌位', '客人到了', '標 No-show', '已吃完', '改桌']) {
       expect(texts.some(text => text.includes(action))).toBe(false)
     }
     expect(container.querySelector('summary')).toBeNull()
-    const contact = container.querySelector('a[href="tel:0912345678"]')
-    expect(contact).toBeTruthy()
+    // 2026-10-17：撥號收進「⋯ 更多」；唯讀角色沒有選單 → 只剩「詳情」（電話號碼本身仍顯示在卡片上）
+    expect(container.textContent).toContain('0912-345-678')
     const detail = [...container.querySelectorAll('button')].find(button => button.textContent.includes('詳情'))
     expect(detail).toBeTruthy()
     act(() => detail.click())

@@ -12,6 +12,7 @@ import { PREASSIGN_COLOR } from '../admin/floormap/statusColors'
 import { formatBookingTables } from '../../utils/bookingTables'
 import GlyphText from '../ui/GlyphText'
 import { Phone } from 'lucide-react'
+import { formatPhone } from '../../utils/phoneFormat'
 
 // 顯示字典與純函式動作已抽到 ./bookingLabels 與 utils/bookingActions；
 // 這裡 re-export 讓既有 import（CustomerDetailModal / TableDrawer / 測試）不必改。
@@ -68,6 +69,8 @@ function BookingCard({ booking, onAssign, onMove }) {
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="text-lg font-bold text-chicken-brown tabular-nums">{booking.timeSlot}</span>
               <span className="text-base font-bold text-chicken-brown">{booking.name}</span>
+              {/* 完整電話（純文字、不截斷；撥號只走「聯絡」鈕，同現場今日訂位卡） */}
+              {formatPhone(booking.phone) && <span data-testid="phone-full" className="text-sm font-bold tabular-nums whitespace-nowrap text-chicken-brown">{formatPhone(booking.phone)}</span>}
               <span className="text-sm text-chicken-brown/60">{booking.guests} 位</span>
               {booking.assignedTableId && (
                 tableKind === 'preassign' ? (

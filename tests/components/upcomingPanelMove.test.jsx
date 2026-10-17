@@ -48,19 +48,18 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); vi.clearAllMocks(); confirm.mockResolvedValue(true) })
   afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
 
-  it('host：「已指派 105 · 改桌」是按鈕（↔ 已改線條圖示），點了呼叫 onMoveTable（且不觸發卡片本身的點擊）', () => {
+  it('host：卡片第一排「改桌」是按鈕（title 寫目前桌號）（↔ 已改線條圖示），點了呼叫 onMoveTable（且不觸發卡片本身的點擊）', () => {
     render(roleCan('host'))
-    act(() => container.querySelector('summary').click())
-    expect(container.querySelector('details').open).toBe(true)
     const b = btn('改桌')
-    expect(b.textContent).toContain('已指派 105')
+    expect(b.closest('details')).toBeNull()
+    expect(b.title).toContain('目前 105')
     act(() => { b.click() })
     expect(onMoveTable).toHaveBeenCalledWith(YU)
   })
 
-  it('預配也能改桌（「已預配 105 · ↔ 改桌」）', () => {
+  it('預配也能改桌（title「目前預配 105」）', () => {
     render(roleCan('host'), [YU], [{ number: '105', status: 'vacant', currentBookingId: null }])
-    expect(btn('改桌').textContent).toContain('已預配 105')
+    expect(btn('改桌').title).toContain('目前預配 105')
   })
 
   it('kitchen（唯讀）：徽章維持唯讀、沒有改桌', () => {
@@ -69,13 +68,11 @@ describe('UpcomingPanel：桌號徽章＝改桌入口', () => {
     expect(container.textContent).toContain('已指派 105')
   })
 
-  it('未到併桌訂位：更多改桌交整組onMoveTable，原安排保留', () => {
+  it('未到併桌訂位：改桌交整組onMoveTable，原安排保留', () => {
     render(roleCan('host'), [{ ...YU, extraTableIds: ['106'] }])
-    act(() => container.querySelector('summary').click())
-    expect(container.querySelector('details').open).toBe(true)
     const b = btn('改桌')
     expect(b.getAttribute('aria-disabled')).not.toBe('true')
-    expect(b.textContent).toContain('105 + 106')
+    expect(b.title).toContain('105 + 106')
     act(() => { b.click() })
     expect(onMoveTable).toHaveBeenCalledWith(expect.objectContaining({ extraTableIds: ['106'], assignedTableId: '105' }))
     // 入口只派工作模式，取消前不改原指派，實際取消由OperationsView整合測試覆蓋。

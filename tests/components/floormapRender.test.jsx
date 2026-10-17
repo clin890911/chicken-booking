@@ -90,12 +90,12 @@ describe('computeFloorContentBBox / computeFloorViewBox（自動裁切純函式�
     expect(vb.height).toBeGreaterThan(0)
   })
 
-  it('只有一張桌：能算出合理的 viewBox（桌尺寸 + 60 留白四周）', () => {
+  it('只有一張桌：能算出合理的 viewBox（桌尺寸 + 16 留白四周）', () => {
     const t = { x: 100, y: 200, w: 90, h: 75, rotation: 0 }
     const bbox = computeFloorContentBBox([t], [])
     expect(bbox).toEqual({ minX: 100, minY: 200, maxX: 190, maxY: 275 })
     const vb = computeFloorViewBox([t], [])
-    expect(vb).toEqual({ x: 40, y: 140, width: 210, height: 195 })
+    expect(vb).toEqual({ x: 84, y: 184, width: 122, height: 107 })
   })
 
   it('旋轉桌：bbox 用旋轉後四角的 AABB，比未旋轉時更大（不會把斜擺的桌算漏）', () => {
@@ -131,9 +131,9 @@ describe('computeFloorContentBBox / computeFloorViewBox（自動裁切純函式�
 describe('computeFloorViewBox：夾限下界（不得比原始 FLOOR_VIEWBOX 更差，但不裁掉真實內容）', () => {
   const floorTablesOf = (floor) => INITIAL_TABLES.filter(t => t.floor === floor)
 
-  it('1F 現場照片型：完整呈現入口、飲料台與縱向樓梯，裁切正常放大', () => {
+  it('1F 現場照片型：完整呈現入口、領位台與縱向樓梯，裁切正常放大', () => {
     const vb = computeFloorViewBox(floorTablesOf('1F'), FIXTURES['1F'])
-    expect(vb).toEqual({ x: 67, y: 37, width: 881, height: 763 })
+    expect(vb).toEqual({ x: 111, y: 81, width: 793, height: 718 })
     expect(vb.width).toBeLessThan(FLOOR_VIEWBOX.width)
     expect(vb.height).toBeLessThan(FLOOR_VIEWBOX.height)
     // 完全落在原始畫布內
@@ -145,7 +145,7 @@ describe('computeFloorViewBox：夾限下界（不得比原始 FLOOR_VIEWBOX 更
 
   it('2F 現場照片型：完整呈現牆面、走道與桌位，不裁掉畫布內內容', () => {
     const vb = computeFloorViewBox(floorTablesOf('2F'), FIXTURES['2F'])
-    expect(vb).toEqual({ x: 67, y: 7, width: 1133, height: 793 })
+    expect(vb).toEqual({ x: 111, y: 51, width: 1068, height: 748 })
     expect(vb.x).toBeGreaterThanOrEqual(0)
     expect(vb.y).toBeGreaterThanOrEqual(0)
     expect(vb.x + vb.width).toBeLessThanOrEqual(FLOOR_VIEWBOX.width)
@@ -200,8 +200,8 @@ describe('FloorMap 元件：自動裁切邊界情況（無桌無設施 fallback�
       <FloorMap floor="1F" tables={tables} fixtures={{ '1F': [], '2F': [] }} onSelectTable={() => {}} />
     )
     expect(html).not.toContain(`viewBox="0 0 ${FLOOR_VIEWBOX.width} ${FLOOR_VIEWBOX.height}"`)
-    // 單桌 80x75 + 60 留白：x=60 y=90 width=200 height=195
-    expect(html).toContain('viewBox="60 90 200 195"')
+    // 單桌 80x75 + 16 留白：x=104 y=134 width=112 height=107
+    expect(html).toContain('viewBox="104 134 112 107"')
   })
 })
 
