@@ -129,9 +129,14 @@ export function AuthProvider({ children }) {
     const uid = fbUser.uid || fbUser.email
     const inflight = inflightRef.current
     if (inflight.has(uid)) return inflight.get(uid)
-    const last = lastOutcomeRef.current.get(uid)
-    if (last && Date.now() - last.at < 5000) return Promise.resolve(last.outcome)
     const email = (fbUser.email || '').toLowerCase()
+    const currentEmail = () => (auth.currentUser?.email || '').toLowerCase()
+    const last = lastOutcomeRef.current.get(uid)
+    if (last && Date.now() - last.at < 5000) {
+      // 5 秒內重用 denied：此帳號若又彈窗登入成功，session 也要清掉，不能殘留。
+      if (currentEmail() === email) fbSignOut(auth).catch(() => {})
+      return Promise.resolve(last.outcome)
+    }
     const run = async () => {
       // 前端白名單只負責 UI；真正的權限由後端 requireStaff 二次把關。
       if (email && ALLOWED_EMAILS.includes(email)) {
@@ -146,8 +151,11 @@ export function AuthProvider({ children }) {
       }
       // 不在建置期白名單 → 可能是後台動態新增的管理員，由閘門問後端（有快取則樂觀放行）。
       const res = await staffGate.check(email)
-      // denied 一律照辦（即使 session 已被另一輪清掉）；其餘結果若已換人則作廢。
-      if (res.status !== 'denied' && (auth.currentUser?.email || '').toLowerCase() !== email) return { status: 'stale' }
+      // denied：session 已被另一輪清掉（currentUser 為 null）也照辦；但若已換成別的帳號，
+      // 只回報結果、不登出不改畫面，免得把剛登入的合法帳號踢掉。其餘結果若已換人則作廢。
+      const now = currentEmail()
+      if (res.status === 'denied' && now && now !== email) return { status: 'denied' }
+      if (res.status !== 'denied' && now !== email) return { status: 'stale' }
       if (res.status === 'allowed') {
         const u = buildUser(email, fbUser.displayName, res.role)
         setUser(u); setAuthNotice(null); setLoading(false)

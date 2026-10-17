@@ -261,8 +261,27 @@ const INVALID_TOKEN_CODES = new Set([
   'auth/user-disabled',
   'auth/user-not-found',
 ])
+// firebase-admin 把「抓 Google 公鑰失敗」也包成 auth/argument-error（message 是原始網路錯誤，
+// 內容不可預期），所以 argument-error 只有 message 符合已知的「token 本身壞掉」句型才算 401。
+// 句型取自 firebase-admin 13 lib/auth/token-verifier.js。
+const INVALID_ARGUMENT_TOKEN_PATTERNS = [
+  /Decoding .* failed/,
+  /expects an? /,
+  /has no "kid" claim/,
+  /has incorrect (algorithm|"aud"|"iss")/,
+  /"sub" \(subject\) claim/,
+  /has invalid signature/,
+  /does not correspond to a known public key/,
+  /must be a .*string/,
+]
 export function classifyVerifyTokenError(err) {
   const code = String(err?.code || err?.errorInfo?.code || '')
+  const message = String(err?.message || err?.errorInfo?.message || '')
+  if (code === 'auth/argument-error') {
+    return INVALID_ARGUMENT_TOKEN_PATTERNS.some((re) => re.test(message))
+      ? { status: 401, message: 'invalid-auth-token' }
+      : { status: 503, message: AUTH_UNAVAILABLE }
+  }
   if (INVALID_TOKEN_CODES.has(code)) return { status: 401, message: 'invalid-auth-token' }
   return { status: 503, message: AUTH_UNAVAILABLE }
 }
