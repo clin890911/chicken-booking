@@ -41,6 +41,9 @@ import {
   canDeleteCollection,
   canWriteSettings,
   classifyDatasetByPermission,
+  lookupAdminStaff,
+  classifyVerifyTokenError,
+  STAFF_LOOKUP_UNAVAILABLE,
 } from './lib/staffAccess.js'
 import { scopeClosureSettingsPush } from './lib/settingsScope.js'
 import { commitClosuresMerge } from './lib/closuresMergeCommit.js'
@@ -90,20 +93,24 @@ async function requireStaff(req) {
   let decoded
   try {
     decoded = await getAuth().verifyIdToken(match[1])
-  } catch {
-    throw errorWithStatus('invalid-auth-token', 401)
+  } catch (verifyErr) {
+    const c = classifyVerifyTokenError(verifyErr)
+    if (c.status === 503) console.error('verifyIdToken unavailable:', verifyErr)
+    const e = errorWithStatus(c.message, c.status)
+    if (c.status === 503) e.code = c.message
+    throw e
   }
   const email = String(decoded.email || '').toLowerCase()
   if (!email) throw errorWithStatus('not-authorized', 403)
   if (STAFF_EMAILS.includes(email)) return { uid: decoded.uid, email, role: 'manager', source: 'env' }
-  try {
-    const snap = await db.collection('admins').doc(email).get()
-    if (snap.exists && snap.data().active !== false) {
-      return { uid: decoded.uid, email, role: resolveStaffRole(snap.data().role), source: 'db' }
-    }
-  } catch (err) {
-    // 查詢失敗（非「不存在」）時保守拒絕，但留 log 供排查。
-    console.error('admins lookup failed:', err)
+  const lookup = await lookupAdminStaff(() => db.collection('admins').doc(email).get())
+  if (lookup.found) return { uid: decoded.uid, email, role: lookup.role, source: 'db' }
+  if (lookup.unavailable) {
+    // Firestore 暫時讀不到 ≠ 查無此人：回 503 讓前端當成「暫時性錯誤」而不是把人登出。
+    console.error('admins lookup failed:', lookup.error)
+    const err = errorWithStatus(STAFF_LOOKUP_UNAVAILABLE, 503)
+    err.code = STAFF_LOOKUP_UNAVAILABLE
+    throw err
   }
   throw errorWithStatus('not-authorized', 403)
 }

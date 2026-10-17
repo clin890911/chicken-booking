@@ -228,3 +228,60 @@ export function validateStaffUpsert({ email, role, name } = {}) {
     },
   }
 }
+
+// 查 admins 集合的身分判定（純邏輯，可測）。
+// getDoc: async () => ({ exists, data() })。三種結果：
+//   { found: true, role }         查到且啟用
+//   { found: false }              查無此人／已停用（呼叫端回 403 not-authorized）
+//   { unavailable: true, error }  Firestore 讀取失敗（呼叫端回 503，不可當成「未授權」）
+export const STAFF_LOOKUP_UNAVAILABLE = 'staff_lookup_unavailable'
+export async function lookupAdminStaff(getDoc) {
+  let snap
+  try {
+    snap = await getDoc()
+  } catch (error) {
+    return { unavailable: true, error }
+  }
+  if (snap && snap.exists) {
+    const data = snap.data() || {}
+    if (data.active !== false) return { found: true, role: resolveStaffRole(data.role) }
+  }
+  return { found: false }
+}
+
+// verifyIdToken 失敗分類：只有「token 本身無效」才是 401；
+// 其他（Google 公鑰抓不到、auth/internal-error、網路…）是暫時性問題 → 503，前端不可據此登出。
+export const AUTH_UNAVAILABLE = 'auth_unavailable'
+const INVALID_TOKEN_CODES = new Set([
+  'auth/id-token-expired',
+  'auth/id-token-revoked',
+  'auth/argument-error',
+  'auth/invalid-id-token',
+  'auth/invalid-user-token',
+  'auth/user-disabled',
+  'auth/user-not-found',
+])
+// firebase-admin 把「抓 Google 公鑰失敗」也包成 auth/argument-error（message 是原始網路錯誤，
+// 內容不可預期），所以 argument-error 只有 message 符合已知的「token 本身壞掉」句型才算 401。
+// 句型取自 firebase-admin 13 lib/auth/token-verifier.js。
+const INVALID_ARGUMENT_TOKEN_PATTERNS = [
+  /Decoding .* failed/,
+  /expects an? /,
+  /has no "kid" claim/,
+  /has incorrect (algorithm|"aud"|"iss")/,
+  /"sub" \(subject\) claim/,
+  /has invalid signature/,
+  /does not correspond to a known public key/,
+  /must be a .*string/,
+]
+export function classifyVerifyTokenError(err) {
+  const code = String(err?.code || err?.errorInfo?.code || '')
+  const message = String(err?.message || err?.errorInfo?.message || '')
+  if (code === 'auth/argument-error') {
+    return INVALID_ARGUMENT_TOKEN_PATTERNS.some((re) => re.test(message))
+      ? { status: 401, message: 'invalid-auth-token' }
+      : { status: 503, message: AUTH_UNAVAILABLE }
+  }
+  if (INVALID_TOKEN_CODES.has(code)) return { status: 401, message: 'invalid-auth-token' }
+  return { status: 503, message: AUTH_UNAVAILABLE }
+}
