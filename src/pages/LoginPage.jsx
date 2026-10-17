@@ -3,13 +3,15 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { Input, Button, Card } from '../components/ui'
 import GlyphText from '../components/ui/GlyphText'
+import { describeAuthError } from '../utils/authErrors'
 import { KeyRound, LockKeyhole, TriangleAlert } from 'lucide-react'
 
 export default function LoginPage() {
-  const { signIn, usingFirebase, user } = useAuth()
+  const { signIn, usingFirebase, user, authNotice, retryVerify } = useAuth()
   const nav = useNavigate()
   const [email, setEmail] = useState('')
   const [err, setErr] = useState('')
+  const [errDetail, setErrDetail] = useState('')
   const [busy, setBusy] = useState(false)
 
   // 登入成功後才導向，而且要「等 user 真的被設定」才導向：
@@ -21,15 +23,38 @@ export default function LoginPage() {
     if (user) nav('/admin', { replace: true })
   }, [user, nav])
 
+  // 把任何錯誤轉成中文顯示；使用者自己關彈窗／連點造成的取消不顯示錯誤。
+  const showError = (ex) => {
+    const d = describeAuthError(ex)
+    setErr(d.silent ? '' : d.message)
+    setErrDetail(d.silent ? '' : d.detail)
+  }
+
   const doSignIn = async (value) => {
+    if (busy) return // 防連點：第二次彈窗會讓第一次變成 cancelled-popup-request
     setErr('')
+    setErrDetail('')
     setBusy(true)
     try {
       await signIn(value)
       // 成功後不在這裡 nav；交給上方 useEffect 等 user set 後導向（避免 race）。
       // 維持 busy=true 直到 user set、元件因導向而卸載。
     } catch (ex) {
-      setErr(ex.message || '登入失敗，請再試一次')
+      showError(ex)
+      setBusy(false)
+    }
+  }
+
+  // 無法確認權限（連線不穩）時重試：沿用既有 Firebase session，不重新彈 Google 視窗。
+  const doRetry = async () => {
+    if (busy) return
+    setErr('')
+    setErrDetail('')
+    setBusy(true)
+    try {
+      await retryVerify()
+    } catch (ex) {
+      showError(ex)
       setBusy(false)
     }
   }
@@ -55,9 +80,19 @@ export default function LoginPage() {
                 請使用授權的 Google 帳號登入。僅限店長加入白名單的同仁帳號可進入後台。
               </p>
               <Button onClick={() => doSignIn()} disabled={busy} className="w-full">
-                {busy ? '登入中...' : '使用 Google 登入'}
+                {busy ? '登入中…' : '使用 Google 登入'}
               </Button>
-              {err && <p className="text-sm text-chicken-red font-bold">{err}</p>}
+              {(err || authNotice) && (
+                <div role="alert" className="space-y-2">
+                  <p className="text-sm text-chicken-red font-bold">{err || authNotice.message}</p>
+                  {errDetail && <p className="text-xs text-chicken-brown/50">錯誤代碼：{errDetail}</p>}
+                  {authNotice?.kind === 'unverified' && (
+                    <Button onClick={doRetry} disabled={busy} className="w-full">
+                      {busy ? '確認中…' : '重試'}
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -70,7 +105,7 @@ export default function LoginPage() {
                 error={err}
               />
               <Button type="submit" disabled={busy} className="w-full">
-                {busy ? '登入中...' : <GlyphText icon={KeyRound} size={18}>模擬登入（僅本機開發）</GlyphText>}
+                {busy ? '登入中…' : <GlyphText icon={KeyRound} size={18}>模擬登入（僅本機開發）</GlyphText>}
               </Button>
               <p className="text-xs text-chicken-red bg-red-50 border border-chicken-red/40 rounded-lg px-3 py-2 leading-5">
                 <TriangleAlert size={14} strokeWidth={2.4} aria-hidden="true" className="mr-1 inline-block align-[-2px]" />未設定 Firebase，目前為本機開發模式，登入後資料<b>不會上傳雲端</b>。

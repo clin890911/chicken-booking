@@ -228,3 +228,23 @@ export function validateStaffUpsert({ email, role, name } = {}) {
     },
   }
 }
+
+// 查 admins 集合的身分判定（純邏輯，可測）。
+// getDoc: async () => ({ exists, data() })。三種結果：
+//   { found: true, role }         查到且啟用
+//   { found: false }              查無此人／已停用（呼叫端回 403 not-authorized）
+//   { unavailable: true, error }  Firestore 讀取失敗（呼叫端回 503，不可當成「未授權」）
+export const STAFF_LOOKUP_UNAVAILABLE = 'staff_lookup_unavailable'
+export async function lookupAdminStaff(getDoc) {
+  let snap
+  try {
+    snap = await getDoc()
+  } catch (error) {
+    return { unavailable: true, error }
+  }
+  if (snap && snap.exists) {
+    const data = snap.data() || {}
+    if (data.active !== false) return { found: true, role: resolveStaffRole(data.role) }
+  }
+  return { found: false }
+}

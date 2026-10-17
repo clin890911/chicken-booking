@@ -1,9 +1,11 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import {
   auth, googleProvider, isFirebaseConfigured,
   signInWithPopup, signOut as fbSignOut, onAuthStateChanged, getIdToken,
 } from '../services/firebase'
 import { staffWhoAmI } from '../services/cloudDataService'
+import { createStaffGate, verifyStaffRole } from '../utils/staffGate'
+import { STAFF_DENIED_CODE, STAFF_DENIED_MESSAGE, STAFF_UNVERIFIED_CODE, STAFF_UNVERIFIED_MESSAGE } from '../utils/authErrors'
 
 const STORAGE_KEY = 'chicken_auth_v1'
 
@@ -100,47 +102,91 @@ function buildUser(email, displayName, roleOverride) {
   }
 }
 
-// 動態管理員驗證：email 不在建置期白名單時，拿 ID Token 問後端 staffWhoAmI
-// （admins 集合由店長在後台「管理員帳號」維護，毋須改環境變數重新部署）。
-// 回 { ok, role } 或 null（非員工 / 查詢失敗）。
-async function verifyDynamicStaff() {
-  try {
-    const token = await getIdToken()
-    if (!token) return null
-    const info = await staffWhoAmI(token)
-    return info?.ok ? info : null
-  } catch {
-    return null
-  }
+const staffGate = createStaffGate({
+  verify: () => verifyStaffRole({ getToken: getIdToken, whoAmI: staffWhoAmI }),
+})
+
+function codedError(code, message) {
+  const e = new Error(message)
+  e.code = code
+  return e
 }
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  // 登入頁要顯示的帳號狀態：{kind:'denied'|'unverified', message} 或 null。
+  // unverified＝Firebase session 保留、但還沒能向後端確認權限，可按「重試」。
+  const [authNotice, setAuthNotice] = useState(null)
+  const inflightRef = useRef(new Map())
+
+  // 驗證只在這一處做（onAuthStateChanged 與 signIn 共用，同一 uid 的 in-flight 去重）。
+  // 回傳 {status:'allowed', user} / {status:'denied'} / {status:'unverified', message} / {status:'stale'}
+  const processFbUser = useCallback((fbUser) => {
+    const uid = fbUser.uid || fbUser.email
+    const inflight = inflightRef.current
+    if (inflight.has(uid)) return inflight.get(uid)
+    const email = (fbUser.email || '').toLowerCase()
+    const run = async () => {
+      // 前端白名單只負責 UI；真正的權限由後端 requireStaff 二次把關。
+      if (email && ALLOWED_EMAILS.includes(email)) {
+        const u = buildUser(email, fbUser.displayName)
+        setUser(u); setAuthNotice(null); setLoading(false)
+        return { status: 'allowed', user: u }
+      }
+      if (!email) {
+        await fbSignOut(auth).catch(() => {})
+        setUser(null); setAuthNotice({ kind: 'denied', message: STAFF_DENIED_MESSAGE }); setLoading(false)
+        return { status: 'denied' }
+      }
+      // 不在建置期白名單 → 可能是後台動態新增的管理員，由閘門問後端（有快取則樂觀放行）。
+      const res = await staffGate.check(email)
+      if ((auth.currentUser?.email || '').toLowerCase() !== email) return { status: 'stale' }
+      if (res.status === 'allowed') {
+        const u = buildUser(email, fbUser.displayName, res.role)
+        setUser(u); setAuthNotice(null); setLoading(false)
+        res.background?.then((bg) => {
+          if (bg.status === 'ok' && bg.changed) {
+            setUser(prev => (prev && prev.email === email ? buildUser(email, fbUser.displayName, bg.role) : prev))
+          } else if (bg.status === 'denied') {
+            // 背景驗證被後端明確拒絕（例如店長剛停用此帳號）→ 登出。
+            fbSignOut(auth).catch(() => {})
+            setUser(null)
+            setAuthNotice({ kind: 'denied', message: STAFF_DENIED_MESSAGE })
+          }
+        })
+        return { status: 'allowed', user: u }
+      }
+      if (res.status === 'denied') {
+        await fbSignOut(auth).catch(() => {})
+        setUser(null); setAuthNotice({ kind: 'denied', message: STAFF_DENIED_MESSAGE }); setLoading(false)
+        return { status: 'denied' }
+      }
+      // 網路／逾時／5xx：不登出，保留 Firebase session，讓登入頁顯示可重試的錯誤。
+      setUser(null); setAuthNotice({ kind: 'unverified', message: STAFF_UNVERIFIED_MESSAGE }); setLoading(false)
+      return { status: 'unverified', message: res.message }
+    }
+    const p = run().finally(() => { inflight.delete(uid) })
+    inflight.set(uid, p)
+    return p
+  }, [])
 
   useEffect(() => {
     // 正式模式：交由 Firebase Auth 維護登入狀態（onAuthStateChanged）。
     if (isFirebaseConfigured) {
       const unsub = onAuthStateChanged(auth, async (fbUser) => {
-        const email = (fbUser?.email || '').toLowerCase()
-        // 前端白名單只負責 UI；真正的權限由後端 requireStaff 二次把關。
-        if (fbUser && ALLOWED_EMAILS.includes(email)) {
-          setUser(buildUser(email, fbUser.displayName))
+        if (!fbUser) {
+          staffGate.cancelBackground()
+          setUser(null)
           setLoading(false)
           return
         }
-        // 不在建置期白名單 → 可能是後台動態新增的管理員，問後端確認後才放行/登出。
-        if (fbUser && email) {
-          const info = await verifyDynamicStaff()
-          if (info) {
-            setUser(buildUser(email, fbUser.displayName, info.role))
-            setLoading(false)
-            return
-          }
+        try {
+          await processFbUser(fbUser)
+        } catch {
+          // 預期外的錯誤也不能把人靜默踢出：當成暫時無法確認。
+          setUser(null); setAuthNotice({ kind: 'unverified', message: STAFF_UNVERIFIED_MESSAGE }); setLoading(false)
         }
-        if (fbUser) fbSignOut(auth).catch(() => {})
-        setUser(null)
-        setLoading(false)
       })
       return unsub
     }
@@ -150,22 +196,21 @@ export function AuthProvider({ children }) {
       if (raw) setUser(JSON.parse(raw))
     } catch {}
     setLoading(false)
-  }, [])
+  }, [processFbUser])
+
+  const outcomeOrThrow = (outcome) => {
+    if (outcome.status === 'allowed') return outcome.user
+    if (outcome.status === 'denied') throw codedError(STAFF_DENIED_CODE, STAFF_DENIED_MESSAGE)
+    throw codedError(STAFF_UNVERIFIED_CODE, STAFF_UNVERIFIED_MESSAGE)
+  }
 
   // 正式模式用 Google 彈窗登入；開發模式 fallback 用 email 模擬。
+  // Firebase 路徑：只負責彈窗，權限驗證交給 processFbUser（與 onAuthStateChanged 共用 in-flight）。
   const signIn = async (email) => {
     if (isFirebaseConfigured) {
+      setAuthNotice(null)
       const result = await signInWithPopup(auth, googleProvider)
-      const e = (result.user?.email || '').toLowerCase()
-      if (ALLOWED_EMAILS.includes(e)) {
-        // onAuthStateChanged 會接手設定 user
-        return buildUser(e, result.user?.displayName)
-      }
-      // 動態管理員：後端 admins 集合說了算（店長在後台「管理員帳號」新增即可登入）。
-      const info = await verifyDynamicStaff()
-      if (info) return buildUser(e, result.user?.displayName, info.role)
-      await fbSignOut(auth).catch(() => {})
-      throw new Error('此 Google 帳號未授權，請聯絡店長在後台「設定 → 管理員帳號」新增')
+      return outcomeOrThrow(await processFbUser(result.user))
     }
     const e = (email || '').trim().toLowerCase()
     if (!e) throw new Error('請輸入 email')
@@ -176,12 +221,23 @@ export function AuthProvider({ children }) {
     return u
   }
 
+  // 「無法確認權限」後的重試：沿用既有 Firebase session，不需重新彈 Google 視窗。
+  const retryVerify = async () => {
+    const fbUser = auth?.currentUser
+    if (!fbUser) throw codedError(STAFF_UNVERIFIED_CODE, STAFF_UNVERIFIED_MESSAGE)
+    setAuthNotice(null)
+    return outcomeOrThrow(await processFbUser(fbUser))
+  }
+
   const signOut = () => {
+    staffGate.cancelBackground()
+    staffGate.clear(user?.email) // 只清角色快取；不動訂位／顧客本機資料
     if (isFirebaseConfigured) {
       fbSignOut(auth).catch(() => {})
     } else {
       localStorage.removeItem(STORAGE_KEY)
     }
+    setAuthNotice(null)
     setUser(null)
   }
 
@@ -194,7 +250,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, loading, signIn, signOut, can,
+      user, loading, signIn, signOut, can, authNotice, retryVerify,
       getToken: getIdToken,
       usingFirebase: isFirebaseConfigured,
       allowedEmails: ALLOWED_EMAILS,
