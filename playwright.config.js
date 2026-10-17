@@ -14,9 +14,16 @@ const PORT = Number(process.env.E2E_PORT || 5173)
 // 這條保證漏攔時只會「連不到」而不是寫進正式資料。（WebKit 不吃此參數，mobile-webkit 不套。）
 const OFFLINE_CHROMIUM = { args: ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1'] }
 
+// 候位真交易 E2E（PR #176）：要 Firestore emulator＋本機 5201 handler＋VITE_FUNCTION_BASE_URL 指向它的
+// dev server，只能用 scripts/test/waitlist-playwright.config.js 跑（`npm run test:e2e:waitlist`）。
+// 在這份主設定裡它們必定在 beforeAll 拋「Isolated test requires…」——排除掉，不算主線失敗。
+// 清單須與 waitlist-playwright.config.js 的 testMatch 成對維護。
+const WAITLIST_EMULATOR_SPECS = ['**/waitlist-stability*.spec.js', '**/waitlist-seat.spec.js', '**/waitlist-multi-seat.spec.js']
+
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.js',
+  testIgnore: WAITLIST_EMULATOR_SPECS,
   timeout: 40_000,
   expect: { timeout: 8_000 },
   fullyParallel: false,
