@@ -92,6 +92,9 @@ function TableShape({
   const textTransform = rot ? `rotate(${-rot} ${cx} ${cy})` : undefined
   // 字級依較短邊判定（自由縮放後 h 不再恆為 75）
   const small = Math.min(w, h) <= 80
+  // 單純空桌：綠底即可入座，不另寫狀態字（有下組／預配／團保／時段衝突時仍顯示第三行）
+  const plainVacant = status === 'vacant' && !presentation?.hasTimeConflict && !groupHoldLabel && !preassignLabel
+    && !presentation?.nextReservation?.timeSlot && !presentation?.unavailableReason
 
   // 分區角點（左上）：避開右上的「團」疊框標記與焦點環。
   const zoneDot = zoneColor ? (
@@ -295,6 +298,19 @@ function TableShape({
                 </text>
               </>
             )}
+          </>
+        ) : plainVacant ? (
+          // 單純空桌（沒有下組、預配、團保、時段衝突）：不寫「空桌／可入座」——綠底本身就代表可坐
+          // （Barry 2026-10-17）。省下第三行，把桌號與人數放大置中，尖峰時更好認。
+          <>
+            <text x={cx} y={cy + 4}
+                  fontSize={small ? 26 : 28} fontWeight={900} fill={textColor} textAnchor="middle" pointerEvents="none">
+              {number}
+            </text>
+            <text x={cx} y={cy + (small ? 22 : 24)}
+                  fontSize={small ? 15 : 16} fontWeight={700} fill={textColor} textAnchor="middle" pointerEvents="none">
+              {capacity} 人
+            </text>
           </>
         ) : (
           <>

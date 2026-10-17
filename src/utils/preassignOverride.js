@@ -4,15 +4,16 @@
 //
 // 規則（2026-09 驗收後定案）：只有「被覆蓋那筆的用餐區間」與「新佔用區間」重疊才解除；
 // 不重疊就保留（例：12:20 帶位不影響 20:30 的預配）。重疊判定見 capacity.preassignConflicts／assignmentWindow。
-// 警示一律講實際會發生的事：「11:00 余先生的預配將解除」vs「20:30 余先生的預配會保留」。
+// 警示一律講實際會發生的事：「時間衝突：確認後 余先生 要重排」vs「時間不衝突，余先生 的排位保留」。
 // 純函式（注入 context 動作與 toast），方便單測。
 
 // 單筆預配衝突的警示句。verb＝動作名（帶位／確認／入座），用在「○○後 … 將解除」。
+// 2026-10-17 縮短（Barry：尖峰沒空讀長句）：「桌號 已排給 時段 姓名（N 位）· 結果」一句講完。
 export function conflictLine(tableNumber, { booking: b, overlaps, willRelease }, verb = '確認') {
   const when = b.timeSlot ? `${b.timeSlot} ` : ''
-  const head = `${tableNumber} 已於排位規劃預留給 ${b.name}（${b.guests} 位${b.timeSlot ? ` · ${b.timeSlot}` : ''}）。`
-  if (willRelease) return `${head}用餐時段重疊：${verb}後 ${when}${b.name} 的預配將解除，需重新指派。`
-  return `${head}${overlaps ? '' : '用餐時段不重疊：'}${when}${b.name} 的預配會保留。`
+  const head = `${tableNumber} 已排給 ${when}${b.name}（${b.guests} 位）· `
+  if (willRelease) return `${head}時間衝突：${verb}後 ${b.name} 要重排`
+  return `${head}${overlaps ? '' : '時間不衝突，'}${b.name} 的排位保留`
 }
 
 // 解除「會被解除」的那幾筆（willRelease），同一筆只處理一次；回傳復原用快照。

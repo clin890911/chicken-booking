@@ -295,7 +295,7 @@ test('選桌入座「用建議桌」後其中一張被別筆預配（時段重�
   await expect(confirmBtn).toBeEnabled()
 
   await preassignFromAnotherDevice(page, CHEN.id, '201')
-  const ack = page.getByLabel('我已確認上述預配／團體保留，仍要使用所選桌')
+  const ack = page.getByLabel('知道了，仍用這桌')
   await expect(ack).toBeVisible()
   await expect(confirmBtn).toBeDisabled()
 

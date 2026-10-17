@@ -20,7 +20,7 @@ const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
 
 // pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
 //   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
-export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiMaxSeats, multiWarnings = [], multiWarningConfirmed = true, onConfirmWarning, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
+export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiMaxSeats, multiWarnings = [], multiWarningSevere = true, multiWarningConfirmed = true, onConfirmWarning, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
   if (!mode) return null
   const suggested = tables.find(t => String(t.number) === String(mode.suggestion))
   const suggestionLabel = suggested ? `${suggested.floor}・${suggested.number}` : mode.suggestion
@@ -86,9 +86,10 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
         )}
         {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs">定位建議桌 {suggestionLabel}</button>}
         {!!selected.length && <button onClick={onClearSelection} className="text-xs underline min-h-[44px]">清空已選桌</button>}
-        {!!multiWarnings.length && <div className="bg-rose-600 rounded-lg px-3 py-2 text-xs space-y-2">
-          {multiWarnings.map(line => <div key={line}>{line}</div>)}
-          <label className="flex items-center gap-2 min-h-[44px]"><input type="checkbox" checked={multiWarningConfirmed} onChange={e => onConfirmWarning?.(e.target.checked)} />我已確認上述預配／團體保留，仍要使用所選桌</label>
+        {/* 紅＝會解除別組排位或佔團體桌；黃＝只是提醒（時間不衝突、對方保留）。都要勾一下才放行（防呆不變） */}
+        {!!multiWarnings.length && <div className={`rounded-lg px-3 py-2 text-sm space-y-1 ${multiWarningSevere ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-900'}`}>
+          {multiWarnings.map(line => <div key={line} className="font-bold">{line}</div>)}
+          <label className="flex items-center gap-2 min-h-[44px] font-bold"><input type="checkbox" className="w-5 h-5" checked={multiWarningConfirmed} onChange={e => onConfirmWarning?.(e.target.checked)} />知道了，仍用這桌</label>
         </div>}
       </div>
     )

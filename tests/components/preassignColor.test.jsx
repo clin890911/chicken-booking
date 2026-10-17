@@ -36,12 +36,12 @@ describe('TableShape：預配桌著色', () => {
     expect(PREASSIGN_COLOR.strokeDash).toBeTruthy()
   })
 
-  it('沒被預配的空桌維持醒目綠、無虛線（領檯找空桌的第一眼不受影響）', () => {
+  it('沒被預配的空桌維持醒目綠、無虛線；單純空桌不寫狀態字（綠底即可入座，2026-10-17），讀屏名稱仍有「可入座」', () => {
     const html = wrapSvg(<TableShape table={baseTable()} onClick={() => {}} />)
     expect(html).toContain(`fill="${STATUS_COLOR.vacant.fill}"`)
-    expect(html).toContain('可入座')
-    expect(html).not.toContain('✓') // ✓ 已改 lucide 線條圖示（巢狀 svg）
-    expect(html).toContain('lucide-check')
+    expect(html).toContain('可入座') // aria-label／title
+    expect(html).not.toContain('lucide-check') // 桌面上不再畫「✓ 可入座」那行
+    expect(html).toContain('font-size="26"') // 桌號放大（75 高的桌＝small：20→26）
     expect(html).not.toContain('stroke-dasharray')
   })
 

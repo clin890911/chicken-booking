@@ -164,9 +164,10 @@ test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、�
 
   // 113 顯示預配標籤（取代空桌字樣），其他空桌不受影響
   await expect(page.getByText('18:00 預配')).toBeVisible()
-  // PR #138：空桌桌面文字由「✓ 可入座」改為狀態標籤「空桌」；112 沒有預配 → 不帶預配標籤
+  // 2026-10-17：單純空桌不再寫「空桌」（綠底即可入座，桌號人數放大）；112 沒有預配 → 只有桌號與人數、不帶預配標籤
   const t112 = page.locator('svg g:has(:text-is("112"))').first()
-  await expect(t112.getByText('空桌', { exact: true })).toBeVisible()
+  await expect(t112.getByText('4 人', { exact: true })).toBeVisible()
+  await expect(t112.getByText('空桌', { exact: true })).toHaveCount(0)
   await expect(t112.getByText(/預配/)).toHaveCount(0)
 })
 

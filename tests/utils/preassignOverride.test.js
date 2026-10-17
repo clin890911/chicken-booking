@@ -14,11 +14,11 @@ const yu = (over = {}) => ({ id: 'Y', name: '余先生', guests: 2, timeSlot: '1
 describe('conflictLine：警示據實', () => {
   it('重疊 → 「11:00 余先生的預配將解除」', () => {
     expect(conflictLine('105', { booking: yu(), overlaps: true, willRelease: true }, '帶位'))
-      .toBe('105 已於排位規劃預留給 余先生（2 位 · 11:00）。用餐時段重疊：帶位後 11:00 余先生 的預配將解除，需重新指派。')
+      .toBe('105 已排給 11:00 余先生（2 位）· 時間衝突：帶位後 余先生 要重排')
   })
   it('不重疊 → 「20:30 余先生的預配會保留」', () => {
     expect(conflictLine('105', { booking: yu({ timeSlot: '20:30' }), overlaps: false, willRelease: false }, '帶位'))
-      .toBe('105 已於排位規劃預留給 余先生（2 位 · 20:30）。用餐時段不重疊：20:30 余先生 的預配會保留。')
+      .toBe('105 已排給 20:30 余先生（2 位）· 時間不衝突，余先生 的排位保留')
   })
 })
 
