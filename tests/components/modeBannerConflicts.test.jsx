@@ -61,3 +61,25 @@ describe('ModeBanner：預配衝突據實', () => {
     expect(buttons()).toContain('仍要預配（他筆預配保留）')
   })
 })
+
+// 2026-10-17：多桌選位的警示依嚴重度配色——會解除別組或佔團體桌＝紅；只是提醒（對方保留）＝黃。勾選門檻不變。
+describe('ModeBanner：多桌警示嚴重度配色', () => {
+  let container, root
+  const multi = { type: 'assign-multi', kind: 'booking', booking: { id: 'Y', name: '楊先生', guests: 10, timeSlot: '18:30' }, need: 10, selected: ['107'], suitable: ['107'], suggestionTables: [] }
+  const render = (severe) => {
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
+    act(() => { root.render(<ModeBanner mode={multi} multiSeats={4} multiMaxSeats={5} multiWarnings={['107 已排給 16:30 王先生（4 位）· 時間不衝突，王先生 的排位保留']} multiWarningSevere={severe} multiWarningConfirmed={false} onConfirmWarning={() => {}} onCancel={() => {}} onConfirmMulti={() => {}} onClearSelection={() => {}} />) })
+  }
+  afterEach(() => { act(() => root?.unmount()); container?.remove() })
+  const box = () => [...container.querySelectorAll('label')].find(l => l.textContent.includes('知道了，仍用這桌')).parentElement
+
+  it('只是提醒 → 黃底；仍要勾「知道了，仍用這桌」', () => {
+    render(false)
+    expect(box().className).toContain('bg-amber-100')
+    expect(box().querySelector('input[type="checkbox"]').checked).toBe(false)
+  })
+  it('會解除別組／佔團體桌 → 紅底', () => {
+    render(true)
+    expect(box().className).toContain('bg-rose-600')
+  })
+})
