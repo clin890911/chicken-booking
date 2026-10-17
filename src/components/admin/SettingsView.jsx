@@ -18,6 +18,7 @@ import Icon from '../ui/Icon'
 import GlyphText from '../ui/GlyphText'
 import { Ban, Check, Repeat, TriangleAlert, X } from 'lucide-react'
 import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
+import { buildLabel, addReloadBlocker } from '../../utils/appVersion'
 import { validateLineReadiness } from '../../utils/lineReadiness'
 import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds, openSeatingIdsOn, effectiveClosedSeatings, describeWeeklyClosures } from '../../utils/weeklyClosures'
 import { onlineLeadLabel } from '../../utils/guestPolicy'
@@ -178,6 +179,8 @@ export default function SettingsView({ onOpenCustomer }) {
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [armUnload])
+  // 同一個條件也擋住「平板喚醒時自動更新到新版本」（useNewVersion），免得改到一半的設定消失
+  useEffect(() => (armUnload ? addReloadBlocker(() => true) : undefined), [armUnload])
 
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
   const handleSave = async () => {
@@ -1083,7 +1086,7 @@ export default function SettingsView({ onOpenCustomer }) {
       </SettingsSection>
 
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
-        雞王涮涮鍋訂位系統 v0.4 · Firestore 同步模式
+        雞王涮涮鍋訂位系統 · 版本 {buildLabel()}
       </p>
       </div>{/* 內容欄 */}
       </div>{/* flex gap-4 */}

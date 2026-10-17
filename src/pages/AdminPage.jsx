@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
 import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
+import { useNewVersion } from '../hooks/useNewVersion'
 import { resolveAdminTab } from '../utils/landingTab'
 import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
 
@@ -69,6 +70,8 @@ export default function AdminPage() {
   const [addPrefill, setAddPrefill] = useState(null)
   const { bookings, waitlist, cloudStatus, hydrated } = useBooking()
   const toast = useToast()
+  // 伺服器有新版本（這台還在跑舊程式）→ 頂端提示更新；平板喚醒時自動更新（見 useNewVersion）
+  const { updateAvailable, reload: reloadApp } = useNewVersion()
 
   // === 新訂位偵測（推 toast）===
   // 口徑與「為什麼要壓數量」寫在 utils/newBookingAlerts；這裡只負責「何時開始比對」。
@@ -205,6 +208,16 @@ export default function AdminPage() {
         )}
 
         <main className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 py-4 overflow-x-hidden max-w-[1600px] w-full mx-auto">
+          {updateAvailable && (
+            <div role="status" className="mb-3 flex flex-shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-blue-300 bg-blue-50 px-4 py-2.5">
+              <p className="text-sm font-bold text-blue-800">
+                系統已有新版本，這台還在用舊版。請按「立即更新」（已存的資料不會遺失）。
+              </p>
+              <button type="button" onClick={reloadApp} className="btn-primary min-h-[44px] px-5">
+                立即更新
+              </button>
+            </div>
+          )}
           {!usingFirebase && (
             <div className="mb-4 flex-shrink-0 rounded-xl border-2 border-chicken-red bg-red-50 px-4 py-3">
               <p className="text-sm font-black text-chicken-red">雲端同步未啟用</p>
