@@ -248,3 +248,21 @@ export async function lookupAdminStaff(getDoc) {
   }
   return { found: false }
 }
+
+// verifyIdToken 失敗分類：只有「token 本身無效」才是 401；
+// 其他（Google 公鑰抓不到、auth/internal-error、網路…）是暫時性問題 → 503，前端不可據此登出。
+export const AUTH_UNAVAILABLE = 'auth_unavailable'
+const INVALID_TOKEN_CODES = new Set([
+  'auth/id-token-expired',
+  'auth/id-token-revoked',
+  'auth/argument-error',
+  'auth/invalid-id-token',
+  'auth/invalid-user-token',
+  'auth/user-disabled',
+  'auth/user-not-found',
+])
+export function classifyVerifyTokenError(err) {
+  const code = String(err?.code || err?.errorInfo?.code || '')
+  if (INVALID_TOKEN_CODES.has(code)) return { status: 401, message: 'invalid-auth-token' }
+  return { status: 503, message: AUTH_UNAVAILABLE }
+}

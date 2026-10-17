@@ -119,6 +119,9 @@ export function AuthProvider({ children }) {
   // unverified＝Firebase session 保留、但還沒能向後端確認權限，可按「重試」。
   const [authNotice, setAuthNotice] = useState(null)
   const inflightRef = useRef(new Map())
+  // 最近一次結果（uid → {outcome, at}）：onAuthStateChanged 那輪先跑完（含 denied 登出）時，
+  // 晚到的 signIn 直接採用，不會因 session 已被清掉而誤報「連線不穩」。
+  const lastOutcomeRef = useRef(new Map())
 
   // 驗證只在這一處做（onAuthStateChanged 與 signIn 共用，同一 uid 的 in-flight 去重）。
   // 回傳 {status:'allowed', user} / {status:'denied'} / {status:'unverified', message} / {status:'stale'}
@@ -126,6 +129,8 @@ export function AuthProvider({ children }) {
     const uid = fbUser.uid || fbUser.email
     const inflight = inflightRef.current
     if (inflight.has(uid)) return inflight.get(uid)
+    const last = lastOutcomeRef.current.get(uid)
+    if (last && Date.now() - last.at < 5000) return Promise.resolve(last.outcome)
     const email = (fbUser.email || '').toLowerCase()
     const run = async () => {
       // 前端白名單只負責 UI；真正的權限由後端 requireStaff 二次把關。
@@ -141,14 +146,15 @@ export function AuthProvider({ children }) {
       }
       // 不在建置期白名單 → 可能是後台動態新增的管理員，由閘門問後端（有快取則樂觀放行）。
       const res = await staffGate.check(email)
-      if ((auth.currentUser?.email || '').toLowerCase() !== email) return { status: 'stale' }
+      // denied 一律照辦（即使 session 已被另一輪清掉）；其餘結果若已換人則作廢。
+      if (res.status !== 'denied' && (auth.currentUser?.email || '').toLowerCase() !== email) return { status: 'stale' }
       if (res.status === 'allowed') {
         const u = buildUser(email, fbUser.displayName, res.role)
         setUser(u); setAuthNotice(null); setLoading(false)
         res.background?.then((bg) => {
           if (bg.status === 'ok' && bg.changed) {
             setUser(prev => (prev && prev.email === email ? buildUser(email, fbUser.displayName, bg.role) : prev))
-          } else if (bg.status === 'denied') {
+          } else if (bg.status === 'denied' && (auth.currentUser?.email || '').toLowerCase() === email) {
             // 背景驗證被後端明確拒絕（例如店長剛停用此帳號）→ 登出。
             fbSignOut(auth).catch(() => {})
             setUser(null)
@@ -166,7 +172,10 @@ export function AuthProvider({ children }) {
       setUser(null); setAuthNotice({ kind: 'unverified', message: STAFF_UNVERIFIED_MESSAGE }); setLoading(false)
       return { status: 'unverified', message: res.message }
     }
-    const p = run().finally(() => { inflight.delete(uid) })
+    const p = run().then((outcome) => {
+      if (outcome.status === 'denied') lastOutcomeRef.current.set(uid, { outcome, at: Date.now() })
+      return outcome
+    }).finally(() => { inflight.delete(uid) })
     inflight.set(uid, p)
     return p
   }, [])

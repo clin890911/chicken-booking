@@ -85,15 +85,22 @@ export function createStaffGate({ verify, storage, delays, sleep, now = () => Da
   const inflight = new Map()
   const recentOk = new Map() // email → 最近一次驗證成功時間；剛驗過就不必再背景重驗
   let generation = 0
-  const bgRunning = new Set()
+  const bgRunning = new Map() // email → 啟動時的 generation（finally 只刪自己那一輪的登記）
+  const cancelHooks = new Set()
+  // 預設 sleep 可被 cancelBackground 提前結束並清掉 setTimeout。
+  const gateSleep = sleep || ((ms) => new Promise((resolve) => {
+    const done = () => { clearTimeout(t); cancelHooks.delete(done); resolve() }
+    const t = setTimeout(done, ms)
+    cancelHooks.add(done)
+  }))
 
   const store = () => storage || globalThis.localStorage
 
   function startBackground(email, cachedRole) {
     if (bgRunning.has(email)) return null
-    bgRunning.add(email)
     const gen = generation
-    return verifyWithBackoff({ verify, delays, sleep, isCancelled: () => gen !== generation })
+    bgRunning.set(email, gen)
+    return verifyWithBackoff({ verify, delays, sleep: gateSleep, isCancelled: () => gen !== generation })
       .then((res) => {
         if (gen !== generation) return { status: 'cancelled' }
         if (res.status === 'ok') {
@@ -104,7 +111,7 @@ export function createStaffGate({ verify, storage, delays, sleep, now = () => Da
         if (res.status === 'denied') clearRoleCache(email, store())
         return { status: res.status }
       })
-      .finally(() => { bgRunning.delete(email) })
+      .finally(() => { if (bgRunning.get(email) === gen) bgRunning.delete(email) })
   }
 
   async function run(email) {
@@ -137,7 +144,7 @@ export function createStaffGate({ verify, storage, delays, sleep, now = () => Da
       return p
     },
     // 登出／換人時取消進行中的背景驗證（結果會變 cancelled，不再動 UI／快取）。
-    cancelBackground() { generation++; bgRunning.clear() },
+    cancelBackground() { generation++; bgRunning.clear(); [...cancelHooks].forEach(h => h()) },
     clear(email) { clearRoleCache(email, store()) },
   }
 }

@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { lookupAdminStaff, STAFF_LOOKUP_UNAVAILABLE } from '../../functions/lib/staffAccess.js'
+import { lookupAdminStaff, STAFF_LOOKUP_UNAVAILABLE, classifyVerifyTokenError, AUTH_UNAVAILABLE } from '../../functions/lib/staffAccess.js'
+
+describe('classifyVerifyTokenError', () => {
+  it.each(['auth/id-token-expired', 'auth/id-token-revoked', 'auth/argument-error', 'auth/invalid-id-token', 'auth/user-disabled'])('%s → 401', (code) => {
+    expect(classifyVerifyTokenError({ code })).toEqual({ status: 401, message: 'invalid-auth-token' })
+  })
+  it('公鑰抓不到／internal-error／網路／未知 → 503', () => {
+    for (const e of [{ code: 'auth/internal-error' }, { code: 'app/network-error' }, new Error('fetch failed'), null]) {
+      expect(classifyVerifyTokenError(e)).toEqual({ status: 503, message: AUTH_UNAVAILABLE })
+    }
+  })
+})
 
 // requireStaff 依此結果決定回碼：unavailable → 503、found:false → 403（查無此人仍是未授權）。
 describe('lookupAdminStaff（admins 查詢：讀取失敗 ≠ 查無此人）', () => {

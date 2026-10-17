@@ -42,6 +42,7 @@ import {
   canWriteSettings,
   classifyDatasetByPermission,
   lookupAdminStaff,
+  classifyVerifyTokenError,
   STAFF_LOOKUP_UNAVAILABLE,
 } from './lib/staffAccess.js'
 import { scopeClosureSettingsPush } from './lib/settingsScope.js'
@@ -92,8 +93,12 @@ async function requireStaff(req) {
   let decoded
   try {
     decoded = await getAuth().verifyIdToken(match[1])
-  } catch {
-    throw errorWithStatus('invalid-auth-token', 401)
+  } catch (verifyErr) {
+    const c = classifyVerifyTokenError(verifyErr)
+    if (c.status === 503) console.error('verifyIdToken unavailable:', verifyErr)
+    const e = errorWithStatus(c.message, c.status)
+    if (c.status === 503) e.code = c.message
+    throw e
   }
   const email = String(decoded.email || '').toLowerCase()
   if (!email) throw errorWithStatus('not-authorized', 403)

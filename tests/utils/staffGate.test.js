@@ -161,4 +161,33 @@ describe('createStaffGate', () => {
     expect((await r.background).status).toBe('cancelled')
     expect(readRoleCache(EMAIL, st)).not.toBeNull()
   })
+  it('cancelBackground 後新登記的背景驗證不會被舊輪 finally 刪掉', async () => {
+    writeRoleCache(EMAIL, 'host', st)
+    const releases = []
+    const g = mk(() => new Promise(r => { releases.push(r) }))
+    const r1 = await g.check(EMAIL)
+    g.cancelBackground()
+    const r2 = await g.check(EMAIL)
+    expect(r2.background).not.toBeNull()
+    releases[0]({ status: 'error' })
+    await r1.background
+    // 舊輪結束後，新輪仍在登記中：再 check（剛驗證成功窗口外）不會重複起第三輪
+    const r3 = await g.check(EMAIL)
+    expect(r3.background).toBeNull()
+    releases[1]({ status: 'ok', role: 'host' })
+    await r2.background
+  })
+  it('預設 sleep 在 cancelBackground 時立即結束並清掉 timer', async () => {
+    vi.useFakeTimers()
+    try {
+      writeRoleCache(EMAIL, 'host', st)
+      const g = createStaffGate({ verify: async () => ({ status: 'error' }), storage: st, delays: [60000] })
+      const r = await g.check(EMAIL)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(vi.getTimerCount()).toBe(1)
+      g.cancelBackground()
+      expect(vi.getTimerCount()).toBe(0)
+      expect((await r.background).status).toBe('cancelled')
+    } finally { vi.useRealTimers() }
+  })
 })
