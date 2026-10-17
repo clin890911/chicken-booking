@@ -1249,7 +1249,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               <p className="font-bold">{mode.booking?.name || mode.wait?.name || mode.group?.agencyName} · {mode.need || mode.booking?.guests || mode.wait?.partySize || mode.batch?.guests} 位</p>
               {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
               <p>目標桌：{(mode.selected?.length ? mode.selected.join(' + ') : pendingConfirm) || '尚未選桌'}</p>
-              <p className="text-sm text-chicken-brown/60">{mode.kind === 'arrive' ? '在地圖點空桌，上方按「確認入座」即入座（5 秒內可復原）。' : '在地圖選桌，上方確認後才儲存。'}</p>
               {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">保留原入座時間；撤出的原桌需清桌。</p>}
               <button type="button" className="tap min-h-[44px] px-4 rounded-lg border" onClick={cancelModeAndNotify}>取消並返回</button>
             </div>
