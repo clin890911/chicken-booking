@@ -37,13 +37,5 @@ export async function startWaitlistBackend() {
   return {...env,controls,read,async reset(){await resetEmulator();await seedEmulator(env.db);controls.requests.length=0;controls.dropNextAck=false;controls.rejectBeforeCommit=false},async close(){await new Promise(resolve=>server.close(resolve));await env.close()}}
 }
 
-// Test-only module substitute: actual AuthContext/BookingContext/commands run; Firebase network/token acquisition is stubbed.
-export const FIREBASE_STUB = `
-export const isFirebaseConfigured=true;
-const user={uid:'TEST_STAFF',email:'berrylin0911@gmail.com',displayName:'隔離測試員'};
-export const auth={currentUser:user}, db=null,googleProvider={};
-export async function getIdToken(){return 'isolated-test-token'}
-export function onAuthStateChanged(_auth,fn){queueMicrotask(()=>fn(user));return ()=>{}}
-export async function signInWithPopup(){return {user}}
-export async function signOut(){}
-`
+// FIREBASE_STUB 移到 firebaseStub.js（不需 emulator 的 spec 也共用），這裡轉出維持既有 import。
+export { FIREBASE_STUB } from './firebaseStub.js'

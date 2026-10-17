@@ -13,7 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:waitlist": "firebase emulators:exec --only firestore --project demo-waitlist-stability 'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-waitlist-stability vitest run tests/functions/waitlistCommands.emulator.test.js && FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GCLOUD_PROJECT=demo-waitlist-stability playwright test --config scripts/test/waitlist-playwright.config.js'"
   },
   "dependencies": {
     "firebase": "^10.13.2",
