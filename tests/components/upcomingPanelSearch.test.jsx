@@ -76,6 +76,15 @@ describe('UpcomingPanel 搜尋＋完整電話', () => {
     expect(container.querySelector('[data-testid="phone-tail"]')).toBeNull()
   })
 
+  it('未配桌卡片：淡琥珀外框＋「● 未配桌」標示；已配桌的沒有', () => {
+    render(data())
+    const card = id => container.querySelector(`[data-booking-id="${id}"]`)
+    expect(card('c').querySelector('[data-testid="unassigned-tag"]').textContent).toContain('未配桌')
+    expect(card('c').className).toContain('border-amber-300')
+    expect(card('a').querySelector('[data-testid="unassigned-tag"]')).toBeNull()
+    expect(card('a').className).not.toContain('border-amber-300')
+  })
+
   it('人數有小孩時附拆分；舊單（無拆分）只顯示總數', () => {
     render([bk({ id: 'k', guests: 5, adults: 3, children: 2 }), bk({ id: 'o', guests: 4, timeSlot: '19:30' })])
     const text = id => container.querySelector(`[data-booking-id="${id}"]`).textContent

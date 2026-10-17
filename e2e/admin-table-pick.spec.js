@@ -165,7 +165,7 @@ test('帶位覆蓋不重疊的預配（12:20 vs 20:30）→ 預配保留', async
   await toOps(page)
 
   await page.locator('svg g:has(:text-is("105"))').first().click()
-  await expect(page.getByText(/105 已於排位規劃預留給 余先生.*20:30 余先生 的預配會保留/)).toBeVisible()
+  await expect(page.getByText(/105 已排給 20:30 余先生.*余先生 的排位保留/)).toBeVisible()
   await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()     // M1：警示仍要勾選解鎖
   await slide(page)
   await expect(page.getByText(/入座 105\s*·\s*可帶下一組/)).toBeVisible()
@@ -182,7 +182,7 @@ test('帶位覆蓋重疊的預配（12:20 vs 12:30）→ 解除；按復原 → 
   await toOps(page)
 
   await page.locator('svg g:has(:text-is("105"))').first().click()
-  await expect(page.getByText(/用餐時段重疊：帶位後 12:30 余先生 的預配將解除/)).toBeVisible()
+  await expect(page.getByText(/時間衝突：帶位後 余先生 要重排/)).toBeVisible()
   await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()
   await slide(page)
   await expect(page.getByText('余先生原本的預配 105 已解除，請重新指派')).toBeVisible()

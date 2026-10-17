@@ -17,7 +17,6 @@ import { formatPhone } from '../../../utils/phoneFormat'
 import { splitSuffix } from '../../../utils/partySplit'
 import { cancelWithUndo } from '../../../utils/bookingActions'
 import EditBookingModal from '../../booking/EditBookingModal'
-import GlyphText from '../../ui/GlyphText'
 import { ArrowLeftRight, Phone, X } from 'lucide-react'
 
 
@@ -90,7 +89,10 @@ function BookingCard({ b, now, kind, quick = null, onQuickAssign, onClickBooking
       data-booking-id={b.id}
       data-flash={flash ? 'true' : undefined}
       className={`relative p-3 rounded-xl border-2 cursor-pointer transition-all
-                 ${overdue ? 'border-chicken-red bg-chicken-red/5' : 'border-chicken-brown/10 bg-white hover:border-chicken-yellow/40'}
+                 ${overdue ? 'border-chicken-red bg-chicken-red/5'
+                   // 還沒配桌：淡琥珀外框＋底（與報到列「未配桌」同色），一眼分出「還要選位」的卡（Barry 2026-10-17）
+                   : !assigned ? 'border-amber-300 bg-amber-50/70 hover:border-amber-400'
+                   : 'border-chicken-brown/10 bg-white hover:border-chicken-yellow/40'}
                  ${flash ? 'ring-4 ring-chicken-yellow/60 !bg-chicken-yellow/10' : ''}`}
       onClick={() => onClickBooking?.(b)}
     >
@@ -101,27 +103,34 @@ function BookingCard({ b, now, kind, quick = null, onQuickAssign, onClickBooking
             <span className="text-sm font-bold truncate min-w-0">{b.name}</span>
           </div>
           {/* 完整電話（取代過去的「…506」末碼）：店員要能照著撥；無電話不顯示。
-              刻意是純文字、不是 tel: 連結——下方已有「聯絡」鈕，兩個撥號熱區上下相鄰，
+              刻意是純文字、不是 tel: 連結——撥號走「⋯ 更多 → 撥打電話」，避免兩個撥號熱區相鄰，
               尖峰時點卡片常誤撥。電話不截斷，人數那段在窄欄時可截斷。 */}
           <div className="flex items-baseline gap-2 mt-0.5 min-w-0">
             {formatPhone(b.phone) && <span data-testid="phone-full" className="text-sm tabular-nums whitespace-nowrap flex-shrink-0 font-bold text-chicken-brown">{formatPhone(b.phone)}</span>}
             <span className="text-xs text-chicken-brown/60 truncate">{b.guests} 位{splitSuffix(b)}</span>
           </div>
         </div>
-        <div className="text-right flex-shrink-0">
-          {overdue ? (
-            <span className="text-[10px] font-bold text-white bg-chicken-red px-2 py-0.5 rounded-full">
+        {/* 右上角＝桌號徽章（Barry 2026-10-17：「幾分後到」與左邊時段重複，客人到領位台時最要看的是坐哪桌）。
+            顏色同卡片既有語意：已指派＝綠實線、已預配＝藍虛線、未配桌＝淡琥珀。過時未到的紅色提醒仍在最上面。
+            徽章文字是「已指派 112」一整句（小字＋大號碼），讀屏與既有測試／搜尋口徑不變。 */}
+        <div className="flex-shrink-0 flex flex-col items-end gap-1">
+          {overdue && (
+            <span className="text-[10px] font-bold text-white bg-chicken-red px-2 py-0.5 rounded-full whitespace-nowrap">
               {fmtOverdueMin(overdueMin)}
             </span>
-          ) : (
-            <span className="text-[10px] font-bold text-amber-700">
-              {overdueMin > 0 ? '到店時間' : `${-overdueMin} 分後`}
+          )}
+          {assigned ? (
+            <span data-testid="table-badge" title={preassigned ? '已預配：只記在訂位上，桌子現在仍可帶別組' : '已指派：桌子已鎖給這組'}
+              className={`inline-flex items-baseline gap-1 rounded-lg px-2 py-0.5 border-2 whitespace-nowrap
+                ${preassigned ? 'border-dashed border-blue-500 bg-blue-50 text-blue-800' : 'border-chicken-green bg-chicken-green/10 text-chicken-green'}`}>
+              <span className="text-[10px] font-bold">{preassigned ? '已預配' : '已指派'}</span>{' '}<span className="text-lg font-bold tabular-nums leading-tight">{tableLabel}</span>
             </span>
+          ) : (
+            <span data-testid="unassigned-tag" className="inline-flex items-center rounded-lg px-2 py-1 border-2 border-amber-300 bg-amber-100 text-amber-800 text-xs font-bold whitespace-nowrap">未配桌</span>
           )}
         </div>
       </div>
 
-      {assigned && <div className={`text-[11px] font-bold mt-1 ${preassigned ? 'text-blue-800' : 'text-chicken-green'}`}>{preassigned ? `已預配 ${tableLabel}` : <GlyphText size={12} className="!gap-1">{`✓ 已指派 ${tableLabel}`}</GlyphText>}</div>}
       <div className="mt-2 flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
         {showSeat ? <button onClick={() => onSeat?.(b)} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">客人到了</button>
           : showArriveSeat ? <>

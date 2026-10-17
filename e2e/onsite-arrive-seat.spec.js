@@ -118,10 +118,10 @@ test('選到的桌有重疊預配 → 勾選才解鎖；入座解除那筆預配
   const strip = page.getByRole('list', { name: '可入座名單' })
   await strip.getByRole('button', { name: '林先生 到了，選桌入座' }).click()
   await mapTable(page, '105').click()
-  await expect(page.getByText(/105 已於排位規劃預留給 陳小姐.*入座後 12:30 陳小姐 的預配將解除/)).toBeVisible()
+  await expect(page.getByText(/105 已排給 12:30 陳小姐.*時間衝突：入座後 陳小姐 要重排/)).toBeVisible()
   const ok = page.getByRole('button', { name: '確認入座', exact: true })
   await expect(ok).toBeDisabled()
-  await page.getByRole('checkbox', { name: /我已確認上述預配／團體保留/ }).check()
+  await page.getByRole('checkbox', { name: /知道了，仍用這桌/ }).check()
   await ok.click()
 
   await expect(page.getByText('林先生（3 位）已入座 105')).toBeVisible()

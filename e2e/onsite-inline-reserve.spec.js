@@ -116,7 +116,7 @@ test('09:00 新增 18:00 → 只預配：地圖該桌仍可入座（帶位籤點
   await expect(page.getByText('18:00 預配')).toBeVisible()
   await page.getByRole('button', { name: /^帶位/ }).click()
   await mapTable(page, '105').click()
-  await expect(page.getByText(/105 已於排位規劃預留給 陳先生.*18:00 陳先生 的預配會保留/)).toBeVisible()
+  await expect(page.getByText(/105 已排給 18:00 陳先生.*陳先生 的排位保留/)).toBeVisible()
   ;({ tables } = await readState(page))
   expect(tables.find(t => t.number === '105').status).toBe('vacant')
 })

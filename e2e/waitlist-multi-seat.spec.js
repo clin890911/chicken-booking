@@ -146,7 +146,7 @@ test('候位擠一擠：10 席帶 11 位、覆蓋同時段預配，5秒復原由
   await page.locator('[data-table-number="109"]').first().click()
   // Confirm the UI's actual preassignment warning before the command is allowed to clear it.
   await expect(page.getByText(/測試預配/).first()).toBeVisible()
-  const warning=page.getByRole('checkbox',{name:/我已確認上述預配/})
+  const warning=page.getByRole('checkbox',{name:/知道了，仍用這桌/})
   await expect(warning).toBeVisible()
   await warning.check()
   await page.getByRole('button',{name:/確認併桌入座|仍要覆蓋/}).first().click()

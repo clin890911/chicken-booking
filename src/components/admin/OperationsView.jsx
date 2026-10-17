@@ -37,6 +37,31 @@ import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
 // dashed：對應地圖上「同色但虛線」的狀態（預配＝桌實體仍空），圖例與地圖的線型也要對得上，
 // 否則兩格同樣的藍會被讀成圖例畫錯。
+// 地圖卡片頂端的樓層大分頁（取代頂列的小分段控制）。目前樓層深色實心；另一層白底粗框。
+// nudge＝本層選不到桌、另一層可以 → 紅點＋輕微脈動提示切換（motion-safe 才動）。
+function FloorTabs({ floor, onChange, counts }) {
+  // 一顆膠囊切兩半（Barry 2026-10-17）：外框一圈、中間無縫；選中那半實心深色「滑塊」，另一半透明。
+  return (
+    <div role="tablist" aria-label="樓層" className="mb-2 flex-shrink-0 grid grid-cols-2 p-1 rounded-xl border-2 border-chicken-brown/20 bg-chicken-brown/[0.04]">
+      {counts.map(c => {
+        const active = c.key === floor
+        return (
+          <button key={c.key} type="button" role="tab" aria-selected={active} onClick={() => onChange(c.key)}
+            title={`${c.key === '1F' ? '1F 主用餐區' : '2F 用餐區'}：${c.label} ${c.value} 桌（共 ${c.total} 桌）`}
+            className={`tap relative min-h-[44px] rounded-lg flex items-center justify-center gap-2 font-bold transition-colors
+              ${active ? 'bg-chicken-brown text-white shadow-sm'
+                : c.nudge ? 'text-chicken-brown ring-2 ring-inset ring-chicken-red motion-safe:animate-pulse'
+                : 'text-chicken-brown/70 hover:bg-chicken-brown/[0.06]'}`}>
+            <span className="text-lg">{c.key}</span>
+            <span className={`text-sm tabular-nums ${active ? 'text-white/85' : 'text-chicken-brown/60'}`}>{c.label} {c.value}</span>
+            {c.nudge && <span aria-label="另一層有可選的桌" className="absolute top-1 right-1.5 w-3 h-3 rounded-full bg-chicken-red" />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function LegendSwatch({ fill, stroke, label, dashed = false }) {
   return (
     <span className="inline-flex items-center gap-1">
@@ -825,9 +850,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const multiWarnings = mode?.type === 'assign-multi' ? mode.selected.flatMap(n => {
     const lines = preassignConflictsFor(n).filter(c => mode.kind !== 'arrive' || c.overlaps).map(c => conflictLine(n, c, mode.kind === 'arrive' ? '入座' : '確認'))
     const hold = groupHoldTables[n]
-    if (hold?.holds?.length) lines.push(`${n} 為今日團體 ${hold.agencyName || '旅行社'} 預留，確認後散客將佔用團體桌`)
+    if (hold?.holds?.length) lines.push(`${n} 是團體 ${hold.agencyName || '旅行社'} 的保留桌 · 用了團體會少一桌`)
     return lines
   }) : []
+  // 警示嚴重度：會解除別組排位、或會佔到團體保留桌 → 紅；只是「時間不衝突、保留」的提醒 → 黃
+  const multiWarningSevere = mode?.type === 'assign-multi' && mode.selected.some(n =>
+    preassignConflictsFor(n).some(c => c.willRelease) || groupHoldTables[n]?.holds?.length)
   const seatedWarningSignature = mode?.type === 'assign-multi' && mode.booking?.status === 'arrived' ? seatedMoveWarningSignature(mode.booking.id, mode.selected, { bookings, groups: groupReservations, tables, settings }) : null
   const multiWarningKey = multiWarnings.length ? multiWarnings.join('；') + (seatedWarningSignature || '') : ''
   const multiWarningConfirmed = !multiWarningKey || mode?.confirmedWarning === multiWarningKey
@@ -1124,6 +1152,21 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     modeSource.current = null
   }
 
+  // 樓層分頁上的數字（B，2026-10-17）：選桌模式＝「這一組可選的桌」、帶位籤＝帶位可加的空桌、平常＝現在可坐。
+  // 本層一張都選不到、另一層有 → 另一層分頁亮紅點提示切換。
+  const floorCounts = (() => {
+    const selecting = mode?.suitable ? 'mode' : (!mode && !reserveOpen && railTab === 'walkin' && canWalkIn) ? 'walkin' : null
+    const pool = selecting === 'mode' ? new Set((mode.suitable || []).map(String))
+      : selecting === 'walkin' ? new Set(walkinSelectable.map(String)) : null
+    const count = f => tables.filter(t => t.floor === f && (pool ? pool.has(String(t.number)) : tablePresentation[t.number]?.canSeatNow)).length
+    const c = { '1F': count('1F'), '2F': count('2F') }
+    const label = selecting === 'mode' ? '可選' : '可坐'
+    return ['1F', '2F'].map(f => ({
+      key: f, value: c[f], label, total: tables.filter(t => t.floor === f).length,
+      nudge: !!selecting && f !== floor && c[floor] === 0 && c[f] > 0,
+    }))
+  })()
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* 上部チップ群：高さ固定（捲動しない）。地図＋右側欄に最大高さを譲る。
@@ -1149,12 +1192,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
         <div className="hidden lg:block flex-1 min-w-0" />
 
-        {/* 樓層：分段控制（全名在 title；桌數附在代號後） */}
-        <SegmentedControl
-          className="flex-none"
-          options={['1F', '2F'].map(f => ({ key: f, label: `${f} · 可坐 ${tables.filter(t => t.floor === f && tablePresentation[t.number]?.canSeatNow).length}`, title: `${f === '1F' ? '1F 主用餐區' : '2F 用餐區'}：現在可坐的桌數（共 ${tables.filter(t => t.floor === f).length} 桌）` }))}
-          value={floor} onChange={setFloor} ariaLabel="樓層" />
-
+        {/* 樓層切換已移到右欄地圖卡片頂端（FloorTabs，2026-10-17）：選桌時眼睛和手都在地圖上 */}
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
         {!mode && !reserveOpen && (
@@ -1188,6 +1226,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         multiSeats={walkinMultiSeats}
         multiMaxSeats={walkinMultiMaxSeats}
         multiWarnings={multiWarnings}
+        multiWarningSevere={multiWarningSevere}
         multiWarningConfirmed={multiWarningConfirmed}
         onConfirmWarning={(checked) => setMode(m => ({ ...m, confirmedWarning: checked ? multiWarningKey : null }))}
         onClearSelection={() => setMode(m => ({ ...m, selected: [], confirmedWarning: null }))}
@@ -1291,6 +1330,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
         {/* 右欄：桌況（地圖 SVG／摘要／排程）。高度填滿剩餘空間，SVG 自動縮放 */}
         <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 h-full min-h-[260px] overflow-hidden flex flex-col">
+          <FloorTabs floor={floor} onChange={setFloor} counts={floorCounts} />
           {showSchedule ? (
             // 排程視圖＝縱向堆疊卡片，會長 → 內部捲動避免裁切
             <div className="flex-1 min-h-0 overflow-y-auto">
