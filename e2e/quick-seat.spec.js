@@ -50,7 +50,7 @@ test('現場：點桌 → 選人數 → 滑動帶位 → 入座成功', async ({
   await loginToOps(page)
 
   // 左欄預設就是「帶位」籤，未選桌時提示點桌況圖
-  await expect(page.getByText(/點右邊桌況圖選一張桌/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /還差桌位/ })).toBeVisible()
 
   // 先選人數 → 面板給出建議桌
   await page.getByRole('button', { name: '4 位', exact: true }).click()
@@ -65,7 +65,7 @@ test('現場：點桌 → 選人數 → 滑動帶位 → 入座成功', async ({
   await expect(page.getByText(new RegExp(`入座 ${tableNo}\\s*·\\s*可帶下一組`))).toBeVisible()
 
   // 入座後面板清空，可以直接帶下一組
-  await expect(page.getByText(/點右邊桌況圖選一張桌/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /還差桌位/ })).toBeVisible()
 })
 
 test('現場：先點桌再選人數（反序）也能帶位，且滑桿未湊齊時鎖住', async ({ page }) => {
@@ -120,7 +120,7 @@ test('現場：連點同一張桌不會重複加入（席數不可加倍）', as
   // 關鍵是任何一刻都不該出現「兩張同號卡」（那代表同一張桌被重複加入、席數加倍）。
   await seat.dblclick()
   await expect(page.getByRole('button', { name: `移除桌 ${tableNo}` })).toHaveCount(0)
-  await expect(page.getByText(/點右邊桌況圖選一張桌/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /還差桌位/ })).toBeVisible()
 
   // 單擊：剛好一張，不多不少
   await seat.click()

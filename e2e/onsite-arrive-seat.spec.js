@@ -92,7 +92,8 @@ test('今日訂位卡：未配桌訂位「到了 · 選桌入座」→ 點桌 �
 
   await page.getByRole('button', { name: /^今日訂位/ }).click()
   const card = page.locator(`[data-booking-id="${LIN.id}"]`)
-  await expect(card.getByRole('button', { name: '指派桌位' })).toBeVisible()
+  // 有可一鍵的建議桌時是「指派 ○○○」，否則「指派桌位」——兩者擇一都算有指派入口
+  await expect(card.getByRole('button', { name: /指派/ }).first()).toBeVisible()
   await card.getByRole('button', { name: '林先生 到了，選桌入座' }).click()
   await mapTable(page, '106').click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()

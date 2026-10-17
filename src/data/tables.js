@@ -88,8 +88,8 @@ export const FIXTURES = {
     { id: 'f1-fridge', type: 'rect', x: 750, y: 235, w: 42, h: 330, text: '自選冰箱', vtext: true },
     { id: 'f1-stairs', type: 'stairs', x: 800, y: 100, w: 85, h: 465, text: '樓梯', vtext: true },
     { id: 'f1-stairs-up', type: 'label', x: 810, y: 610, w: 0, h: 0, text: '↑ 上樓', vtext: false },
-    // 照片劃掉的錢櫃台不設領位台；111下方手寫「飲料」作飲料台。
-    { id: 'f1-drinks', type: 'rect', x: 650, y: 725, w: 95, h: 30, text: '飲料台', vtext: false },
+    // 111 下方這座其實是領位台（Barry 2026-10-17 更正；舊版依照片手寫「飲料」標成飲料台）。id 沿用不改，避免已存的佈局對不上。
+    { id: 'f1-drinks', type: 'rect', x: 650, y: 725, w: 95, h: 30, text: '領位台', vtext: false },
     { id: 'f1-door', type: 'rect', x: 127, y: 650, w: 24, h: 110, text: '玻璃門入口', vtext: true },
     // 左壁入口處留空；牆面沿用既有rect，不增加設施型別。
     { id: 'f1-wall-top', type: 'rect', x: 127, y: 97, w: 761, h: 3, text: '', vtext: false },

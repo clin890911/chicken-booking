@@ -165,13 +165,16 @@ test('今日訂位卡取消：有確認框；復原把訂位與桌一起倒回',
   expect(tables.find(t => t.number === '105')).toMatchObject({ status: 'reserved', currentBookingId: WANG.id })
 })
 
-test('未配桌訂位「詳情 ›」開訂位詳情（不換頁），可直接改人數', async ({ page }) => {
+test('未配桌訂位「⋯ 更多 → 查看詳情」開訂位詳情（不換頁），可直接改人數', async ({ page }) => {
   await page.clock.setFixedTime(at('11:40'))
   const LIN = mkBooking({ id: 'E2E-ED-LIN', name: '林先生', guests: 3 })
   await seed(page, { tables: [mkTable('105'), mkTable('106', { y: 462 })], bookings: [LIN] })
   await loginToOps(page)
   await page.getByRole('button', { name: /^今日訂位/ }).click()
-  await page.locator(`[data-booking-id="${LIN.id}"]`).getByRole('button', { name: '詳情 ›' }).click()
+  // 2026-10-17 卡片減量：「詳情」收進「⋯ 更多」
+  const card = page.locator(`[data-booking-id="${LIN.id}"]`)
+  await card.getByLabel('林先生 更多操作').click()
+  await card.getByRole('button', { name: '查看詳情' }).click()
   await expect(page.getByRole('button', { name: '改人數／時段／備註' })).toBeVisible()
   await expect(page.getByRole('button', { name: '指派桌位', exact: true }).last()).toBeVisible()
 })
