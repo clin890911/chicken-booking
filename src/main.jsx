@@ -5,6 +5,7 @@ import App from './App.jsx'
 import './index.css'
 import './styles/glass.css'
 import { initOpaqueMode } from './utils/opaqueMode'
+import { installPopoverDismiss } from './utils/popoverDismiss'
 import { resolveLiffStatePath } from './utils/liffState'
 
 // LIFF Endpoint=站根：LINE 以 ?liff.state=/path 帶入目標路徑。
@@ -15,6 +16,7 @@ if (liffTarget) window.history.replaceState(null, '', liffTarget)
 
 // Liquid Glass 降級：掛載前就把 <html data-material> / data-no-backdrop 設好，首幀即是正確材質
 initOpaqueMode()
+installPopoverDismiss()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>
