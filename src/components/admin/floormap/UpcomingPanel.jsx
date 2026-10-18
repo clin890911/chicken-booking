@@ -147,7 +147,7 @@ function BookingCard({ b, now, kind, quick = null, onQuickAssign, onClickBooking
         {/* 第一排第二顆＝「改桌」（2026-10-17：撥號還沒接、到店最常做的是換桌）。聯絡改收進更多。 */}
         {canMove && <button type="button" aria-disabled={isCombo ? 'true' : undefined} onClick={() => isCombo ? onMoveBlocked?.() : onMoveTable(b)} title={isCombo ? MOVE_COMBO_REASON : `重新選擇桌位（目前${preassigned ? '預配' : ''} ${tableLabel}）`}
           className={`inline-flex items-center gap-1 min-h-[44px] px-3 border rounded-md text-xs font-bold ${isCombo ? 'text-chicken-brown/40' : 'text-chicken-brown'}`}><ArrowLeftRight size={14} strokeWidth={2.4} aria-hidden="true" className="shrink-0" />改桌</button>}
-        {hasMenu ? <details>
+        {hasMenu ? <details data-popover>
           <summary className="cursor-pointer list-none min-h-[44px] px-3 flex items-center rounded-md border text-xs" aria-label={`${b.name} 更多操作`}>⋯ 更多</summary>
           {/* 浮出選單以「整張卡片」為定位基準（details 不設 relative）：左右貼齊卡片內距，
               垂直位置留在原本的流位置（top 不設）——不會往右溢出被側欄裁掉，也不會把下面的卡片推開 */}
