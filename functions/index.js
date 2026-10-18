@@ -4,6 +4,8 @@ import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, ve
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
 import { createWaitlistHandler } from './lib/waitlistCommands.js'
+import { kickWaitlistSms, sweepSmsOutbox, sendTestSms, normalizeSmsConfig, validateSmsConfigPatch, readSmsCounters, renderSmsMessage, DEFAULT_SMS_TEMPLATE, SMS_CONFIG_DOC } from './lib/smsDispatch.js'
+import { every8dCredentials, smsCharCount, smsCredits } from './lib/every8d.js'
 import { guardOperationalSync } from './lib/waitlistSyncGuard.js'
 import { commitOrdinaryBulk, readOperationalUpdates } from './lib/operationalBulk.js'
 import crypto from 'node:crypto'
@@ -2801,3 +2803,120 @@ export const dailyBackup = onSchedule(
     }
   },
 )
+
+// ===== 候位叫號簡訊（EVERY8D）=====
+// 只新增函式，不改任何既有 export（部署是 --force 全量，改名／移除會刪掉正式函式）。
+// EVERY8D secret 只綁在這三支新函式；adminWaitlistTransition 不加 secret、不加 afterCommit，
+// 叫號交易只多寫一筆 smsOutbox（見 lib/waitlistCommands.js），送出全在這裡、與叫號分離。
+// ⚠️ 部署前必須先建 EVERY8D_UID／EVERY8D_PWD 兩個 secret（帳號沒開好就存 UNSET），否則整包 functions 都部署不了。
+const EVERY8D_UID = defineSecret('EVERY8D_UID')
+const EVERY8D_PWD = defineSecret('EVERY8D_PWD')
+const SMS_SECRETS = [EVERY8D_UID, EVERY8D_PWD, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]
+const SMS_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/
+
+function every8dCredentialsFromSecrets() {
+  let uid = ''
+  let pwd = ''
+  try { uid = EVERY8D_UID.value() || '' } catch { uid = '' }
+  try { pwd = EVERY8D_PWD.value() || '' } catch { pwd = '' }
+  return every8dCredentials(uid, pwd)
+}
+
+function smsDeps() {
+  return {
+    fetchImpl: fetch,
+    credentials: every8dCredentialsFromSecrets(),
+    // 失敗／狀態不明告警到店員群組：沿用既有 tgSend 與 TELEGRAM secret，不新增 Telegram secret。
+    alert: async text => {
+      const r = await tgSend(escapeTg(text))
+      if (!r.ok) console.error('SMS_ALERT_TELEGRAM_FAILED', r.error)
+    },
+  }
+}
+
+async function readSmsConfigView() {
+  const [snap, settingsSnap, counters] = await Promise.all([
+    db.collection(SMS_CONFIG_DOC[0]).doc(SMS_CONFIG_DOC[1]).get(),
+    db.collection('settings').doc('main').get(),
+    readSmsCounters(db),
+  ])
+  const config = normalizeSmsConfig(snap.exists ? snap.data() : {})
+  const storeName = String((settingsSnap.exists && settingsSnap.data()?.storeName) || '雞王涮涮鍋')
+  const preview = renderSmsMessage({ ...config, storeName, queueNumber: '12' })
+  return {
+    exists: snap.exists,
+    config,
+    storeName,
+    defaultTemplate: DEFAULT_SMS_TEMPLATE,
+    preview,
+    previewChars: smsCharCount(preview),
+    previewCredits: smsCredits(preview),
+    credentialsConfigured: !!every8dCredentialsFromSecrets(),
+    counters,
+    updatedAt: snap.exists ? (snap.data().updatedAt || null) : null,
+    updatedBy: snap.exists ? (snap.data().updatedBy || null) : null,
+  }
+}
+
+// 叫號成功後前端「不等待」呼叫一次：只處理該候位的 pending outbox。失敗不影響叫號（前端吞掉錯誤；sweeper 會補）。
+export const smsKick = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: SMS_SECRETS }, async (req, res) => {
+  try {
+    const staff = await requireStaff(req)
+    if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+    if (!roleCan(staff.role, 'waitlist.update')) return res.status(403).json({ ok: false, error: 'permission-denied' })
+    const waitlistId = req.body?.waitlistId
+    if (typeof waitlistId !== 'string' || !SMS_ID_RE.test(waitlistId)) return res.status(400).json({ ok: false, error: 'invalid-waitlist-id' })
+    const results = await kickWaitlistSms({ db, waitlistId, ...smsDeps() })
+    return res.json({ ok: true, results: results.map(r => ({ id: r.id, status: r.status })) })
+  } catch (err) {
+    return res.status(err.status || 500).json({ ok: false, error: err.message || 'sms-kick-failed' })
+  }
+})
+
+// 後備：每分鐘撿一次 pending（舊前端、kick 失敗、冷啟動、短退避重試）與 lease 過期的 processing（標 unknown、不重送）。
+export const smsSweeper = onSchedule(
+  { schedule: 'every 1 minutes', timeZone: 'Asia/Taipei', secrets: SMS_SECRETS },
+  async () => {
+    try {
+      const results = await sweepSmsOutbox({ db, ...smsDeps() })
+      const acted = results.filter(r => !r.noop && !r.notDue)
+      if (acted.length) console.log('smsSweeper:', JSON.stringify(acted.map(r => ({ id: r.id, status: r.status }))))
+    } catch (err) {
+      console.error('smsSweeper failed:', err?.message)
+    }
+  },
+)
+
+// 叫號簡訊設定（僅 settings.update＝店長）：get／set／test。設定放 system/smsConfig，
+// 刻意不進 settings/main 同步管線（舊 iPad 整份 settings 推送會把開關蓋回去）。
+export const adminSmsConfig = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets: SMS_SECRETS }, async (req, res) => {
+  let staff
+  try {
+    staff = await requireStaff(req)
+  } catch (err) {
+    return res.status(err.status || 401).json({ ok: false, error: err.message || 'unauthorized' })
+  }
+  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method-not-allowed' })
+  if (!roleCan(staff.role, 'settings.update')) return res.status(403).json({ ok: false, error: '僅店長可設定叫號簡訊' })
+  try {
+    const { action } = req.body || {}
+    if (action === 'get') return res.json({ ok: true, ...(await readSmsConfigView()) })
+    if (action === 'set') {
+      const ref = db.collection(SMS_CONFIG_DOC[0]).doc(SMS_CONFIG_DOC[1])
+      const [snap, settingsSnap] = await Promise.all([ref.get(), db.collection('settings').doc('main').get()])
+      const storeName = String((settingsSnap.exists && settingsSnap.data()?.storeName) || '雞王涮涮鍋')
+      const checked = validateSmsConfigPatch(req.body?.patch || {}, { storeName, current: snap.exists ? snap.data() : {} })
+      if (!checked.ok) return res.status(400).json({ ok: false, error: checked.error })
+      await ref.set({ ...checked.value, updatedAt: new Date().toISOString(), updatedBy: staff.email }, { merge: true })
+      return res.json({ ok: true, ...(await readSmsConfigView()) })
+    }
+    if (action === 'test') {
+      const result = await sendTestSms({ db, to: String(req.body?.phone || ''), actor: staff.email, ...smsDeps() })
+      return res.json({ ok: true, result: { status: result.status, error: result.error || null, reason: result.reason || null, dryRunMessage: result.dryRunMessage || null } })
+    }
+    return res.status(400).json({ ok: false, error: 'unknown-action' })
+  } catch (err) {
+    console.error('adminSmsConfig failed:', err)
+    return res.status(500).json({ ok: false, error: err.message || 'sms-config-failed' })
+  }
+})
