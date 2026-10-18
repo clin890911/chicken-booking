@@ -25,6 +25,7 @@ export const SMS_DAILY_LIMIT_DEFAULT = 300
 export const SMS_PER_WAITLIST_LIMIT_DEFAULT = 3
 export const SMS_SINGLE_MAX_CHARS = 70
 
+const QUIET_STATES = new Set(['skipped-disabled', 'superseded'])
 export const SMS_TERMINAL = new Set(['sent', 'dry-run', 'failed', 'unknown', 'superseded', 'skipped-disabled', 'skipped-unconfigured', 'limited'])
 
 const clampInt = (v, min, max, fallback) => {
@@ -192,7 +193,8 @@ export async function processSmsOutbox({ db, id, fetchImpl, credentials, alert, 
   const finishFromPending = async (status, patch = {}, smsExtra = {}) => {
     const done = await transition(db, ref, { status: 'pending' }, { status, ...patch, finishedAt: iso(nowMs), updatedAt: iso(nowMs) })
     if (!done) return { id, status: 'raced' }
-    await writeWaitlistSmsStatus(db, o, id, status, smsExtra, nowMs)
+    // 開關關閉／已過時：卡片本來就不顯示，完全不碰 waitlist 文件（預設關閉時叫號路徑零額外寫入）。
+    if (!QUIET_STATES.has(status)) await writeWaitlistSmsStatus(db, o, id, status, smsExtra, nowMs)
     return { id, status, ...patch }
   }
 

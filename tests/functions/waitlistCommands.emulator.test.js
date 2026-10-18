@@ -127,6 +127,7 @@ describe.runIf(enabled)('waitlist real Firestore transactions, isolated demo pro
     const mk=async id=>{const c=await call(testCommand('create',id,0,{name:id,partySize:2,phone:'0912345678',children:0},day));return call(testCommand('call',id,c.body.item.queueVersion,{},day))}
     await mk('SMS_OFF')
     expect((await kickWaitlistSms({db:env.db,waitlistId:'SMS_OFF',...deps})).map(r=>r.status)).toEqual(['skipped-disabled'])
+    expect((await env.db.collection('waitlist').doc('SMS_OFF').get()).data()).not.toHaveProperty('smsStatus')
     await env.db.collection('system').doc('smsConfig').set({enabled:true,dryRun:true})
     await mk('SMS_DRY')
     expect((await kickWaitlistSms({db:env.db,waitlistId:'SMS_DRY',...deps})).map(r=>r.status)).toEqual(['dry-run'])

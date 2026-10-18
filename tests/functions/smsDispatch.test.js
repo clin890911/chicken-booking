@@ -82,7 +82,7 @@ describe('總開關 fail-closed：預設關閉', () => {
     expect(r.status).toBe('skipped-disabled')
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(records.get('smsOutbox/wl_call_1').status).toBe('skipped-disabled')
-    expect(records.get('waitlist/W1').smsStatus.state).toBe('skipped-disabled')
+    expect(records.get('waitlist/W1')).not.toHaveProperty('smsStatus') // 開關關閉：完全不碰 waitlist 文件
     expect(records.get('waitlist/W1').queueVersion).toBe(2)
   })
   it('readSmsConfig 讀取失敗回 enabled:false（不 throw）', async () => {
@@ -154,6 +154,12 @@ describe('過時判斷 superseded（送前重讀 waitlist）', () => {
     const fetchImpl = okFetch()
     expect(await run(db, 'wl_call_1', { fetchImpl })).toMatchObject({ status: 'superseded', reason: 'stale' })
     expect(fetchImpl).not.toHaveBeenCalled()
+  })
+  it('superseded 不回寫 waitlist（卡片本來就不顯示，少一次寫入）', async () => {
+    const { db, records } = fakeDb(); enable(records); seedCall(records)
+    records.set('waitlist/W1', { ...records.get('waitlist/W1'), status: 'seated' })
+    await run(db, 'wl_call_1')
+    expect(records.get('waitlist/W1')).not.toHaveProperty('smsStatus')
   })
   it('候位已被刪 → superseded，且不會用 smsStatus 把候位「復活」', async () => {
     const { db, records } = fakeDb(); enable(records); seedCall(records)
