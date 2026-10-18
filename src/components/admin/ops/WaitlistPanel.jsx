@@ -15,6 +15,7 @@ import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameF
 import WaitlistHistorySheet from './WaitlistHistorySheet'
 import FloatingPhoneKeypad from './FloatingPhoneKeypad'
 import { X } from 'lucide-react'
+import { waitlistPhoneHint, waitlistSmsBadge, smsLooksActive } from '../../../utils/waitlistSms'
 
 // 候位人數上限與散客後台相同（200，見 GuestCountField／PartySizeField）；線上訂位的 12 人上限不在這裡。
 // 超過單桌常見容量（12）＝大組，入座時需併桌（seatingService 的候位入座已支援併桌）。
@@ -70,6 +71,8 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
   }
   const skipped=waitlist.filter(w=>w.status==='skipped'&&waitlistDay(w)===todayStr()).sort(compareWaitlistOrder)
   const active = waitlist.filter(w => ['waiting','called'].includes(w.status)&&waitlistDay(w)===todayStr()).sort(compareWaitlistOrder)
+  const smsActive = smsLooksActive(waitlist.filter(w => waitlistDay(w) === todayStr()))
+  const phoneHint = waitlistPhoneHint(form.phone)
 
   // 「前面還有 N 組」：依取號先後排名（越早取號越前面）
   const aheadOf = useMemo(() => {
@@ -163,6 +166,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                 <PhoneLink phone={w.phone} className="text-sm" />
                 {w.status === 'called' && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-bold">已叫號</span>}
               </div>
+              <SmsBadge w={w} smsActive={smsActive} />
               <div className="text-[10px] text-chicken-brown/50 mt-0.5">
                 已等 {diffMin(w.takenAt)} 分
                 {aheadOf[w.id] > 0
@@ -234,12 +238,13 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
           />
           {/* inputMode="none"：不叫出系統鍵盤，點欄位改浮出數字鍵盤（不蓋住「取號」） */}
           <div>
-            <label className="label">電話（選填）</label>
+            <label className="label">手機（叫號簡訊用，選填）</label>
             <input
               ref={phoneRef}
               type="tel"
               inputMode="none"
-              aria-label="電話（選填）"
+              aria-label="手機（叫號簡訊用，選填）"
+              aria-describedby={phoneHint ? 'waitlist-phone-hint' : undefined}
               value={form.phone}
               onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
               onClick={() => setKeypadOpen(true)}
@@ -247,6 +252,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
               placeholder="0912345678"
               className={`input tabular-nums ${keypadOpen ? 'ring-4 ring-chicken-red/20 border-chicken-red' : ''}`}
             />
+            {phoneHint && <p id="waitlist-phone-hint" role="status" className="mt-1 text-xs text-amber-700">{phoneHint}</p>}
           </div>
           <FloatingPhoneKeypad
             open={showAdd && keypadOpen}
@@ -261,6 +267,22 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
       </Modal>
 
       <WaitlistHistorySheet open={showHistory} onClose={() => setShowHistory(false)} />
+    </div>
+  )
+}
+
+// 已叫號卡片的簡訊狀態：失敗／不明一律提示改打電話（簡訊是補充，不取代喊號）。
+const SMS_TONE = {
+  ok: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  bad: 'bg-red-50 text-red-700 border-red-200 font-bold',
+  neutral: 'bg-chicken-brown/5 text-chicken-brown/60 border-chicken-brown/10',
+}
+function SmsBadge({ w, smsActive }) {
+  const badge = waitlistSmsBadge(w, { smsActive })
+  if (!badge) return null
+  return (
+    <div className="mt-1">
+      <span data-sms-badge={badge.tone} className={`inline-block text-[11px] px-1.5 py-0.5 rounded-md border ${SMS_TONE[badge.tone]}`}>{badge.label}</span>
     </div>
   )
 }
