@@ -17,6 +17,15 @@ export function waitlistCallOutboxId(waitlistId, commandId) {
   return 'wl_call_' + crypto.createHash('sha256').update(JSON.stringify([waitlistId, commandId])).digest('hex').slice(0, 40)
 }
 
+// 個資保存期限：smsOutbox 含完整門號與簡訊內文，只留 7 天（smsSweeper 會刪過期的）。
+export const SMS_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+// expireAt＝createdAt＋保存期限，用 ISO 字串（與 repo 其他欄位的時間慣例一致）。
+// now 若不是可解析的時間（理論上不會發生）回 null——欄位仍存在、不是 undefined，交易不會因此 throw。
+export function smsOutboxExpireAt(createdAt, retentionMs = SMS_OUTBOX_RETENTION_MS) {
+  const t = Date.parse(createdAt)
+  return Number.isFinite(t) ? new Date(t + retentionMs).toISOString() : null
+}
+
 // 叫號交易內要多寫的那一筆（純資料，不讀任何東西）。沒有可用手機 → null（不寫）。
 // 總開關、上限、範本都在送出端判斷，叫號交易完全不讀 system/smsConfig。
 export function buildWaitlistCallOutbox({ item, commandId, now }) {
@@ -37,6 +46,7 @@ export function buildWaitlistCallOutbox({ item, commandId, now }) {
       nextAttemptAt: null,
       createdAt: now,
       updatedAt: now,
+      expireAt: smsOutboxExpireAt(now),
     },
   }
 }

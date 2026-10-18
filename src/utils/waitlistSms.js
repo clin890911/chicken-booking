@@ -31,7 +31,7 @@ export function waitlistSmsBadge(w, { smsActive = false } = {}) {
   // 上一次叫號（回來了之後又重叫）留下的舊狀態不算數
   const current = s && (!s.calledAt || !w.calledAt || s.calledAt === w.calledAt) ? s.state : null
   switch (current) {
-    case 'sent': return { label: '簡訊已送', tone: 'ok' }
+    case 'sent': return { label: '簡訊已送出', tone: 'ok' }
     case 'dry-run': return { label: '簡訊乾跑（未實送）', tone: 'neutral' }
     case 'pending':
     case 'retrying': return { label: '簡訊發送中', tone: 'neutral' }

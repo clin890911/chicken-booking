@@ -2873,7 +2873,8 @@ export const smsKick = onRequest({ cors: PUBLIC_CORS, invoker: 'public', secrets
   }
 })
 
-// 後備：每分鐘撿一次 pending（舊前端、kick 失敗、冷啟動、短退避重試）與 lease 過期的 processing（標 unknown、不重送）。
+// 後備：每分鐘撿一次 pending（舊前端、kick 失敗、冷啟動、確定未送出的重試——間隔約 ≥60 秒）與 lease 過期的 processing（標 unknown、不重送）；
+// 並順手清掉 7 天前的 smsOutbox（個資保存期限，每次最多 100 筆，失敗不影響送出）。
 export const smsSweeper = onSchedule(
   { schedule: 'every 1 minutes', timeZone: 'Asia/Taipei', secrets: SMS_SECRETS },
   async () => {

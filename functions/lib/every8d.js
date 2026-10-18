@@ -4,6 +4,15 @@
 //   欄位 UID、PWD、SB（主旨，不發出）、MSG、DEST、ST（空＝立即）、RETRYTIME（有效分鐘）
 //   成功：純文字 `CREDIT,SENDED,COST,UNSEND,BATCHID`；失敗：`Status,Msg`（Status 為負數，例 -99）
 // ⚠ 開戶後要用測試簡訊實測：中文編碼（規格書未載明，這裡送 UTF-8）、實際 SiteUrl、錯誤碼表。
+//
+// 錯誤分類總原則＝at-most-once（寧可漏發讓店員打電話，也不讓客人收到重複簡訊）：
+//   只有「能確定請求沒被對方接受」才可重試（retryable）；結果不明一律 unknown、不重送。
+//   依規格書：回應格式（成功 5 欄／失敗 `Status,Msg` 且 Status 為負數）、-28 時間格式錯、-99 未知錯誤。
+//   屬推測、待開戶用測試簡訊實測：
+//     · -99 是否可能發生在對方已受理之後（規格書只寫「未知錯誤」）→ 保守歸 unknown
+//     · 其他負數碼的含義（帳密錯等）→ 視為確定未送（failed、不重試）
+//     · HTTP 狀態碼語意（規格書未載明）：429／503 視為閘道擋下、502 與 500／504 視為不明
+//     · 連線前失敗的錯誤碼集合（Node/undici 的 cause.code）
 
 export const EVERY8D_DEFAULT_HOST = 'new.e8d.tw'
 export const EVERY8D_TIMEOUT_MS = 10_000
@@ -61,9 +70,10 @@ export function buildSendSmsRequest({ host = EVERY8D_DEFAULT_HOST, credentials, 
 
 // 解析回應本文。回傳 outcome：
 //   sent      — 確定已交給 EVERY8D（SENDED ≥ 1）
-//   rejected  — 確定沒送出（明確錯誤碼、或 SENDED=0），retryable 表示值不值得短退避重試
-//   unknown   — 看不懂回應：不能確定有沒有送出 → at-most-once，不重送
-const RETRYABLE_CODES = new Set(['-99']) // 規格書只列 -99（不明錯誤）／-28（時間格式錯）；-99 明確表示這次沒成功
+//   rejected  — 確定沒送出（明確的錯誤碼、或 SENDED=0），retryable 表示值不值得重試
+//   unknown   — 不能確定有沒有送出（看不懂的回應、-99 未知錯誤）→ at-most-once，不重送
+// 負數碼目前沒有任何一個被視為「可重試」：-99 雖是失敗回應，但「未知」就是不知道對方有沒有受理。
+const UNKNOWN_CODES = new Set(['-99']) // 規格書：-99＝未知錯誤（依規格書）；歸 unknown 是保守推測，待開戶實測
 export function parseSendSmsResponse(text) {
   const raw = String(text ?? '').trim()
   const parts = raw.split(',').map(s => s.trim())
@@ -75,20 +85,25 @@ export function parseSendSmsResponse(text) {
   }
   if (parts.length >= 1 && num(parts[0]) !== null && num(parts[0]) < 0) {
     const code = String(num(parts[0]))
-    return { outcome: 'rejected', retryable: RETRYABLE_CODES.has(code), code, error: `EVERY8D ${code}：${parts.slice(1).join(',').slice(0, 120) || '錯誤'}` }
+    const error = `EVERY8D ${code}：${parts.slice(1).join(',').slice(0, 120) || '錯誤'}`
+    if (UNKNOWN_CODES.has(code)) return { outcome: 'unknown', code, error }
+    return { outcome: 'rejected', retryable: false, code, error }
   }
   return { outcome: 'unknown', code: 'unparseable', error: `EVERY8D 回應無法解析：${raw.slice(0, 120)}` }
 }
 
-// 依 HTTP 狀態分類：429／502／503 是閘道層擋下、請求沒被處理 → 可重試；
-// 其他非 2xx（500、504…）可能已處理一半 → unknown（不重送）。
+// 依 HTTP 狀態分類（規格書未載明，以下皆為推測，待開戶實測）：
+//   429（限流）／503（服務暫不可用）＝在入口被擋下、請求沒被處理 → 可重試；
+//   401／403＝帳密或權限問題 → failed 不重試；
+//   502（閘道錯誤，上游可能已受理）、500、504 與其他非 2xx → unknown（不重送）。
 export function classifyHttpStatus(status) {
-  if ([429, 502, 503].includes(status)) return { outcome: 'rejected', retryable: true, code: `http-${status}`, error: `EVERY8D HTTP ${status}` }
+  if ([429, 503].includes(status)) return { outcome: 'rejected', retryable: true, code: `http-${status}`, error: `EVERY8D HTTP ${status}` }
   if (status === 401 || status === 403) return { outcome: 'rejected', retryable: false, code: `http-${status}`, error: `EVERY8D HTTP ${status}（帳密或權限）` }
   return { outcome: 'unknown', code: `http-${status}`, error: `EVERY8D HTTP ${status}` }
 }
 
-// 連線前就失敗（DNS 查不到、連線被拒）＝請求確定沒送到 → 可重試；逾時／中途斷線 → unknown。
+// 連線前就失敗（DNS 查不到、連線被拒）＝請求確定沒送到 → 可重試；
+// 請求逾時（AbortError／TimeoutError）、中途斷線（ECONNRESET 等）、其他不認得的錯誤 → unknown（可能已送出，不重送）。
 const PRE_CONNECT_CODES = new Set(['ENOTFOUND', 'ECONNREFUSED', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH'])
 export function classifyFetchError(err) {
   const code = err?.cause?.code || err?.code || ''
@@ -98,16 +113,29 @@ export function classifyFetchError(err) {
 }
 
 // 實際送出。永遠不 throw（除設定錯誤外）：結果一律回 outcome 物件，由 dispatcher 決定回寫。
+// 逾時（EVERY8D_TIMEOUT_MS）必須遠小於 dispatcher 的 lease（SMS_LEASE_MS，見 smsDispatch.js 與測試的常數斷言），
+// 否則送出還在跑、sweeper 就會判 lease 過期而誤報「狀態不明」。除了 AbortController 之外再用 Promise.race
+// 當硬上限：就算注入的 fetch 不理會 signal（或 body 讀取卡住）也一定在 timeoutMs 內回 unknown。
 export async function sendEvery8dSms({ fetchImpl, host, credentials, to, message, timeoutMs = EVERY8D_TIMEOUT_MS }) {
   let request
   try { request = buildSendSmsRequest({ host, credentials, to, message }) }
   catch (err) { return { outcome: 'rejected', retryable: false, code: err.code || 'config', error: err.message } }
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
+  let timer
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      reject(Object.assign(Error('every8d-timeout'), { name: 'TimeoutError' }))
+    }, timeoutMs)
+  })
+  const work = (async () => {
     const res = await fetchImpl(request.url, { ...request.init, signal: controller.signal })
     if (!res.ok) return classifyHttpStatus(res.status)
     return parseSendSmsResponse(await res.text())
+  })()
+  work.catch(() => {}) // 逾時後 work 才 reject 時不要變成 unhandled rejection
+  try {
+    return await Promise.race([work, deadline])
   } catch (err) {
     return classifyFetchError(err)
   } finally {

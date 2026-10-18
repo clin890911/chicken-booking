@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   every8dCredentials, smsCharCount, smsCredits, buildSendSmsRequest, parseSendSmsResponse,
-  classifyHttpStatus, classifyFetchError, sendEvery8dSms, isAllowedEvery8dHost,
+  classifyHttpStatus, classifyFetchError, sendEvery8dSms, isAllowedEvery8dHost, EVERY8D_TIMEOUT_MS,
 } from '../../functions/lib/every8d.js'
 
 const creds = { uid: 'test-uid', pwd: 'test-pwd' }
@@ -49,15 +49,18 @@ describe('解析回應', () => {
   it('SENDED=0 → 確定沒送出、不重試', () => {
     expect(parseSendSmsResponse('100.00,0,0,1,abc')).toMatchObject({ outcome: 'rejected', retryable: false })
   })
-  it('-99 不明錯誤 → 明確失敗、可重試；其他負數 → 明確失敗、不重試', () => {
-    expect(parseSendSmsResponse('-99,發生不明錯誤')).toMatchObject({ outcome: 'rejected', retryable: true, code: '-99' })
+  it('-99 未知錯誤 → unknown（不能確定對方有沒有受理，不重送）；其他負數 → 明確失敗、不重試', () => {
+    const r = parseSendSmsResponse('-99,發生不明錯誤')
+    expect(r).toMatchObject({ outcome: 'unknown', code: '-99' })
+    expect(r.retryable).toBeUndefined()
     expect(parseSendSmsResponse('-2,帳號密碼錯誤')).toMatchObject({ outcome: 'rejected', retryable: false, code: '-2' })
     expect(parseSendSmsResponse('-28,時間格式錯誤')).toMatchObject({ outcome: 'rejected', retryable: false })
   })
   it('看不懂的回應 → unknown（不重送）', () => {
     for (const t of ['', '<html>error</html>', 'OK', '{"Result":false}']) expect(parseSendSmsResponse(t).outcome).toBe('unknown')
   })
-  it('HTTP 狀態：429/502/503 可重試；401/403 不重試；500/504 不明', () => {
+  it('HTTP 狀態：429/503 可重試；401/403 不重試；500/502/504 不明（不重送）', () => {
+    expect(classifyHttpStatus(502)).toMatchObject({ outcome: 'unknown', code: 'http-502' })
     expect(classifyHttpStatus(503)).toMatchObject({ outcome: 'rejected', retryable: true })
     expect(classifyHttpStatus(429)).toMatchObject({ outcome: 'rejected', retryable: true })
     expect(classifyHttpStatus(401)).toMatchObject({ outcome: 'rejected', retryable: false })
@@ -67,11 +70,53 @@ describe('解析回應', () => {
   it('連線前失敗可重試；逾時與中途斷線不明', () => {
     expect(classifyFetchError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))).toMatchObject({ outcome: 'rejected', retryable: true })
     expect(classifyFetchError(Object.assign(Error('aborted'), { name: 'AbortError' })).outcome).toBe('unknown')
+    expect(classifyFetchError(Object.assign(Error('timeout'), { name: 'TimeoutError' })).outcome).toBe('unknown')
+    expect(classifyFetchError(new TypeError('fetch failed')).outcome).toBe('unknown')
+    expect(classifyFetchError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }))).toMatchObject({ outcome: 'rejected', retryable: true })
     expect(classifyFetchError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })).outcome).toBe('unknown')
   })
 })
 
+describe('重試資格總表：只有確定未送出才可重試', () => {
+  const retryable = r => r.outcome === 'rejected' && r.retryable === true
+  it('可重試＝HTTP 429／503、連線前失敗；其餘一律不可', () => {
+    const all = [
+      classifyHttpStatus(429), classifyHttpStatus(503),
+      classifyFetchError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })),
+    ]
+    all.forEach(r => expect(retryable(r)).toBe(true))
+    const never = [
+      parseSendSmsResponse('-99,x'), parseSendSmsResponse('-2,x'), parseSendSmsResponse('garbage'), parseSendSmsResponse('1,0,0,1,B'),
+      classifyHttpStatus(500), classifyHttpStatus(502), classifyHttpStatus(504), classifyHttpStatus(401), classifyHttpStatus(403),
+      classifyFetchError(Object.assign(Error('aborted'), { name: 'AbortError' })),
+      classifyFetchError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })),
+    ]
+    never.forEach(r => expect(retryable(r)).toBe(false))
+  })
+})
+
 describe('sendEvery8dSms（fetch 一律 mock）', () => {
+  it('-99／HTTP 502 經完整送出流程 → unknown', async () => {
+    const f99 = vi.fn(async () => ({ ok: true, status: 200, text: async () => '-99,未知錯誤' }))
+    expect(await sendEvery8dSms({ fetchImpl: f99, credentials: creds, to: '0912345678', message: 'hi' })).toMatchObject({ outcome: 'unknown', code: '-99' })
+    const f502 = vi.fn(async () => ({ ok: false, status: 502, text: async () => '' }))
+    expect(await sendEvery8dSms({ fetchImpl: f502, credentials: creds, to: '0912345678', message: 'hi' })).toMatchObject({ outcome: 'unknown', code: 'http-502' })
+  })
+  it('預設逾時明確且遠小於 lease 前提（≤15 秒）', () => {
+    expect(EVERY8D_TIMEOUT_MS).toBeGreaterThan(0)
+    expect(EVERY8D_TIMEOUT_MS).toBeLessThanOrEqual(15_000)
+  })
+  it('fetch 完全不理會 signal 也在 timeoutMs 內回 unknown（硬上限）', async () => {
+    const fetchImpl = vi.fn(() => new Promise(() => {})) // 永遠不 resolve、不看 signal
+    const t0 = Date.now()
+    const r = await sendEvery8dSms({ fetchImpl, credentials: creds, to: '0912345678', message: 'hi', timeoutMs: 30 })
+    expect(r).toMatchObject({ outcome: 'unknown', code: 'timeout' })
+    expect(Date.now() - t0).toBeLessThan(1000)
+  })
+  it('body 讀取卡住（headers 已回）同樣逾時 → unknown', async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, text: () => new Promise(() => {}) }))
+    expect((await sendEvery8dSms({ fetchImpl, credentials: creds, to: '0912345678', message: 'hi', timeoutMs: 30 })).outcome).toBe('unknown')
+  })
   it('成功', async () => {
     const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, text: async () => '500.00,1,1,0,BATCH1' }))
     const r = await sendEvery8dSms({ fetchImpl, credentials: creds, to: '0912345678', message: 'hi' })

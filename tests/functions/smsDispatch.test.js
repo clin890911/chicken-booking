@@ -1,13 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   processSmsOutbox, kickWaitlistSms, sweepSmsOutbox, sendTestSms, readSmsConfig, normalizeSmsConfig,
-  validateSmsConfigPatch, renderSmsMessage, DEFAULT_SMS_TEMPLATE, SMS_LEASE_MS, SMS_STALE_MS,
+  validateSmsConfigPatch, renderSmsMessage, DEFAULT_SMS_TEMPLATE, SMS_LEASE_MS, SMS_STALE_MS, SMS_BACKOFF_MS, SMS_PURGE_BATCH_LIMIT,
+  purgeExpiredSmsOutbox,
 } from '../../functions/lib/smsDispatch.js'
-import { every8dCredentials } from '../../functions/lib/every8d.js'
+import { SMS_OUTBOX_RETENTION_MS } from '../../functions/lib/smsPhone.js'
+import { every8dCredentials, EVERY8D_TIMEOUT_MS } from '../../functions/lib/every8d.js'
 
 // In-memory Firestore（只實作 dispatcher 用到的 API）；交易內「寫後再讀」直接 throw。HTTP 一律 mock。
 const clone = v => (v === undefined ? v : structuredClone(v))
-function fakeDb({ failConfigRead = false } = {}) {
+function fakeDb({ failConfigRead = false, failDelete = false, failQueryOp = null } = {}) {
   const records = new Map()
   const docRef = (col, id) => {
     const path = `${col}/${id}`
@@ -19,14 +21,22 @@ function fakeDb({ failConfigRead = false } = {}) {
       },
       set: async (d, opt) => { records.set(path, opt?.merge ? { ...(records.get(path) || {}), ...clone(d) } : clone(d)) },
       update: async d => { if (!records.has(path)) throw Error('NOT_FOUND'); records.set(path, { ...records.get(path), ...clone(d) }) },
+      delete: async () => { if (failDelete) throw Error('delete-denied'); records.delete(path) },
     }
   }
   const query = (col, filters = [], lim = Infinity) => ({
     where: (f, op, v) => query(col, [...filters, [f, op, v]], lim),
     limit: n => query(col, filters, n),
-    get: async () => ({ docs: [...records].filter(([p]) => p.startsWith(col + '/') && p.split('/').length === 2)
-      .filter(([, v]) => filters.every(([f, op, val]) => (op === '==' ? v[f] === val : val.includes(v[f]))))
-      .slice(0, lim).map(([p, v]) => ({ id: p.split('/')[1], data: () => clone(v) })) }),
+    get: async () => {
+      if (failQueryOp && filters.some(([, op]) => op === failQueryOp)) throw Error('query-failed')
+      return { docs: [...records].filter(([p]) => p.startsWith(col + '/') && p.split('/').length === 2)
+      .filter(([, v]) => filters.every(([f, op, val]) => {
+        if (op === '==') return v[f] === val
+        if (op === '<') return typeof v[f] === 'string' && v[f] < val
+        return val.includes(v[f])
+      }))
+      .slice(0, lim).map(([p, v]) => ({ id: p.split('/')[1], data: () => clone(v) })) }
+    },
   })
   const db = {
     collection: col => ({ doc: id => docRef(col, id), where: (...a) => query(col).where(...a), limit: n => query(col).limit(n) }),
@@ -210,11 +220,13 @@ describe('at-most-once：結果不明不重送', () => {
   })
 })
 
-describe('短退避與 3 次上限（只對「確定沒送出」的錯誤）', () => {
-  it('-99 → 15 秒後重試 → 45 秒後重試 → 第 3 次仍失敗標 failed＋告警', async () => {
+describe('重試與 3 次上限（只對「確定沒送出」的錯誤：HTTP 429／503、連線前失敗）', () => {
+  const http503 = () => vi.fn(async () => ({ ok: false, status: 503, text: async () => '' }))
+  it('503 → 最早 15 秒後可重試 → 再 45 秒後可重試 → 第 3 次仍失敗標 failed＋告警（實際重試靠每分鐘 sweeper，間隔約 ≥60 秒）', async () => {
     const { db, records } = fakeDb(); enable(records); seedCall(records)
-    const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, text: async () => '-99,發生不明錯誤' }))
+    const fetchImpl = http503()
     const alert = vi.fn()
+    expect(SMS_BACKOFF_MS).toEqual([15_000, 45_000]) // 只是「最早可重試時間」下限，不是實際間隔
     const r1 = await run(db, 'wl_call_1', { fetchImpl, alert })
     expect(r1.status).toBe('pending')
     expect(Date.parse(r1.retryAt)).toBe(clockMs + 15_000)
@@ -232,12 +244,94 @@ describe('短退避與 3 次上限（只對「確定沒送出」的錯誤）', (
     await run(db, 'wl_call_1', { fetchImpl, alert })
     expect(fetchImpl).toHaveBeenCalledTimes(3)
   })
+  it('連線前失敗（ECONNREFUSED）也可重試', async () => {
+    const { db, records } = fakeDb(); enable(records); seedCall(records)
+    const fetchImpl = vi.fn(async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }) })
+    expect((await run(db, 'wl_call_1', { fetchImpl })).status).toBe('pending')
+  })
+  it.each([
+    ['-99 未知錯誤', async () => ({ ok: true, status: 200, text: async () => '-99,未知錯誤' }), '-99'],
+    ['HTTP 502', async () => ({ ok: false, status: 502, text: async () => '' }), 'http-502'],
+    ['請求逾時（AbortError）', async () => { throw Object.assign(Error('aborted'), { name: 'AbortError' }) }, 'timeout'],
+    ['中途斷線（ECONNRESET）', async () => { throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }) }, 'network'],
+  ])('%s → unknown、只送 1 次、告警、之後 sweeper 再撿也不重送', async (_name, impl, errorCode) => {
+    const { db, records } = fakeDb(); enable(records); seedCall(records)
+    const fetchImpl = vi.fn(impl)
+    const alert = vi.fn()
+    expect((await run(db, 'wl_call_1', { fetchImpl, alert })).status).toBe('unknown')
+    expect(records.get('smsOutbox/wl_call_1')).toMatchObject({ status: 'unknown', errorCode })
+    expect(records.get('waitlist/W1').smsStatus.state).toBe('unknown')
+    expect(alert).toHaveBeenCalledTimes(1)
+    clockMs += 120_000
+    await sweepSmsOutbox({ db, clock, fetchImpl, credentials: creds, alert })
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
   it('帳密錯（-2）→ 直接 failed、不重試', async () => {
     const { db, records } = fakeDb(); enable(records); seedCall(records)
     const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, text: async () => '-2,帳號或密碼錯誤' }))
     expect((await run(db, 'wl_call_1', { fetchImpl })).status).toBe('failed')
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(records.get('smsOutbox/wl_call_1')).toMatchObject({ status: 'failed', errorCode: '-2' })
+  })
+})
+
+describe('HTTP 逾時與 lease 的關係', () => {
+  it('lease 至少是 HTTP 逾時的 3 倍（送出途中不會被 sweeper 判 lease 過期）', () => {
+    expect(EVERY8D_TIMEOUT_MS * 3).toBeLessThanOrEqual(SMS_LEASE_MS)
+  })
+  it('逾時結果＝unknown 且不重送（逾時值由上面的常數斷言保證遠小於 lease）', async () => {
+    const { db, records } = fakeDb(); enable(records); seedCall(records)
+    const fetchImpl = vi.fn(async () => { throw Object.assign(Error('aborted'), { name: 'AbortError' }) })
+    expect((await run(db, 'wl_call_1', { fetchImpl })).status).toBe('unknown')
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('個資清理：expireAt 與 smsOutbox 保存期限', () => {
+  const NOW = T0 + 30 * 24 * 3600 * 1000
+  const old = id => ({ kind: 'waitlist-call', to: '0912345678', status: 'sent', createdAt: new Date(NOW - SMS_OUTBOX_RETENTION_MS - 1000).toISOString() })
+  it('刪除 7 天前的 smsOutbox，保留 7 天內的；只碰 smsOutbox', async () => {
+    const { db, records } = fakeDb()
+    records.set('smsOutbox/old1', old()); records.set('smsOutbox/old2', old())
+    records.set('smsOutbox/fresh', { status: 'sent', createdAt: new Date(NOW - 6 * 24 * 3600 * 1000).toISOString() })
+    records.set('smsOutbox/edge', { status: 'sent', createdAt: new Date(NOW - SMS_OUTBOX_RETENTION_MS).toISOString() }) // 剛好 7 天：保留
+    records.set('smsCounters/2026-09-01', { live: { total: 3 }, createdAt: '2020-01-01T00:00:00.000Z' })
+    records.set('waitlist/W1', { id: 'W1', createdAt: '2020-01-01T00:00:00.000Z' })
+    const r = await purgeExpiredSmsOutbox({ db, clock: () => NOW })
+    expect(r).toEqual({ deleted: 2, failed: 0 })
+    expect([...records.keys()].sort()).toEqual(['smsCounters/2026-09-01', 'smsOutbox/edge', 'smsOutbox/fresh', 'waitlist/W1'])
+  })
+  it('每次最多 100 筆（有上限）', async () => {
+    const { db, records } = fakeDb()
+    for (let i = 0; i < 130; i++) records.set(`smsOutbox/o${i}`, old())
+    expect(SMS_PURGE_BATCH_LIMIT).toBe(100)
+    expect((await purgeExpiredSmsOutbox({ db, clock: () => NOW })).deleted).toBe(100)
+    expect([...records.keys()].filter(k => k.startsWith('smsOutbox/'))).toHaveLength(30)
+  })
+  it('清理查詢失敗／刪除失敗都不 throw', async () => {
+    const q = fakeDb({ failQueryOp: '<' })
+    q.records.set('smsOutbox/old', old())
+    await expect(purgeExpiredSmsOutbox({ db: q.db, clock: () => NOW })).resolves.toMatchObject({ deleted: 0, error: 'query-failed' })
+    const d = fakeDb({ failDelete: true })
+    d.records.set('smsOutbox/old', old())
+    await expect(purgeExpiredSmsOutbox({ db: d.db, clock: () => NOW })).resolves.toEqual({ deleted: 0, failed: 1 })
+  })
+  it('sweeper：清理失敗不影響送出結果；成功時順手清', async () => {
+    const bad = fakeDb({ failQueryOp: '<' }); enable(bad.records); seedCall(bad.records)
+    const fetchImpl = okFetch()
+    const res = await sweepSmsOutbox({ db: bad.db, clock, fetchImpl, credentials: creds, alert: vi.fn() })
+    expect(res.map(r => r.status)).toEqual(['sent'])
+    const ok = fakeDb(); enable(ok.records); seedCall(ok.records)
+    ok.records.set('smsOutbox/ancient', { status: 'sent', createdAt: '2020-01-01T00:00:00.000Z' })
+    await sweepSmsOutbox({ db: ok.db, clock, fetchImpl: okFetch(), credentials: creds, alert: vi.fn() })
+    expect(ok.records.has('smsOutbox/ancient')).toBe(false)
+    expect(ok.records.get('smsOutbox/wl_call_1').status).toBe('sent')
+  })
+  it('後台測試簡訊的 outbox 也帶 expireAt', async () => {
+    const { db, records } = fakeDb(); enable(records, { dryRun: true })
+    await sendTestSms({ db, to: '0912345678', clock, fetchImpl: okFetch(), credentials: null })
+    const box = [...records].find(([k]) => k.startsWith('smsOutbox/test_'))[1]
+    expect(Date.parse(box.expireAt) - Date.parse(box.createdAt)).toBe(SMS_OUTBOX_RETENTION_MS)
   })
 })
 

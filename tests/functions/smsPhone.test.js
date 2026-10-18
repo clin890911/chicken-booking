@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeTwMobile, waitlistCallOutboxId, buildWaitlistCallOutbox } from '../../functions/lib/smsPhone.js'
+import { normalizeTwMobile, waitlistCallOutboxId, buildWaitlistCallOutbox, smsOutboxExpireAt, SMS_OUTBOX_RETENTION_MS } from '../../functions/lib/smsPhone.js'
 
 describe('normalizeTwMobile：叫號簡訊只認台灣手機', () => {
   it.each([
@@ -34,5 +34,18 @@ describe('buildWaitlistCallOutbox', () => {
     expect(r.data).toMatchObject({ kind: 'waitlist-call', waitlistId: 'W1', commandId: 'c1', queueNumber: 12, calledAt: item.calledAt, to: '0912345678', status: 'pending', attempts: 0 })
     expect(buildWaitlistCallOutbox({ item: { ...item, phone: '049-2753377' }, commandId: 'c1', now: item.calledAt })).toBeNull()
     expect(buildWaitlistCallOutbox({ item: { ...item, phone: '' }, commandId: 'c1', now: item.calledAt })).toBeNull()
+  })
+  it('有 expireAt＝createdAt＋7 天（ISO）；所有欄位都不是 undefined', () => {
+    const r = buildWaitlistCallOutbox({ item, commandId: 'c1', now: item.calledAt })
+    expect(SMS_OUTBOX_RETENTION_MS).toBe(7 * 24 * 3600 * 1000)
+    expect(r.data.expireAt).toBe('2026-10-25T04:00:00.000Z')
+    expect(Date.parse(r.data.expireAt) - Date.parse(r.data.createdAt)).toBe(SMS_OUTBOX_RETENTION_MS)
+    expect(Object.values(r.data).some(v => v === undefined)).toBe(false)
+  })
+  it('now 無法解析時 expireAt 為 null（不 throw、不 undefined）', () => {
+    expect(smsOutboxExpireAt('not-a-date')).toBeNull()
+    expect(smsOutboxExpireAt(undefined)).toBeNull()
+    const r = buildWaitlistCallOutbox({ item, commandId: 'c1', now: 'garbage' })
+    expect(r.data.expireAt).toBeNull()
   })
 })

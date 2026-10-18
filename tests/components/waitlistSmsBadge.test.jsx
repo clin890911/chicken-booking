@@ -32,7 +32,7 @@ describe('取號表單電話提示', () => {
 describe('候位卡簡訊徽章', () => {
   const called = (extra = {}) => ({ id: 'W', status: 'called', calledAt: today, phone: '0912345678', ...extra })
   it.each([
-    ['sent', '簡訊已送', 'ok'],
+    ['sent', '簡訊已送出', 'ok'],
     ['dry-run', '簡訊乾跑（未實送）', 'neutral'],
     ['retrying', '簡訊發送中', 'neutral'],
     ['failed', '簡訊失敗・請打電話', 'bad'],

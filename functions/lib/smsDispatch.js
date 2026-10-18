@@ -1,13 +1,14 @@
 import crypto from 'node:crypto'
 import { businessDate } from './operationalCommands.js'
-import { normalizeTwMobile } from './smsPhone.js'
+import { normalizeTwMobile, smsOutboxExpireAt, SMS_OUTBOX_RETENTION_MS } from './smsPhone.js'
 import { EVERY8D_DEFAULT_HOST, isAllowedEvery8dHost, sendEvery8dSms, smsCharCount, smsCredits } from './every8d.js'
 
 // 叫號簡訊專用 dispatcher（與 notifications／retryNotifications 完全分開）。
 // 設計鐵律（見 docs/候位簡訊_工作量與衝擊評估 §2、§6、§8）：
 //  1. 結果不明不重送（at-most-once）：送出前先 claim 成 processing；lease 過期還是 processing ＝ 可能已送出 → unknown。
 //  2. 送前重讀 waitlist：不是 called、calledAt 對不上、叫號超過 10 分鐘 → superseded，不送。
-//  3. 只有「確定沒送出」的錯誤才短退避重試（15s／45s），最多 3 次。
+//  3. 只有「確定沒送出」的錯誤（HTTP 429／503、連線前失敗）才重試，最多 3 次。-99／502／逾時／斷線一律 unknown 不重送。
+//     重試實際靠每分鐘 smsSweeper 撿起（kick 只在叫號當下踢一次），所以間隔約 ≥60 秒；SMS_BACKOFF_MS 只是「最早可重試時間」的下限。
 //  4. 總開關 system/smsConfig fail-closed：文件不存在／讀取失敗／enabled!==true 一律不送。
 //  5. 回寫 waitlist/{id}.smsStatus 只更新這一欄，絕不碰 queueVersion（否則別台裝置的命令會被 waitlist-changed 擋）。
 //  6. 叫號交易不讀也不等這裡任何東西：這裡壞掉，叫號／入座照常。
@@ -17,8 +18,13 @@ export const SMS_OUTBOX = 'smsOutbox'
 export const SMS_COUNTERS = 'smsCounters'
 export const DEFAULT_SMS_TEMPLATE = '【{店名}】您的候位 #{號碼} 已可入座，請於 10 分鐘內至櫃台報到。'
 export const DEFAULT_STORE_NAME = '雞王涮涮鍋'
+// lease 必須遠大於 HTTP 逾時（EVERY8D_TIMEOUT_MS，見 every8d.js），否則送出還在跑 sweeper 就判過期而誤報狀態不明。
+// 目前 60s 對 10s 逾時＝6 倍；tests/functions/smsDispatch.test.js 有常數斷言（至少 3 倍）。
 export const SMS_LEASE_MS = 60_000
+// 重試最早時間（第 1、2 次失敗後）。實際重試由每分鐘 sweeper 撿起，所以真正間隔 ≈ 60 秒以上，不是 15／45 秒。
 export const SMS_BACKOFF_MS = [15_000, 45_000]
+// 保存期限與每次清理上限（個資：smsOutbox 含完整門號與簡訊內文）。
+export const SMS_PURGE_BATCH_LIMIT = 100
 export const SMS_MAX_ATTEMPTS = 3
 export const SMS_STALE_MS = 10 * 60_000
 export const SMS_DAILY_LIMIT_DEFAULT = 300
@@ -318,7 +324,27 @@ export async function kickWaitlistSms({ db, waitlistId, ...deps }) {
 // smsSweeper：撿 pending／processing（lease 過期的會被標 unknown，不重送）。
 export async function sweepSmsOutbox({ db, limit = 50, ...deps }) {
   const snap = await db.collection(SMS_OUTBOX).where('status', 'in', ['pending', 'processing']).limit(limit).get()
-  return processSmsBatch({ db, ids: snap.docs.map(d => d.id), ...deps })
+  const results = await processSmsBatch({ db, ids: snap.docs.map(d => d.id), ...deps })
+  // 送出處理完才清理；清理失敗只記 log，絕不影響上面已完成的送出結果。
+  await purgeExpiredSmsOutbox({ db, clock: deps.clock })
+  return results
+}
+
+// 個資清理：刪除 createdAt 早於 7 天前的 smsOutbox，每次最多 SMS_PURGE_BATCH_LIMIT 筆。
+// 只碰 smsOutbox（單欄位範圍查詢，不需複合索引）；任何失敗都吞掉並回報，不 throw。
+export async function purgeExpiredSmsOutbox({ db, clock = Date.now, limit = SMS_PURGE_BATCH_LIMIT } = {}) {
+  try {
+    const cutoff = iso(clock() - SMS_OUTBOX_RETENTION_MS)
+    const snap = await db.collection(SMS_OUTBOX).where('createdAt', '<', cutoff).limit(limit).get()
+    const settled = await Promise.allSettled(snap.docs.slice(0, limit).map(d => db.collection(SMS_OUTBOX).doc(d.id).delete()))
+    const deleted = settled.filter(r => r.status === 'fulfilled').length
+    const failed = settled.length - deleted
+    if (failed) console.error('SMS_PURGE_PARTIAL', failed)
+    return { deleted, failed }
+  } catch (err) {
+    console.error('SMS_PURGE_FAILED', err?.message)
+    return { deleted: 0, failed: 0, error: err?.message || String(err) }
+  }
 }
 
 // 後台「發測試簡訊」：同樣受總開關／dryRun／每日上限約束；留一筆 kind:'test' 的 outbox 當紀錄。
@@ -327,7 +353,7 @@ export async function sendTestSms({ db, to, actor = '', clock = Date.now, ...dep
   if (!mobile) return { ok: false, status: 'invalid-mobile', error: '請輸入 09 開頭的 10 碼手機' }
   const nowMs = clock()
   const id = 'test_' + crypto.randomBytes(12).toString('hex')
-  await db.collection(SMS_OUTBOX).doc(id).set({ kind: 'test', to: mobile, status: 'pending', attempts: 0, nextAttemptAt: null, calledAt: null, requestedBy: actor, createdAt: iso(nowMs), updatedAt: iso(nowMs) })
+  await db.collection(SMS_OUTBOX).doc(id).set({ kind: 'test', to: mobile, status: 'pending', attempts: 0, nextAttemptAt: null, calledAt: null, requestedBy: actor, createdAt: iso(nowMs), updatedAt: iso(nowMs), expireAt: smsOutboxExpireAt(iso(nowMs)) })
   const result = await processSmsOutbox({ db, id, clock, ...deps })
   return { ok: ['sent', 'dry-run'].includes(result.status), ...result }
 }

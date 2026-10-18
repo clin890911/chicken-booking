@@ -142,6 +142,33 @@ describe.runIf(enabled)('waitlist real Firestore transactions, isolated demo pro
     expect(swept.find(r=>r.id===box.id).status).toBe('unknown')
     expect((await box.ref.get()).data().status).toBe('unknown')
   })
+  it('dispatcher 併發（真 Firestore）：kick／sweeper／kick 同時撿同一筆 → 每個門號只實送 1 次；kick 與離開同時 → 欄位不被蓋回',async()=>{
+    await env.db.collection('system').doc('smsConfig').set({enabled:true,dryRun:false})
+    const sends=new Map()
+    const fetchImpl=async(_url,init)=>{
+      const to=new URLSearchParams(init.body).get('DEST')
+      sends.set(to,(sends.get(to)||0)+1)
+      await new Promise(r=>setTimeout(r,100))
+      return {ok:true,status:200,text:async()=>'100,1,1,0,BATCH'}
+    }
+    const deps={fetchImpl,credentials:{uid:'u',pwd:'p'},alert:async()=>{},clock:()=>Date.parse(now)+2000}
+    const mk=async(id,phone)=>{const c=await call(testCommand('create',id,0,{name:id,partySize:2,phone,children:0},day));return call(testCommand('call',id,c.body.item.queueVersion,{},day))}
+    for(let i=0;i<6;i++){
+      const id=`SMS_RACE_${i}`
+      await mk(id,`09123456${String(10+i)}`)
+      await Promise.all([kickWaitlistSms({db:env.db,waitlistId:id,...deps}),sweepSmsOutbox({db:env.db,...deps}),kickWaitlistSms({db:env.db,waitlistId:id,...deps})])
+    }
+    expect([...sends.values()]).toEqual(Array(6).fill(1)) // 0 次重複實送
+    expect((await env.db.collection('smsOutbox').get()).docs.map(d=>d.data().status)).toEqual(Array(6).fill('sent'))
+    await env.db.collection('system').doc('smsConfig').set({enabled:true,dryRun:true})
+    for(let i=0;i<5;i++){
+      const id=`SMS_CLOB_${i}`
+      const called=await mk(id,`09987654${String(10+i)}`)
+      const [,leave]=await Promise.allSettled([kickWaitlistSms({db:env.db,waitlistId:id,...deps}),call(testCommand('leave',id,called.body.item.queueVersion,{},day))])
+      expect(leave.value.code).toBe(200)
+      expect((await env.db.collection('waitlist').doc(id).get()).data()).toMatchObject({status:'left',queueVersion:3})
+    }
+  },60000)
   it('released group batch at same table/time no longer holds a vacant table; no override consent required',async()=>{
     await env.db.collection('groupReservations').doc('RELEASED_GROUP').set({id:'RELEASED_GROUP',date:day,status:'confirmed',batches:[{id:'BATCH',tableNumbers:['101'],timeSlot:'12:00',releasedAt:now}]})
     expect((await call(create('RELEASED_SEAT'))).code).toBe(200)
