@@ -78,7 +78,7 @@ const assertReturned=()=>{
 const openEntry=entry=>{
  if(entry==='card')act(()=>container.querySelector('summary').click())
  else click('詳情 ›')
- const target=[...document.querySelectorAll('button')].find(b=>b.textContent.startsWith('↔ 改桌'))
+ const target=[...document.querySelectorAll('button')].find(b=>b.textContent.startsWith('改桌') /* ↔ 已改線條圖示（GlyphText） */)
  expect(target).toBeTruthy();expect(target.disabled).not.toBe(true)
  act(()=>target.click())
 }

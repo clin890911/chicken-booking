@@ -5,6 +5,7 @@ import { todayStr } from '../../../utils/timeSlots'
 import { todayGroupsByState } from '../../../utils/groupLive'
 import GroupTodayCard from './GroupTodayCard'
 import GroupSheet from '../group/GroupSheet'
+import GlyphText from '../../ui/GlyphText'
 
 // 現場右側欄「今日團體」籤：依抵達時間列今日各團，梯次入座/離席/整團完成。
 // 已完成的團移入底部「已完成」摺疊區（灰階、不可再操作、保留回傳單列印）。
@@ -39,7 +40,7 @@ export default function GroupTodayPanel({ onFocusTable, onReseatBatch }) {
             onClick={() => setShowCompleted(v => !v)}
             className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-chicken-brown/5 text-xs font-bold text-chicken-brown/65 hover:bg-chicken-brown/10"
           >
-            <span>✓ 已完成（{completed.length}）</span>
+            <GlyphText size={13}>{`✓ 已完成（${completed.length}）`}</GlyphText>
             <span className="text-[10px]">{showCompleted ? '收合 ▲' : '展開 ▼'}</span>
           </button>
           {showCompleted && (

@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { MotionConfig } from 'framer-motion'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { BookingProvider } from './contexts/BookingContext'
 import { ToastProvider, ConfirmProvider } from './components/ui/Toast'
@@ -45,7 +46,9 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // reducedMotion="user"：系統開「減少動態效果」時，framer 自動略過 transform 動畫（toast／modal 的 spring）。
   return (
+    <MotionConfig reducedMotion="user">
     <ToastProvider>
       <ConfirmProvider>
         <AuthProvider>
@@ -55,5 +58,6 @@ export default function App() {
         </AuthProvider>
       </ConfirmProvider>
     </ToastProvider>
+    </MotionConfig>
   )
 }

@@ -36,10 +36,12 @@ describe('TableShape：預配桌著色', () => {
     expect(PREASSIGN_COLOR.strokeDash).toBeTruthy()
   })
 
-  it('沒被預配的空桌維持醒目綠、無虛線（領檯找空桌的第一眼不受影響）', () => {
+  it('沒被預配的空桌維持醒目綠、無虛線；單純空桌不寫狀態字（綠底即可入座，2026-10-17），讀屏名稱仍有「可入座」', () => {
     const html = wrapSvg(<TableShape table={baseTable()} onClick={() => {}} />)
     expect(html).toContain(`fill="${STATUS_COLOR.vacant.fill}"`)
-    expect(html).toContain('✓ 可入座')
+    expect(html).toContain('可入座') // aria-label／title
+    expect(html).not.toContain('lucide-check') // 桌面上不再畫「✓ 可入座」那行
+    expect(html).toContain('font-size="26"') // 桌號放大（75 高的桌＝small：20→26）
     expect(html).not.toContain('stroke-dasharray')
   })
 
@@ -96,5 +98,24 @@ describe('FloorMap：預配與已預訂在同一張圖上可分辨', () => {
     expect(html).toContain('周晴茹')
     expect(html).toContain('11:30 預配')
     expect(html).toContain('stroke-dasharray')
+  })
+})
+
+// 2026-10 全站去 emoji：桌面底列的 ⚠／✓ 字元改成巢狀 lucide 線條圖示（⚠ 在 iOS 會被畫成彩色 emoji）。
+// 只換字元，不動桌面填色；圖示顏色＝文字色。
+describe('TableShape：桌面底列無 emoji 字元', () => {
+  it('時段衝突 → 線條警示圖示＋「時段衝突」，填色仍是可入座綠', () => {
+    const html = wrapSvg(<TableShape table={baseTable()} presentation={{ hasTimeConflict: true }} onClick={() => {}} />)
+    expect(html).toContain('時段衝突')
+    expect(html).not.toContain('⚠')
+    expect(html).toContain('lucide-triangle-alert')
+    expect(html).toContain(`fill="${STATUS_COLOR.vacant.fill}"`)
+  })
+
+  it('規劃圖已選桌 →「已選」配線條勾勾，不再是 ✓ 字元', () => {
+    const html = wrapSvg(<TableShape table={baseTable()} planState="selected" onClick={() => {}} />)
+    expect(html).toContain('已選')
+    expect(html).not.toContain('✓')
+    expect(html).toContain('lucide-check')
   })
 })

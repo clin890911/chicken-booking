@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Modal } from '../../ui'
 import SegmentedControl from '../../ui/SegmentedControl'
+import GlyphText from '../../ui/GlyphText'
+import { Flag } from 'lucide-react'
 
 const GSTATUS = {
   planned: '預排', confirmed: '已確認', arrived: '已到', completed: '已完成', cancelled: '已取消',
@@ -84,7 +86,7 @@ export default function AgencyDetailModal({ agency, rank, stats, guides = [], on
             {guides.length === 0 && <span className="text-xs text-chicken-brown/40">尚無導遊</span>}
             {guides.map(g => (
               <span key={g.id} className="text-xs px-2.5 py-1 rounded-full bg-chicken-cream border border-chicken-brown/10 text-chicken-brown font-bold">
-                ‍✈️ {g.name}{g.phone ? `（${g.phone}）` : ''}
+                <GlyphText icon={Flag} size={12} strokeWidth={2.4} className="!gap-1">{g.name}{g.phone ? `（${g.phone}）` : ''}</GlyphText>
               </span>
             ))}
           </div>

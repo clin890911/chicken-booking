@@ -139,9 +139,25 @@ export function seatBooking(bookingId) {
     return { ok: false, code: 'table-occupied', error: occupiedError(booking.assignedTableId, table) }
   }
 
+  const undo = seatUndoSnapshot(booking, [table])
   bookingService.setStatus(bookingId, 'arrived')   // setStatus 內會自動記 actualArrivalTime
   tableService.seatTable(booking.assignedTableId, bookingId)
-  return { ok: true, tableNumber: booking.assignedTableId }
+  return { ok: true, tableNumber: booking.assignedTableId, undo }
+}
+
+// 入座前的復原快照（四個「客人到了」入口共用，見 undoSeatBooking）：
+// 每張桌入座前是「本筆鎖住（reserved）」還是「空桌（預配）」——復原時據此倒回 reserved 或 vacant。
+// assignment：入座前的配桌（只有「到了 · 選桌入座」那條會連桌號一起改，復原要寫回原本的未配桌）。
+// prev：入座前訂位本身的狀態與入座會寫的欄位（status／actualArrivalTime）——復原據實寫回，
+// 不一律改成 confirmed（pending 入座後復原要回 pending）。
+function seatUndoSnapshot(booking, tables, assignment) {
+  const bookingId = booking.id
+  const restore = {}
+  tables.forEach(t => { restore[String(t.number)] = heldBy(t, bookingId) ? 'reserved' : 'vacant' })
+  const prev = { status: booking.status, actualArrivalTime: booking.actualArrivalTime ?? null }
+  const snap = { bookingId, tableNumbers: tables.map(t => String(t.number)), restore, prev }
+  if (assignment) snap.assignment = assignment
+  return snap
 }
 
 // === 預配的大組（主桌＋額外桌）到店：整組一起入座 ===
@@ -163,9 +179,75 @@ export function seatBookingAllTables(bookingId) {
       return { ok: false, code: 'table-occupied', error: occupiedError(n, t) }
     }
   }
+  const undo = seatUndoSnapshot(booking, nums.map(n => tableService.getByNumber(n)))
   bookingService.setStatus(bookingId, 'arrived')
   nums.forEach(n => tableService.seatTable(n, bookingId))
-  return { ok: true, tableNumber: nums[0], tableNumbers: nums }
+  return { ok: true, tableNumber: nums[0], tableNumbers: nums, undo }
+}
+
+// === 未配桌的訂位到店：選桌即入座（指派＋入座一步完成）===
+// 不另寫佔用邏輯：先走 assignBookingTablesMulti（單桌退回 assignBookingToTable）的全部守門——
+// 今日可用、此刻空桌（鎖桌型只能選此刻空桌）、同樓層、擠一擠容量——再走 seatBooking／seatBookingAllTables
+// 的佔用守門入座。入座若意外失敗（理論上不會：桌剛由本筆鎖住）就把剛才的指派倒回，不留半套。
+// 只給「還沒配桌」的待到訂位用：已有桌（鎖桌／預配）的到店走 seatBooking，換桌走 replace*。
+// 回傳 undo 快照（桌全部倒回空桌、訂位回到未配桌），由 undoSeatBooking 復原。
+// 通知：service 層不發；BookingContext 包裝只發一次「客人到了」（不發「桌位已指派」，避免一次入座兩則）。
+export function assignAndSeatBooking(bookingId, tableNumbers) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (!['confirmed', 'pending'].includes(booking.status)) return { ok: false, error: '這筆訂位不是待到狀態，無法入座' }
+  if (bookingTableNumbers(booking).length) return { ok: false, error: '這筆訂位已有桌，請改用「客人到了」或改桌' }
+  const assignment = { assignedTableId: null, extraTableIds: [] }
+  const picked = [...new Set((tableNumbers || []).map(String).filter(Boolean))]
+  const a = assignBookingTablesMulti(bookingId, picked)
+  if (!a.ok) return a
+  const r = seatBooking(bookingId)
+  if (!r.ok) {
+    // 倒回剛才的指派：只清仍由本筆鎖住的桌
+    bookingService.update(bookingId, assignment)
+    picked.forEach(n => { const t = tableService.getByNumber(n); if (t && t.status === 'reserved' && heldBy(t, bookingId)) tableService.clearTable(n) })
+    return r
+  }
+  const nums = r.tableNumbers || [r.tableNumber]
+  // 入座前這些桌都是空桌（剛才才鎖給本筆）→ 復原一律倒回空桌，訂位回未配桌
+  return { ok: true, tableNumber: nums[0], tableNumbers: nums, undo: { ...r.undo, restore: Object.fromEntries(nums.map(n => [String(n), 'vacant'])), assignment } }
+}
+
+// === 「客人到了」的 5 秒復原（報到列／今日訂位卡／桌抽屜／訂位卡共用）===
+// snap＝入座時回傳的 undo 快照（seatBooking／seatBookingAllTables／assignAndSeatBooking）。
+// 復原鐵律（見 undo-paths 記錄）：
+//   - 訂位必須仍是 arrived、桌組仍是當初那幾張（期間被改桌／離席就不動）
+//   - 每張桌必須「仍由本筆用餐中」或「已是無人持有的空桌」才可倒；任一張被別組／團體接手 → 整組不動、回錯誤
+//     （不搶別人的桌、不清別人的桌；只動本筆持有或空著的桌）
+//   - 桌倒回入座前的樣子：本筆鎖住的 → reserved（重新鎖給本筆）、原本空桌（預配）→ vacant
+//   - 訂位回入座前的狀態（prev：confirmed／pending 與 actualArrivalTime）；有 assignment（選桌入座）則桌號一併寫回入座前（未配桌）
+export function undoSeatBooking(snap = {}) {
+  const { bookingId, tableNumbers = [], restore = {}, assignment, prev } = snap || {}
+  const booking = bookingId != null ? bookingService.getById(bookingId) : null
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (booking.status !== 'arrived') return { ok: false, error: '這筆訂位的狀態已被更動，無法復原' }
+  const nums = bookingTableNumbers(booking)
+  const want = [...new Set(tableNumbers.map(String))]
+  if (!want.length || nums.length !== want.length || nums.some(n => !want.includes(n))) {
+    return { ok: false, error: '這筆訂位的桌位已被更動，無法復原' }
+  }
+  const taken = nums.filter(n => {
+    const t = tableService.getByNumber(n)
+    if (!t || t.currentRef) return true
+    if (t.status === 'dining' && heldBy(t, bookingId)) return false
+    if (t.status === 'vacant' && t.currentBookingId == null) return false
+    return true
+  })
+  if (taken.length) return { ok: false, code: 'table-occupied', error: `${taken.join('、')} 已被別組使用，無法復原` }
+  // 訂位寫回入座前的狀態（pending 回 pending）與 actualArrivalTime；舊快照沒有 prev 時退回 confirmed
+  if (prev && ['confirmed', 'pending'].includes(prev.status)) {
+    bookingService.update(bookingId, { status: prev.status, actualArrivalTime: prev.actualArrivalTime ?? null })
+  } else {
+    bookingService.setStatus(bookingId, 'confirmed')   // 清掉 actualArrivalTime
+  }
+  if (assignment) bookingService.update(bookingId, { assignedTableId: assignment.assignedTableId ?? null, extraTableIds: assignment.extraTableIds || [] })
+  nums.forEach(n => (restore[n] === 'reserved' ? tableService.reserveTable(n, bookingId) : tableService.clearTable(n)))
+  return { ok: true, tableNumbers: nums }
 }
 
 // === 報到列「到了」入座「預配」訂位後的 5 秒復原 ===
@@ -970,7 +1052,11 @@ export function undoAssignBooking(bookingId, tableNumber) {
 }
 
 // === 大組多桌組合建議（單桌裝不下時的併桌建議）===
-// 候選 = 今日可用 + vacant 桌。★ 併桌一律「同一樓層」（一組客人不可能分坐兩層）。
+// 候選 = 今日可用 + vacant 桌，再排除「依佔用區間會撞桌」的桌（timeConflictTableNumbers：時段重疊的他筆
+// 預配／鎖桌、今日團保）——與單桌建議 suggestTable 同一支 helper。過去只看 vacant，會推薦有預配的桌和
+// 團體保留桌，店員照著選才被警示擋下（尖峰時白走一趟）。只影響「建議」；可點選集合不縮小（預配/團保靠警示＋勾選解鎖）。
+// opts 同 findSuitableTables（預設 mode 'now'＝現在入座的佔用區間 [現在, 現在＋佔位)）。
+// ★ 併桌一律「同一樓層」（一組客人不可能分坐兩層）。
 // 每個樓層內：
 //   1) 桌數最少 → 2) 空位（浪費）最少 → 3) 桌與桌在平面圖上最靠近（真的併得起來）。
 //   過去用「容量大優先」貪婪湊，9 位會給 6+6（12 席、浪費 3），明明 4+6（10 席）就夠、
@@ -978,11 +1064,13 @@ export function undoAssignBooking(bookingId, tableNumber) {
 // 跨樓層：桌數少 → 浪費少 → 1F 優先。
 // 沒有任何單一樓層能湊夠 → 回座位最多的單層（該層全部可用桌，enough:false），由 UI 提示改候位/分桌。
 // 回傳 { tableNumbers, seats, enough, floor }。
-export function suggestTableCombo(partySize) {
+export function suggestTableCombo(partySize, opts = {}) {
   const need = Math.max(0, Number(partySize) || 0)
-  const today = todayStr()
+  const today = opts?.now ? formatDate(opts.now) : todayStr()
+  const conflicts = timeConflictTableNumbers({ date: today, mode: 'now', ...opts })
   const pool = tableService.listAll()
     .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && (Number(t.capacity) || 0) > 0)
+    .filter(t => !conflicts.has(String(t.number)))
 
   const floors = [...new Set(pool.map(t => t.floor))]
   const perFloor = floors.map(f => bestComboOnFloor(pool.filter(t => t.floor === f), need, f))

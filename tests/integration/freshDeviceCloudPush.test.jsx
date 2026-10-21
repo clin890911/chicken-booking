@@ -356,17 +356,17 @@ describe('全新裝置第一次登入：不可把出廠桌位／出廠設定推�
     })
   })
 
-  it('(d) 外場 floor＋首拉失敗，接著做任何一個與桌位無關的操作（抽候位號）', async () => {
+  it('(d) 外場 floor＋首拉失敗，接著做任何一個與桌位無關的操作（新增電話訂位）', async () => {
     const cloud = customCloud({ extraTable: true })
     const be = createFakeBackend('floor', cloud)
     be.state.pullFails = true
     const app = await bootAs(be, 'floor')
 
-    await act(async () => { app.ref.ctx.addWaitlist({ name: '陳先生', partySize: 2 }) })
+    await act(async () => { app.ref.ctx.addBooking({ name: '陳先生', guests: 2, date: TODAY, timeSlot: '12:00', source: 'phone' }) })
     await sleep(400) // > syncCloudSoon 的 250ms 防抖：修補前這裡會送出含 52 張出廠桌的推送
 
     expect(leaks).toEqual([])
-    console.info('[(d) floor/pull FAIL + addWaitlist] push trace:', JSON.stringify(pushTrace(be.log)))
+    console.info('[(d) floor/pull FAIL + addBooking] push trace:', JSON.stringify(pushTrace(be.log)))
     expect({
       damagingPushes: damageReport(be.log, cloud),
       cloudAfter: cloudSummary(be.state),
@@ -458,7 +458,7 @@ describe('⑦ 首拉失敗 → 期間建立的資料不推 → 回線拉取成�
     const app = await bootAs(be, role)
     expect(app.ref.ctx.cloudStatus.state).toBe('offline')
 
-    await act(async () => { app.ref.ctx.addWaitlist({ name: '陳先生', partySize: 2 }) })
+    await act(async () => { app.ref.ctx.addBooking({ name: '陳先生', guests: 2, date: TODAY, timeSlot: '12:00', source: 'phone' }) })
     await sleep(400)
     expect(be.log.pushes).toEqual([])                            // 閘門未開：一個請求都沒發
     expect(app.ref.ctx.cloudStatus.state).toBe('offline')       // 不因延後推送被改成 synced / rejected
@@ -471,13 +471,13 @@ describe('⑦ 首拉失敗 → 期間建立的資料不推 → 回線拉取成�
 
     expect(leaks).toEqual([])
     expect(pushTrace(be.log)).toEqual([
-      { status: 200, source: 'pushChangedData（partial:true）', keys: ['waitlist'], tables: 0 },
+      { status: 200, source: 'pushChangedData（partial:true）', keys: ['bookings'], tables: 0 },
     ])
-    expect([...be.state.collections.waitlist.values()].map(w => w.name)).toEqual(['陳先生'])
+    expect([...be.state.collections.bookings.values()].filter(b=>b.source==='phone').map(b => b.name)).toEqual(['陳先生'])
     expect(damageReport(be.log, cloud)).toEqual([])
     expect(cloudSummary(be.state)).toEqual(cloudSummary(cloud))
     expect(app.ref.ctx.cloudStatus.state).toBe('synced')
-    expect(app.ref.ctx.waitlist.map(w => w.name)).toEqual(['陳先生']) // 首拉沒有把它洗掉
+    expect(app.ref.ctx.bookings.filter(b=>b.source==='phone').map(b => b.name)).toEqual(['陳先生']) // 首拉沒有把它洗掉
   })
 })
 

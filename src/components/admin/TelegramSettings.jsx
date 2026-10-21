@@ -3,6 +3,7 @@ import { Card, Input, Button } from '../ui'
 import { useToast } from '../ui/Toast'
 import { useBooking } from '../../contexts/BookingContext'
 import * as tg from '../../services/telegramService'
+import GlyphText from '../ui/GlyphText'
 
 // Telegram 通知 + 備份設定
 export default function TelegramSettings({ embedded = false }) {
@@ -125,7 +126,7 @@ export default function TelegramSettings({ embedded = false }) {
 
       {!hasToken && (
         <div className="px-3 py-2.5 bg-chicken-green/10 border border-chicken-green/30 rounded-lg text-xs text-chicken-brown/80 leading-relaxed">
-          <div className="font-bold text-chicken-green mb-0.5">✓ 內場通知由後端自動送出</div>
+          <div className="font-bold text-chicken-green mb-0.5"><GlyphText size={14} className="!justify-start">✓ 內場通知由後端自動送出</GlyphText></div>
           客人「線上訂位 / 自助改期 / 取消」會即時推送到內場 Telegram —— bot token 與
           chat 已在後端（Secret Manager）設定，<b>前端無需、也不應設定 token</b>（安全考量，
           避免 token 外洩到瀏覽器）。

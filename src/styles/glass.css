@@ -1,0 +1,209 @@
+/* ==========================================================================
+   Liquid Glass（A 版：只有控制層用玻璃）——預設開啟
+   參考 iOS 26 HIG 的分層原則：浮在內容上的「控制層」用玻璃，內容層（桌況圖、訂位卡、表單）維持不透明。
+   iOS 27 的可讀性修正一併採用：外緣暗邊（--lg-edge）、上緣鏡面高光（--lg-spec）、文字多的面板用較實的填色。
+
+   控制層分兩種材質：
+   ▸ 靜態玻璃（.lg-chrome / .lg-toolbar / .lg-seg / .lg-mode / .lg-drawer）
+     底下只有桌布（不會有內容捲過去）→ 模糊與否看起來一樣，所以**不做 backdrop-filter**，
+     只用半透明填色＋邊緣光。零合成成本，也不必用偽元素、不建立堆疊脈絡
+     （桌抽屜裡有未 portal 的 fixed Modal，宿主若 isolation:isolate 會把 Modal 的 z-index 困在抽屜裡）。
+   ▸ 浮動玻璃（.lg-float：toast、浮動數字鍵盤、modal／確認框面板）
+     真的浮在內容上 → backdrop-filter 一律畫在 ::before，**不加在宿主身上**：
+     宿主若帶 backdrop-filter / filter / transform 會成為 position:fixed 子孫的 containing block，子孫會跑位。
+     宿主只加 isolation:isolate（讓 ::before 的 z-index:-1 留在宿主內），position:relative 用 :where() 包成
+     0 特異度——宿主原本的 fixed / absolute 一律勝出。
+
+   【不可違反】
+   1. 現場頁一面式版面的容器不加 transform / filter / backdrop-filter / will-change / contain，不加固定高度、不動 min-h-0。
+   2. 進場動畫只動 transform（宿主 opacity<1 會變成 backdrop root，模糊在動畫中會先糊後清）。
+   3. 只改材質不改尺寸：側欄／底部導覽用「透明邊框＋background-clip」內縮玻璃窗格，外框尺寸與改版前相同。
+
+   降級成不透明（三層，任一成立）：
+   ① @media (prefers-reduced-transparency: reduce)
+   ② <html data-material="opaque">（設定頁「不透明模式」，每台裝置自己記；iPad Safari 可能不支援 ①）
+   ③ 不支援 backdrop-filter：@supports not (...)，以及 JS 偵測補的 <html data-no-backdrop>
+   ========================================================================== */
+
+:root {
+  --lg-ink: 58 46 38;                                  /* chicken-brown */
+  --lg-fill: rgb(255 255 255 / .66);                   /* regular：導覽、頂列、分段控制 */
+  --lg-fill-strong: rgb(255 255 255 / .86);            /* 文字多：toast、sheet、桌抽屜 */
+  --lg-fill-keypad: rgb(43 35 32 / .82);               /* 深色玻璃：浮動數字鍵盤 */
+  --lg-filter: blur(22px) saturate(1.7);
+  --lg-edge: rgb(var(--lg-ink) / .12);                 /* iOS 27 暗邊 */
+  --lg-spec: rgb(255 255 255 / .9);                    /* 上緣鏡面高光 */
+  --lg-rim: inset 0 1px 0 var(--lg-spec), inset 0 -1px 0 rgb(255 255 255 / .35), inset 0 0 0 1px var(--lg-edge);
+  --lg-shadow: 0 10px 30px rgb(var(--lg-ink) / .12), 0 1px 3px rgb(var(--lg-ink) / .08);
+  --lg-shadow-sm: 0 2px 10px rgb(var(--lg-ink) / .08), 0 0 0 .5px rgb(var(--lg-ink) / .06);
+  /* 桌布：極淡的暖色光暈，讓半透明材質讀得出來（色相取品牌杏／綠，飽和度壓低以免干擾文字） */
+  --lg-canvas-image:
+    radial-gradient(60% 50% at 8% 0%, rgb(242 145 0 / .10), transparent 70%),
+    radial-gradient(50% 60% at 100% 100%, rgb(158 182 58 / .12), transparent 70%),
+    radial-gradient(40% 40% at 60% 30%, rgb(230 0 18 / .04), transparent 70%);
+  /* Apple 預設 UI spring（damping 1.0、response 0.35s）的 CSS linear() 近似；不 overshoot。
+     不支援 linear() 的瀏覽器整條 transition 宣告無效 → 自動沿用 index.css 原本的 90ms ease-out。 */
+  --lg-spring: linear(0, .075 5%, .227 10%, .39 15%, .536 20%, .656 25%, .75 30%, .821 35%, .873 40%, .911 45%, .938 50%, .957 55%, .971 60%, .98 65%, .986 70%, .991 75%, .994 80%, .996 85%, .998 90%, 1);
+  --lg-spring-dur: 500ms;
+}
+
+/* ---------- 降級：不透明（只換變數，各元件規則不用重寫） ---------- */
+:root[data-material="opaque"],
+:root[data-no-backdrop] {
+  --lg-fill: #fff;
+  --lg-fill-strong: #fff;
+  --lg-fill-keypad: #2b2320;
+  --lg-filter: none;
+  --lg-canvas-image: none;
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --lg-fill: #fff;
+    --lg-fill-strong: #fff;
+    --lg-fill-keypad: #2b2320;
+    --lg-filter: none;
+    --lg-canvas-image: none;
+  }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --lg-fill: #fff;
+    --lg-fill-strong: #fff;
+    --lg-fill-keypad: #2b2320;
+    --lg-filter: none;
+    --lg-canvas-image: none;
+  }
+}
+/* 增加對比：實心底＋實線邊 */
+@media (prefers-contrast: more) {
+  :root {
+    --lg-fill: #fff;
+    --lg-fill-strong: #fff;
+    --lg-edge: rgb(var(--lg-ink) / .55);
+    --lg-canvas-image: none;
+  }
+}
+
+/* ---------- 桌布（後台根容器） ---------- */
+.lg-canvas {
+  background-color: #f6f1e8;
+  background-image: var(--lg-canvas-image);
+}
+
+/* ---------- 靜態玻璃：半透明填色＋邊緣光，不模糊 ---------- */
+.lg-chrome,
+.lg-toolbar,
+.lg-seg {
+  background-color: var(--lg-fill);
+  box-shadow: var(--lg-rim);
+}
+
+/* 側欄：浮起的玻璃窗格（iPadOS 26 sidebar）。透明邊框＋padding-box 背景＝窗格往內縮 8px，
+   外框寬高與改版前相同（76px / 224px、100dvh）→ 主區寬度、桌況圖比例都不變。 */
+.lg-sidebar {
+  border: 8px solid transparent;
+  border-right-width: 0;
+  background-clip: padding-box;
+  border-radius: 30px;
+}
+.lg-sidebar [aria-current="page"] {
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 1px rgb(230 0 18 / .12);
+}
+.lg-sidebar .border-t { border-color: rgb(var(--lg-ink) / .08); }
+
+/* 底部導覽（手機／iPad 直向）：膠囊窗格；上下各 4px 透明邊框取代原本 grid 的 pt-1 pb-1 → 總高度不變 */
+.lg-bottomnav {
+  border: 4px solid transparent;
+  border-left-width: 8px;
+  border-right-width: 8px;
+  background-clip: padding-box;
+  border-radius: 28px;
+}
+
+/* 桌面版頁首（現場頁以外）：一條玻璃列 */
+.lg-topbar { box-shadow: inset 0 -1px 0 var(--lg-edge); }
+
+/* 現場頁頂列：一條玻璃膠囊收納統計 pill／樓層／視圖。只加水平內距：一面式的垂直預算一 px 都不能多吃 */
+.lg-toolbar {
+  border-radius: 22px;
+  padding: 0 4px 0 12px;
+  box-shadow: var(--lg-rim), var(--lg-shadow-sm);
+}
+/* 頂列裡的分段控制：玻璃上不疊玻璃（Apple：避免 glass on glass），改淡色軌道 */
+.lg-toolbar .lg-seg {
+  background-color: rgb(var(--lg-ink) / .07);
+  box-shadow: none;
+}
+
+/* 分段控制：選中段＝白色「鏡片」，切換用 spring（只動 transform） */
+.lg-seg > button {
+  transition: transform var(--lg-spring-dur) var(--lg-spring), background-color 160ms ease, color 160ms ease;
+}
+.lg-seg > button[aria-pressed="true"] {
+  box-shadow: 0 2px 8px rgb(var(--lg-ink) / .12), inset 0 0 0 .5px rgb(var(--lg-ink) / .08);
+}
+
+/* 帶位欄籤列（內容面板裡的控制）：膠囊分段；選中鏡片畫在 ::after（內縮 5px），按鈕維持 44px 觸控高度 */
+.lg-tabs > button {
+  isolation: isolate;
+  transition: transform var(--lg-spring-dur) var(--lg-spring), color 160ms ease;
+}
+.lg-tabs > button[data-active="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 5px 2px;
+  z-index: -1;
+  border-radius: 999px;
+  pointer-events: none;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(var(--lg-ink) / .12), inset 0 0 0 .5px rgb(var(--lg-ink) / .08);
+}
+
+/* 模式橫幅：模式色是防誤判的安全語義（PR #173 加深過的那一階）→ 有色「材質」：實心模式色＋鏡面高光邊＋陰影。
+   刻意不透明：94% 時白字疊在 bg-white/15–20 的確認列上只剩 4.3–4.4:1（實測），不過 AA。 */
+.lg-mode {
+  border-radius: 22px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .22), inset 0 0 0 1px rgb(0 0 0 / .12), var(--lg-shadow);
+}
+
+/* 桌抽屜：文字多 → strong 填色 */
+.lg-drawer {
+  background-color: var(--lg-fill-strong);
+  border-radius: 28px;
+  box-shadow: var(--lg-rim), var(--lg-shadow-sm);
+}
+
+/* ---------- 浮動玻璃：backdrop-filter 畫在 ::before ---------- */
+:where(.lg-float) { position: relative; }
+.lg-float { isolation: isolate; }
+.lg-float::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--lg-float-fill, var(--lg-fill-strong));
+  -webkit-backdrop-filter: var(--lg-filter);
+  backdrop-filter: var(--lg-filter);
+  box-shadow: var(--lg-rim);
+}
+.lg-sheet { box-shadow: var(--lg-shadow); }
+.lg-toast { box-shadow: var(--lg-shadow); }
+
+/* 浮動數字鍵盤：深色玻璃（領位一邊看桌一邊打電話，鍵盤底下的桌況要透得出輪廓） */
+.lg-keypad { --lg-float-fill: var(--lg-fill-keypad); }
+.lg-keypad::before {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), inset 0 0 0 1px rgb(0 0 0 / .25), 0 18px 50px rgb(0 0 0 / .35);
+}
+
+/* ---------- 按壓回饋：spring 回彈（只動 transform） ---------- */
+.tap { transition: transform var(--lg-spring-dur) var(--lg-spring), opacity 120ms ease-out; }
+.tap:active { transition-duration: 90ms; }
+
+/* 減少動態：spring 回彈全關（framer 端由 App 的 MotionConfig reducedMotion="user" 處理） */
+@media (prefers-reduced-motion: reduce) {
+  .tap, .lg-seg > button, .lg-tabs > button { transition: none; }
+  .tap:active { transform: none; }
+}

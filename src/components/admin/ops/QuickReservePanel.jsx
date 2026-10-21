@@ -4,13 +4,15 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useConfirm } from '../../ui/Toast'
 import PartySizeField from '../PartySizeField'
 import { normalizeSplit } from '../../../utils/partySplit'
+import { X } from 'lucide-react'
 import NumericKeypad from './NumericKeypad'
 import ReturningGuestBadges, { useMatchedCustomer } from '../ReturningGuestBadges'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './HonorificNameField'
 import TimeSlotPicker from '../../booking/TimeSlotPicker'
 import Icon from '../../ui/Icon'
 import { generateTimeSlots, todayStr, nowSlot } from '../../../utils/timeSlots'
-import { calcSlotCapacity, isDayClosedForClosures, HOLD_LEAD_MIN } from '../../../utils/capacity'
+import { HOLD_LEAD_MIN } from '../../../utils/capacity'
+import { staffSlotOk, nextBookableSlot } from '../../../utils/staffSlots'
 
 const KEYPAD_WIDTH = 392
 const KEYPAD_GAP = 12
@@ -25,19 +27,9 @@ const NOTE_OPTIONS = [
   { key: 'mobility', label: '行動不便', icon: 'wheelchair' },
 ]
 
-// 預設時段＝「下一個還沒開始」且可訂（非公休、剩餘席數夠）的時段；今天都過了回 ''。
-// 店主要的是「接電話 → 大多訂接下來的場」，70–90% 店員不必改。純函式，now 可注入（測試固定時間）。
-// 「關閉場次 / 時段」只停線上客人（2026-10 店主）：員工面板不跳過它們，剩餘席數照實際佔用算；公休日仍跳過。
-const staffSlotOk = ({ settings, tables, bookings, groupReservations, date, guests }, t) =>
-  !isDayClosedForClosures(settings, date)
-  && calcSlotCapacity(tables, bookings, date, t, settings, groupReservations, { ignoreOnlineClosure: true }) >= guests
-
-export function nextBookableSlot({ settings = {}, tables = [], bookings = [], groupReservations = [], date, guests = 1, now = new Date() } = {}) {
-  const pad = (n) => String(n).padStart(2, '0')
-  const nowHHMM = `${pad(now.getHours())}:${pad(now.getMinutes())}`
-  return generateTimeSlots(settings.openTime, settings.closeTime, settings.slotInterval)
-    .find(t => t > nowHHMM && staffSlotOk({ settings, tables, bookings, groupReservations, date, guests }, t)) || ''
-}
+// 預設時段（nextBookableSlot）與「可訂」口徑（staffSlotOk）移到 utils/staffSlots.js，
+// 後台新增訂位／編輯訂位共用；這裡 re-export 維持既有 import 路徑。
+export { nextBookableSlot }
 
 // 面板開著跨過時段：所選時段已早於目前這個 30 分時段（nowSlot）→ 改選第一個「開始時間 ≥ nowSlot」且
 // 非公休、剩餘席數夠的時段（與 TimeSlotPicker 的「已過」同口徑：早於 nowSlot 才算過），並給一行說明；
@@ -218,7 +210,7 @@ export default function QuickReservePanel({
             <span data-testid="reserve-table" className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-sm font-bold ${
               lockKind === 'preassign' ? 'bg-blue-100 text-blue-800' : 'bg-chicken-green/15 text-chicken-green'}`}>
               {lockKind === 'preassign' ? `預配 ${table.number}` : `桌 ${table.number}`}
-              <span className="text-[11px] font-semibold opacity-75">· {table.capacity} 人桌{Number(guests) > (Number(table.capacity) || 0) ? ' · 擠一擠' : ''}{table.number === suggestedNumber ? ' · 建議' : ''}</span>
+              <span className="text-[11px] font-semibold">· {table.capacity} 人桌{Number(guests) > (Number(table.capacity) || 0) ? ' · 擠一擠' : ''}{table.number === suggestedNumber ? ' · 建議' : ''}</span>
             </span>
           ) : (
             <span data-testid="reserve-table" className="text-sm font-bold text-chicken-brown/60">
@@ -308,6 +300,7 @@ export default function QuickReservePanel({
             guests={Number(guests) || 1}
             hideFull={false}
             ignoreOnlineClosure
+            allowFull
             {...(now ? { now } : {})}
           />
         </div>
@@ -385,7 +378,7 @@ export default function QuickReservePanel({
           <div
             role="dialog"
             aria-label="電話數字鍵盤"
-            className="fixed z-[71] rounded-xl bg-[#2b2320] p-3 shadow-2xl"
+            className="lg-float lg-keypad fixed z-[71] rounded-[28px] p-3"
             style={keypadPos
               ? { left: keypadPos.left, bottom: keypadPos.bottom, width: keypadPos.width }
               : { left: KEYPAD_GAP, bottom: KEYPAD_GAP, width: KEYPAD_WIDTH, visibility: 'hidden' }}
@@ -406,8 +399,8 @@ export default function QuickReservePanel({
                 </div>
               </div>
               <button type="button" aria-label="收起鍵盤" onClick={() => setKeypadOpen(false)}
-                className="ml-auto flex-none h-8 w-8 rounded-full bg-white/15 text-sm font-bold text-white">
-                ✕
+                className="ml-auto -my-1 -mr-1 flex-none inline-flex items-center justify-center h-11 w-11 rounded-full bg-white/15 text-white">
+                <X size={20} strokeWidth={2.4} aria-hidden="true" />
               </button>
             </div>
             <NumericKeypad value={phone} onChange={setPhone} tone="dark" onDone={() => setKeypadOpen(false)} />

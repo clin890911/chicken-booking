@@ -4,35 +4,13 @@
 //
 // variant：
 //   'grid'（預設）＝原本的六格大數字卡（高度約 76px）
-//   'compact'      ＝現場 iPad 用的單行 pill 列（高度約 30px，與樓層/視圖切換同一列）。
+//   'compact'      ＝現場 iPad 用的單行 pill 列（高度約 30px，與樓層/視圖切換同一列），只列三個數字。
 //                    iPad 10 橫向可視高只有 506pt，頂部三排就吃掉 180px；壓成一條把高度還給桌況圖。
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo } from 'react'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse } from '../../../utils/bookingPulse'
 import { diningTablePresentation } from '../../../utils/tableStatus'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
-
-const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
-
-// 「現場 · 7/27 (日) 18:32」：分鐘級即可，30 秒 tick（與 OpsHintBar 同步調）。
-// 刻意做成子元件，計時器只在 compact 版掛載，grid 版完全不受影響。
-function NowLabel() {
-  const [now, setNow] = useState(() => new Date())
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30000)
-    return () => clearInterval(id)
-  }, [])
-  const hh = String(now.getHours()).padStart(2, '0')
-  const mm = String(now.getMinutes()).padStart(2, '0')
-  return (
-    <div className="flex-none text-sm font-bold text-chicken-brown whitespace-nowrap">
-      現場
-      <span className="ml-1.5 text-[11px] font-bold text-chicken-brown/55 tabular-nums">
-        {now.getMonth() + 1}/{now.getDate()} ({WEEKDAYS[now.getDay()]}) {hh}:{mm}
-      </span>
-    </div>
-  )
-}
 
 export default function StatusBar({ tables, waitlist, bookings = [], variant = 'grid', tablePresentation = null }) {
   const counts = { vacant: 0, reserved: 0, dining: 0, cleaning: 0, blocked: 0 }
@@ -77,17 +55,14 @@ export default function StatusBar({ tables, waitlist, bookings = [], variant = '
     { label: '在席人數', value: occSeats,        color: 'text-chicken-brown', className: 'bg-white text-chicken-brown border-chicken-brown/10' },
   ]
   if (variant === 'compact') {
-    // 單行 pill：數字 text-base、標籤 text-[11px]。原本掛在「90分內將到」下面的
-    // 「+N 過時未到」在一條線上沒有位置放副標 → 獨立成一顆紅底 pill（資訊不減）。
-    const pills = [
-      ...items.map(it => ({ label: it.label, value: it.value, className: it.className, color: it.color })),
-      ...(pulse.overdue.length > 0
-        ? [{ label: '未報到', value: pulse.overdue.length, className: 'bg-chicken-red/10 border-chicken-red/25', color: 'text-chicken-red' }]
-        : []),
-    ]
+    // 現場 iPad 頂列只留三個「看一眼就要的」數字（Barry 2026-10-17：頂列資訊太多、很多沒在看）。
+    // 其餘各有更直接的落點，不重複：90 分內將到／過時未到 → 今日訂位籤 badge＋提示列；
+    // 待清桌、超時 → 提示列；候位 → 候位籤 badge；時間 → iPad 狀態列。
+    const KEEP = ['可入座', '用餐中', '在席人數']
+    const pills = items.filter(it => KEEP.includes(it.label))
+      .map(it => ({ label: it.label, value: it.value, className: it.className, color: it.color }))
     return (
       <div className="flex items-center gap-2 min-w-0">
-        <NowLabel />
         <div className="flex items-center gap-1.5 min-w-0 overflow-x-auto no-scrollbar">
           {pills.map(p => (
             <div
@@ -95,7 +70,7 @@ export default function StatusBar({ tables, waitlist, bookings = [], variant = '
               className={`flex-none flex items-baseline gap-1 px-2 py-1 rounded-lg border ${p.className}`}
             >
               <span className={`text-base font-bold tabular-nums leading-none ${p.color}`}>{p.value}</span>
-              <span className="text-[11px] font-bold opacity-60 leading-none whitespace-nowrap">{p.label}</span>
+              <span className="text-[11px] font-bold leading-none whitespace-nowrap">{p.label}</span>
             </div>
           ))}
         </div>
@@ -110,7 +85,7 @@ export default function StatusBar({ tables, waitlist, bookings = [], variant = '
              className={`border rounded-xl px-3 py-2 flex flex-col items-center ${it.className}
                          ${it.accent && it.value > 0 ? 'ring-2 ring-red-100' : ''}`}>
           <div className={`text-2xl font-bold tabular-nums leading-none ${it.color}`}>{it.value}</div>
-          <div className="text-[11px] font-bold opacity-70 mt-1">{it.label}</div>
+          <div className="text-[11px] font-bold mt-1">{it.label}</div>
           {it.sub && <div className="text-[10px] font-bold text-chicken-red mt-0.5">{it.sub}</div>}
         </div>
       ))}

@@ -70,7 +70,7 @@ test('預配 12:00 的訂位 11:40 出現在報到列 → 按到了入座；復�
   await expect(page.getByText('等報到 1')).toHaveCount(0)
 
   // 5 秒內復原：桌回空桌（不是 reserved）、訂位回待到且保留預配 105 → 又回到報到列
-  await page.getByRole('button', { name: '↩ 復原' }).click()
+  await page.getByRole('button', { name: '復原', exact: true }).click()
   ;({ bookings, tables } = await readState(page))
   expect(bookings.find(b => b.id === YU.id)).toMatchObject({ status: 'confirmed', assignedTableId: '105' })
   expect(tables.find(t => t.number === '105')).toMatchObject({ status: 'vacant', currentBookingId: null })

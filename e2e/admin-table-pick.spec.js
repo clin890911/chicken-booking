@@ -75,7 +75,8 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
   await page.getByRole('button', { name: '來源：現場' }).click()
   await expect(page.getByPlaceholder('現場客可不填')).toBeVisible()
   await page.getByPlaceholder('王小姐').fill('余先生')
-  await expect(page.getByText('選好時段後')).toBeVisible()
+  // 今天會預選下一個可訂時段（10:40 → 11:00），桌位區一進來就在；再點一次 11:00 維持選取
+  await expect(page.getByText('選好時段後')).toHaveCount(0)
   await page.getByRole('button', { name: /^11:00/ }).click()
 
   // 桌位區：預選建議桌（2 位 → 1F 四人桌 105），改選 106，確認列帶出桌號
@@ -92,7 +93,7 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
   // 今日清單：卡片是綠色「桌 106」（現場指派已鎖桌），有「改桌」
   await expect(page.getByText('桌 106', { exact: true })).toBeVisible()
   await page.locator('summary[aria-label="余先生 更多操作"]').click()
-  await page.getByRole('button', { name: '↔ 改桌' }).click()
+  await page.getByTestId('admin-content').getByRole('button', { name: '改桌', exact: true }).click() // ↔ 已改線條圖示；限定內容區，避開 toast 的「改桌」
 
   // 未到客人用自由重選整組；原桌可重新選入、取消選取，確認前不更動原安排。
   await expect(page.getByText(/重新選桌：余先生/)).toBeVisible()
@@ -164,7 +165,7 @@ test('帶位覆蓋不重疊的預配（12:20 vs 20:30）→ 預配保留', async
   await toOps(page)
 
   await page.locator('svg g:has(:text-is("105"))').first().click()
-  await expect(page.getByText(/105 已於排位規劃預留給 余先生.*20:30 余先生 的預配會保留/)).toBeVisible()
+  await expect(page.getByText(/105 已排給 20:30 余先生.*余先生 的排位保留/)).toBeVisible()
   await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()     // M1：警示仍要勾選解鎖
   await slide(page)
   await expect(page.getByText(/入座 105\s*·\s*可帶下一組/)).toBeVisible()
@@ -181,7 +182,7 @@ test('帶位覆蓋重疊的預配（12:20 vs 12:30）→ 解除；按復原 → 
   await toOps(page)
 
   await page.locator('svg g:has(:text-is("105"))').first().click()
-  await expect(page.getByText(/用餐時段重疊：帶位後 12:30 余先生 的預配將解除/)).toBeVisible()
+  await expect(page.getByText(/時間衝突：帶位後 余先生 要重排/)).toBeVisible()
   await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()
   await slide(page)
   await expect(page.getByText('余先生原本的預配 105 已解除，請重新指派')).toBeVisible()

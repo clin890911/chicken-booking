@@ -21,7 +21,7 @@
 export const STATUS_COLOR = {
   vacant: {
     fill: '#86efac', stroke: '#15803d', strokeWidth: 2, text: '#14532d',
-    badge: '#059669', // 可入座：實心綠、最醒目（不動）
+    badge: '#047857', // 可入座：實心綠、最醒目（2026-10 對比：emerald-600→700，白字 3.8→5.5:1；桌面填色不動）
   },
   reserved: {
     fill: '#d8eaff', stroke: '#1d4ed8', strokeWidth: 3, text: '#0f2f6b',
@@ -33,7 +33,7 @@ export const STATUS_COLOR = {
   },
   cleaning: {
     fill: '#fde68a', stroke: '#d97706', strokeWidth: 2, text: '#92400e',
-    badge: '#d97706', // 待清桌：琥珀（不動）
+    badge: '#b45309', // 待清桌：琥珀（2026-10 對比：amber-600→700，白字 3.2→5.0:1；桌面填色不動）
   },
   blocked: {
     fill: '#e5e7eb', stroke: '#9ca3af', strokeWidth: 2, text: '#6b7280',

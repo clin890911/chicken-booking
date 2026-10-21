@@ -21,10 +21,12 @@ export function projectBookingForRead(doc, role) {
   return out
 }
 
+// Explicit public schema: opaque undo snapshots belong only in server receipts.
+const WAITLIST_PUBLIC_FIELDS=['id','queueNumber','takenAt','name','phone','phoneDigits','partySize','children','adults','lineUserId','estimatedMin','status','calledAt','seatedAt','leftAt','skippedAt','returnedAt','assignedTableNumber','notes','queueVersion','serverManaged','createdBy','updatedAt','bookingId','tableNumbers','seatCommandId','seatActor','undoUntil']
 export function projectWaitlistForRead(doc, role) {
-  if (role !== 'kitchen') return doc
-  const out = { ...doc }
-  for (const f of WAITLIST_PII_FIELDS) delete out[f]
+  const out=Object.fromEntries(WAITLIST_PUBLIC_FIELDS.filter(k=>Object.hasOwn(doc,k)).map(k=>[k,doc[k]]))
+  if(typeof out.notes!=='string'&&out.notes!=null)out.notes=''
+  if(role==='kitchen')for(const f of WAITLIST_PII_FIELDS)delete out[f]
   return out
 }
 

@@ -61,14 +61,28 @@ describe('UpcomingPanel 搜尋＋完整電話', () => {
     expect(cards()).toEqual(['b', 'a', 'c'])
   })
 
-  it('卡片顯示完整格式化電話（可點撥）；無電話不顯示', () => {
+  it('卡片顯示完整格式化電話（純文字，撥號只走更多裡的「撥打電話」，避免兩個撥號熱區相鄰誤撥）；無電話不顯示', () => {
     render(data())
     const phone = id => container.querySelector(`[data-booking-id="${id}"] [data-testid="phone-full"]`)
     expect(phone('a').textContent).toBe('0912-345-678')
-    expect(phone('a').getAttribute('href')).toBe('tel:0912345678')
+    expect(phone('a').tagName).toBe('SPAN')
+    expect(phone('a').getAttribute('href')).toBeNull()
+    const telLinks = container.querySelectorAll('[data-booking-id="a"] a[href^="tel:"]')
+    expect(telLinks).toHaveLength(1)
+    expect(telLinks[0].textContent).toContain('撥打電話') // 2026-10-17：撥號收進「⋯ 更多」
+    expect(telLinks[0].getAttribute('href')).toBe('tel:0912345678')
     expect(phone('b').textContent).toBe('0922-111-999')
     expect(phone('c')).toBeNull()
     expect(container.querySelector('[data-testid="phone-tail"]')).toBeNull()
+  })
+
+  it('未配桌卡片：淡琥珀外框＋「● 未配桌」標示；已配桌的沒有', () => {
+    render(data())
+    const card = id => container.querySelector(`[data-booking-id="${id}"]`)
+    expect(card('c').querySelector('[data-testid="unassigned-tag"]').textContent).toContain('未配桌')
+    expect(card('c').className).toContain('border-amber-300')
+    expect(card('a').querySelector('[data-testid="unassigned-tag"]')).toBeNull()
+    expect(card('a').className).not.toContain('border-amber-300')
   })
 
   it('人數有小孩時附拆分；舊單（無拆分）只顯示總數', () => {
@@ -81,7 +95,7 @@ describe('UpcomingPanel 搜尋＋完整電話', () => {
 })
 
 describe('ArrivalStrip chip 電話末碼', () => {
-  it('有電話顯示小字末 3 碼；無電話不顯示', () => {
+  it('報到列有電話顯示完整號碼（不截斷）；無電話不顯示', () => {
     const container = document.createElement('div'); document.body.appendChild(container)
     const root = createRoot(container)
     const t = (n, id) => ({ number: n, capacity: 4, floor: '1F', x: 1, y: 1, w: 80, h: 75, rotation: 0, isActive: true, outage: null, status: 'reserved', currentBookingId: id })
@@ -92,10 +106,10 @@ describe('ArrivalStrip chip 電話末碼', () => {
     act(() => root.render(<ArrivalStrip tables={[t('101', 'b1'), t('102', 'b2')]} bookings={bookings} onSelectTable={() => {}} onArrive={() => {}} now={new Date(2026, 6, 1, 18, 0, 0).getTime()} />))
     const chips = container.querySelectorAll('[role="listitem"]')
     expect(chips).toHaveLength(2)
-    const withTail = [...chips].filter(c => c.querySelector('[data-testid="phone-tail"]'))
-    expect(withTail).toHaveLength(1)
-    expect(withTail[0].textContent).toContain('…678')
-    expect(withTail[0].querySelector('[data-testid="phone-tail"]').className).toContain('text-[10px]')
+    const withPhone = [...chips].filter(c => c.querySelector('[data-testid="phone-full"]'))
+    expect(withPhone).toHaveLength(1)
+    expect(withPhone[0].textContent).toContain('0912-345-678')
+    expect(withPhone[0].querySelector('[data-testid="phone-full"]').className).toContain('whitespace-nowrap')
     act(() => root.unmount()); container.remove()
   })
 })

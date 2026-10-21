@@ -4,6 +4,7 @@ import * as bookingService from '../services/bookingService'
 import * as tableService from '../services/tableService'
 import * as settingsService from '../services/settingsService'
 import * as waitlistService from '../services/waitlistService'
+import * as waitlistCommands from '../services/waitlistCommands'
 import * as customerService from '../services/customerService'
 import * as seatingService from '../services/seatingService'
 import * as agencyService from '../services/agencyService'
@@ -152,6 +153,8 @@ export function BookingProvider({ children }) {
       const data = await cloudData.pullCloudData()
       const gateWasOpen = cloudData.hasPulledCloud()
       const applied = cloudData.applyCloudSnapshot(data)
+      if (applied?.stale) return
+      if(applied?.operationalConflictsResolved) toastRef.current?.warning?.('另一台已變更桌位或訂位，本機舊帶位／清桌操作未套用；請確認最新桌況。布局與備註草稿保留。')
       cloudPulledRef.current = true
       lastPullOkAtRef.current = Date.now()
       refresh()
@@ -298,7 +301,7 @@ export function BookingProvider({ children }) {
       tables: tableService.listAll(),
       bookings: bookingService.listAll(),
       groupReservations: groupReservationService.listAll(),
-      waitlist: waitlistService.listAll(),
+      waitlist: waitlistService.listAll().filter(w=>!w.serverManaged),
     }
     let doneCount = 0
 
@@ -317,7 +320,7 @@ export function BookingProvider({ children }) {
       if (done.length) {
         done.forEach(a => opsLogService.append({ kind: 'day-rollover', ...a, message: sweepActionMsg(a) }))
         doneCount += done.length
-        toastRef.current?.info?.(`🌅 換日掃除：已自動清理 ${done.length} 筆昨日殘留（詳見現場提示列）`)
+        toastRef.current?.info?.(`換日掃除：已自動清理 ${done.length} 筆昨日殘留（詳見現場提示列）`)
       }
     }
 
@@ -330,7 +333,7 @@ export function BookingProvider({ children }) {
       done.forEach(a => opsLogService.append({ kind: 'auto-release', ...a, message: sweepActionMsg(a) }))
       doneCount += done.length
       const hrs = Math.round((Number(settings.autoReleaseAfterMin) || 300) / 6) / 10
-      toastRef.current?.warning?.(`⏱ ${done.length} 桌用餐逾 ${hrs} 小時，已自動處理（疑似忘記清桌，詳見現場提示列）`)
+      toastRef.current?.warning?.(`${done.length} 桌用餐逾 ${hrs} 小時，已自動處理（疑似忘記清桌，詳見現場提示列）`)
     }
 
     if (doneCount) { refresh(); syncCloudSoon() }
@@ -554,6 +557,24 @@ export function BookingProvider({ children }) {
     }
     return r
   }
+  // 未配桌的訂位到店「選桌即入座」（指派＋入座一步，見 seatingService.assignAndSeatBooking）。
+  // 通知只發一次「客人到了」（不另發「桌位已指派」：對店員群組而言這是一個動作）。
+  const assignAndSeatBooking = (bookingId, tableNumbers) => {
+    const r = seatingService.assignAndSeatBooking(bookingId, tableNumbers)
+    refresh()
+    syncCloudSoon()
+    if (r.ok) {
+      const b = bookingService.getById(bookingId)
+      if (b) safeNotify(() => tg.notifyBookingArrived(b))
+    }
+    return r
+  }
+  // 四個「客人到了」入口共用的 5 秒復原（只倒仍由本筆持有或已空的桌，見 seatingService.undoSeatBooking）
+  const undoSeatBooking = (snapshot) => {
+    const r = seatingService.undoSeatBooking(snapshot)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
   // 報到列預配入座的 5 秒復原：桌回空桌、訂位回待到且保留預配（見 seatingService.undoSeatPreassigned）
   const undoSeatPreassigned = (bookingId, tableNumber) => {
     const r = seatingService.undoSeatPreassigned(bookingId, tableNumber)
@@ -669,7 +690,7 @@ export function BookingProvider({ children }) {
   // opts（{ bookingId, date, timeSlot }）只給「建議／候選」用：帶了就排除依時段會撞桌的桌。
   const findSuitableTables = (partySize, opts) => seatingService.findSuitableTables(partySize, opts)
   const suggestTable = (partySize, opts) => seatingService.suggestTable(partySize, opts)
-  const suggestTableCombo = (partySize) => seatingService.suggestTableCombo(partySize)
+  const suggestTableCombo = (partySize, opts) => seatingService.suggestTableCombo(partySize, opts)
   // 鎖桌時機分流（capacity.lockKindFor）：今日訂位挑桌的建議／候選 → { kind:'hold'|'preassign', tables }
   const findReserveCandidates = (partySize, opts) => seatingService.findReserveCandidates(partySize, opts)
   // 預配型的可點選集合（桌子不必此刻空著，只要此刻的佔用不會延續進預配區間）
@@ -702,44 +723,79 @@ export function BookingProvider({ children }) {
   }
 
   // ============ 候位動作 ============
-  const addWaitlist = (data) => {
-    const w = waitlistService.create(data)
-    if (w.phone) customerService.upsert({ phone: w.phone, name: w.name, partySize: w.partySize, source: 'walk-in' })
-    refresh()
-    syncCloudSoon()
-    safeNotify(() => tg.notifyWaitlistCreated(w))
-    return w
+  const waitlistOwner = user?.uid || user?.email || ''
+  const waitlistStore = import.meta.env.VITE_FUNCTION_BASE_URL || 'chicken-booking-tw'
+  const waitlistOwnerRef = useRef(waitlistOwner)
+  waitlistOwnerRef.current = waitlistOwner
+  const waitlistInFlightRef = useRef(new Map())
+  const [pendingWaitlistCommands, setPendingWaitlistCommands] = useState([])
+  const reloadWaitlistPending = useCallback(() => {
+    try { setPendingWaitlistCommands(waitlistCommands.listPending(waitlistOwner, waitlistStore)) }
+    catch (error) { toastRef.current.error(error.message) }
+  }, [waitlistOwner, waitlistStore])
+  const sendWaitlistEnvelope = async envelope => {
+    if (envelope.owner !== waitlistOwnerRef.current || envelope.store !== waitlistStore) return { ok: false, error: '請使用原操作帳號確認候位' }
+    const key = envelope.command.commandId
+    if (waitlistInFlightRef.current.has(key)) return waitlistInFlightRef.current.get(key)
+    const task = (async () => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return { ok: false, pending: true, error: '目前離線，操作尚未確認；請保留資料，恢復連線後確認原操作' }
+      // A generic push that started before the command must finish first. While this command is running,
+      // new generic pushes are gated and older pulls cannot apply their snapshots.
+      cloudData.beginWaitlistCommand()
+      try {
+        if (pushInFlightRef.current) await pushInFlightRef.current.catch(() => {})
+        const result = await cloudData.operationalRequest('adminWaitlistTransition', envelope.command)
+        if (envelope.owner !== waitlistOwnerRef.current) return { ok: false, pending: true, error: '帳號已切換，請用原帳號確認操作結果' }
+        cloudData.acceptWaitlistCommandResult(result)
+        refresh()
+        try { waitlistCommands.completeCommand(envelope) }
+        catch (error) { toastRef.current.error('雲端已儲存，但裝置待確認記錄尚未清除；重試只會確認原操作。' + error.message) }
+        return { ...result, ok: true, commandId: key, booking: result.bookings?.find(b => b.createdBy === 'waitlist'), tableNumbers: envelope.command.payload?.tableNumbers }
+      } catch (error) {
+        const rejected = waitlistCommands.isDefiniteRejection(error)
+        if (rejected) {
+          try { waitlistCommands.completeCommand(envelope) } catch (storageError) { toastRef.current.error(storageError.message) }
+          // No local mutation preceded the request. Pull the complete latest queue/table/booking state.
+          if (envelope.owner === waitlistOwnerRef.current) await pullCloud()
+        }
+        return { ok: false, pending: !rejected, error: waitlistCommands.commandError(error) }
+      } finally { cloudData.endWaitlistCommand(); reloadWaitlistPending() }
+    })()
+    waitlistInFlightRef.current.set(key, task)
+    try { return await task } finally { waitlistInFlightRef.current.delete(key) }
   }
-  const changeWaitlistQueue = async (id, action, commandId) => {
-    if (!can?.('waitlist.update')) return {ok:false,error:'權限不足'}
-    const w=waitlistService.getById(id)
-    if (!w || waitlistService.waitlistDay(w)!==todayStr() || !(action==='skip'?['waiting','called']:['skipped']).includes(w.status)) return {ok:false,error:'候位已更動或不是今天，請重新確認'}
+  const runWaitlistCommand = async (action, id, payload, commandId) => {
+    if (!can?.(action === 'create' ? 'waitlist.create' : 'waitlist.update')) return { ok: false, error: '此帳號沒有操作權限' }
+    if (['seat', 'undo'].includes(action) && (!can?.('table.update') || !can?.('booking.create') || !can?.('booking.assign'))) return { ok: false, error: '此帳號沒有帶位權限' }
     try {
-      const data=await cloudData.operationalRequest('adminWaitlistTransition',{id,action,expectedVersion:w.queueVersion||0,commandId})
-      cloudData.acceptWaitlistRecord(data.item);refresh();return {ok:true,item:data.item}
-    }catch(error){return {ok:false,error:error.status===409?'另一台已更動候位，請重新整理確認': '過號操作未儲存，請檢查連線後重試'}}
+      const current = id ? waitlistService.getById(id) : null
+      const envelope = waitlistCommands.prepareCommand({ owner: waitlistOwner, store: waitlistStore, action, id, expectedVersion: current?.queueVersion || 0, payload, commandId })
+      reloadWaitlistPending()
+      return await sendWaitlistEnvelope(envelope)
+    } catch (error) { return { ok: false, error: error.message } }
   }
-  const skipWaitlist = (id, commandId) => changeWaitlistQueue(id,'skip',commandId)
-  const returnWaitlist = (id, commandId) => changeWaitlistQueue(id,'return',commandId)
-  const callWaitlist = (id) => { const w=waitlistService.call(id); if(w){refresh();syncCloudSoon()} return w }
-  const seatWaitlist = (id, tableNumber) => {
-    const before = waitlistService.getById(id)
-    const r = seatingService.seatWaitlist(id, tableNumber)
-    refresh()
-    syncCloudSoon()
-    if (r.ok && before) safeNotify(() => tg.notifyWaitlistSeated(before, tableNumber))
-    return r
+  const addWaitlist = data => runWaitlistCommand('create', null, data)
+  const callWaitlist = id => runWaitlistCommand('call', id)
+  const leaveWaitlist = id => runWaitlistCommand('leave', id)
+  const skipWaitlist = (id, commandId) => runWaitlistCommand('skip', id, null, commandId)
+  const returnWaitlist = (id, commandId) => runWaitlistCommand('return', id, null, commandId)
+  const seatWaitlist = (id, tableNumber, options = {}) => runWaitlistCommand('seat', id, { tableNumbers: [String(tableNumber)], ...options })
+  const seatWaitlistMulti = (id, tableNumbers, options = {}) => runWaitlistCommand('seat', id, { tableNumbers: tableNumbers.map(String), ...options })
+  const undoWaitlistSeat = (id, seatCommandId) => runWaitlistCommand('undo', id, { seatCommandId })
+  const retryWaitlistCommands = async () => {
+    const entries = waitlistCommands.listPending(waitlistOwner, waitlistStore)
+    for (const envelope of entries) {
+      const result = await sendWaitlistEnvelope(envelope)
+      if (!result.ok) toastRef.current.error(result.error)
+      else toastRef.current.success(envelope.command.action === 'create' ? `已確認取號 #${result.item.queueNumber}` : '已確認候位操作')
+    }
+    reloadWaitlistPending()
   }
-  // 候位併桌入座：TG 通知帶整組桌號（客人會看到自己坐哪幾桌，只報主桌會誤導）
-  const seatWaitlistMulti = (id, tableNumbers) => {
-    const before = waitlistService.getById(id)
-    const r = seatingService.seatWaitlistMulti(id, tableNumbers)
-    refresh()
-    syncCloudSoon()
-    if (r.ok && before) safeNotify(() => tg.notifyWaitlistSeated(before, (r.tableNumbers || []).join(' + ')))
-    return r
-  }
-  const leaveWaitlist = (id) => { waitlistService.leave(id); refresh(); syncCloudSoon() }
+  useEffect(() => {
+    reloadWaitlistPending()
+    window.addEventListener(waitlistCommands.pendingEvent, reloadWaitlistPending)
+    return () => window.removeEventListener(waitlistCommands.pendingEvent, reloadWaitlistPending)
+  }, [reloadWaitlistPending])
 
   // ============ 顧客動作（不發 TG，太瑣碎）============
   const updateCustomer = (phone, patch) => { customerService.update(phone, patch); refresh(); syncCloudSoon() }
@@ -876,11 +932,11 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
-    addWaitlist, callWaitlist, skipWaitlist, returnWaitlist, seatWaitlist, seatWaitlistMulti, leaveWaitlist,
+    addWaitlist, callWaitlist, skipWaitlist, returnWaitlist, seatWaitlist, seatWaitlistMulti, leaveWaitlist, undoWaitlistSeat, pendingWaitlistCommands: pendingWaitlistCommands.filter(e=>e.owner===waitlistOwner), waitlistCommandOwner: waitlistOwner, retryWaitlistCommands,
     updateCustomer, setCustomerBlacklist, setCustomerVip,
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
@@ -888,7 +944,7 @@ export function BookingProvider({ children }) {
     seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
     updateSettings, flushCloudNow, discardRejectedChanges,
   }), [
-    bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated,
+    bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated, pendingWaitlistCommands, waitlistOwner,
     agencies, guides, groupReservations, usingFirebase,
     refresh, pullCloud, syncCloudSoon, flushCloudNow, discardRejectedChanges,
   ])

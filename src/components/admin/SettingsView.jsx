@@ -15,12 +15,17 @@ import TelegramSettings from './TelegramSettings'
 import StaffAdminSection from './StaffAdminSection'
 import ExportCenter from './ExportCenter'
 import Icon from '../ui/Icon'
+import GlyphText from '../ui/GlyphText'
+import { Ban, Check, Repeat, TriangleAlert, X } from 'lucide-react'
 import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
+import { buildLabel, addReloadBlocker } from '../../utils/appVersion'
 import { validateLineReadiness } from '../../utils/lineReadiness'
 import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds, openSeatingIdsOn, effectiveClosedSeatings, describeWeeklyClosures } from '../../utils/weeklyClosures'
 import { onlineLeadLabel } from '../../utils/guestPolicy'
 import { CLOSURE_SETTING_KEYS, isClosureSettingKey, settingsWriteScope } from '../../utils/settingsScope'
 import { describeClosureConflicts } from '../../utils/closuresMerge'
+import { useOpaqueMode } from '../../utils/opaqueMode'
+import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
 
 // 預設值（與 settingsService 的 DEFAULT 對齊，僅供 UI 對比顯示用）
 const SETTINGS_DEFAULTS = {
@@ -56,7 +61,7 @@ const FIELD_LABELS = {
 const SETTINGS_CATEGORIES = [
   { key: 'ops-rules', label: '營運規則',   icon: 'clock', sections: ['hours', 'seatings', 'closures'] },
   { key: 'online',    label: '線上訂位',   icon: 'globe', sections: ['online-guard', 'hero', 'contact'] },
-  { key: 'floor',     label: '現場與桌位', icon: 'chair', sections: ['automation', 'layout', 'table-enable'] },
+  { key: 'floor',     label: '現場與桌位', icon: 'chair', sections: ['device-display', 'automation', 'layout', 'table-enable'] },
   { key: 'line',      label: '通知與 LINE', icon: 'bell', sections: ['line', 'telegram'] },
   { key: 'data',      label: '資料與權限', icon: 'lock', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
 ]
@@ -68,7 +73,8 @@ const CategoryContext = createContext([])
 // 完全唯讀角色（kitchen）：所有「可編輯」區塊用 <fieldset disabled> 整段鎖住，輸入框／按鈕一律不可操作。
 // 下列區塊本質是讀取或帳號操作（查 No-show、登出），維持可用；資料匯出（含電話個資）不在其內——kitchen 直接不渲染；雲端同步區改由按鈕層級處理。
 const ReadOnlyContext = createContext(false)
-const READONLY_EXEMPT_SECTIONS = ['noshow', 'account', 'firestore']
+// device-display：這台裝置自己的顯示偏好（存 localStorage、不寫雲端），任何角色都能切。
+const READONLY_EXEMPT_SECTIONS = ['noshow', 'account', 'firestore', 'device-display']
 
 export default function SettingsView({ onOpenCustomer }) {
   const { settings, bookings, updateSettings, flushCloudNow, cloudStatus, migrateLocalToCloud, pullCloud, discardRejectedChanges, localPersistDegraded } = useBooking()
@@ -174,6 +180,8 @@ export default function SettingsView({ onOpenCustomer }) {
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [armUnload])
+  // 同一個條件也擋住「平板喚醒時自動更新到新版本」（useNewVersion），免得改到一半的設定消失
+  useEffect(() => (armUnload ? addReloadBlocker(() => true) : undefined), [armUnload])
 
   // B1：若改到容量／時段相關設定，儲存前用 confirm(danger) 提示受影響的未來訂位
   const handleSave = async () => {
@@ -637,6 +645,8 @@ export default function SettingsView({ onOpenCustomer }) {
         </div>
       </SettingsSection>
 
+      <DeviceDisplaySection />
+
       <SettingsSection sectionKey="automation" title="現場自動化（自動清檯）" description="超時自動釋桌與換日掃除；系統自動動作會留紀錄（現場提示列可查）。" badge={autoReleaseOn ? '啟用' : '未啟用'} summary={automationSummary}>
         <div className="space-y-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
@@ -890,8 +900,8 @@ export default function SettingsView({ onOpenCustomer }) {
             <ul className="space-y-1.5">
               {lineReadiness.checks.map(item => (
                 <li key={item.label} className="flex items-start gap-2 text-sm">
-                  <span aria-hidden className={item.ok ? 'text-chicken-green' : 'text-chicken-red'}>
-                    {item.ok ? '✓' : '✕'}
+                  <span aria-hidden className={`mt-0.5 ${item.ok ? 'text-chicken-green' : 'text-chicken-red'}`}>
+                    {item.ok ? <Check size={16} strokeWidth={2.6} /> : <X size={16} strokeWidth={2.6} />}
                   </span>
                   <span className={item.ok ? 'text-chicken-brown/70' : 'font-bold text-chicken-brown'}>
                     {item.label}
@@ -1077,7 +1087,7 @@ export default function SettingsView({ onOpenCustomer }) {
       </SettingsSection>
 
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
-        雞王涮涮鍋訂位系統 v0.4 · Firestore 同步模式
+        雞王涮涮鍋訂位系統 · 版本 {buildLabel()}
       </p>
       </div>{/* 內容欄 */}
       </div>{/* flex gap-4 */}
@@ -1105,6 +1115,60 @@ function readBannerFile(file) {
     reader.onerror = reject
     reader.readAsDataURL(file)
   })
+}
+
+// 這台裝置的顯示：Liquid Glass「不透明模式」開關（每台裝置自己記，見 utils/opaqueMode）。
+// iPad Safari 可能不支援系統「降低透明度」的 CSS 偵測 → 給一個 app 內開關；立即生效、不用按儲存。
+function DeviceDisplaySection() {
+  const [opaque, setOpaque] = useOpaqueMode()
+  const [hideStrip, setHideStrip] = useDeviceFlag(HIDE_ARRIVAL_STRIP_KEY)
+  const toast = useToast()
+  const toggleStrip = () => {
+    if (!setHideStrip(!hideStrip)) toast.warning('這台裝置無法記住設定（可能是私密瀏覽），重新整理後會回到預設')
+  }
+  const toggle = () => {
+    const next = !opaque
+    const saved = setOpaque(next)
+    if (!saved) toast.warning('這台裝置無法記住設定（可能是私密瀏覽），重新整理後會回到預設')
+  }
+  return (
+    <SettingsSection sectionKey="device-display" title="這台裝置的顯示" description="只影響這台裝置，不會同步到其他裝置。" badge={opaque ? '不透明' : '玻璃'} summary={`${opaque ? '不透明模式' : '玻璃效果（預設）'} · 等報到列${hideStrip ? '已關閉' : '顯示'}`} defaultOpen>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={opaque}
+        onClick={toggle}
+        className="tap w-full flex items-center justify-between gap-4 min-h-[56px] rounded-xl border border-chicken-brown/15 bg-white px-4 py-3 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block font-bold text-chicken-brown">不透明模式</span>
+          <span className="block text-xs text-chicken-brown/70 mt-0.5 leading-5">
+            把導覽列、浮動數字鍵盤、通知、桌抽屜的半透明玻璃改成實心底。看不清楚、覺得畫面變慢，或 iPad 已開「降低透明度」卻仍是半透明時打開。
+          </span>
+        </span>
+        <span aria-hidden="true" className={`relative flex-none w-[52px] h-8 rounded-full transition-colors ${opaque ? 'bg-emerald-700' : 'bg-chicken-brown/25'}`}>
+          <span className={`absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow transition-transform ${opaque ? 'translate-x-5' : ''}`} />
+        </span>
+      </button>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={!hideStrip}
+        onClick={toggleStrip}
+        className="tap mt-2 w-full flex items-center justify-between gap-4 min-h-[56px] rounded-xl border border-chicken-brown/15 bg-white px-4 py-3 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block font-bold text-chicken-brown">現場地圖下方「等報到」列</span>
+          <span className="block text-xs text-chicken-brown/70 mt-0.5 leading-5">
+            關掉後桌況圖更大；客人到店改從「今日訂位」卡片按「客人到了」。
+          </span>
+        </span>
+        <span aria-hidden="true" className={`relative flex-none w-[52px] h-8 rounded-full transition-colors ${!hideStrip ? 'bg-emerald-700' : 'bg-chicken-brown/25'}`}>
+          <span className={`absolute top-1 left-1 w-6 h-6 rounded-full bg-white shadow transition-transform ${!hideStrip ? 'translate-x-5' : ''}`} />
+        </span>
+      </button>
+    </SettingsSection>
+  )
 }
 
 // 首頁廣告單張卡片：Reorder.Item（右上握把拖曳排序）+ 圖上疊標題副標（前台預覽）+ 非 16:9 提示。
@@ -1349,7 +1413,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
       >
         <span className="text-sm leading-tight">{t}</span>
         <span className={`mt-0.5 flex items-center gap-1 text-[11px] leading-tight ${on ? 'text-white' : 'text-emerald-700'}`}>
-          {on ? <>⛔ 已關閉</> : <><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />開放</>}
+          {on ? <><Ban size={11} strokeWidth={2.6} aria-hidden="true" />已關閉</> : <><span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />開放</>}
         </span>
       </button>
     )
@@ -1365,7 +1429,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
 
       {unsaved && (
         <div className="flex items-center gap-2 rounded-xl border-2 border-amber-400 bg-amber-50 px-4 py-2.5 text-sm font-bold text-amber-800">
-          <span aria-hidden>⚠️</span>
+          <TriangleAlert size={18} strokeWidth={2.4} aria-hidden="true" className="shrink-0" />
           關閉時段已修改但尚未儲存，請按頁面下方「儲存全部變更」。
         </div>
       )}
@@ -1457,7 +1521,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
             <div className="mb-2 text-sm font-bold text-chicken-brown">近期已關閉（{upcoming.length}）</div>
             {weeklyLines.length > 0 && (
               <div className="mb-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs font-bold leading-5 text-amber-800">
-                {weeklyLines.map(l => <div key={l}>🔁 {l}</div>)}
+                {weeklyLines.map(l => <div key={l} className="flex items-start gap-1.5"><Repeat size={13} strokeWidth={2.4} aria-hidden="true" className="mt-1 shrink-0" /><span>{l}</span></div>)}
               </div>
             )}
             {upcoming.length === 0 ? (
@@ -1490,7 +1554,9 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
               <div className="min-w-0">
                 <div className="text-base font-black text-chicken-brown">{dayLabel(date)}</div>
                 <div className={`mt-0.5 text-sm font-bold ${dayClosed ? 'text-chicken-red' : hasAnyClosure ? 'text-amber-800' : 'text-emerald-700'}`}>
-                  {dayClosed ? '⛔ 整天公休' : hasAnyClosure ? `⚠️ 部分關閉：${describeDay(date)}` : '✓ 全天開放訂位'}
+                  <GlyphText icon={dayClosed ? Ban : hasAnyClosure ? TriangleAlert : Check} size={15} className="!justify-start">
+                    {dayClosed ? '整天公休' : hasAnyClosure ? `部分關閉：${describeDay(date)}` : '全天開放訂位'}
+                  </GlyphText>
                 </div>
               </div>
               <input type="date" value={date} min={todayStr()} onChange={e => e.target.value && pickDate(e.target.value)}
@@ -1506,7 +1572,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                   dayClosed ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-red/40 bg-white text-chicken-red hover:bg-red-50'
                 }`}
               >
-                {dayClosed ? '⛔ 整天公休中 · 點此恢復營業' : '設為整天公休'}
+                {dayClosed ? <GlyphText icon={Ban} size={16}>整天公休中 · 點此恢復營業</GlyphText> : '設為整天公休'}
               </button>
               {hasAnyClosure && !dayClosed && (
                 <button type="button" onClick={reopenDay} className="btn-secondary min-h-[44px] whitespace-nowrap text-sm">
@@ -1560,9 +1626,9 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                         <div className="min-w-0">
                           <span className="text-sm font-bold text-chicken-brown">{s.name}</span>
                           <span className="ml-1.5 text-xs text-chicken-brown/50">{s.start}–{s.end}</span>
-                          <span className="ml-1.5 inline-block rounded-full bg-chicken-brown/10 px-2 py-0.5 text-[11px] font-bold text-chicken-brown/70">🔁 每週{WEEKDAY_LABELS[dateDow]}預設關閉</span>
+                          <span className="ml-1.5 inline-block rounded-full bg-chicken-brown/10 px-2 py-0.5 text-[11px] font-bold text-chicken-brown/70"><GlyphText icon={Repeat} size={11} strokeWidth={2.6} className="align-[-1px] !gap-1">每週{WEEKDAY_LABELS[dateDow]}預設關閉</GlyphText></span>
                           <div className={`mt-0.5 text-xs font-bold ${weeklyClosed ? 'text-chicken-red' : closedInSeating ? 'text-amber-700' : 'text-emerald-700'}`}>
-                            {weeklyClosed ? '⛔ 本日依每週預設關閉' : closedInSeating ? `✓ 本日特別開放 · 已關閉 ${closedInSeating} / ${slots.length} 個時段` : '✓ 本日特別開放'}
+                            <GlyphText icon={weeklyClosed ? Ban : Check} size={13} className="!gap-1">{weeklyClosed ? '本日依每週預設關閉' : closedInSeating ? `本日特別開放 · 已關閉 ${closedInSeating} / ${slots.length} 個時段` : '本日特別開放'}</GlyphText>
                           </div>
                         </div>
                         <button
@@ -1592,7 +1658,7 @@ function ClosuresEditor({ form, setForm, bookings, unsaved = false }) {
                         <span className="text-sm font-bold text-chicken-brown">{s.name}</span>
                         <span className="ml-1.5 text-xs text-chicken-brown/50">{s.start}–{s.end}</span>
                         <div className={`mt-0.5 text-xs font-bold ${seatingClosed ? 'text-chicken-red' : closedInSeating ? 'text-amber-700' : 'text-emerald-700'}`}>
-                          {seatingClosed ? '⛔ 整場次已關閉' : closedInSeating ? `已關閉 ${closedInSeating} / ${slots.length} 個時段` : '全部開放'}
+                          {seatingClosed ? <GlyphText icon={Ban} size={13} className="!gap-1">整場次已關閉</GlyphText> : closedInSeating ? `已關閉 ${closedInSeating} / ${slots.length} 個時段` : '全部開放'}
                         </div>
                       </div>
                       <button

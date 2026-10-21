@@ -35,6 +35,12 @@ export default function HandoffPanel({onLocate}){
   if(!result.ok){failedTask.current={id:task.id,version:task.version,status:action==='complete'?'completed':'pending'};setFailure(result.error)}
   else {pending.current.delete(key);failedTask.current=null}
  }
+ // 沒有待辦＋收合 → 縮成一條細列（視覺約 32px、可點區 44px（min-h 44＋負 margin 抵銷 12px），不再是 ~70px 的卡片）：帶位欄每一像素都要還給帶位面板。
+ // 仍保留入口（看已完成／別天的交班），不整個藏掉。
+ const slim=collapsed&&pendingCount===0
+ if(slim)return <section aria-label="現場交班待辦" data-compact="true" className="flex-none">
+  <button aria-expanded={false} onClick={toggle} className="w-full text-left text-xs text-chicken-brown/55 min-h-[44px] -my-[6px] px-1">交班待辦 0 · <span className="underline underline-offset-2">展開</span></button>
+ </section>
  return <section aria-label="現場交班待辦" className="rounded-xl border bg-white p-3 flex flex-col gap-2 max-h-[260px] overflow-hidden flex-none">
   <div className={`grid items-center gap-2 flex-none ${collapsed?'grid-cols-1':'grid-cols-[minmax(0,1fr)_120px_36px]'}`}>
    <button aria-expanded={!collapsed} onClick={toggle} className="font-bold text-sm text-left min-h-[44px]">交班待辦 {pendingCount} <span className="text-xs font-normal">{collapsed?'展開':'收合'}</span></button>

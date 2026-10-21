@@ -9,6 +9,7 @@ npm test            # 單元/整合測試（Vitest，快、CI / 上線前必跑�
 npm run test:watch  # 開發時即時重跑（改檔自動跑）
 npm run test:coverage   # 產生覆蓋率報告（coverage/ 目錄）
 npm run test:e2e    # E2E（Playwright，真實瀏覽器跑用戶端訂位 / 管理端指派主線）
+npm run test:e2e:waitlist  # 候位真交易（Firestore emulator＋vitest＋專用 Playwright config，見下方）
 ```
 
 > 兩層測試：**Vitest** 守邏輯層（快、每次改動都跑）；**Playwright E2E** 守兩條最重要的使用者主線（真實瀏覽器、較慢、上線前跑一次）。
@@ -46,14 +47,37 @@ Vitest 全綠長這樣：
 | `e2e/customer-booking.spec.js` | 用戶端訂位 | 選時段 → 填姓名/電話 → 送出 → 進確認頁；另測電話格式錯誤擋送出 |
 | `e2e/customer-manage.spec.js` | 用戶端查詢/修改 | 開管理連結 → 驗證電話末碼 → 改時段更新成功 / 取消訂位成功 |
 | `e2e/admin-assign.spec.js` | 管理端指派 | 同仁登入 → 今日列表看到訂位 → 指派桌位（A6 二步確認）→ 指派成功 |
-| `e2e/waitlist-seat.spec.js` | 管理端候位 | 登入 → 取號 → 叫號 → 入座（A6 二步確認）→ 入座成功 |
+| `e2e/waitlist-seat.spec.js` | 管理端候位（**需 emulator**，見下節） | 登入 → 取號 → 叫號 → 入座（A6 二步確認）→ 入座成功 |
 
 > 客人端訂位走後端 `guestGetAvailability` / `guestCreateBooking`，E2E 以 `page.route` mock 這兩個端點的回應，故不需後端即可跑、且結果穩定。
+
+## 候位真交易測試（需 Firestore emulator）
+
+PR #176 起候位取號／叫號／入座改走雲端交易 `adminWaitlistTransition`。以下測試**不 mock 候位結果**，而是用產品自己的
+`functions/lib/waitlistCommands.js` handler 對本機 Firestore emulator 跑真交易：
+
+| 檔案 | 層 |
+|---|---|
+| `tests/functions/waitlistCommands.emulator.test.js` | Vitest（9 項）。未設 emulator 環境變數時**自動略過**（`describe.runIf`），所以 `npm test` 會顯示 skipped，不是 PASS |
+| `e2e/waitlist-seat.spec.js`、`e2e/waitlist-multi-seat.spec.js`、`e2e/waitlist-stability.spec.js` | Playwright（共 12 項）。**主設定 `playwright.config.js` 用 `testIgnore` 排除**，`npm run test:e2e` 不會跑也不會紅；只能用 `scripts/test/waitlist-playwright.config.js` 跑 |
+
+**怎麼跑**（兩段共用同一個 emulator、會清空 demo project，必須依序；指令已包成一支）：
+
+```bash
+npm --prefix functions install   # 首次：測試從 functions/ 載入 firebase-admin（worktree 可 symlink 主 checkout 的 functions/node_modules）
+npm run test:e2e:waitlist
+```
+
+前提：
+- `firebase` CLI ＋ Java（emulator 用）。只接受 `127.0.0.1:8080` 與專案 `demo-waitlist-stability`；環境變數不對就直接拋錯，**沒有正式 Firestore fallback**。
+- 埠：Vite **5199**（`reuseExistingServer:false`＋`strictPort`，被佔用會直接失敗，不會誤用別的 checkout）、測試 handler **5201**、emulator **8080**。
+- 用本機 `/Applications/Google Chrome.app`（非 Playwright 內建 chromium）。
+- 細節與量測紀錄見 `docs/WAITLIST_STABILITY.md`。
 
 ## 上線前檢查清單（每次部署前照做）
 
 1. `npm test` → **必須全綠**（Vitest 邏輯層）。有紅燈先修到綠再上。
-2. `npm run test:e2e` → **必須全綠**（用戶端訂位 + 管理端指派主線）。
+2. `npm run test:e2e` → **必須全綠**（用戶端訂位 + 管理端指派主線）。有動到候位（`waitlist*`、`adminWaitlistTransition`）時另跑 `npm run test:e2e:waitlist`。
 3. `npm run build` → 必須成功（無編譯錯誤）。
 4. 若這次有改 UI 細節，另外用 preview / 實機快速點一輪受影響頁面（自動測試不涵蓋每個畫面細節）。
 5. 部署後，到線上站確認 bundle 已更新（見 `README` / Zeabur 後台）。

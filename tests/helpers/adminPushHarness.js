@@ -2,6 +2,9 @@
 // 不 import functions/index.js 本身（那會載入 firebase-functions runtime／secrets）。
 import { readFileSync } from 'node:fs'
 import crypto from 'node:crypto'
+import {projectForRead} from '../../functions/lib/dataProjection.js'
+import {readOperationalUpdates} from '../../functions/lib/operationalBulk.js'
+import {guardOperationalSync} from '../../functions/lib/waitlistSyncGuard.js'
 import { classifyDatasetByPermission } from '../../functions/lib/staffAccess'
 import { scopeClosureSettingsPush } from '../../functions/lib/settingsScope'
 import { guardSettingsPush, settingsReplaceOptions, buildClosuresSettingsReport } from '../../functions/lib/settingsGuard'
@@ -46,14 +49,14 @@ export function buildAdminPush(db, { reports = [], notifyChanges = async () => {
     return out
   }
   const adminPushData = new Function(
-    'onRequest', 'db', 'requireStaff', 'errorWithStatus', 'crypto', 'PUBLIC_CORS', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID',
+    'projectForRead','readOperationalUpdates','guardOperationalSync','onRequest', 'db', 'requireStaff', 'errorWithStatus', 'crypto', 'PUBLIC_CORS', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID',
     'LINE_CHANNEL_ACCESS_TOKEN', 'SYNC_COLLECTION_IDKEYS', 'classifyDatasetByPermission', 'scopeClosureSettingsPush',
     'snapshotBookingsByIds', 'COLLECTIONS', 'buildBookingUpsertData', 'createServerToken', 'stripServerOwnedCustomerFields',
     'upsertOps', 'deleteOps', 'normalizeStoreSettings', 'protectQueueUpsert', 'notifyAdminBookingChanges', 'notifyAdminBookingTelegram',
     'guardSettingsPush', 'settingsReplaceOptions', 'buildClosuresSettingsReport', 'reportSettingsGuard', 'commitClosuresMerge',
     body,
   )(
-    (_, fn) => fn, db, async req => ({ uid: 'U', role: req.role }), (m, s) => Object.assign(Error(m), { status: s }), crypto, true, '', '', '',
+    projectForRead,readOperationalUpdates,guardOperationalSync,(_, fn) => fn, db, async req => ({ uid: 'U', role: req.role }), (m, s) => Object.assign(Error(m), { status: s }), crypto, true, '', '', '',
     { bookings: 'id', tables: 'number', waitlist: 'id', customers: 'phone', agencies: 'id', guides: 'id', groupReservations: 'id' },
     classifyDatasetByPermission, scopeClosureSettingsPush,
     snapshotBookingsByIds, { bookings: 'bookings', tables: 'tables', waitlist: 'waitlist', customers: 'customers' },

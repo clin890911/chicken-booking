@@ -83,3 +83,37 @@ describe('EditBookingModal：大人／小孩', () => {
     expect(ctx.updateBooking.mock.calls[0][1]).toMatchObject({ guests: 3, adults: 3, children: 0 })
   })
 })
+
+// 2026-10 尖峰優化：改日期時，原時段在新日期仍可訂就保留（不逼店員重選）；不可訂才清空。
+describe('EditBookingModal：換日期保留仍可訂的時段', () => {
+  let container, root
+  const render = (booking) => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root.render(<EditBookingModal booking={booking} onClose={() => {}} />) })
+  }
+  const btn = (pred) => [...document.querySelectorAll('button')].find(pred)
+  const saveBtn = () => btn(b => /儲存變更|還差/.test(b.textContent))
+  afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.clearAllMocks(); vi.useRealTimers(); ctx.bookings = [] })
+
+  it('明天 18:00 → 改後天：仍是 18:00，可直接存', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 9, 9, 9, 0))
+    const b = { ...base, source: 'walkin', date: '2026-10-10', timeSlot: '18:00' }
+    ctx.bookings = [b]                                   // 自己那筆不算佔用
+    render(b)
+    act(() => { btn(x => x.textContent.startsWith('後天')).click() })
+    expect(saveBtn().textContent).toBe('儲存變更')
+    act(() => { saveBtn().click() })
+    expect(ctx.updateBooking).toHaveBeenCalledWith('B1', expect.objectContaining({ date: '2026-10-11', timeSlot: '18:00' }))
+  })
+
+  it('新日期該時段已滿 → 清空、要求重選', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 9, 9, 9, 0))
+    const b = { ...base, source: 'walkin', date: '2026-10-10', timeSlot: '18:00' }
+    ctx.bookings = [b, { id: 'X', date: '2026-10-11', timeSlot: '18:00', guests: 4, status: 'confirmed' }]
+    render(b)
+    act(() => { btn(x => x.textContent.startsWith('後天')).click() })
+    expect(saveBtn().textContent).toContain('還差：時段')
+  })
+})

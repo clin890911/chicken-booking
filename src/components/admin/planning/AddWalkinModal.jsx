@@ -129,6 +129,7 @@ export default function AddWalkinModal({ open, onClose, date, onCreated }) {
             guests={guests}
             hideFull={false}
             ignoreOnlineClosure
+            allowFull
           />
           {attempted && !timeSlot && <p className="text-xs text-chicken-red font-bold mt-1">請選時段</p>}
         </div>

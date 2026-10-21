@@ -6,13 +6,15 @@ import { todayStr, formatDate } from '../../../utils/timeSlots'
 import { overdueMinOf } from '../../../utils/bookingPulse'
 import { assignmentKind, diningTablePresentation } from '../../../utils/tableStatus'
 import { GROUP_HOLD_COLOR } from './statusColors'
+import { useDeviceFlag, MAP_ROT180_KEY_PREFIX } from '../../../utils/devicePrefs'
 
-// 「到了」一鍵入座的出現窗：訂位時間前 30 分 ~ 後 60 分。寫成具名常數方便日後調整。
+// 「到了」一鍵入座的出現窗：訂位時間前 60 分 ~ 後 60 分。寫成具名常數方便日後調整。
+// （2026-10 前緣由 30 放寬到 60：連假早到的客人過去在報到列找不到，要繞去今日訂位籤）
 // ★ 2026-08 二版：鈕本身已從桌況圖搬到地圖下方的「報到列」（見 ArrivalStrip.jsx）——
 //   地圖容器只有數百 px 寬、一張桌換算下來常常 <40px，任何 ≥40px 實體熱區都會壓到鄰桌
 //   甚至壓住「另一顆到了鈕」讓它整個點不到（獨立驗收在相鄰兩桌同時進窗時實測踩到，會
 //   誤觸把不相干的訂位標記入座）。這個判定純函式留在這裡，ArrivalStrip 引用同一份。
-export const ARRIVE_WINDOW_BEFORE_MIN = 30
+export const ARRIVE_WINDOW_BEFORE_MIN = 60
 export const ARRIVE_WINDOW_AFTER_MIN = 60
 
 // 純函式抽出方便單測：桌是否該顯示「到了」入口。
@@ -26,7 +28,7 @@ export function isArriveEligible(table, booking, now = Date.now()) {
 // 「預配」的待到訂位也要能從報到列一下入座（2026-09「接近時段才鎖」之後，早上接的訂位多半只預配、
 // 桌況維持空桌——只看 reserved 桌的話，這些客人到了在報到列上找不到）。
 // 條件：今天、待到（confirmed）、有配桌且是預配（assignmentKind＝'preassign'：桌沒鎖給這筆），
-// 時間窗同上（前 30／後 60 分）。桌此刻被別組佔著也照列——按「到了」時 seatBooking 的佔用守門會擋下，
+// 時間窗同上（前 60／後 60 分）。桌此刻被別組佔著也照列——按「到了」時 seatBooking 的佔用守門會擋下，
 // 由呼叫端給「改桌」出口（不在這裡默默藏起來，否則客人到了店員卻找不到入口）。
 export function isPreassignArriveEligible(table, booking, now = Date.now()) {
   if (!table || !booking || !booking.timeSlot) return false
@@ -46,9 +48,10 @@ export function isPreassignArriveEligible(table, booking, now = Date.now()) {
 // 放大效果）。★ 只用在 FloorMap（現場/規劃/統一佔用圖），LayoutEditor 仍固定用
 // FLOOR_VIEWBOX——編輯器需要看到完整 1200×800 空間才能往空白處新增桌位/設施，
 // 若編輯器也裁切，拖桌子時裁切框會即時跳動，體感很差，見該檔案內註解。
-const AUTOFIT_PADDING = 60 // 四周留白（user unit）：label 型設施是 0 寬高錨點，實際文字
-  // 寬度不在資料裡（fontSize 15 依字數往右畫），沒有留白會被裁掉；此值已依現有設施文字
-  // （「玻璃門入口」「冷藏自選冰箱」直書、「結帳口」等）實測夠用。
+const LABEL_FONT = 15 // FixtureLayer 文字標籤字級（bbox 估寬與轉向共用）
+const AUTOFIT_PADDING = 16 // 四周留白（user unit）。2026-10-17 由 60 縮到 16（Barry：桌位再大一點）：
+  // 過去留 60 是因為 label 型設施是 0 寬高錨點、文字寬度不在 bbox 裡；現在 bbox 直接把 label
+  // 文字範圍（每字約 15px、基線上方一行高）算進去，不再靠大留白兜底。
 
 // 依「單一樓層」的桌位＋設施算內容 bounding box（含桌位旋轉，避免斜擺的桌被裁到）。
 // 無桌無設施（floor 不存在任何內容）時回傳 null，由呼叫端 fallback 回 FLOOR_VIEWBOX。
@@ -88,6 +91,12 @@ export function computeFloorContentBBox(floorTables, fixtureItems) {
   ;(fixtureItems || []).forEach(f => {
     const x = Number(f.x) || 0
     const y = Number(f.y) || 0
+    if (f.type === 'label') {
+      // 文字標籤：fontSize 15 從 (x, 基線 y) 往右畫 → 估寬＝字數×15、高＝基線上方 15
+      expand(x, y - LABEL_FONT)
+      expand(x + [...String(f.text || '')].length * LABEL_FONT, y)
+      return
+    }
     const w = Number(f.w) || 0
     const h = Number(f.h) || 0
     expand(x, y)
@@ -146,6 +155,26 @@ export function computeFloorViewBox(floorTables, fixtureItems) {
   }
 }
 
+// 顯示方向：整層轉 180°（只換畫的位置，存檔座標不動；Barry 2026-10-17：領位台要在左上角，跟站在領位台看出去一致）。
+// 以內容 bbox 中心為軸，矩形 (x,y,w,h) → (2cx−x−w, 2cy−y−h)；桌子本身的 rotation 不變（矩形轉 180° 形狀相同，字維持正向）。
+// 文字標籤沒有寬度 → 以每字約 15px 估寬、基線往下補一行高；箭頭字元上下左右互換（「↑ 上樓」轉向後要指另一邊）。
+const ARROW_FLIP = { '↑': '↓', '↓': '↑', '←': '→', '→': '←' }
+export function rotateFloor180(floorTables, fixtureItems) {
+  const bbox = computeFloorContentBBox(floorTables, fixtureItems)
+  if (!bbox) return { tables: floorTables, fixtures: fixtureItems }
+  const sx = bbox.minX + bbox.maxX, sy = bbox.minY + bbox.maxY // = 2cx、2cy
+  const flipRect = (o) => ({ ...o, x: sx - (Number(o.x) || 0) - (Number(o.w) || 0), y: sy - (Number(o.y) || 0) - (Number(o.h) || 0) })
+  return {
+    tables: floorTables.map(flipRect),
+    fixtures: fixtureItems.map(f => {
+      if (f.type !== 'label') return flipRect(f)
+      const text = String(f.text || '').replace(/[↑↓←→]/g, ch => ARROW_FLIP[ch])
+      const width = [...text].length * LABEL_FONT
+      return { ...f, text, x: sx - (Number(f.x) || 0) - width, y: sy - (Number(f.y) || 0) + LABEL_FONT }
+    }),
+  }
+}
+
 // 渲染樓層設施（醬料台/出菜口/結帳口/冰箱/樓梯/洗手間…）— 純標示、不可點選。
 // items 由 FloorMap 解析（settings.floorPlan.fixtures 優先，fallback 預設 FIXTURES）。
 function FixtureLayer({ items = [] }) {
@@ -154,7 +183,7 @@ function FixtureLayer({ items = [] }) {
       {items.map((f, i) => {
         if (f.type === 'label') {
           return (
-            <text key={f.id || i} x={f.x} y={f.y} fontSize={15} fontWeight={700} fill="#6b5b4d">
+            <text key={f.id || i} x={f.x} y={f.y} fontSize={LABEL_FONT} fontWeight={700} fill="#6b5b4d">
               {f.text}
             </text>
           )
@@ -263,9 +292,19 @@ export default function FloorMap({
     return () => clearInterval(id)
   }, [liveMode])
 
-  const floorTables = useMemo(
+  // 這台裝置對這個樓層的顯示方向（地圖工具列「轉向」切換，每層各自記）
+  const [rotated, setRotated] = useDeviceFlag(`${MAP_ROT180_KEY_PREFIX}${floor}`)
+  const rawFloorTables = useMemo(
     () => tables.filter(t => t.floor === floor),
     [tables, floor]
+  )
+  const rawFixtureItems = useMemo(
+    () => (fixtures && fixtures[floor]) || FIXTURES?.[floor] || [],
+    [fixtures, floor]
+  )
+  const { tables: floorTables, fixtures: fixtureItems } = useMemo(
+    () => rotated ? rotateFloor180(rawFloorTables, rawFixtureItems) : { tables: rawFloorTables, fixtures: rawFixtureItems },
+    [rotated, rawFloorTables, rawFixtureItems]
   )
 
   // 每張桌一個「穩定」的點擊 handler：onSelectTable 走 ref，容器每次重建 handler 也不會
@@ -292,10 +331,7 @@ export default function FloorMap({
   }, [bookings])
 
   // 設施：settings.floorPlan.fixtures 優先，未設定 fallback 程式內預設 FIXTURES。
-  const fixtureItems = useMemo(
-    () => (fixtures && fixtures[floor]) || FIXTURES?.[floor] || [],
-    [fixtures, floor]
-  )
+  // （設施清單與轉向後的座標在上方 rawFloorTables 旁一起算：點擊 handler 也要用轉向後的桌）
   // 分區色解析：zoneId → color（無分區回 null）
   const zoneColorOf = useMemo(() => {
     const m = {}
@@ -328,32 +364,34 @@ export default function FloorMap({
     return () => clearTimeout(timer)
   }, [locateTableNumber, locateRequestId, floor])
 
-  // 放大整張實體布局，不擴張單桌熱區；相鄰桌不會互相遮住。
-  const minSide = Math.min(...floorTables.map(t => Math.min(t.w, t.h)).filter(n => n > 0), 75)
-  const scale = Math.max(0.8, 44 / minSide) * zoom
+  // 縮放：100%＝「全貌」——整層樓剛好塞進可視區（SVG meet），不必捲動就看到每張桌（Barry 2026-10-17）。
+  // ＋ 放大整張實體布局（不擴張單桌熱區、相鄰桌不互相遮住），要點小桌時再放大；− 最小到 50%。
+  // 舊版以「最短桌邊 ≥44px」為下限強制撐大地圖、一進來就要捲動——尖峰時看不到全貌，店主要求改回全貌優先。
+  const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25
+  const fitPct = `${zoom * 100}%`
   return (
     <div ref={mapRef} aria-modal={expanded ? true : undefined} className={expanded ? 'fixed inset-3 z-[80] bg-white rounded-xl shadow-xl flex flex-col p-3' : 'h-full min-h-0 flex flex-col'} role={expanded ? 'dialog' : undefined} aria-label={expanded ? `${floor} 放大桌況圖` : undefined}>
       <div className="flex items-center gap-2 flex-wrap mb-2 shrink-0">
-        <button type="button" aria-label="縮小地圖" disabled={zoom <= 1} onClick={() => setZoom(v => Math.max(1, v - 0.25))} className="min-h-[44px] min-w-[44px] rounded-lg border">−</button>
-        <span className="text-xs tabular-nums">{Math.round(zoom * 100)}%</span>
-        <button type="button" aria-label="放大地圖" disabled={zoom >= 2} onClick={() => setZoom(v => Math.min(2, v + 0.25))} className="min-h-[44px] min-w-[44px] rounded-lg border">＋</button>
+        <button type="button" aria-label="縮小地圖" disabled={zoom <= ZOOM_MIN} onClick={() => setZoom(v => Math.max(ZOOM_MIN, v - ZOOM_STEP))} className="min-h-[44px] min-w-[44px] rounded-lg border">−</button>
+        <span className="text-xs tabular-nums min-w-[2.5rem] text-center">{zoom === 1 ? '全貌' : `${Math.round(zoom * 100)}%`}</span>
+        <button type="button" aria-label="放大地圖" disabled={zoom >= ZOOM_MAX} onClick={() => setZoom(v => Math.min(ZOOM_MAX, v + ZOOM_STEP))} className="min-h-[44px] min-w-[44px] rounded-lg border">＋</button>
+        {zoom !== 1 && <button type="button" onClick={() => setZoom(1)} className="min-h-[44px] px-3 rounded-lg border text-xs font-bold">看全貌</button>}
+        <button type="button" aria-pressed={rotated} onClick={() => setRotated(!rotated)} title="整層地圖轉 180°（只影響這台裝置的顯示）"
+          className={`min-h-[44px] px-3 rounded-lg border text-xs font-bold ${rotated ? 'bg-chicken-brown/10' : ''}`}>⟲ 轉向</button>
         <button type="button" onClick={() => { setZoom(1); setExpanded(v => !v) }} className="min-h-[44px] px-3 rounded-lg border text-xs font-bold">{expanded ? '關閉放大視圖' : '放大視圖'}</button>
-        <span className="text-[11px] text-chicken-brown/60">可捲動地圖 · Tab 選桌，Enter／空白鍵開啟</span>
+        <span className="text-[11px] text-chicken-brown/60">{zoom > 1 ? "可捲動地圖 · " : ""}Tab 選桌，Enter／空白鍵開啟</span>
       </div>
       <div ref={viewportRef} className="overflow-auto min-h-0 flex-1" style={{ overscrollBehavior: 'contain' }}>
     <svg
       viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
       preserveAspectRatio="xMidYMid meet"
-      style={{ width: `max(100%, ${viewBox.width * scale}px)`, height: `max(100%, ${viewBox.height * scale}px)` }}
+      style={{ width: fitPct, height: fitPct, margin: zoom < 1 ? '0 auto' : undefined }}
       aria-label={`${floor} 桌況圖`}
       className="block"
 
     >
       <style>{`g[role="button"]:focus { outline: none; } g[role="button"]:focus > rect { stroke: #111827; stroke-width: 5; stroke-dasharray: 3 2; }`}</style>
-      {/* 樓層標籤：座標跟著 viewBox 原點走（裁切後 viewBox 原點不再固定是 0,0） */}
-      <text x={viewBox.x + 20} y={viewBox.y + 36} fontSize={28} fontWeight={800} fill="#3a2e26" opacity={0.15}>
-        {floor === '1F' ? '1F · 主用餐區' : '2F · 用餐區'}
-      </text>
+      {/* 樓層浮水印已移除（2026-10-17：留白縮到 16 後會疊在牆與醬料台上；樓層看頂列 1F／2F 切換） */}
 
       {/* 設施標示（桌位底下） */}
       <FixtureLayer items={fixtureItems} />

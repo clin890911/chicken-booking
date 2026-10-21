@@ -83,8 +83,8 @@ test('現場→今日訂位→＋新增：姓氏/稱謂→人數→時段→電�
   // 回「今日訂位」籤，新卡捲到可見並閃一下；toast 據實
   await expect(page.getByText('已新增 王小姐 14:00 · 預配 106')).toBeVisible()
   await expect(page.getByTestId('quick-reserve-panel')).toHaveCount(0)
-  // 本裝置自己建的不再跳「📋 新訂位」提醒（已有上面的確認 toast）
-  await expect(page.getByText(/📋 新訂位/)).toHaveCount(0)
+  // 本裝置自己建的不再跳「新訂位：」提醒（已有上面的確認 toast；2026-10 起提醒文字已無 emoji）
+  await expect(page.getByText(/新訂位：/)).toHaveCount(0)
   const card = page.locator('[data-booking-id][data-flash="true"]')
   await expect(card).toBeVisible()
   await expect(card).toContainText('王小姐')
@@ -116,7 +116,7 @@ test('09:00 新增 18:00 → 只預配：地圖該桌仍可入座（帶位籤點
   await expect(page.getByText('18:00 預配')).toBeVisible()
   await page.getByRole('button', { name: /^帶位/ }).click()
   await mapTable(page, '105').click()
-  await expect(page.getByText(/105 已於排位規劃預留給 陳先生.*18:00 陳先生 的預配會保留/)).toBeVisible()
+  await expect(page.getByText(/105 已排給 18:00 陳先生.*陳先生 的排位保留/)).toBeVisible()
   ;({ tables } = await readState(page))
   expect(tables.find(t => t.number === '105').status).toBe('vacant')
 })

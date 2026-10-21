@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import crypto from 'node:crypto'
+import {projectForRead} from '../../functions/lib/dataProjection.js'
+import {readOperationalUpdates} from '../../functions/lib/operationalBulk.js'
+import {guardOperationalSync} from '../../functions/lib/waitlistSyncGuard.js'
 import {
   roleCan, classifyDatasetByPermission, settingsWriteScope, CLOSURE_SETTING_KEYS, STAFF_ROLES,
 } from '../../functions/lib/staffAccess'
@@ -178,6 +181,7 @@ describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
   }
   const ref = path => ({ path, get: async () => ({ exists: records.has(path), data: () => clone(records.get(path)) }) })
   const db = {
+    runTransaction:async fn=>{const staged=db.batch();const result=await fn({get:r=>r.get(),set:staged.set,delete:staged.delete});await staged.commit();return result},
     collection: name => ({ doc: id => ref(`${name}/${id}`) }),
     batch: () => {
       const staged = []
@@ -217,14 +221,14 @@ describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
     const push = source.slice(pushStart, source.indexOf('\n})', pushStart) + 3).replace('export const', 'const')
     const body = [pick('commitInChunks'), pick('readSettingsForAdminNotify'), push].join('\n') + '\nreturn adminPushData'
     adminPushData = new Function(
-      'onRequest', 'db', 'requireStaff', 'errorWithStatus', 'crypto', 'PUBLIC_CORS', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID',
+      'projectForRead','readOperationalUpdates','guardOperationalSync','onRequest', 'db', 'requireStaff', 'errorWithStatus', 'crypto', 'PUBLIC_CORS', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID',
       'LINE_CHANNEL_ACCESS_TOKEN', 'SYNC_COLLECTION_IDKEYS', 'classifyDatasetByPermission', 'scopeClosureSettingsPush',
       'snapshotBookingsByIds', 'COLLECTIONS', 'buildBookingUpsertData', 'createServerToken', 'stripServerOwnedCustomerFields',
       'upsertOps', 'deleteOps', 'normalizeStoreSettings', 'protectQueueUpsert', 'notifyAdminBookingChanges', 'notifyAdminBookingTelegram',
       'guardSettingsPush', 'settingsReplaceOptions', 'buildClosuresSettingsReport', 'reportSettingsGuard',
       body,
     )(
-      (_, fn) => fn, db, async req => ({ uid: 'U', role: req.role }), (m, s) => Object.assign(Error(m), { status: s }), crypto, true, '', '', '',
+      projectForRead,readOperationalUpdates,guardOperationalSync,(_, fn) => fn, db, async req => ({ uid: 'U', role: req.role }), (m, s) => Object.assign(Error(m), { status: s }), crypto, true, '', '', '',
       { bookings: 'id', tables: 'number', waitlist: 'id', customers: 'phone', agencies: 'id', guides: 'id', groupReservations: 'id' },
       classifyDatasetByPermission, scopeClosureSettingsPush,
       async () => new Map(), { bookings: 'bookings', tables: 'tables', waitlist: 'waitlist', customers: 'customers' },

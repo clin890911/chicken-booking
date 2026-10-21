@@ -64,14 +64,14 @@ export function buildNewBookingAlerts(added, today, { detailLimit = DETAIL_LIMIT
   // 今日：顯眼且停留久（店員得馬上安排桌）
   if (todays.length) {
     alerts.push(todays.length <= detailLimit
-      ? { key: 'today', message: `📋 新訂位：${label(todays[0])} · ${todays[0].timeSlot}`, duration: 6000 }
-      : { key: 'today-many', message: `📋 ${todays.length} 筆新訂位 · ${todays[0].timeSlot} 起（見「今日訂位」）`, duration: 6000 })
+      ? { key: 'today', message: `新訂位：${label(todays[0])} · ${todays[0].timeSlot}`, duration: 6000 }
+      : { key: 'today-many', message: `${todays.length} 筆新訂位 · ${todays[0].timeSlot} 起（見「今日訂位」）`, duration: 6000 })
   }
   // 未來日：不緊迫，標註日期、停留短
   if (future.length) {
     alerts.push(future.length <= detailLimit
-      ? { key: 'future', message: `🗓 未來日新訂位：${label(future[0])} · ${future[0].date} ${future[0].timeSlot}`, duration: 3500 }
-      : { key: 'future-many', message: `🗓 ${future.length} 筆未來日新訂位（見「訂位」頁）`, duration: 3500 })
+      ? { key: 'future', message: `未來日新訂位：${label(future[0])} · ${future[0].date} ${future[0].timeSlot}`, duration: 3500 }
+      : { key: 'future-many', message: `${future.length} 筆未來日新訂位（見「訂位」頁）`, duration: 3500 })
   }
   return alerts
 }

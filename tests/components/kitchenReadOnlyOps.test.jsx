@@ -103,13 +103,14 @@ describe('現場頁 × 角色：kitchen 無任何寫入入口、其他三角色�
     expect(container.querySelector('[data-testid="walkin-seat"]')).toBeTruthy()
     click(tab('今日訂位'))
     expect(has('＋ 新增今日訂位')).toBe(true)
-    expect(has('指派桌位')).toBe(true)
+    // 有可一鍵的建議桌時卡片是「指派 ○○○」＋「選桌」，否則是「指派桌位」——兩者擇一都算有指派入口
+    expect(has('指派桌位') || has('選桌')).toBe(true)
     click(tab('候位'))
     const addWait = btns().find(b => b.textContent.includes('取號') || b.textContent.includes('候位登記') || b.textContent.includes('＋'))
     expect(addWait).toBeTruthy()
     expect(has('入座')).toBe(true)
     expect(has('叫號')).toBe(true)
-    if (role !== 'host') expect(has('編輯佈局')).toBe(role === 'manager')
+    expect(has('編輯佈局')).toBe(false) // 2026-10-17：頂列不再放編輯佈局（改從設定頁進）
   })
 
   it('kitchen：沒有帶位籤與確認入座、點空桌不會累積已選桌；今日訂位無新增／指派；候位無寫入鈕；無編輯佈局', () => {
@@ -122,7 +123,7 @@ describe('現場頁 × 角色：kitchen 無任何寫入入口、其他三角色�
     expect(has('確認入座')).toBe(false)
     // 今日訂位籤：看得到卡片（唯讀資訊），沒有新增／指派／客人到了／No-show／已完成
     expect(has('＋ 新增今日訂位')).toBe(false)
-    for (const t of ['指派桌位', '客人到了', '標 No-show', '✓ 已完成', '改桌']) expect(has(t), t).toBe(false)
+    for (const t of ['指派桌位', '選桌', '客人到了', '標 No-show', '已吃完', '改桌']) expect(has(t), t).toBe(false)
     expect(container.textContent).toContain('未指派客')
     // 候位籤：看得到候位客，沒有入座／叫號／暫過號／棄號；取號鈕 disabled
     click(tab('候位'))

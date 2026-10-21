@@ -12,6 +12,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useBooking } from '../contexts/BookingContext'
 import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
+import { useNewVersion } from '../hooks/useNewVersion'
+import { resolveAdminTab } from '../utils/landingTab'
 import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
 
 const TABS = [
@@ -28,8 +30,10 @@ export default function AdminPage() {
   // URL 作為分頁的單一真實來源：重整/上一頁/下一頁/書籤皆能還原（?tab=settings&section=...）。
   // tab 為衍生值（非另存 state），故無雙向同步 useEffect、無迴圈。
   const [searchParams, setSearchParams] = useSearchParams()
+  const { user, usingFirebase, can } = useAuth()
   const rawTab = searchParams.get('tab')
-  const tab = VALID_TABS.includes(rawTab) ? rawTab : 'bookings'
+  // 沒指定分頁時依角色落點（外場／領位→現場，其他→訂位），見 utils/landingTab
+  const tab = resolveAdminTab(rawTab, user?.role, VALID_TABS)
   // useCallback：底下的跨頁 handler（指派桌 / 開團單）會一路傳進 React.memo 化的訂位卡，
   // 參考穩定才能讓卡片在清單重繪時真的跳過。
   const setTab = useCallback((next) => setSearchParams(prev => {
@@ -64,9 +68,10 @@ export default function AdminPage() {
   const [pendingRosterPhone, setPendingRosterPhone] = useState(null)
   // addPrefill：名冊「新增訂位」帶入的預填（電話/姓名），導到訂位頁新增子分頁
   const [addPrefill, setAddPrefill] = useState(null)
-  const { user, usingFirebase, can } = useAuth()
   const { bookings, waitlist, cloudStatus, hydrated } = useBooking()
   const toast = useToast()
+  // 伺服器有新版本（這台還在跑舊程式）→ 頂端提示更新；平板喚醒時自動更新（見 useNewVersion）
+  const { updateAvailable, reload: reloadApp } = useNewVersion()
 
   // === 新訂位偵測（推 toast）===
   // 口徑與「為什麼要壓數量」寫在 utils/newBookingAlerts；這裡只負責「何時開始比對」。
@@ -163,7 +168,7 @@ export default function AdminPage() {
   const navTo = (t) => { setTaskSource(null); if (t !== 'bookings') setAddPrefill(null); setTab(t) }
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-chicken-cream flex">
+    <div className="lg-canvas h-[100dvh] overflow-hidden flex">
       {/* 桌面版側邊導航 */}
       <SidebarNav tabs={TABS} active={tab} onChange={navTo} badges={badges} />
 
@@ -188,7 +193,7 @@ export default function AdminPage() {
             在 iPad 橫向卻是 66px 的實體高度（左欄會因此捲動）→ ops 不渲染，
             右邊的登入者/角色改由 OperationsView 接在統計條最右端。其他分頁完全不變。 */}
         {tab !== 'ops' && (
-        <div className="hidden lg:block flex-shrink-0 bg-[#fbfaf8] border-b border-chicken-brown/10 px-6 py-2">
+        <div className="lg-chrome lg-topbar hidden lg:block flex-shrink-0 px-6 py-2">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-baseline gap-2.5">
               <h1 className="text-lg font-semibold tracking-tight text-chicken-brown">{tabInfo.label}</h1>
@@ -203,6 +208,16 @@ export default function AdminPage() {
         )}
 
         <main className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 py-4 overflow-x-hidden max-w-[1600px] w-full mx-auto">
+          {updateAvailable && (
+            <div role="status" className="mb-3 flex flex-shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-blue-300 bg-blue-50 px-4 py-2.5">
+              <p className="text-sm font-bold text-blue-800">
+                系統已有新版本，這台還在用舊版。請按「立即更新」（已存的資料不會遺失）。
+              </p>
+              <button type="button" onClick={reloadApp} className="btn-primary min-h-[44px] px-5">
+                立即更新
+              </button>
+            </div>
+          )}
           {!usingFirebase && (
             <div className="mb-4 flex-shrink-0 rounded-xl border-2 border-chicken-red bg-red-50 px-4 py-3">
               <p className="text-sm font-black text-chicken-red">雲端同步未啟用</p>

@@ -10,6 +10,9 @@ import { copyText } from '../../utils/clipboard'
 import { assignmentKind } from '../../utils/tableStatus'
 import { PREASSIGN_COLOR } from '../admin/floormap/statusColors'
 import { formatBookingTables } from '../../utils/bookingTables'
+import GlyphText from '../ui/GlyphText'
+import { Phone } from 'lucide-react'
+import { formatPhone } from '../../utils/phoneFormat'
 
 // 顯示字典與純函式動作已抽到 ./bookingLabels 與 utils/bookingActions；
 // 這裡 re-export 讓既有 import（CustomerDetailModal / TableDrawer / 測試）不必改。
@@ -66,6 +69,8 @@ function BookingCard({ booking, onAssign, onMove }) {
             <div className="flex items-baseline gap-2 flex-wrap">
               <span className="text-lg font-bold text-chicken-brown tabular-nums">{booking.timeSlot}</span>
               <span className="text-base font-bold text-chicken-brown">{booking.name}</span>
+              {/* 完整電話（純文字、不截斷；撥號只走「聯絡」鈕，同現場今日訂位卡） */}
+              {formatPhone(booking.phone) && <span data-testid="phone-full" className="text-sm font-bold tabular-nums whitespace-nowrap text-chicken-brown">{formatPhone(booking.phone)}</span>}
               <span className="text-sm text-chicken-brown/60">{booking.guests} 位</span>
               {booking.assignedTableId && (
                 tableKind === 'preassign' ? (
@@ -79,8 +84,8 @@ function BookingCard({ booking, onAssign, onMove }) {
                   <span data-kind={tableKind}
                     className={`text-xs font-bold px-2.5 py-0.5 rounded-full
                     ${booking.status === 'arrived'
-                      ? 'bg-orange-600 text-white'
-                      : 'bg-emerald-600 text-white'}`}>
+                      ? 'bg-orange-700 text-white'
+                      : 'bg-emerald-700 text-white'}`}>
                     桌 {formatBookingTables(booking)}
                   </span>
                 )
@@ -90,7 +95,7 @@ function BookingCard({ booking, onAssign, onMove }) {
                   ${stage === 'buffer-overtime'
                     ? 'bg-chicken-red text-white animate-pulse'
                     : stage === 'overtime'
-                    ? 'bg-chicken-red/90 text-white'
+                    ? 'bg-chicken-red text-white'
                     : stage === 'late'
                     ? 'bg-chicken-yellow text-white'
                     : 'bg-chicken-brown/10 text-chicken-brown'}`}>
@@ -164,20 +169,20 @@ function BookingCard({ booking, onAssign, onMove }) {
           </button>
 
           <div className="mt-2 flex gap-2 flex-wrap items-center">
-            {booking.phone && <a href={`tel:${booking.phone.replace(/[^+\d]/g, '')}`} aria-label={`聯絡 ${booking.name} ${booking.phone}`} className="min-h-[44px] inline-flex items-center px-3 rounded-lg border text-xs font-bold">☎ 聯絡</a>}
+            {booking.phone && <a href={`tel:${booking.phone.replace(/[^+\d]/g, '')}`} aria-label={`聯絡 ${booking.name} ${booking.phone}`} className="min-h-[44px] inline-flex items-center gap-1 px-3 rounded-lg border text-xs font-bold"><Phone size={14} strokeWidth={2.2} aria-hidden="true" />聯絡</a>}
             {show.assign ? <button onClick={act.assign} className="tap text-sm px-3 min-h-[44px] bg-chicken-red text-white rounded-lg font-bold">{dayKind === 'future' ? '指派桌位（預配）' : '指派桌位'}</button>
               : show.seat ? <button onClick={act.seat} className="tap text-sm px-3 min-h-[44px] bg-chicken-green text-white rounded-lg font-bold">客人到了</button>
               : show.checkout ? <button onClick={act.checkout} className="tap text-sm px-3 min-h-[44px] bg-orange-500 text-white rounded-lg font-bold">客人已離席</button>
-              : show.restore ? <button onClick={act.restore} className="tap text-sm px-3 min-h-[44px] rounded-lg border font-bold">↩ 恢復為待到</button> : null}
+              : show.restore ? <button onClick={act.restore} className="tap text-sm px-3 min-h-[44px] rounded-lg border font-bold"><GlyphText size={16}>↩ 恢復為待到</GlyphText></button> : null}
             {handoff.canWrite&&<button className="tap text-sm px-3 min-h-[44px] border rounded-lg" onClick={()=>handoff.openTask({bookingId:booking.id})}>＋ 交班事項</button>}
-            {(show.edit || show.move || show.checkout || show.noshow || show.cancel) && <details className="relative">
+            {(show.edit || show.move || show.checkout || show.noshow || show.cancel) && <details data-popover className="relative">
               <summary className="tap cursor-pointer list-none px-3 min-h-[44px] flex items-center rounded-lg border text-sm" aria-label={`${booking.name} 更多操作`}>⋯ 更多</summary>
               <div className="mt-1 min-w-[200px] bg-white border rounded-lg shadow-lg p-1 flex flex-col" onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
-                {show.move && <button onClick={act.move} aria-disabled={act.moveDisabledReason ? 'true' : undefined} title={act.moveDisabledReason || '重新選擇整組桌位'} className="min-h-[44px] px-3 text-left">↔ 改桌</button>}
-                {show.edit && <button onClick={() => setEditing(true)} className="min-h-[44px] px-3 text-left">編輯</button>}
+                {show.move && <button onClick={act.move} aria-disabled={act.moveDisabledReason ? 'true' : undefined} title={act.moveDisabledReason || '重新選擇整組桌位'} className="min-h-[44px] px-3 text-left"><GlyphText size={16} className="!justify-start">↔ 改桌</GlyphText></button>}
+                {show.edit && <button onClick={() => setEditing(true)} className="min-h-[44px] px-3 text-left">{booking.status === 'arrived' ? '改人數／備註' : '編輯'}</button>}
                 {show.checkout && <button onClick={act.finalize} className="min-h-[44px] px-3 text-left">直接釋出（已清桌）</button>}
                 {show.noshow && <><p className="px-3 py-2 text-xs text-chicken-brown/60">未到客人請先聯絡，確認後再標記。</p><button onClick={act.noshow} className="min-h-[44px] px-3 text-left text-chicken-red">標 No-show</button></>}
-                {show.cancel && <button onClick={act.cancel} className="min-h-[44px] px-3 text-left text-chicken-red">✕ 取消訂位</button>}
+                {show.cancel && <button onClick={act.cancel} className="min-h-[44px] px-3 text-left text-chicken-red"><GlyphText size={16} className="!justify-start">✕ 取消訂位</GlyphText></button>}
               </div>
             </details>}
             {show.futureAssignedNote && <span className="text-xs text-chicken-brown/50">未來訂位 · 當天才可報到</span>}

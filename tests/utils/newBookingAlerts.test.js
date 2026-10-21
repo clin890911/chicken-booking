@@ -53,13 +53,13 @@ describe('buildNewBookingAlerts', () => {
 
   it('今日單筆 → 逐筆詳情（姓名／人數／時段）', () => {
     const [a] = buildNewBookingAlerts([b('a')], TODAY)
-    expect(a.message).toBe('📋 新訂位：陳小姐 3 位 · 12:00')
+    expect(a.message).toBe('新訂位：陳小姐 3 位 · 12:00')
     expect(a.duration).toBe(6000)
   })
 
   it('未來日單筆 → 標註日期、停留較短', () => {
     const [a] = buildNewBookingAlerts([b('a', { date: '2026-08-06', timeSlot: '12:30' })], TODAY)
-    expect(a.message).toBe('🗓 未來日新訂位：陳小姐 3 位 · 2026-08-06 12:30')
+    expect(a.message).toBe('未來日新訂位：陳小姐 3 位 · 2026-08-06 12:30')
     expect(a.duration).toBe(3500)
   })
 
@@ -68,14 +68,14 @@ describe('buildNewBookingAlerts', () => {
     const alerts = buildNewBookingAlerts(
       [b('a', { timeSlot: '12:30' }), b('b2', { timeSlot: '11:30' }), b('c', { timeSlot: '12:00' })], TODAY)
     expect(alerts).toHaveLength(1)
-    expect(alerts[0].message).toBe('📋 3 筆新訂位 · 11:30 起（見「今日訂位」）')
+    expect(alerts[0].message).toBe('3 筆新訂位 · 11:30 起（見「今日訂位」）')
   })
 
   it('未來日多筆 → 一則摘要', () => {
     const alerts = buildNewBookingAlerts(
       [b('a', { date: '2026-09-10' }), b('b2', { date: '2026-08-08' })], TODAY)
     expect(alerts).toHaveLength(1)
-    expect(alerts[0].message).toBe('🗓 2 筆未來日新訂位（見「訂位」頁）')
+    expect(alerts[0].message).toBe('2 筆未來日新訂位（見「訂位」頁）')
   })
 
   it('今日＋未來日混在同一批 → 最多兩則（各一則）', () => {

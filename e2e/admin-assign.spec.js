@@ -71,7 +71,7 @@ test('管理端：登入 → 指派桌位（人工選桌確認）→ 指派成�
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
   await expect(page.getByText(`已選：${tableNo}`)).toBeVisible()
 
-  // 6) 按「✓ 確認指派」→ 指派成功（成功 toast）
+  // 6) 按「確認指派」（✓ 已改成線條圖示，按鈕名稱＝純文字）→ 指派成功（成功 toast）
   await page.getByRole('button', { name: /確認指派/ }).click()
   await expect(page.getByText(new RegExp(`指派至 ${tableNo}.*可指派下一組`))).toBeVisible()
   const tables = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_tables_v3') || '[]'))
@@ -94,7 +94,7 @@ test('管理端：09:00 指派 18:00 的訂位 → 只預配（確認句／toast
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
   await expect(page.getByText(`已選：${tableNo}`)).toBeVisible()
   await expect(page.getByText(/確認指派 王大明/)).toHaveCount(0)
-  await page.getByRole('button', { name: '✓ 確認預配' }).click()
+  await page.getByRole('button', { name: '確認預配', exact: true }).click()
   await expect(page.getByText(new RegExp(`王大明（4 位）已預配 ${tableNo}（桌子現在仍可帶位）`))).toBeVisible()
 
   const state = await page.evaluate(() => ({
@@ -164,15 +164,16 @@ test('管理端：今日預配的空桌顯示「📌 時段 預配」標籤、�
 
   // 113 顯示預配標籤（取代空桌字樣），其他空桌不受影響
   await expect(page.getByText('18:00 預配')).toBeVisible()
-  // PR #138：空桌桌面文字由「✓ 可入座」改為狀態標籤「空桌」；112 沒有預配 → 不帶預配標籤
+  // 2026-10-17：單純空桌不再寫「空桌」（綠底即可入座，桌號人數放大）；112 沒有預配 → 只有桌號與人數、不帶預配標籤
   const t112 = page.locator('svg g:has(:text-is("112"))').first()
-  await expect(t112.getByText('空桌', { exact: true })).toBeVisible()
+  await expect(t112.getByText('4 人', { exact: true })).toBeVisible()
+  await expect(t112.getByText('空桌', { exact: true })).toHaveCount(0)
   await expect(t112.getByText(/預配/)).toHaveCount(0)
 })
 
 // PR #138：訂位卡的次要動作收進「⋯ 更多」原生選單，改桌要先展開才點得到。
 async function openMove(page) {
-  const move = page.getByRole('button', { name: '↔ 改桌', exact: true })
+  const move = page.getByRole('button', { name: '改桌', exact: true }) // ↔ 已改線條圖示，可及名稱＝純文字
   // <details> 的開合狀態可能跨分頁切換保留（已展開時再點 summary 會收起），故先判斷再展開。
   if (!(await move.isVisible())) await page.locator('summary', { hasText: '更多' }).first().click()
   await move.click()
@@ -205,7 +206,7 @@ for (const { label, original, selected } of [
   await page.locator('aside').getByRole('button',{name:'訂位',exact:true}).click()
   await openMove(page)
   for(const n of selected) await page.locator(`svg g:has(:text-is("${n}"))`).first().click()
-  await page.getByRole('button',{name:'✓ 確認改桌',exact:true}).click()
+  await page.getByRole('button',{name:'確認改桌',exact:true}).click()
   await expect(page.getByText(/已改桌至.*原訂位保留/)).toBeVisible()
   state=await read()
   expect([state.booking.assignedTableId,...state.booking.extraTableIds]).toEqual(selected)

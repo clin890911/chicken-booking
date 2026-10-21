@@ -93,12 +93,12 @@ test('併桌：多桌中任一張被預先配走也要擋，且警示指出是�
   // 再併上被預配的 102 → 警示出現且指名 102（不是 101）
   await page.locator('svg g:has(:text-is("102"))').first().click()
   await expect(page.getByRole('button', { name: '移除桌 102' })).toBeVisible()
-  await expect(page.getByText(/102 已於排位規劃預留給 預配客/)).toBeVisible()
+  await expect(page.getByText(/102 已排給 .*預配客/)).toBeVisible()
   await expect(slider(page)).toBeDisabled()
 
   // 拿掉那張桌 → 警示消失、滑桿恢復
   await page.getByRole('button', { name: '移除桌 102' }).click()
-  await expect(page.getByText(/已於排位規劃預留給/)).toHaveCount(0)
+  await expect(page.getByText(/已排給 /)).toHaveCount(0)
   await expect(slider(page)).not.toBeDisabled()
 })
 

@@ -12,10 +12,14 @@ import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/t
 import { todayStr } from '../../../utils/timeSlots'
 import { STATUS_COLOR } from './statusColors'
 import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
-import { releaseOverlappingPreassigns } from '../../../utils/preassignOverride'
+import { releaseOverlappingPreassigns, conflictLine } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
+import { toastSeatedWithUndo, seatAfterArriveConfirm } from '../../../utils/arriveSeat'
 import { splitSuffix } from '../../../utils/partySplit'
 import { formatPhone } from '../../../utils/phoneFormat'
+import EditBookingModal from '../../booking/EditBookingModal'
+import { X } from 'lucide-react'
+import GlyphText from '../../ui/GlyphText'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -57,7 +61,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const confirmDialog = useConfirm()
   const {
     blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, releaseCheckedOutTables,
+    assignBookingToTable, seatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, releaseCheckedOutTables,
     setTableOutage, clearTableOutage, releaseOverriddenAssignment,
     settings, groupReservations, bookings, tables,
   } = useBooking()
@@ -65,7 +69,11 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const [showWalkIn, setShowWalkIn] = useState(false)
   const [showBlock, setShowBlock] = useState(false)
   const [showOutage, setShowOutage] = useState(false)
+  const [editingBooking, setEditingBooking] = useState(false) // 用餐中「改人數／備註」
   const [walkInForm, setWalkInForm] = useState({ name: '散客', phone: '', guests: 2, notes: '' })
+  // 散客入座會解除時段重疊的他筆預配 → 與現場帶位／選桌模式同口徑：先勾「仍要帶這桌」才解鎖
+  const [walkInOverride, setWalkInOverride] = useState(false)
+  useEffect(() => { if (showWalkIn) setWalkInOverride(false) }, [showWalkIn])
   const [blockReason, setBlockReason] = useState('臨時保留')
   const [outageForm, setOutageForm] = useState({ days: 0, reason: '桌椅維修' })
 
@@ -112,11 +120,16 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     ? preassignConflicts(bookings, table.number, { date: todayStr(), window: assignmentWindow({ mode: 'now' }, settings) }, settings)
     : []
 
+  // 只在 Modal 開著時算（每秒 tick 不必白算）
+  const walkInReleases = showWalkIn ? nowConflicts().filter(c => c.willRelease) : []
+  const walkInLocked = walkInReleases.length > 0 && !walkInOverride
+
   const handleWalkIn = () => {
     if (!walkInForm.guests || walkInForm.guests < 1) return toast.error('請填人數')
-    if (!walkInForm.name.trim()) return toast.error('請填姓名')
+    // 姓名選填：空白交給 walkInSeat 補「散客」（與現場帶位面板同口徑，不逼店員打字）
     const overridden = nowConflicts()
-    const r = walkInSeat(table.number, walkInForm)
+    if (overridden.some(c => c.willRelease) && !walkInOverride) return toast.warning('請先勾選「我知道，仍要帶這桌」')
+    const r = walkInSeat(table.number, { ...walkInForm, name: walkInForm.name.trim() })
     if (!r.ok) return toast.error('入座失敗：' + r.error)
     releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
     toast.success(`${r.booking.name} 已入座 ${table.number}`)
@@ -124,35 +137,45 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     onClose?.()
   }
 
+  // 入座前的預留確認與今日訂位卡／訂位詳情同一套（seatAfterArriveConfirm：時段重疊的他筆預配、今日團保才確認）
+  const afterArriveConfirm = (b, proceed) => seatAfterArriveConfirm(b, { confirm: confirmDialog, bookings, groupReservations, tables, settings, now: new Date() }, proceed)
+
   const handleSeat = () => {
     if (!booking) return
-    const r = seatBooking(booking.id)
-    if (!r.ok) {
-      // 入座被擋（佔用／停用）→ 直接給「改桌」出口；併桌訂位不支援單桌改桌
-      if (onStartMove) {
-        return toast.action('入座失敗：' + r.error, { label: '改桌', onClick: () => onStartMove() }, { type: 'error', duration: 8000 })
+    return afterArriveConfirm(booking, () => {
+      const r = seatBooking(booking.id)
+      if (!r.ok) {
+        // 入座被擋（佔用／停用）→ 直接給「改桌」出口；併桌訂位不支援單桌改桌
+        if (onStartMove) {
+          return toast.action('入座失敗：' + r.error, { label: '改桌', onClick: () => onStartMove() }, { type: 'error', duration: 8000 })
+        }
+        return toast.error(r.error)
       }
-      return toast.error(r.error)
-    }
-    toast.success(`${booking.name} 已入座 ${table.number}`)
+      // 5 秒復原：與報到列／今日訂位卡共用（booking 與桌一起倒、被別組佔走不搶）
+      toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${(r.tableNumbers || [table.number]).join('、')}`, name: booking.name, undoSeatBooking, toast })
+    })
   }
 
   // 預配（規劃頁預先配桌、桌仍 vacant）的訂位客人到場 → 一鍵指派+入座。
   // 補缺口：過去這位客人已有 assignedTableId，反而不會出現在「可入座候選名單」，到場後無入座入口。
   const handleSeatPreassigned = () => {
     if (!preassign) return
-    // 併桌預配（主桌＋副桌）不可走單桌指派：assignTable 會重設 extraTableIds，副桌就掉了。
-    // 直接 seatBooking → seatBookingAllTables 整組守門入座。
-    const isComboPreassign = (preassign.extraTableIds || []).filter(Boolean).length > 0
-    const r1 = isComboPreassign ? { ok: true } : assignBookingToTable(preassign.id, table.number)
-    if (!r1.ok) return toast.error('入座失敗：' + r1.error)
-    const r2 = seatBooking(preassign.id)
-    if (!r2.ok) {
-      if (isComboPreassign) return toast.error('入座失敗：' + r2.error)
-      toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return
-    }
-    toast.success(`${preassign.name}（${preassign.guests} 位）入座 ${(r2.tableNumbers || [table.number]).join('、')}`)
-    onClose?.()
+    return afterArriveConfirm(preassign, () => {
+      // 併桌預配（主桌＋副桌）不可走單桌指派：assignTable 會重設 extraTableIds，副桌就掉了。
+      // 直接 seatBooking → seatBookingAllTables 整組守門入座。
+      const isComboPreassign = (preassign.extraTableIds || []).filter(Boolean).length > 0
+      const r1 = isComboPreassign ? { ok: true } : assignBookingToTable(preassign.id, table.number)
+      if (!r1.ok) return toast.error('入座失敗：' + r1.error)
+      const r2 = seatBooking(preassign.id)
+      if (!r2.ok) {
+        if (isComboPreassign) return toast.error('入座失敗：' + r2.error)
+        toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return
+      }
+      // 復原：桌倒回空桌、訂位回待到（單桌時入座前剛鎖給本筆，快照記為 reserved → 改倒回空桌，保留原本的預配語意）
+      const undo = isComboPreassign ? r2.undo : { ...r2.undo, restore: Object.fromEntries((r2.undo?.tableNumbers || []).map(n => [n, 'vacant'])) }
+      toastSeatedWithUndo({ ...r2, undo }, { message: `${preassign.name}（${preassign.guests} 位）入座 ${(r2.tableNumbers || [table.number]).join('、')}`, name: preassign.name, undoSeatBooking, toast })
+      onClose?.()
+    })
   }
 
   // 這筆 booking 佔用的所有桌（大組併桌時 >1）：checkout/釋出要整組一起處理
@@ -291,9 +314,11 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   }
 
   return (
-    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden flex flex-col h-full">
+    // Liquid Glass：抽屜是靜態玻璃（.lg-drawer＝半透明填色＋邊緣光，不模糊、不建立堆疊脈絡）——
+    // 抽屜裡的 Modal 沒有 portal，宿主若加 isolation/transform/backdrop-filter 會困住它的 z-index 或定位。
+    <div className="lg-drawer rounded-[28px] overflow-hidden flex flex-col h-full">
       {/* Header */}
-      <div className="px-5 pt-5 pb-3 border-b border-chicken-brown/10 bg-gradient-to-b from-white to-chicken-cream/30">
+      <div className="px-5 pt-5 pb-3 border-b border-chicken-brown/10">
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="text-3xl font-bold text-chicken-red leading-none">{table.number}</div>
@@ -304,7 +329,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
               {table.floor === '1F' ? '一樓' : '二樓'}
             </div>
           </div>
-          <button onClick={onClose} className="text-chicken-brown/40 hover:text-chicken-brown text-2xl leading-none">×</button>
+          <button onClick={onClose} aria-label="關閉" className="-mt-2 -mr-2 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-full text-chicken-brown/70 hover:text-chicken-brown hover:bg-chicken-brown/[0.06]"><X size={22} strokeWidth={2.2} aria-hidden="true" /></button>
         </div>
         <span className="inline-block mt-3 px-3 py-1 rounded-full text-xs font-bold text-white"
               style={{ background: STATUS_PILL_BG[displayStatus] }}>
@@ -346,7 +371,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
                   </div>
                   <div className={`flex items-center justify-between rounded-xl px-3 py-2 mt-2
                     ${stage === 'buffer-overtime' ? 'bg-chicken-red text-white animate-pulse'
-                      : stage === 'overtime' ? 'bg-chicken-red/90 text-white'
+                      : stage === 'overtime' ? 'bg-chicken-red text-white'
                       : stage === 'late' ? 'bg-orange-100 text-orange-700'
                       : 'bg-chicken-cream text-chicken-brown'}`}>
                     <span className="text-xs font-bold">已用餐</span>
@@ -522,9 +547,9 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
               <button
                 onClick={onStartMove}
                 className="btn-secondary w-full text-sm min-h-[44px]"
-              >↔ 改桌（{booking.name} 換到別桌）</button>
+              ><GlyphText>{`↔ 改桌（${booking.name} 換到別桌）`}</GlyphText></button>
 
-              <button onClick={handleCancel} className="w-full text-sm rounded-xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5">✕ 取消訂位</button>
+              <button onClick={handleCancel} className="w-full text-sm rounded-xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5"><GlyphText>✕ 取消訂位</GlyphText></button>
             </>
           )}
 
@@ -542,8 +567,9 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
                 直接釋出（已清桌完成）
               </button>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={onStartMove} className="btn-secondary text-sm disabled:opacity-45">↔ 換桌</button>
-                <button onClick={() => toast.info('（v1 預留）訂單明細整合中')} className="btn-secondary text-sm">訂單明細</button>
+                <button onClick={onStartMove} className="btn-secondary text-sm disabled:opacity-45"><GlyphText>↔ 換桌</GlyphText></button>
+                {/* 用餐中加人／補過敏備註：原地改（只開放人數＋備註，桌位不動）；取代原本空殼的「訂單明細」 */}
+                <button onClick={() => setEditingBooking(true)} className="btn-secondary text-sm">改人數／備註</button>
               </div>
             </>
           )}
@@ -567,15 +593,28 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
         </div>
       )}
 
+      {editingBooking && booking && <EditBookingModal booking={booking} onClose={() => setEditingBooking(false)} />}
+
       {/* Walk-in Modal */}
       <Modal open={showWalkIn} onClose={() => setShowWalkIn(false)} title={`${table.number} · 散客入座`} footer={
         <>
           <button onClick={() => setShowWalkIn(false)} className="btn-secondary px-4 py-2">取消</button>
-          <button onClick={handleWalkIn} className="btn-primary px-4 py-2">確認入座</button>
+          <button onClick={handleWalkIn} disabled={walkInLocked} className="btn-primary px-4 py-2 disabled:opacity-40">確認入座</button>
         </>
       }>
         <div className="space-y-3">
-          <Input label="姓名" value={walkInForm.name} onChange={e => setWalkInForm(f => ({ ...f, name: e.target.value }))} placeholder="散客" />
+          {walkInReleases.length > 0 && (
+            <div className="rounded-xl border border-chicken-red/40 bg-chicken-red/10 px-3 py-2">
+              {walkInReleases.map(c => (
+                <div key={c.booking.id} className="text-sm font-bold text-chicken-red">{conflictLine(table.number, c, '入座')}</div>
+              ))}
+              <label className="mt-1.5 flex items-center gap-2 text-xs font-bold text-chicken-red cursor-pointer">
+                <input type="checkbox" checked={walkInOverride} onChange={e => setWalkInOverride(e.target.checked)} className="w-4 h-4 accent-current" />
+                我知道，仍要帶這桌
+              </label>
+            </div>
+          )}
+          <Input label="姓名（選填）" value={walkInForm.name} onChange={e => setWalkInForm(f => ({ ...f, name: e.target.value }))} placeholder="散客" />
           <Input label="電話（選填）" value={walkInForm.phone} onChange={e => setWalkInForm(f => ({ ...f, phone: e.target.value }))} placeholder="0912345678" />
           <Select
             label="人數"

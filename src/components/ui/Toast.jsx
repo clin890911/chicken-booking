@@ -1,6 +1,9 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { X } from 'lucide-react'
 import Icon from './Icon'
+import GlyphText from './GlyphText'
+import { SPRING_UI } from './springs'
 
 // 輕量 Toast 系統：取代 alert/confirm，支援 Undo
 // 使用：
@@ -12,11 +15,13 @@ import Icon from './Icon'
 
 const ToastContext = createContext(null)
 
-const TYPE_STYLES = {
-  success: 'bg-chicken-green text-white',
-  error:   'bg-chicken-red text-white',
-  info:    'bg-chicken-brown text-white',
-  warning: 'bg-chicken-yellow text-white',
+// Liquid Glass：toast 是浮在內容上的控制層 → 淺色厚玻璃＋深棕字；類型靠左側實色圖示膠囊區分
+// （過去整塊綠底白字只有 2.2:1，iPad 在餐廳燈光下看不清）。膠囊底色白字皆 ≥4.5:1。
+const TYPE_CHIP = {
+  success: 'bg-emerald-700',
+  error:   'bg-[#c2000f]',
+  info:    'bg-chicken-brown',
+  warning: 'bg-amber-700',
 }
 const TYPE_ICONS = {
   success: 'checkCircle',
@@ -82,30 +87,35 @@ function ToastContainer({ toasts, onDismiss }) {
     <div data-testid="toast-container" className="fixed top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none items-center">
       <AnimatePresence>
         {toasts.map(t => (
+          // 進場 spring、只動 transform：不從 opacity:0 出發——動畫時鐘凍結時內容仍可見，
+          // 也避免宿主 opacity<1 讓 ::before 的 backdrop-filter 在動畫中失效；退場才淡出。
           <motion.div
             key={t.id}
-            initial={{ opacity: 0, y: -12, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -12, scale: 0.95 }}
-            transition={{ duration: 0.18 }}
-            className={`pointer-events-auto rounded-xl shadow-lg px-4 py-3 flex items-center gap-3 max-w-md min-w-[260px] ${TYPE_STYLES[t.type]}`}
+            initial={{ y: -24, scale: 0.92 }}
+            animate={{ y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -16, scale: 0.96, transition: { duration: 0.16 } }}
+            transition={SPRING_UI}
+            data-type={t.type}
+            className="lg-float lg-toast pointer-events-auto rounded-[22px] text-chicken-brown pl-2.5 pr-4 py-3 flex items-center gap-3 max-w-md min-w-[260px]"
           >
-            <Icon name={TYPE_ICONS[t.type]} size={20} className="flex-shrink-0" />
+            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-white flex-shrink-0 ${TYPE_CHIP[t.type] || TYPE_CHIP.info}`}>
+              <Icon name={TYPE_ICONS[t.type]} size={18} />
+            </span>
             <span className="flex-1 text-sm font-bold leading-snug">{t.message}</span>
             {t.action && (
               <button
                 onClick={() => { t.action.onClick?.(); onDismiss(t.id) }}
                 data-testid="toast-action"
-                className="min-h-[44px] min-w-[44px] px-4 rounded-lg bg-white text-chicken-brown text-sm font-bold shadow-sm hover:bg-white/90 active:scale-95 flex-shrink-0"
+                className="min-h-[44px] min-w-[44px] px-4 rounded-full bg-chicken-brown text-white text-sm font-bold hover:bg-chicken-brown/90 active:scale-95 flex-shrink-0"
               >
-                {t.action.label || '復原'}
+                <GlyphText size={16}>{t.action.label || '復原'}</GlyphText>
               </button>
             )}
             <button
               onClick={() => onDismiss(t.id)}
-              className="opacity-60 hover:opacity-100 text-lg leading-none flex-shrink-0 min-h-[44px] min-w-[44px] -mr-2"
+              className="inline-flex items-center justify-center text-chicken-brown/80 hover:text-chicken-brown flex-shrink-0 min-h-[44px] min-w-[44px] -mr-2"
               aria-label="關閉"
-            >×</button>
+            ><X size={20} strokeWidth={2.2} aria-hidden="true" /></button>
           </motion.div>
         ))}
       </AnimatePresence>
@@ -150,7 +160,7 @@ export function ConfirmProvider({ children }) {
           onClick={() => handle(false)}
         >
           <div
-            className={`animate-soft-enter bg-white rounded-2xl shadow-xl w-full max-w-sm p-6
+            className={`lg-float lg-sheet animate-soft-enter rounded-[28px] w-full max-w-sm p-6
               ${state.options.danger ? 'border-l-4 border-chicken-red' : ''}`}
             onClick={e => e.stopPropagation()}
           >

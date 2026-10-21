@@ -53,15 +53,16 @@ describe('一樓照片預設：桌號、容量與現場設施', () => {
     expect(up.text).toContain('上樓')
   })
 
-  it('玻璃門位於左下、飲料台在111下方，劃掉的錢櫃台不預設成領位台', () => {
+  it('玻璃門位於左下、領位台在111下方（2026-10-17 更正：原標飲料台），只有這一座領位、無錢櫃台', () => {
     const door=fixture('f1-door'), drinks=fixture('f1-drinks')
     expect(door.y).toBeGreaterThan(table(101).y+table(101).h)
     expect(door.x).toBe(fixture('f1-wall-left').x)
     expect(door.text).toBe('玻璃門入口')
     expect(drinks.x).toBe(table(111).x)
     expect(drinks.y).toBeGreaterThan(table(111).y+table(111).h)
-    expect(drinks.text).toBe('飲料台')
-    expect(fixtures.some(f => f.id === 'f1-host' || /領位|錢櫃/.test(f.text))).toBe(false)
+    expect(drinks.text).toBe('領位台')
+    expect(fixtures.filter(f => /領位/.test(f.text))).toHaveLength(1)
+    expect(fixtures.some(f => f.id === 'f1-host' || /錢櫃|飲料/.test(f.text))).toBe(false)
     expect(new Set(fixtures.map(f => f.id)).size).toBe(fixtures.length)
     for (const t of tables) for (const f of fixtures) expect(overlaps(t,f)).toBe(false)
   })

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CalendarDays, Check, ChevronLeft, Clock, Minus, Phone, Plus, Search, ShieldCheck, Sparkles, Users } from 'lucide-react'
+import { CalendarDays, CalendarX, Check, ChevronLeft, Clock, Minus, Phone, Plus, Search, ShieldCheck, Sparkles, TriangleAlert, Users } from 'lucide-react'
 import { Input, Textarea, SlotSkeleton } from '../components/ui'
 import { useBooking } from '../contexts/BookingContext'
 import { useLiffIdentity } from '../hooks/useLiffIdentity'
@@ -381,7 +381,7 @@ export default function BookingPage() {
                 </div>
               ) : (
                 <div className="rounded-2xl border border-[#06C755]/30 bg-[#06C755]/10 px-4 py-3 text-sm font-black leading-6 text-[#06A848]">
-                  ✓ 訂位卡片將自動傳送到您的 LINE{lineIdentity.displayName ? `（${lineIdentity.displayName}）` : ''}
+                  <Check size={16} strokeWidth={2.6} aria-hidden="true" className="mr-1 inline-block align-[-3px]" />訂位卡片將自動傳送到您的 LINE{lineIdentity.displayName ? `（${lineIdentity.displayName}）` : ''}
                 </div>
               )
             )}
@@ -590,11 +590,12 @@ function CalendarPicker({ dates, value, onChange }) {
                 cell.isToday ? 'bg-chicken-yellow/10 text-chicken-brown hover:bg-chicken-red/5' :
                 cell.isWeekend ? 'bg-white text-chicken-red hover:bg-chicken-red/5' :
                 'bg-white text-chicken-brown hover:bg-chicken-red/5'
-              } ${!cell.inMonth ? 'opacity-35' : ''}`}
+              }`}
             >
               <div className="flex h-full flex-col items-center justify-center">
-                <div className="text-lg font-black tabular-nums sm:text-xl">{cell.day}</div>
-                <div className={`mt-0.5 text-[10px] font-black ${active ? 'text-white/80' : disabled ? 'text-chicken-brown/20' : cell.isToday ? 'text-chicken-yellow' : 'text-chicken-brown/45'}`}>
+                {/* 非本月日期：只淡化日期數字（大字 ≥3:1），「可訂」小字維持可讀——整格 opacity-35 會讓仍可預訂的日子只剩 1.7:1 */}
+                <div className={`text-lg font-black tabular-nums sm:text-xl ${!cell.inMonth && !active ? 'opacity-60' : ''}`}>{cell.day}</div>
+                <div className={`mt-0.5 text-[10px] font-black ${active ? 'text-white' : disabled ? 'text-chicken-brown/20' : cell.isToday ? 'text-chicken-yellow' : 'text-chicken-brown/45'}`}>
                   {cell.isToday ? '今天' : disabled ? '—' : '可訂'}
                 </div>
               </div>
@@ -623,13 +624,13 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
         <SlotSkeleton />
       ) : error ? (
         <div className="empty-panel mt-4" role="alert">
-          <div className="mb-2 text-3xl">⚠️</div>
+          <TriangleAlert size={32} strokeWidth={2} aria-hidden="true" className="mx-auto mb-2 text-chicken-red" />
           <p className="font-bold text-chicken-brown">{error}</p>
           <p className="mt-1 text-sm text-chicken-brown/60">請稍後再試，或來電由專人為您訂位。</p>
         </div>
       ) : total === 0 ? (
         <div className="empty-panel mt-4">
-          <div className="text-3xl mb-2">📅</div>
+          <CalendarX size={32} strokeWidth={1.8} aria-hidden="true" className="mx-auto mb-2 text-chicken-brown/60" />
           <p className="font-bold text-chicken-brown">這天目前沒有可訂時段</p>
           <p className="mt-1 text-sm text-chicken-brown/60">可以讓系統幫你找最近一個還有空位的日期。</p>
           <button
@@ -669,7 +670,7 @@ function TimeGrid({ groupedSlots, value, guests, settings, loading, error, onCha
                         }`}
                       >
                         <div className="text-lg font-black tabular-nums">{slot.time}</div>
-                        <div className={`mt-1 text-[11px] font-black ${active ? 'text-white/85' : scarce ? 'text-chicken-yellow' : 'text-chicken-green'}`}>
+                        <div className={`mt-1 text-[11px] font-black ${active ? 'text-white' : scarce ? 'text-chicken-yellow' : 'text-chicken-green'}`}>
                           {scarce ? '少量名額' : '可訂位'}
                         </div>
                         {active && (

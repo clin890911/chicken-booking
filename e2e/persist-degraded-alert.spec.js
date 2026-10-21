@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { FIREBASE_STUB } from './helpers/firebaseStub.js'
 
 // 「同步基準線落不了地」的主動警示（PR #109 後半段）。
 //
@@ -13,6 +14,11 @@ import { test, expect } from '@playwright/test'
 // 無痕模式），其餘 key 照常寫入——不然整個 app 連桌位資料都存不了，測到的就不是這個 bug。
 // 觸發點：adminPullData 回 ok:true → BookingContext.pullCloud → applyCloudSnapshot →
 // persistSyncState() → setItem 拋錯 → 模組旗標 syncPersistDegraded 翻成 true。
+//
+// ⚠️ 拉取要真的送得出去：#168 起員工端點走 strictAuthHeader，取不到 ID Token 就在送出前丟錯
+// （iPad 喚醒時 token 過期的修法）。本機「模擬登入」沒有 Firebase、getIdToken 永遠回 null →
+// adminPullData 根本不會發出、這條警示永遠等不到。所以這裡改用 FIREBASE_STUB 換掉 firebase.js
+// （固定測試 token、AuthContext／BookingContext 照真的跑），直接以已登入員工進後台。
 
 const TOAST_TEXT = /你排的桌位可能在重新整理後消失/
 const SETTINGS_BANNER = /佈局變更可能在重新整理後遺失/
@@ -20,10 +26,14 @@ const SYNC_STATE_KEY = 'chicken_sync_state_v1'
 const POLL_MS = 4000 // BookingContext 旗標輪詢間隔
 
 test.beforeEach(async ({ page }) => {
+  await page.route('**/src/services/firebase.js*', route =>
+    route.fulfill({ contentType: 'application/javascript', body: FIREBASE_STUB }))
+
   // 單一 handler 依 URL 分流：Playwright 多個 page.route 的優先序（先註冊 vs 後註冊）
   // 在不同版本間曾有變動，而這支測試**依賴 adminPullData 真的回 ok:true**（否則
   // applyCloudSnapshot 不會被呼叫、也就不會走到 persistSyncState），不能賭匹配順序。
-  await page.route('**/admin*', route => {
+  // 只攔後端 function（非本機站台的 /admin*）：`**/admin*` glob 會連頁面導覽 /admin 一起攔掉。
+  await page.route(url => url.hostname !== 'localhost' && url.pathname.startsWith('/admin'), route => {
     const url = route.request().url()
     const ok = url.includes('adminPullData') || url.includes('adminPushData')
     return route.fulfill({
@@ -75,12 +85,9 @@ test.beforeEach(async ({ page }) => {
 // 登入後**停在現場頁**：這條警示的整個存在理由就是「店主日常都在現場帶位，
 // 不會主動點進設定頁看靜態警示列」。在設定頁測等於沒測到重點。
 async function loginToOnsite(page) {
-  await page.goto('/login')
-  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
-  await page.getByRole('button', { name: /模擬登入/ }).click()
-  await expect(page).toHaveURL(/\/admin/)
+  await page.goto('/admin')
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
-  await expect(page.getByText(/點右邊桌況圖選一張桌/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /還差桌位/ })).toBeVisible()
 }
 
 test('同步基準線寫不進 localStorage 時，現場頁會主動跳 toast 警示', async ({ page }) => {
@@ -90,7 +97,7 @@ test('同步基準線寫不進 localStorage 時，現場頁會主動跳 toast �
   await expect(page.getByText(TOAST_TEXT)).toBeVisible({ timeout: 15_000 })
 
   // 人在現場頁時就看得到——不必先切到設定頁才會知道出事。
-  await expect(page.getByText(/點右邊桌況圖選一張桌/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /還差桌位/ })).toBeVisible()
 
   // 確認真的是那把 key 被擋、其餘 localStorage 照常運作（否則測到的是「整個 app 存不了東西」）
   const state = await page.evaluate(k => localStorage.getItem(k), SYNC_STATE_KEY)
