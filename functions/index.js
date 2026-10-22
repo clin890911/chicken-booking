@@ -4,6 +4,7 @@ import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, ve
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
 import { createWaitlistHandler } from './lib/waitlistCommands.js'
+import { reconcileCustomerUpdateIntents } from './lib/waitlistCustomers.js'
 import { guardOperationalSync } from './lib/waitlistSyncGuard.js'
 import { commitOrdinaryBulk, readOperationalUpdates } from './lib/operationalBulk.js'
 import crypto from 'node:crypto'
@@ -2733,6 +2734,7 @@ export const retryNotifications = onSchedule(
     secrets: [TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LINE_CHANNEL_ACCESS_TOKEN],
   },
   async () => {
+    await reconcileCustomerUpdateIntents({db}).catch(()=>{})
     await reconcileNotificationIntents()
     const nowMs = Date.now()
     const [pendingSnap,processingSnap]=await Promise.all([db.collection('notifications').where('status','==','pending').limit(100).get(),db.collection('notifications').where('status','==','processing').limit(100).get()])

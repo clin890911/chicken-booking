@@ -100,4 +100,32 @@ describe.runIf(enabled)('waitlist real Firestore transactions, isolated demo pro
     expect({code:result.code,error:result.body?.error}).toEqual({code:200,error:undefined})
     expect(result.body.item.status).toBe('seated')
   })
+  it('CRM retry/replay uses one transactional customer increment per create/seat intent',async()=>{
+    const body={...create('CRM'),payload:{name:'顧客測試',phone:'(0900) 000-001',partySize:3}}
+    const created=await call(body);expect(created.code).toBe(200)
+    expect((await env.db.collection('customers').doc('0900000001').get()).data()).toMatchObject({visits:1,totalGuests:3})
+    expect((await call(body)).body.replayed).toBe(true)
+    const seat=testCommand('seat','CRM',1,{tableNumbers:['101']},day)
+    expect((await call(seat)).code).toBe(200)
+    expect((await call(seat)).body.replayed).toBe(true)
+    const {customerUpdateIntent,processCustomerUpdateIntent}=await import('../../functions/lib/waitlistCustomers.js')
+    // A separate pending event is recovered by competing workers on real Firestore.
+    const intent=customerUpdateIntent({item:created.body.item,command:{id:'CRM_RECOVERY',commandId:'crm_recovery_command',action:'create'},now})
+    await env.db.collection('customerUpdateIntents').doc(intent.id).set(intent)
+    await Promise.all(Array.from({length:3},()=>processCustomerUpdateIntent({db:env.db,id:intent.id})))
+    expect((await env.db.collection('customers').doc('0900000001').get()).data()).toMatchObject({visits:3,totalGuests:9})
+  },30000)
+  it('undo rejects restoration of an original extra table now occupied by another group',async()=>{
+    await Promise.all(['UNDO_A','UNDO_B'].map(id=>call(create(id))))
+    await env.db.collection('bookings').doc('PRE').set({id:'PRE',date:day,timeSlot:'12:00',status:'confirmed',assignedTableId:'101',extraTableIds:['102']})
+    const seatA=testCommand('seat','UNDO_A',1,{tableNumbers:['101'],confirmedConflictTables:['101']},day)
+    expect((await call(seatA)).code).toBe(200)
+    const seatB=testCommand('seat','UNDO_B',1,{tableNumbers:['102']},day)
+    expect((await call(seatB)).code).toBe(200)
+    const result=await call(testCommand('undo','UNDO_A',2,{seatCommandId:seatA.commandId},day))
+    expect(result.code).toBe(409);expect(result.body.error).toBe('undo-preassign-table-taken')
+    expect((await env.db.collection('bookings').doc('PRE').get()).data().assignedTableId).toBeNull()
+    expect((await env.db.collection('tables').doc('102').get()).data().waitlistId).toBe('UNDO_B')
+  },30000)
+
 })

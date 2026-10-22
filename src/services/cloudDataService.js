@@ -816,12 +816,30 @@ export function acceptWaitlistCommandResult(result) {
   if ((previous?.queueVersion || 0) > (result.item.queueVersion || 0)) return
   const updates = { waitlist: [result.item], bookings: result.bookings || [], tables: result.tables || [] }
   const staged = {}
+  const accepted = {}
   for (const [col, records] of Object.entries(updates)) {
     const merged = indexDocs(col, localArrayOf(col))
     for (const record of records) {
       const id = idOf(col, record)
-      if ((merged[id]?.operationalVersion || 0) > (record.operationalVersion || 0)) continue
-      merged[id] = record
+      const current = merged[id]
+      if ((current?.operationalVersion || 0) > (record.operationalVersion || 0)) continue
+      let next = record
+      if (current && ['tables', 'bookings'].includes(col)) {
+        // A command acknowledges operational state, not the layout/notes waiting in
+        // the generic sync debounce. Rebase only local safe-field changes against
+        // the last cloud baseline; retain the canonical version and ownership.
+        let baseline = {}
+        try { baseline = JSON.parse(lastSynced[col][id] || '{}') } catch {}
+        const protectedFields = [...operationalCriticalFields(col), 'operationalVersion', 'waitlistId', 'waitlistCommandId', 'manageToken']
+        next = { ...record }
+        for (const key of new Set([...Object.keys(baseline), ...Object.keys(current)])) {
+          if (protectedFields.includes(key) || stable(current[key]) === stable(baseline[key])) continue
+          if (Object.hasOwn(current, key)) next[key] = current[key]
+          else delete next[key]
+        }
+      }
+      merged[id] = next
+      ;(accepted[col] ||= {})[id] = record
     }
     if (col === 'bookings') for (const id of (result.deletedBookingIds || [])) delete merged[id]
     staged[col] = merged
@@ -836,10 +854,11 @@ export function acceptWaitlistCommandResult(result) {
     }
     throw error
   }
-  for (const [col, records] of Object.entries(updates)) {
-    for (const record of records) {
-      const id = idOf(col, record)
-      lastSynced[col][id] = stable(staged[col][id])
+  for (const [col, records] of Object.entries(accepted)) {
+    for (const [id, canonical] of Object.entries(records)) {
+      // Only cloud-confirmed fields advance the baseline. Rebased edits must stay
+      // dirty for the next generic push, including when this ACK is replayed.
+      lastSynced[col][id] = stable(canonical)
       pendingDeletes[col].delete(id)
     }
   }
