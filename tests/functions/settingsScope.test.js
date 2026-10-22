@@ -337,7 +337,10 @@ describe('adminPushData（真 handler）：host 只能改關閉設定', () => {
       event: 'settings_push_audit', scope: 'closures-only', role: 'host',
       appliedKeys: ['closures'], changedKeys: ['closures'], written: true, preservedFields: [], protectedChanged: [],
     })
-    expect(JSON.stringify(reports[0].audit)).not.toContain('2026-10-22') // 稽核不含設定值
+    const { at, ...auditMetadata } = reports[0].audit
+    expect(typeof at).toBe('string')
+    expect(Number.isFinite(Date.parse(at))).toBe(true)
+    expect(JSON.stringify(auditMetadata)).not.toContain('2026-10-22') // 稽核 metadata 不含設定值；at 可恰為同日
     expect(records.get('settings/main').lineLoginChannelId).toBe('2009996489')
   })
 

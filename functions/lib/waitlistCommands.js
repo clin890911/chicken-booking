@@ -4,6 +4,8 @@ import { roleCan } from './staffAccess.js'
 import { projectBookingForRead, projectWaitlistForRead } from './dataProjection.js'
 import { notificationIntent } from './durableNotifications.js'
 import { isTableUsableOnDate } from './tableUsable.js'
+import { assertRestorablePreassigns } from './waitlistUndoGuard.js'
+import { customerUpdateIntent, processCustomerUpdateIntent } from './waitlistCustomers.js'
 
 const fail=(message,status=409)=>{throw Object.assign(Error(message),{status})}
 const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v
@@ -95,6 +97,7 @@ export async function executeWaitlistCommand({db,staff,command,now=new Date().to
       if(!originalReceipt||originalReceipt.actor!==staff.uid)fail('undo-unavailable')
       const restore=[]
       for(const old of originalReceipt.privateUndo?.releasedPreassigns||[]){const r=db.collection('bookings').doc(old.id),latest=docData(await tx.get(r));if(!latest||latest.updatedAt!==current.seatedAt||latest.status!==old.status||latest.assignedTableId||latest.extraTableIds?.length||(latest.operationalVersion||0)!==(old.operationalVersion||0)+1)fail('undo-preassign-changed');restore.push({...old,updatedAt:now,operationalVersion:(latest.operationalVersion||0)+1})}
+      await assertRestorablePreassigns({db,tx,restore,removedBooking:b,now,day})
       writes.push(...restore.map(b=>[db.collection('bookings').doc(b.id),b]))
       booking={...b,status:'cancelled',cancellationReason:'waitlist-seat-undo',assignedTableId:null,extraTableIds:[],updatedAt:now}
       tables=tables.map(t=>({...t,status:'vacant',currentBookingId:null,currentRef:null,seatedAt:null,waitlistId:null,updatedAt:now,operationalVersion:(t.operationalVersion||0)+1}))
@@ -103,6 +106,7 @@ export async function executeWaitlistCommand({db,staff,command,now=new Date().to
     }
     result={ok:true,item:projectWaitlistForRead(item,staff.role),bookings:writes.filter(([r])=>r.path?.startsWith('bookings/')).map(([,b])=>publicBooking(b)),tables,deletedBookingIds:deletes.map(r=>r.id||r.path.split('/').at(-1)),undoUntil:item.undoUntil||null}
     if(['create','seat'].includes(action)){const intent=notificationIntent({channel:'telegram',event:action==='create'?'waitlist_created':'waitlist_seated',version:`${id}:${commandId}`,payload:{text:action==='create'?`候位 #${item.queueNumber} 已取號（${item.partySize} 位）`:`候位 #${item.queueNumber} 已入座：${item.tableNumbers.join(' + ')}`}},now);writes.push([db.collection('notificationIntents').doc(intent.id),intent])}
+    if(['create','seat'].includes(action)){const intent=customerUpdateIntent({item,command,now});if(intent)writes.push([db.collection('customerUpdateIntents').doc(intent.id),intent])}
     // All transactional reads above precede every write.
     for(const [r,data] of writes)tx.set(r,data)
     for(const r of deletes)tx.delete(r)
@@ -118,11 +122,17 @@ export function createWaitlistHandler({db,requireStaff,now=()=>new Date().toISOS
     const state=queues.get(key)||{tail:Promise.resolve(),size:0}
     if(state.size>=maxQueue)fail('waitlist-busy-retry',503)
     state.size++;queues.set(key,state)
-    const bounded=async work=>{let timer;try{return await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Object.assign(Error('waitlist-busy-retry'),{status:503})),20000)})])}finally{clearTimeout(timer)}}
     const previous=state.tail
-    let release;state.tail=new Promise(resolve=>{release=resolve})
-    try{await bounded(previous);return await bounded(run())}
-    finally{release();state.size--;if(!state.size&&queues.get(key)===state)queues.delete(key)}
+    let expired=false,timer
+    // The HTTP deadline cannot cancel Firestore. Keep the queue slot until the
+    // actual task settles; a timed-out queued task must never start later.
+    const task=previous.then(()=>{if(!expired)return run()}).finally(()=>{
+      state.size--;if(!state.size&&queues.get(key)===state)queues.delete(key)
+    })
+    state.tail=task.catch(()=>{})
+    try{return await Promise.race([task,new Promise((_,reject)=>{
+      timer=setTimeout(()=>{expired=true;reject(Object.assign(Error('waitlist-busy-retry'),{status:503}))},20000)
+    })])}finally{clearTimeout(timer)}
   }
   return async(req,res)=>{try{
     const staff=await requireStaff(req)
@@ -134,6 +144,12 @@ export function createWaitlistHandler({db,requireStaff,now=()=>new Date().toISOS
       const receipt=await db.collection('waitlist').doc(req.body.id).collection('commands').doc(req.body.commandId).get()
       result=receipt.exists?await run():await schedule(businessDate(now()),run)
     }else result=await run()
+    // CRM is a separate idempotent transaction. Failure leaves its durable
+    // intent pending for scheduled recovery and never changes queue success.
+    if(['create','seat'].includes(req.body?.action)){
+      let timer
+      try{await Promise.race([processCustomerUpdateIntent({db,id:customerUpdateIntent({item:result.item,command:req.body,now:now()})?.id}),new Promise(resolve=>{timer=setTimeout(resolve,2000)})])}catch{}finally{clearTimeout(timer)}
+    }
     try{await afterCommit(result)}catch{}
     return res.json(result)
   }catch(e){return res.status(e.status||500).json({ok:false,error:e.message||'operation-failed',...(e.status===503?{retryable:true}: {})})}}
