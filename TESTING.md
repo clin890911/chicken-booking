@@ -80,7 +80,7 @@ npm run test:e2e:waitlist
 2. `npm run test:e2e` → **必須全綠**（用戶端訂位 + 管理端指派主線）。有動到候位（`waitlist*`、`adminWaitlistTransition`）時另跑 `npm run test:e2e:waitlist`。
 3. `npm run build` → 必須成功（無編譯錯誤）。
 4. 若這次有改 UI 細節，另外用 preview / 實機快速點一輪受影響頁面（自動測試不涵蓋每個畫面細節）。
-5. 部署後，到線上站確認 bundle 已更新（見 `README` / Zeabur 後台）。
+5. 部署後，到線上站確認 bundle 已更新（見 `README` / Cloudflare Pages 後台；設定頁底部顯示版本號）。
 
 ## 加新功能時怎麼維護
 

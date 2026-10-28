@@ -17,6 +17,11 @@ describe('LINE readiness fails closed without claiming token or delivery verific
       lineLoginCallbackUrl: 'https://us-central1-chicken-booking-tw.cloudfunctions.net/lineLoginCallback',
     }).ready).toBe(true)
   })
+  it('accepts both the old Zeabur and new Cloudflare Pages site during migration', () => {
+    for (const url of ['https://chicken-booking.zeabur.app', 'https://chicken-booking.pages.dev/']) {
+      expect(validateLineReadiness({ ...complete, publicSiteUrl: url }).ready).toBe(true)
+    }
+  })
   it.each(['lineLoginChannelId', 'lineLoginCallbackUrl', 'lineLoginStartEndpoint', 'publicSiteUrl'])('rejects missing %s even with official friend link', field => {
     const result = validateLineReadiness({ ...complete, [field]: '' })
     expect(result.ready).toBe(false)
@@ -29,6 +34,8 @@ describe('LINE readiness fails closed without claiming token or delivery verific
     ['publicSiteUrl', 'https://chicken-booking.zeabur.app.evil.example'],
     ['publicSiteUrl', 'https://evil@chicken-booking.zeabur.app'],
     ['publicSiteUrl', 'http://chicken-booking.zeabur.app'],
+    ['publicSiteUrl', 'https://chicken-booking.pages.dev/book'],
+    ['publicSiteUrl', 'https://preview.chicken-booking.pages.dev'],
     ['lineLoginCallbackUrl', 'https://linelogincallback-reaor76eyq-uc.a.run.app?redirect=https://evil.example'],
   ])('rejects unsafe or mismatched %s', (field, value) => {
     expect(validateLineReadiness({ ...complete, [field]: value }).ready).toBe(false)

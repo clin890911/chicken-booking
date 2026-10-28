@@ -54,7 +54,8 @@ In the admin settings page:
 
 ## LINE-first 訂位閉環（LIFF Endpoint = 站根）
 
-**架構（2026-06 重構）**：LIFF Endpoint URL 設為**站根**（`https://chicken-booking.zeabur.app/`），
+**架構（2026-06 重構）**：LIFF Endpoint URL 設為**站根**（搬家後為 `https://chicken-booking.pages.dev/` 或綁定的自訂網域；舊為 `https://chicken-booking.zeabur.app/`），
+須與後台 `publicSiteUrl` 一致，且在 `functions/lib/lineReadiness.js` 的 `SITE_ORIGINS` 內，否則 LINE 綁定會被判定未就緒。
 所有頁面用 path-style deep link 進入；LINE 會把 path+query 編進 `?liff.state=` 帶到站根，
 由 `src/main.jsx` 的 `resolveLiffStatePath` shim（`src/utils/liffState.js`）在 React 掛載前落地目標頁。
 

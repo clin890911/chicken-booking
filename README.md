@@ -38,7 +38,12 @@ npm run build
 
 ## 部署
 
-推送到 GitHub 後，Zeabur 自動建置部署。`zeabur.json` 已設定 SPA 路由。
+前端：推送到 GitHub main 後，Cloudflare Pages（專案 `chicken-booking`）自動建置部署 `dist`。
+Pages 在 `dist` 沒有 `404.html` 時會把未知路徑回 `index.html`（SPA 路由）；快取標頭見 `public/_headers`。
+建置設定：Build command `npm run build`、output `dist`、環境變數 `NODE_VERSION=20`；只部署 main（預覽站會連正式 Firestore，不開）。
+後端：`.github/workflows/deploy-functions.yml` 部署 Cloud Functions。
+
+搬家過渡期（2026-10～11）舊站 Zeabur 仍在，`zeabur.json` 留到舊站收掉後再刪。
 
 ## 資料層
 

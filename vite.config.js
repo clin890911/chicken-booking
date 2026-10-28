@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process'
 // 店裡 iPad 常駐在現場頁、好幾天不重新整理 → 一直跑舊版（2026-10 實例：新功能已上線一週，
 // 平板仍是舊版、以為系統不能擠一擠）。後台定期抓 /version.json 比對，不同就提示更新（utils/appVersion）。
 function gitShortSha() {
-  const fromEnv = process.env.ZEABUR_GIT_COMMIT_SHA || process.env.GITHUB_SHA || ''
+  const fromEnv = process.env.CF_PAGES_COMMIT_SHA || process.env.ZEABUR_GIT_COMMIT_SHA || process.env.GITHUB_SHA || ''
   if (fromEnv) return fromEnv.slice(0, 7)
   try {
     return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
