@@ -2,7 +2,7 @@ name: Deploy Cloud Functions
 
 # 後端（Cloud Functions）自動部署。
 #
-# 為什麼需要這支：前端由 Zeabur 接 GitHub 自動 build，後端一直是手動 firebase deploy。
+# 為什麼需要這支：前端由 Cloudflare Pages（原 Zeabur）接 GitHub 自動 build，後端一直是手動 firebase deploy。
 # 兩邊不同步就會出現「前端更新了、後端 RBAC 還是舊的 → 操作一直被 403 擋」這類難查的問題
 # （#95 訂位專員帶位跳雲端同步失敗即是一例）。
 #
