@@ -3,6 +3,7 @@
 const SITE_ORIGINS = [
   'https://chicken-booking.zeabur.app',
   'https://chicken-booking.pages.dev',
+  'https://booking.masterofchicken.com',
 ]
 const FUNCTION_ORIGIN = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
 const ENDPOINTS = {
