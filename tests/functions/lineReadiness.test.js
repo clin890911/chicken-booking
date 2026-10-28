@@ -36,6 +36,8 @@ describe('LINE readiness fails closed without claiming token or delivery verific
     ['publicSiteUrl', 'http://chicken-booking.zeabur.app'],
     ['publicSiteUrl', 'https://chicken-booking.pages.dev/book'],
     ['publicSiteUrl', 'https://preview.chicken-booking.pages.dev'],
+    ['publicSiteUrl', 'https://chicken-booking.pages.dev.evil.example'],
+    ['publicSiteUrl', 'http://chicken-booking.pages.dev'],
     ['lineLoginCallbackUrl', 'https://linelogincallback-reaor76eyq-uc.a.run.app?redirect=https://evil.example'],
   ])('rejects unsafe or mismatched %s', (field, value) => {
     expect(validateLineReadiness({ ...complete, [field]: value }).ready).toBe(false)

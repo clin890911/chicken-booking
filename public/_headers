@@ -1,14 +1,14 @@
-# Cloudflare Pages 回應標頭。iPad 常駐現場頁，入口與版本檔必須每次重新驗證，
-# 否則「偵測新版本」會一直拿到舊的 index.html／version.json。
-/
-  Cache-Control: no-cache
-
-/index.html
+# Cloudflare Pages 回應標頭。iPad 常駐現場頁，入口（含 SPA fallback 的 /admin 等）與版本檔
+# 必須每次重新驗證，否則「偵測新版本」會一直拿到舊版。
+# Pages 會把多條符合規則的標頭串接，所以下面兩條先用「! Cache-Control」拿掉 /* 給的值再重設。
+/*
   Cache-Control: no-cache
 
 /version.json
+  ! Cache-Control
   Cache-Control: no-store
 
 # Vite 產出的檔名含內容雜湊，可長期快取
 /assets/*
+  ! Cache-Control
   Cache-Control: public, max-age=31536000, immutable
