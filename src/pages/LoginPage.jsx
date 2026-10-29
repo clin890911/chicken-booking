@@ -4,10 +4,12 @@ import { useAuth } from '../contexts/AuthContext'
 import { Input, Button, Card } from '../components/ui'
 import GlyphText from '../components/ui/GlyphText'
 import { describeAuthError } from '../utils/authErrors'
+import { useAdminAppManifest } from '../hooks/useAppManifest'
 import { KeyRound, LockKeyhole, TriangleAlert } from 'lucide-react'
 
 export default function LoginPage() {
   const { signIn, usingFirebase, user, authNotice, retryVerify } = useAuth()
+  useAdminAppManifest() // 從登入頁「加入主畫面」＝後台 App
   const nav = useNavigate()
   const [email, setEmail] = useState('')
   const [err, setErr] = useState('')

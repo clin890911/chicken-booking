@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon-chicken-king.png?v=2" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- PWA：可「加入主畫面」。客人頁用 manifest.webmanifest（開啟＝首頁）；
+         後台／登入頁掛載時換成 manifest-admin.webmanifest（開啟＝/admin），見 hooks/useAppManifest。
+         刻意不註冊 service worker：資料全靠即時連線，快取只會讓平板卡在舊版（新版本偵測見 utils/appVersion）。 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="雞王訂位" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#e60012" />
     <!-- 管理連結帶 ?token=，避免跨來源 Referer 外洩 token（只送 origin、不送路徑/query）。 -->

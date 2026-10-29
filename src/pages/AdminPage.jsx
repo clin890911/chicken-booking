@@ -13,6 +13,7 @@ import { useBooking } from '../contexts/BookingContext'
 import { useToast } from '../components/ui/Toast'
 import { todayStr } from '../utils/timeSlots'
 import { useNewVersion } from '../hooks/useNewVersion'
+import { useAdminAppManifest } from '../hooks/useAppManifest'
 import { resolveAdminTab } from '../utils/landingTab'
 import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
 
@@ -72,6 +73,7 @@ export default function AdminPage() {
   const toast = useToast()
   // 伺服器有新版本（這台還在跑舊程式）→ 頂端提示更新；平板喚醒時自動更新（見 useNewVersion）
   const { updateAvailable, reload: reloadApp } = useNewVersion()
+  useAdminAppManifest() // 「加入主畫面」＝後台 App（開啟直接進 /admin）
 
   // === 新訂位偵測（推 toast）===
   // 口徑與「為什麼要壓數量」寫在 utils/newBookingAlerts；這裡只負責「何時開始比對」。
