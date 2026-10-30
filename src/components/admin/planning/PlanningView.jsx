@@ -15,6 +15,7 @@ import GroupEditorStage from './GroupEditorStage'
 import GroupRescheduleModal from './GroupRescheduleModal'
 import AddWalkinModal from './AddWalkinModal'
 import SlotMapPanel from './SlotMapPanel'
+import DaySeatingPanel from './DaySeatingPanel'
 import BookingDetailSheet from '../../booking/BookingDetailSheet'
 import Icon from '../../ui/Icon'
 import SegmentedControl from '../../ui/SegmentedControl'
@@ -36,7 +37,9 @@ const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 // 跨頁導向 props（AdminPage 餵入、消費後回呼清空）：
 //   pendingPreassign：未來日訂位的「指派桌位（預配）」→ 切到該日排位地圖 + 自動進預配模式
 //   pendingGroupOpen：訂位頁團體卡點擊 → 切到該日 + 開團單詳情
-export default function PlanningView({ onGoToday, pendingPreassign, onPreassignConsumed, pendingGroupOpen, onGroupOpenConsumed }) {
+// pane='seat'（當日排位，2026-10-30）：月曆點日期直接進來——左邊當天全部訂位、右邊該場次桌況圖、同畫面排桌。
+//   訂位頁日曆也用同一個 DaySeatingPanel（嵌在 BookingsView 裡，返回回訂位頁日曆）。
+export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign, onPreassignConsumed, pendingGroupOpen, onGroupOpenConsumed }) {
   const {
     groupReservations, agencies, guides, tables, bookings, settings,
     reserveGroupTables, removeGroupReservation, addAgency, addGuide,
@@ -55,7 +58,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
   const canPreassign = seatingPerms(can).booking
 
   const today = todayStr()
-  const [pane, setPane] = useState('day') // day=月曆+當日總覽 | map=排位地圖全寬
+  const [pane, setPane] = useState('day') // day=月曆+當日總覽 | seat=當日排位 | map=排位地圖全寬
   const [selectedDate, setSelectedDate] = useState(today)
   const [monthCursor, setMonthCursor] = useState(() => {
     const d = new Date(today + 'T00:00:00')
@@ -119,6 +122,12 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     onPreassignConsumed?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPreassign?.id])
+
+  // 月曆點日期 → 直接進「當日排位」（不再停在當日總覽、也不用再切排位地圖）
+  const openDaySeating = (date) => {
+    jumpToDate(date)
+    setPane('seat')
+  }
 
   // 跨頁：訂位頁團體卡 → 該日 + 團單詳情
   useEffect(() => {
@@ -355,13 +364,20 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     )
   }
 
+  // 規劃視圖分頁（當日總覽／當日排位／排位地圖）。排位地圖本版保留（團體流程仍在用），下一版評估下架。
+  const paneSwitch = (
+    <SegmentedControl options={[{ key: 'day', label: '當日總覽' }, { key: 'seat', label: '當日排位' }, { key: 'map', label: '排位地圖' }]} value={pane} onChange={setPane} ariaLabel="規劃視圖" />
+  )
+
   return (
     <div ref={rootRef} className="space-y-3">
       {/* 視圖切換 +（map 態）精簡日期列。
           sticky：手機上當日總覽很長，捲到下面要切地圖／換日不必先捲回頂端。 */}
-      <div className="sticky top-0 z-20 py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap">
+      {/* 當日排位自帶一列控制（日期／場次），這列收起來把垂直空間讓給地圖；
+          同一顆分頁（paneSwitch）改放進排位控制列最前面——「當日總覽」一下就切得回去 */}
+      <div className={`${pane === 'seat' ? 'hidden' : 'sticky top-0 z-20'} py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap`}>
         {/* 分段控制（segmented control）：灰底槽 + 白色浮起的選中段，與 iPadOS 一致 */}
-        <SegmentedControl options={[{ key: 'day', label: '當日總覽' }, { key: 'map', label: '排位地圖' }]} value={pane} onChange={setPane} ariaLabel="規劃視圖" />
+        {paneSwitch}
         {pane === 'map' && (
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => shiftDay(-1)} aria-label="前一日" className="tap w-8 h-8 rounded-lg bg-white border border-chicken-brown/15 text-chicken-brown flex items-center justify-center"><Icon name="chevronLeft" size={14} strokeWidth={2.2} /></button>
@@ -394,6 +410,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
           <GroupCalendar
             value={selectedDate}
             onSelect={setSelectedDate}
+            onOpenDay={openDaySeating}
             cursor={monthCursor}
             onCursorChange={setMonthCursor}
             monthSummary={monthSummary}
@@ -418,6 +435,19 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
             onFocusBatch={focusBatchOnMap}
           />
         </div>
+      ) : pane === 'seat' ? (
+        <DaySeatingPanel
+          date={selectedDate}
+          onShiftDay={shiftDay}
+          headerStart={paneSwitch}
+          onOpenGroup={openExisting}
+          onMoveTable={onMoveTable}
+          onAddBooking={canAddWalkin ? () => setShowAddWalkin(true) : undefined}
+          seatingId={mapSeatingId}
+          onSeatingChange={setMapSeatingId}
+          floor={mapFloor}
+          onFloorChange={setMapFloor}
+        />
       ) : (
         <SlotMapPanel
           date={selectedDate}

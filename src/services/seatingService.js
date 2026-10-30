@@ -1074,7 +1074,14 @@ export function suggestTableCombo(partySize, opts = {}) {
   const pool = tableService.listAll()
     .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && (Number(t.capacity) || 0) > 0)
     .filter(t => !conflicts.has(String(t.number)))
+  return suggestComboFromPool(pool, need)
+}
 
+// suggestTableCombo 的純函式核心：給定「可選桌池」與人數，挑最佳組合（規則同上，含擠一擠退路）。
+// 規劃頁「當日排位」用它對未來日的可選桌池（daySeatingPlan.assignableTables）出建議——不讀今日桌況。
+export function suggestComboFromPool(poolInput = [], partySize = 0) {
+  const need = Math.max(0, Number(partySize) || 0)
+  const pool = (poolInput || []).filter(t => (Number(t.capacity) || 0) > 0)
   const floors = [...new Set(pool.map(t => t.floor))]
   const pickBest = (extra) => {
     const perFloor = floors.map(f => bestComboOnFloor(pool.filter(t => t.floor === f), need, f, extra))

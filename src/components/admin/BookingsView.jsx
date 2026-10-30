@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import DaySeatingPanel from './planning/DaySeatingPanel'
+import { addDays, formatDate } from '../../utils/timeSlots'
 import { useScrollToTopOn } from '../../hooks/useScrollToTopOn'
 import TodayView from './TodayView'
 import CalendarView from './CalendarView'
@@ -20,12 +22,18 @@ const SUB_TABS = [
 // 團體卡點擊呼叫 onOpenGroup → 規劃頁團單詳情
 // 所有新增入口（直接點「新增」、日曆選日、名冊帶預填）都是連續新增：存檔後留在新增畫面、
 // 保留日期＋時段，只清客人欄位——電話一通接一通，不必每存一筆就被帶回「今日」再點回來。
+// 日曆點日期 → 直接進「當日排位」（與規劃頁同一個 DaySeatingPanel）；「月曆」返回回到這裡的日曆（停在該日清單）。
+// 訂位卡的動作（聯絡／編輯／取消訂位／更多／交班事項）在排位畫面選中訂位時都有（同一份 useBookingActions）。
 export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, onCreated, openAdd }) {
   // 新增訂位要 booking.create；唯讀角色（kitchen）沒有「新增」子分頁、日曆也不出現「＋ 新增訂位」，
   // 名冊預填（openAdd）更不會把他送進新增表單。fail-closed：useAuth() 無 Provider 時視為無權。
   const canCreate = !!useAuth()?.can?.('booking.create')
   const [sub, setSubRaw] = useState(openAdd && canCreate ? 'add' : 'today')
-  const setSub = (k) => setSubRaw(k === 'add' && !canCreate ? 'today' : k)
+  // 當日排位（日曆子分頁內）：null＝看日曆；有日期＝排位畫面。日曆元件保持掛載（隱藏），返回時月份／收合狀態都還在。
+  const [seatDate, setSeatDate] = useState(null)
+  const [calFocus, setCalFocus] = useState(null) // 從排位返回時，日曆停在排位最後看的那天
+  const setSub = (k) => { setSeatDate(null); setSubRaw(k === 'add' && !canCreate ? 'today' : k) }
+  const closeSeating = () => { setCalFocus({ date: seatDate, seq: Date.now() }); setSeatDate(null) }
   // 新增表單的預填：可能來自名冊（openAdd prop）或日曆選日期後按「＋ 新增訂位」（本地觸發）。
   // 兩條路共用同一個 state，誰後觸發就以誰為準（都帶 seq，AddBookingView 依 seq 變更才重灌欄位）。
   const [addPrefill, setAddPrefill] = useState(openAdd || null)
@@ -49,7 +57,7 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   }
 
   // 子分頁切換捲回頂端（今日清單捲到很下面再切「新增」，表單不該停在半路）
-  const rootRef = useScrollToTopOn(sub)
+  const rootRef = useScrollToTopOn(seatDate ? `seat:${sub}` : sub)
 
   return (
     <div ref={rootRef} className="space-y-3">
@@ -60,7 +68,25 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
       {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
       <div key={sub} className="animate-soft-enter">
           {sub === 'today' && <TodayView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} />}
-          {sub === 'calendar' && <CalendarView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} onAddBooking={canCreate ? handleAddBookingFromCalendar : undefined} />}
+          {sub === 'calendar' && (
+            <>
+              <div hidden={!!seatDate} style={seatDate ? { display: 'none' } : undefined}>
+                <CalendarView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup}
+                  onOpenDay={setSeatDate} onPlanDay={setSeatDate} focusDate={calFocus}
+                  onAddBooking={canCreate ? handleAddBookingFromCalendar : undefined} />
+              </div>
+              {seatDate && (
+                <DaySeatingPanel
+                  date={seatDate}
+                  onShiftDay={(d) => setSeatDate(prev => formatDate(addDays(new Date(prev + 'T00:00:00'), d)))}
+                  onBackToCalendar={closeSeating}
+                  onOpenGroup={onOpenGroup ? (groupId) => onOpenGroup({ id: groupId, date: seatDate }) : undefined}
+                  onMoveTable={onMoveTable}
+                  onAddBooking={canCreate ? handleAddBookingFromCalendar : undefined}
+                />
+              )}
+            </>
+          )}
           {sub === 'search' && <SearchBookingsView onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
           {sub === 'add' && canCreate && <AddBookingView initial={addPrefill} continuous onCreated={(b) => onCreated?.(b)} onAssignTable={onAssignTable} onMoveTable={onMoveTable} />}
       </div>
