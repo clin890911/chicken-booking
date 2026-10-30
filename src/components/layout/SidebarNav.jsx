@@ -78,10 +78,16 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
       </button>
 
       {/* User card；底部加 home indicator 安全區（iPad 直/橫向手勢列不蓋住登出） */}
+      {/* 登入者／角色：非現場頁頂端標題列拿掉後（頁面捲動第 2 批），這裡是唯一顯示處——
+          76px 圖示欄（iPad 橫向）也要看得到角色，不能只剩頭像縮寫 */}
       <div className="border-t border-chicken-brown/10 p-2 pb-[calc(0.5rem_+_env(safe-area-inset-bottom))]">
-        <div className="flex items-center justify-center xl:justify-start gap-2.5 px-1 xl:px-2 py-2">
+        <div data-testid="sidebar-user" className="flex flex-col xl:flex-row items-center justify-center xl:justify-start gap-1 xl:gap-2.5 px-1 xl:px-2 py-2">
           <div className="w-8 h-8 rounded-full bg-[#e9e5df] text-chicken-brown/80 text-[13px] font-bold flex items-center justify-center flex-shrink-0" title={user?.displayName}>
             {(user?.displayName || '?').trim().charAt(0).toUpperCase()}
+          </div>
+          <div className="xl:hidden w-full min-w-0 text-center text-xs leading-tight" title={`${user?.displayName || ''}${user?.roleLabel ? ` · ${user.roleLabel}` : ''}`}>
+            <div className="font-semibold text-chicken-brown truncate">{user?.displayName}</div>
+            <div className="text-chicken-brown/55 truncate">{user?.roleLabel || '—'}</div>
           </div>
           <div className="hidden xl:block min-w-0 flex-1">
             <div className="text-[13px] font-bold text-chicken-brown truncate">{user?.displayName}</div>

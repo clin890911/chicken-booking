@@ -19,6 +19,7 @@ import DaySeatingPanel from './DaySeatingPanel'
 import BookingDetailSheet from '../../booking/BookingDetailSheet'
 import Icon from '../../ui/Icon'
 import SegmentedControl from '../../ui/SegmentedControl'
+import PageTitle from '../../layout/PageTitle'
 import { seatingPerms, isReadOnlyRole } from '../../../utils/seatingPerms'
 
 const PURGE_FLAG = 'chicken_group_blank_purge_v1'
@@ -345,7 +346,8 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
   // 團單詳情頁（唯讀確認 + 回傳單）整頁接管
   if (detailGroup) {
     return (
-      <div ref={rootRef}>
+      // lg:h-full：詳情頁 lg↑ 是左右兩欄、撐滿內容區高度（左欄內捲、地圖固定），見 GroupDetailStage
+      <div ref={rootRef} className="lg:h-full">
         <GroupDetailStage
           group={detailGroup}
           tables={tables}
@@ -379,6 +381,8 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
           當日排位頂端白白多 12px（頁面捲動檢查：1180×820 整頁溢出 32px 的一部分） */}
       {pane !== 'seat' && (
       <div className="sticky top-0 z-20 py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap">
+        {/* 頁名與視圖分頁同一列（桌機不再有獨立標題列，見 layout/PageTitle） */}
+        <PageTitle className="mr-1">規劃</PageTitle>
         {/* 分段控制（segmented control）：灰底槽 + 白色浮起的選中段，與 iPadOS 一致 */}
         {paneSwitch}
         {pane === 'map' && (
@@ -443,7 +447,7 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
         <DaySeatingPanel
           date={selectedDate}
           onShiftDay={shiftDay}
-          headerStart={paneSwitch}
+          headerStart={<><PageTitle className="mr-1">規劃</PageTitle>{paneSwitch}</>}
           onOpenGroup={openExisting}
           onMoveTable={onMoveTable}
           onAddBooking={canAddWalkin ? () => setShowAddWalkin(true) : undefined}

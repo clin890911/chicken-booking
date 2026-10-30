@@ -67,10 +67,13 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
   const needRows = NEEDS.filter(n => (Number(counts[n.key]) || 0) > 0)
   const noNeeds = needRows.length === 0 && !(group.allergyText || '').trim() && !(group.tableSideNeeds || '').trim() && !(group.notes || '').trim()
 
+  // 版面（頁面捲動第 2 批，2026-10-31）：iPad 橫向／桌機（lg↑）改左右兩欄——左欄團資訊、右欄座位示意。
+  // 原本單欄、地圖排在最下面，整頁要捲 700px 以上才看得到桌。lg↑ 整頁撐滿內容區高度，
+  // 左欄內容較長時只在左欄內捲動、地圖固定在右欄；lg 以下（手機／iPad 直向）維持原本單欄由上而下。
   return (
-    <div className="space-y-3">
+    <div data-testid="group-detail" className="space-y-3 lg:space-y-0 lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:gap-3">
       {/* 頂部：返回 + 標題 + 動作 */}
-      <div className="flex items-center gap-2 flex-wrap px-1">
+      <div className="flex items-center gap-2 flex-wrap px-1 lg:shrink-0">
         <button type="button" onClick={onBack} className="tap inline-flex items-center gap-0.5 h-8 pr-2 rounded-lg text-[13px] font-semibold text-chicken-brown/60 hover:text-chicken-brown">
           <Icon name="chevronLeft" size={14} strokeWidth={2.4} />返回當日總覽
         </button>
@@ -81,13 +84,16 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
         )}
         {onEdit && <button type="button" onClick={onEdit} className="tap inline-flex items-center gap-1 h-9 px-3.5 rounded-[9px] bg-chicken-red text-white text-[13px] font-semibold shadow-sm">編輯</button>}
       </div>
-      <div className="flex items-center gap-2 flex-wrap px-1">
+      <div className="flex items-center gap-2 flex-wrap px-1 lg:shrink-0">
         <Icon name="bus" size={20} className="text-chicken-red" />
         <h2 className="text-xl font-semibold tracking-tight text-chicken-brown">{group.agencyName || '（未填旅行社）'}</h2>
         <Pill cls={st.cls}>{st.label}</Pill>
         <span className="text-sm text-chicken-brown/60 tabular-nums">{dayLabel(group.date)}</span>
       </div>
 
+      <div className={`space-y-3 lg:space-y-0 lg:flex-1 lg:min-h-0 lg:grid lg:gap-4 ${heldNumbers.length > 0 ? 'lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]' : 'lg:grid-cols-1'}`}>
+      {/* 左欄：團資訊（統計、梯次、聯絡、備餐）——內容長時只在這欄內捲動 */}
+      <div data-testid="group-detail-info" className="space-y-3 lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain lg:pr-1 lg:pb-1">
       {/* 三格統計 */}
       <StatGroup items={[
         { label: '總人數', big: counts.total || 0, small: '位' },
@@ -170,19 +176,20 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
           {noNeeds && <div className="px-3.5 py-3 text-xs text-chicken-brown/40">無特殊需求</div>}
         </div>
       </div>
+      </div>
 
-      {/* 座位示意（唯讀） */}
+      {/* 右欄：座位示意（唯讀）——lg↑ 撐滿右欄高度，地圖以「全貌」縮放塞進可視區 */}
       {heldNumbers.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 px-1">
+        <div data-testid="group-detail-map" className="space-y-1.5 lg:space-y-0 lg:min-h-0 lg:flex lg:flex-col lg:gap-1.5">
+          <div className="flex items-center gap-2 px-1 lg:shrink-0">
             <SectionTitle>座位示意</SectionTitle>
             <span className="flex-1" />
             {floorsWithTables.length > 1 && (
               <SegmentedControl size="sm" ariaLabel="樓層" value={activeFloor} onChange={setFloor} options={floorsWithTables.map(f => ({ key: f, label: f }))} />
             )}
           </div>
-          <div className="bg-white rounded-xl border border-chicken-brown/10 p-2.5">
-            <div className="rounded-lg overflow-hidden border border-chicken-brown/5 min-h-[320px]" style={{ background: '#faf8f5' }}>
+          <div className="bg-white rounded-xl border border-chicken-brown/10 p-2.5 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
+            <div className="rounded-lg overflow-hidden border border-chicken-brown/5 min-h-[320px] lg:flex-1 lg:min-h-[280px]" style={{ background: '#faf8f5' }}>
               <FloorMap
                 floor={activeFloor}
                 tables={tables}
@@ -196,10 +203,11 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
                 onSelectTable={() => {}}
               />
             </div>
-            <div className="text-center text-[11px] text-chicken-brown/45 mt-2">靛色 = 本團保留桌 · 要調整圈桌請點右上「編輯」</div>
+            <div className="text-center text-[11px] text-chicken-brown/45 mt-2 lg:shrink-0">靛色 = 本團保留桌 · 要調整圈桌請點右上「編輯」</div>
           </div>
         </div>
       )}
+      </div>
 
       {sheetOpen && (
         <GroupSheet group={group} tables={tables} store={settings} fixtureSource={fixtures} onClose={() => setSheetOpen(false)} />

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import CustomersView from './CustomersView'
 import AgencyDirectoryView from './AgencyDirectoryView'
 import SegmentedControl from '../../ui/SegmentedControl'
+import PageTitle from '../../layout/PageTitle'
 
 const SUB = [
   { key: 'customers', label: '顧客', icon: 'users' },
@@ -25,7 +26,9 @@ export default function RosterView({ pendingPhone, onPendingConsumed, onAddBooki
 
   return (
     <div className="space-y-3">
-      <div className="sticky top-0 z-20 py-1 bg-chicken-cream">
+      {/* 頁名與子分頁籤同一列（桌機不再有獨立標題列，見 layout/PageTitle） */}
+      <div className="sticky top-0 z-20 py-1 bg-chicken-cream flex items-center gap-3">
+        <PageTitle className="pl-1">名冊</PageTitle>
         <SegmentedControl options={SUB} value={sub} onChange={setSub} ariaLabel="名冊子分頁" />
       </div>
       {sub === 'customers' && <CustomersView initialQuery={seedQuery} onAddBooking={onAddBooking} />}

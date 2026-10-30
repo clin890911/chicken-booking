@@ -15,6 +15,7 @@ import TelegramSettings from './TelegramSettings'
 import StaffAdminSection from './StaffAdminSection'
 import ExportCenter from './ExportCenter'
 import Icon from '../ui/Icon'
+import PageTitle from '../layout/PageTitle'
 import GlyphText from '../ui/GlyphText'
 import { Ban, Check, Repeat, TriangleAlert, X } from 'lucide-react'
 import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
@@ -429,6 +430,8 @@ export default function SettingsView({ onOpenCustomer }) {
       <div className="flex gap-4">
       {/* 桌機：左側二級分類側欄 */}
       <nav className="hidden lg:flex w-44 shrink-0 flex-col gap-1" aria-label="設定分類">
+        {/* 頁名坐在分類側欄頂端（桌機不再有獨立標題列，見 layout/PageTitle）；側欄本來就比內容短，不增加高度 */}
+        <PageTitle className="px-3 pb-1">設定</PageTitle>
         {SETTINGS_CATEGORIES.map(c => (
           <button
             key={c.key}
