@@ -9,5 +9,8 @@ export const auth={currentUser:user}, db=null,googleProvider={};
 export async function getIdToken(){return 'isolated-test-token'}
 export function onAuthStateChanged(_auth,fn){queueMicrotask(()=>fn(user));return ()=>{}}
 export async function signInWithPopup(){return {user}}
+export async function signInWithRedirect(){}
+export async function getRedirectResult(){return null}
+export const authOnSameOrigin=false;
 export async function signOut(){}
 `
