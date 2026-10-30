@@ -1,70 +1,39 @@
 import { useMemo, useState, useEffect } from 'react'
+import { TriangleAlert, Timer, Clock, Brush, Users } from 'lucide-react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { todayStr } from '../../../utils/timeSlots'
 import { classifyTodayPulse } from '../../../utils/bookingPulse'
-import { diffMin, stageOf } from '../../../utils/diningStage'
-import { dayPhase } from '../../../utils/dayPhase'
-import { todayActiveGroups } from '../../../utils/groupLive'
-import { listToday as opsLogToday } from '../../../services/opsLogService'
+import { pickOpsAlerts, computeStoreStats } from '../../../utils/opsAlerts'
 
-// 時間欄最舊的一筆（缺時間的排最後；同時間依桌號，結果穩定可預期）
-function oldestBy(list, timeOf) {
-  const ts = (t) => { const v = new Date(timeOf(t) || '').getTime(); return Number.isFinite(v) ? v : Infinity }
-  return [...list].sort((a, b) => ts(a) - ts(b) || String(a.number).localeCompare(String(b.number)))[0]
-}
+// 現場頁頂端「一條」（Barry 2026-10-30，取代「全店」六格統計列＋原本另一列的提示列）：
+//   常駐兩格：可入座 N 桌 · 可坐 M 人｜用餐中 N 桌 · M 人（大字主數字、小字單位與人數，比照訂位頁「12 組 · 48 人」）
+//   有事才接在後面：過時未到／超時／將到／待清／候位，數字 0 的不出現；點了直接帶到那件事。
+// 只渲染在頂列裡（與 地圖／摘要／排程 同一列），不另外多一列 → iPad 頂部高度不增加。
+// 用餐中以外的管理數字（待清總數、系統自動處理紀錄、一天節奏）在摘要分頁。
 
-// 現場「現在該做什麼」單行提示列（StatusBar 下方，最多兩則，不做 dashboard）。
-// 優先序：過時未到 > 超時用餐 > 待清桌 > 系統自動處理紀錄 > 一天節奏單句。
-export function pickHints({ pulse, tables, settings, groups, autoCount, now }) {
-  const hints = []
-  if (pulse.overdue.length) {
-    hints.push({ level: 'danger', text: `${pulse.overdue.length} 組過時未到待處理`, action: 'open-upcoming' })
-  }
-  // 刻意不過濾 isActive/outage：停用或維修中但仍佔用的桌（不一致狀態）更需要被提示處理。
-  const overtime = (tables || []).filter(t => t.status === 'dining' && t.seatedAt
-    && ['overtime', 'buffer-overtime'].includes(stageOf(diffMin(t.seatedAt, now), settings)))
-  // 「N 桌超時／待清」點了直接處理：帶出最該先處理的那一桌（打開它的桌況抽屜）。
-  // 超時＝坐最久的；待清＝最早變成待清的（updatedAt 最舊）。處理完 N−1，再點一次就是下一桌。
-  if (overtime.length) {
-    const first = oldestBy(overtime, t => t.seatedAt)
-    hints.push({ level: 'danger', text: `${overtime.length} 桌已超時用餐，可禮貌詢問結帳`, action: 'open-table', tableNumber: String(first.number) })
-  }
-  const cleaningTables = (tables || []).filter(t => t.status === 'cleaning')
-  if (cleaningTables.length) {
-    const first = oldestBy(cleaningTables, t => t.updatedAt)
-    hints.push({ level: 'warn', text: `${cleaningTables.length} 桌待清`, action: 'open-table', tableNumber: String(first.number) })
-  }
-  if (autoCount > 0) {
-    hints.push({ level: 'info', text: `系統今日自動處理 ${autoCount} 筆`, action: 'open-log' })
-  }
-  if (!hints.length) {
-    const p = dayPhase(settings, now)
-    const upcomingTxt = () => {
-      const parts = []
-      if (pulse.soon.length + pulse.later.length > 0) parts.push(`${pulse.soon.length + pulse.later.length} 組訂位`)
-      const g = (groups || []).length
-      if (g) parts.push(`${g} 團`)
-      return parts.length ? `今日還有 ${parts.join('、')}` : '今日無待到訂位'
-    }
-    if (p.phase === 'before-open') hints.push({ level: 'calm', text: `開店前 · ${upcomingTxt()}` })
-    else if (p.phase === 'service') hints.push({ level: 'calm', text: `${p.seating?.name || '營業中'} · ${upcomingTxt()}` })
-    else if (p.phase === 'between') hints.push({ level: 'calm', text: `場次空檔${p.next ? ` · ${p.next.start} ${p.next.name}` : ''} · ${upcomingTxt()}` })
-    else hints.push({ level: 'calm', text: '已過打烊時間 · 桌況乾淨即可收工' })
-  }
-  return hints.slice(0, 2)
-}
+const ALERT_ICON = { overdue: TriangleAlert, overtime: Timer, soon: Clock, cleaning: Brush, waitlist: Users }
 
-// 底色一律不透明：提示列直接放在後台桌布上（Liquid Glass 的桌布帶暖色光暈），
-// 半透明的 red/10 會吃到桌布顏色，紅字掉到 4.4:1；red-50 實心底 ≥5.5:1。
+// 底色一律不透明：頂列是玻璃（半透明白），半透明底會吃到桌布顏色，字色掉到 AA 以下；實心淡底 ≥5:1。
 const LEVEL_CLS = {
   danger: 'bg-red-50 border-chicken-red/30 text-chicken-red',
   warn: 'bg-amber-50 border-amber-300 text-amber-800',
   info: 'bg-sky-50 border-sky-200 text-sky-800',
-  calm: 'bg-white border-chicken-brown/10 text-chicken-brown/65',
+  queue: 'bg-violet-50 border-violet-200 text-violet-800',
 }
 
-export default function OpsHintBar({ onOpenUpcoming, onOpenLog, onOpenTable }) {
-  const { tables, bookings, settings, groupReservations } = useBooking()
+// 「將到 3 組 · 10 人」：label 小字、主數字大字、單位與人數小字
+function Figure({ label, value, unit, people, small = 'text-chicken-brown/60' }) {
+  return (
+    <span className="inline-flex items-baseline gap-0.5 whitespace-nowrap">
+      <span className={`text-sm font-semibold ${small}`}>{label}</span>
+      <span className="text-xl font-bold tabular-nums leading-none">{value}</span>
+      <span className={`text-sm font-semibold ${small}`}>{unit}{people != null ? ` · ${people} 人` : ''}</span>
+    </span>
+  )
+}
+
+export default function OpsHintBar({ tablePresentation = null, onOpenUpcoming, onOpenTable, onOpenWaitlist }) {
+  const { tables, bookings, settings, waitlist } = useBooking()
   const today = todayStr()
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
@@ -72,32 +41,50 @@ export default function OpsHintBar({ onOpenUpcoming, onOpenLog, onOpenTable }) {
     return () => clearInterval(id)
   }, [])
 
-  const hints = useMemo(() => {
+  const { stats, alerts } = useMemo(() => {
     const pulse = classifyTodayPulse(bookings, today, now)
-    const groups = todayActiveGroups(groupReservations, today)
-    const autoCount = opsLogToday(today).length
-    return pickHints({ pulse, tables, settings, groups, autoCount, now })
-  }, [bookings, tables, settings, groupReservations, today, now])
+    return {
+      stats: computeStoreStats({ tables: tables || [], bookings: bookings || [], waitlist: waitlist || [], tablePresentation, pulse, today }),
+      alerts: pickOpsAlerts({ pulse, tables, settings, waitlist, now }),
+    }
+  }, [bookings, tables, settings, waitlist, tablePresentation, today, now])
 
-  if (!hints.length) return null
+  const run = (a) => {
+    if (a.action === 'open-upcoming') onOpenUpcoming?.()
+    if (a.action === 'open-table') onOpenTable?.(a.tableNumber)
+    if (a.action === 'open-waitlist') onOpenWaitlist?.()
+  }
+
   return (
-    // 細長條：兩則提示串在同一行（iPad 頂部每一像素都要還給桌況圖）。
-    // 內容過長時各自 truncate，不換行、不長高。
-    <div className="flex items-center gap-2">
-      {hints.map((h, i) => (
-        <button
-          key={i}
-          onClick={() => {
-            if (h.action === 'open-upcoming') onOpenUpcoming?.()
-            if (h.action === 'open-log') onOpenLog?.()
-            if (h.action === 'open-table') onOpenTable?.(h.tableNumber)
-          }}
-          title={h.action === 'open-table' ? `打開 ${h.tableNumber} 處理` : undefined}
-          className={`flex-1 min-w-0 truncate text-left px-3 py-1 rounded-lg border text-xs font-bold ${LEVEL_CLS[h.level]} ${h.action ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
-        >
-          {h.text}
-        </button>
-      ))}
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 min-w-0 text-chicken-brown">
+      {/* 常駐：看一眼就知道「還能坐多少、場內多少人」（口徑同樓層鈕「可坐」＝現在就能坐的桌） */}
+      <div role="group" aria-label="全店概況" className="flex items-center gap-2.5 min-h-[44px] flex-none">
+        <span data-stat="vacant" className="text-emerald-800"><Figure label="可入座" value={stats.vacant} unit="桌" people={stats.vacantSeats} /></span>
+        <span aria-hidden className="h-5 w-px bg-chicken-brown/15" />
+        <span data-stat="dining"><Figure label="用餐中" value={stats.dining} unit="桌" people={stats.occSeats} /></span>
+      </div>
+      {/* 有事才出現：數字 0 的不列；全部是 0 → 這一段不渲染（不留空白） */}
+      {alerts.length > 0 && (
+        <div role="group" aria-label="需要處理" className="flex flex-wrap items-center gap-1 min-w-0">
+          {alerts.map(a => {
+            const Icon = ALERT_ICON[a.key]
+            return (
+              <button
+                key={a.key}
+                type="button"
+                data-alert={a.key}
+                onClick={() => run(a)}
+                title={a.title}
+                aria-label={`${a.text}：${a.title}`}
+                className={`tap flex-none inline-flex items-center gap-1 min-h-[44px] px-2.5 rounded-xl border cursor-pointer hover:brightness-95 ${LEVEL_CLS[a.level]}`}
+              >
+                {Icon && <Icon size={15} strokeWidth={2.25} aria-hidden className="flex-none" />}
+                <Figure label={a.label} value={a.count} unit={a.unit} people={a.people} small="" />
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

@@ -1,10 +1,54 @@
 import { useMemo } from 'react'
+import { History } from 'lucide-react'
 import { diffMin, stageOf } from '../../../utils/diningStage'
 import { buildOpsTablePresentation } from '../../../utils/opsTablePresentation'
 
 // 桌況「摘要」視圖：以「可坐存量 + 依可操作狀態分組」快速回答『現在能坐多少、哪些要處理』。
 // 共同桌況字典補下組與用餐＋清桌估占；tables 已由父層依樓層過濾。
-export default function TableSummaryView({ tables = [], bookings = [], groupHoldTables = {}, settings = {}, date, now = Date.now(), tablePresentation, onSelectTable }) {
+// 「全店」管理數字（Barry 2026-10-30：原頂端六格統計列移到這裡給店長看；前台頂端只留可入座／用餐中＋有事才出現的提示）。
+// 大字主數字、小字單位與人數，比照訂位頁「12 組 · 48 人」。
+function StoreCard({ store, onOpenLog }) {
+  const cell = (label, value, unit, people, cls = 'text-chicken-brown') => (
+    <div className="bg-chicken-cream rounded-xl px-3 py-2">
+      <div className="text-[11px] font-bold text-chicken-brown/60">{label}</div>
+      <div className={`whitespace-nowrap ${cls}`}>
+        <span className="text-2xl font-bold tabular-nums">{value}</span>
+        <span className="text-sm font-semibold text-chicken-brown/60"> {unit}{people != null ? ` · ${people} 人` : ''}</span>
+      </div>
+    </div>
+  )
+  return (
+    <section aria-label="全店" className="space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-bold text-chicken-brown">全店</h3>
+        {store.phase && <span className="text-[11px] font-semibold text-chicken-brown/60 truncate">{store.phase}</span>}
+      </div>
+      <div data-store-stats className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {cell('用餐中', store.dining, '桌', store.occSeats, 'text-orange-800')}
+        {cell('在席人數', store.occSeats, '人', null)}
+        {cell('可入座', store.vacant, '桌', store.vacantSeats, 'text-emerald-800')}
+        {cell('90 分內將到', store.soon, '組', null, 'text-sky-800')}
+        {cell('待清桌', store.cleaning, '桌', null, 'text-amber-800')}
+        {cell('候位需處理', store.waitlist, '組', store.waitlistPeople, 'text-violet-800')}
+      </div>
+      {(store.overdue > 0 || store.later > 0) && (
+        <p className="text-[11px] font-semibold text-chicken-brown/60">
+          {store.overdue > 0 && <span className="text-chicken-red">過時未到 {store.overdue} 組　</span>}
+          {store.later > 0 && `更晚 ${store.later} 組`}
+        </p>
+      )}
+      {store.autoCount > 0 && onOpenLog && (
+        <button type="button" onClick={onOpenLog}
+          className="tap w-full min-h-[44px] px-3 rounded-xl border border-sky-200 bg-sky-50 text-sky-800 text-sm font-bold inline-flex items-center gap-2">
+          <History size={16} aria-hidden /> 系統今日自動處理 {store.autoCount} 筆 · 查看紀錄
+        </button>
+      )}
+      <div className="text-xs font-bold text-chicken-brown/60 pt-1 border-t border-chicken-brown/10">本樓層</div>
+    </section>
+  )
+}
+
+export default function TableSummaryView({ store = null, onOpenLog, tables = [], bookings = [], groupHoldTables = {}, settings = {}, date, now = Date.now(), tablePresentation, onSelectTable }) {
   const presentation = useMemo(() => tablePresentation || buildOpsTablePresentation({ tables, bookings, groupHoldTables, settings, date, now }), [tablePresentation, tables, bookings, groupHoldTables, settings, date, now])
   const data = useMemo(() => {
     const vacant = [], dining = [], cleaning = [], held = [], conflicts = [], unavailable = []
@@ -43,6 +87,7 @@ export default function TableSummaryView({ tables = [], bookings = [], groupHold
 
   return (
     <div className="h-full min-h-0 overflow-y-auto pr-1 space-y-3">
+      {store && <StoreCard store={store} onOpenLog={onOpenLog} />}
       {/* 可坐存量 */}
       <div className="grid grid-cols-4 gap-2">
         {stockCards.map(([k, label]) => (

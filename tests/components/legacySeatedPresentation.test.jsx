@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
 import FloorMap, { isArriveEligible, isPreassignArriveEligible } from '../../src/components/admin/floormap/FloorMap'
-import StatusBar from '../../src/components/admin/floormap/StatusBar'
+import { computeStoreStats } from '../../src/utils/opsAlerts'
 import ArrivalStrip, { buildTargets } from '../../src/components/admin/floormap/ArrivalStrip'
 import { diningTablePresentation } from '../../src/utils/tableStatus'
 import { buildOpsTablePresentation } from '../../src/utils/opsTablePresentation'
@@ -51,10 +51,9 @@ describe('legacy整組已到店呈現與報到入口一致',()=>{
  })
  it('頂部用餐桌數跟地圖2桌一致，在席9人只計一次，不寫儲存',()=>{
   const before=JSON.stringify(tables)
-  mount(<StatusBar tables={tables} bookings={[booking]} waitlist={[]} variant="compact"/>)
-  const valueFor=label=>[...container.querySelectorAll('span')].find(s=>s.textContent===label)?.parentElement.querySelector('span').textContent
-  expect(valueFor('用餐中')).toBe('2')
-  expect(valueFor('在席人數')).toBe('9')
+  const st=computeStoreStats({tables,bookings:[booking],waitlist:[],today:'2026-10-04'})
+  expect(st.dining).toBe(2)
+  expect(st.occSeats).toBe(9)
   expect(JSON.stringify(tables)).toBe(before)
  })
  it.each([{currentBookingId:'OTHER'},{currentRef:{type:'group',groupId:'G'}},{status:'cleaning'},{number:'999'}])('不遮蓋其他所有權或非桌組：%s',over=>{
