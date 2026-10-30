@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, createContext, useContext } from 'react'
+import { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import { Reorder, useDragControls } from 'framer-motion'
@@ -68,6 +68,38 @@ const SETTINGS_CATEGORIES = [
   { key: 'data',      label: '資料與權限', icon: 'lock', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
 ]
 const DEFAULT_CATEGORY = 'ops-rules'
+// 由網址參數解出「分類＋區塊」（純函式，給 SettingsView 與測試用）。
+//   section：分類 key；不合法時若 block 是某分類的區塊就推回那個分類，否則退回預設分類。
+//   block：只在屬於該分類時保留，否則為 null（由畫面退回該分類預設區塊；權限另由畫面判斷）。
+export function resolveSettingsLocation(rawSection, rawBlock) {
+  const byKey = SETTINGS_CATEGORIES.find(c => c.key === rawSection)
+  const cat = byKey || SETTINGS_CATEGORIES.find(c => c.sections.includes(rawBlock)) || SETTINGS_CATEGORIES.find(c => c.key === DEFAULT_CATEGORY)
+  return { categoryKey: cat.key, block: cat.sections.includes(rawBlock) ? rawBlock : null }
+}
+// 區塊標題（左側／上方區塊清單用；與各 <SettingsSection title> 同字）
+const SECTION_TITLES = {
+  hours: '營業時段', seatings: '場次設定', closures: '休店 / 關閉時段管理',
+  'online-guard': '線上訂位防線', hero: '首頁廣告輪播', contact: '客人聯絡入口',
+  'device-display': '這台裝置的顯示', automation: '現場自動化（自動清檯）', layout: '桌位佈局', 'table-enable': '桌位啟用',
+  line: 'LINE 官方帳號', telegram: '通知與備份',
+  firestore: 'Firestore 資料同步', noshow: 'No-show 查詢', export: '資料匯出', staff: '管理員帳號', account: '帳號',
+}
+// 主從式版面（頁面捲動第 3 批）的斷點：md（768）以上＝一次只顯示一個區塊、內容欄自己捲；
+// 手機（< md）維持原本的可收合清單。jsdom 沒有 matchMedia → 一律走清單版（既有單元測試不受影響）。
+const WIDE_QUERY = '(min-width: 768px)'
+function useWideSettings() {
+  const get = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(WIDE_QUERY).matches
+  const [wide, setWide] = useState(get)
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+    const mq = window.matchMedia(WIDE_QUERY)
+    const on = () => setWide(mq.matches)
+    on()
+    mq.addEventListener?.('change', on)
+    return () => mq.removeEventListener?.('change', on)
+  }, [])
+  return wide
+}
 // AdminPage 在捲動容器外、BottomNav 之上留的固定操作列插槽 id（儲存列會 portal 進去）。
 export const ADMIN_ACTION_BAR_SLOT = 'admin-action-bar-slot'
 // 由父層提供「目前分類包含的 sectionKey 清單」；SettingsSection 據此自我隱藏（不屬當前分類則 return null）。
@@ -98,17 +130,18 @@ export default function SettingsView({ onOpenCustomer }) {
   const [cloudBusy, setCloudBusy] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  // 目前分類同步到 URL（?tab=settings&section=xxx）：重整/上一頁/書籤皆能還原、可分享定位。
+  // 目前分類與區塊同步到 URL（?tab=settings&section=<分類>&block=<區塊>）：重整/上一頁/書籤皆能還原、可分享定位。
+  // section 沿用 PR #82 起的「分類」語意（既有書籤／e2e 不破）；區塊另用 block（分類 key 'line' 與區塊 key 'line' 同名，不能共用一個參數）。
   const [searchParams, setSearchParams] = useSearchParams()
-  const rawSection = searchParams.get('section')
-  const activeKey = SETTINGS_CATEGORIES.some(c => c.key === rawSection) ? rawSection : DEFAULT_CATEGORY
+  const { categoryKey: activeKey, block: urlBlock } = resolveSettingsLocation(searchParams.get('section'), searchParams.get('block'))
   const activeCat = SETTINGS_CATEGORIES.find(c => c.key === activeKey) || SETTINGS_CATEGORIES[0]
-  const setActiveKey = (k) => setSearchParams(prev => {
-    const p = new URLSearchParams(prev)
-    p.set('tab', 'settings') // 確保停留在設定分頁（分類鈕從設定頁內按）
-    p.set('section', k)
-    return p
-  })
+
+  // === 主從式版面（純呈現層；儲存邏輯完全不動）===
+  // md 以上同一分類一次只顯示一個區塊：左側（lg）／上方（md）是區塊清單，右側內容欄自己捲動，整頁不捲。
+  // 換區塊／換分類時被隱藏的區塊會 unmount，但 form 在本層 → 編輯不遺失（與換分類同一機制）。
+  const wide = useWideSettings()
+  // 各分類上次選的區塊（換回該分類時還原）；目前分類的區塊以網址 block 為準
+  const [pickedSection, setPickedSection] = useState({}) // { [分類 key]: sectionKey }
 
   // B14：追蹤未儲存變更（比對目前表單 vs 已存 settings）＋給店員看的明細
   const dirtyKeys = useMemo(() => dirtySettingsKeys(form, settings), [form, settings])
@@ -127,6 +160,55 @@ export default function SettingsView({ onOpenCustomer }) {
   // 只在「未存變更全是關閉相關」時可存：不能讓店員以為其他欄位也一起存了。
   const canSaveClosuresNow = closuresOnly && closureDirtyKeys.length > 0 && otherDirtyKeys.length === 0
   const readOnlyRole = isReadOnlyRole(can)
+  // 這個角色在目前分類看得到的區塊（與下方各區塊的權限條件同口徑）
+  const sectionVisible = (k) => (
+    (k === 'layout' || k === 'table-enable') ? !!can('table.config')
+      : k === 'export' ? canExportData(can)
+        : k === 'staff' ? !!can('staff.manage')
+          : true
+  )
+  const visibleSectionsOf = (cat) => cat.sections.filter(sectionVisible)
+  const visibleSections = visibleSectionsOf(activeCat)
+  // 預設選第一個區塊；訂位專員（只能存休店／關閉）進「營運規則」直接停在休店區塊
+  const defaultSectionOf = (vis) => (closuresOnly && vis.includes('closures') ? 'closures' : vis[0])
+  const defaultSection = defaultSectionOf(visibleSections)
+  // 網址 block 不存在／不屬目前分類／這個角色看不到 → 退回該分類預設區塊
+  const linkedSection = visibleSections.includes(urlBlock) ? urlBlock : null
+  const selectedSection = linkedSection || defaultSection
+  // 選區塊：寫進網址但用 replace——區塊是分類內的細選，每點一次都塞歷史會讓「上一頁」要按很多下才離開設定頁；
+  // 分類／分頁切換維持 push（既有慣例，上一頁可回上個分類）。
+  const pickSection = (k) => {
+    setPickedSection(p => ({ ...p, [activeKey]: k }))
+    setSearchParams(prev => {
+      const p = new URLSearchParams(prev)
+      p.set('tab', 'settings')
+      p.set('section', activeKey)
+      p.set('block', k)
+      return p
+    }, { replace: true })
+  }
+  // 換分類（push，同既有慣例）：區塊帶上次在該分類選的；沒選過就拿掉 block、落在該分類預設區塊
+  const setActiveKey = (k) => {
+    // 只記「明確選過／網址帶的」區塊；預設區塊不寫進網址（手機清單版才不會因此自動展開第一塊）
+    if (linkedSection) setPickedSection(p => ({ ...p, [activeKey]: linkedSection }))
+    const cat = SETTINGS_CATEGORIES.find(c => c.key === k)
+    const remembered = k !== activeKey ? pickedSection[k] : linkedSection
+    const nextBlock = cat && visibleSectionsOf(cat).includes(remembered) ? remembered : null
+    setSearchParams(prev => {
+      const p = new URLSearchParams(prev)
+      p.set('tab', 'settings') // 確保停留在設定分頁（分類鈕從設定頁內按）
+      p.set('section', k)
+      if (nextBlock) p.set('block', nextBlock); else p.delete('block')
+      return p
+    })
+  }
+  const detailRef = useRef(null)
+  // 換區塊／換分類：內容欄捲回頂端
+  useEffect(() => { if (detailRef.current) detailRef.current.scrollTop = 0 }, [selectedSection, activeKey])
+  const categoryCtx = useMemo(
+    () => ({ sections: activeCat.sections, wide, selected: selectedSection, linked: linkedSection }),
+    [activeCat.sections, wide, selectedSection, linkedSection],
+  )
   // 是否動到會影響容量／時段的設定（B1）
   const capacityDirty = dirtyKeys.some(k => CAPACITY_FIELDS.includes(k))
   // 未來已確認訂位筆數（保守估計：date>=今天 && status==='confirmed'）
@@ -425,16 +507,16 @@ export default function SettingsView({ onOpenCustomer }) {
   ) : null
 
   return (
-    <CategoryContext.Provider value={activeCat.sections}>
+    <CategoryContext.Provider value={categoryCtx}>
     <ReadOnlyContext.Provider value={readOnlyRole}>
-      <div className="flex gap-4">
-      {/* 桌機：左側二級分類側欄 */}
-      <nav className="hidden lg:flex w-44 shrink-0 flex-col gap-1" aria-label="設定分類">
+      <div className={`flex gap-4${wide ? ' h-full min-h-0' : ''}`}>
+      {/* 桌機：左側二級分類側欄（主從式版面時，目前分類底下列出它的區塊） */}
+      <nav className={`hidden lg:flex w-44 shrink-0 flex-col gap-1${wide ? ' min-h-0 overflow-y-auto overscroll-y-contain' : ''}`} aria-label="設定分類">
         {/* 頁名坐在分類側欄頂端（桌機不再有獨立標題列，見 layout/PageTitle）；側欄本來就比內容短，不增加高度 */}
         <PageTitle className="px-3 pb-1">設定</PageTitle>
         {SETTINGS_CATEGORIES.map(c => (
+          <div key={c.key} className="flex flex-col gap-1">
           <button
-            key={c.key}
             type="button"
             onClick={() => setActiveKey(c.key)}
             aria-current={activeKey === c.key ? 'page' : undefined}
@@ -444,11 +526,26 @@ export default function SettingsView({ onOpenCustomer }) {
           >
             <Icon name={c.icon} size={18} /><span>{c.label}</span>
           </button>
+          {wide && activeKey === c.key && (
+            <ul data-settings-list="" aria-label={`${c.label}的區塊`} className="mb-1 ml-[1.1rem] flex flex-col gap-0.5 border-l border-chicken-brown/10 pl-2">
+              {visibleSections.map(k => (
+                <li key={k}>
+                  <button type="button" onClick={() => pickSection(k)} aria-current={selectedSection === k ? 'true' : undefined}
+                    className={`flex min-h-[44px] w-full items-center rounded-[9px] px-2.5 py-1.5 text-left text-[13px] font-semibold leading-snug transition-colors ${
+                      selectedSection === k ? 'bg-white text-chicken-brown shadow-sm ring-1 ring-chicken-brown/10' : 'text-chicken-brown/70 hover:bg-chicken-brown/[0.05]'
+                    }`}>
+                    {SECTION_TITLES[k] || k}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          </div>
         ))}
       </nav>
 
-      {/* 內容欄 */}
-      <div className="min-w-0 flex-1 space-y-4">
+      {/* 內容欄（主從式版面：頂端狀態列固定、下方區塊內容自己捲） */}
+      <div className={`min-w-0 flex-1 ${wide ? 'flex min-h-0 flex-col gap-3' : 'space-y-4'}`}>
       {/* 手機：頂部橫向分類 pills */}
       <div className="lg:hidden -mx-1 flex gap-2 overflow-x-auto pb-1" aria-label="設定分類">
         {SETTINGS_CATEGORIES.map(c => (
@@ -465,6 +562,19 @@ export default function SettingsView({ onOpenCustomer }) {
           </button>
         ))}
       </div>
+      {/* 直向 iPad（md～lg）：分類下面一排區塊籤；lg 以上改在左側分類欄底下 */}
+      {wide && (
+        <div data-settings-list="" role="group" aria-label={`${activeCat.label}的區塊`} className="lg:hidden -mx-1 flex shrink-0 gap-1.5 overflow-x-auto px-1 pb-0.5">
+          {visibleSections.map(k => (
+            <button key={k} type="button" onClick={() => pickSection(k)} aria-current={selectedSection === k ? 'true' : undefined}
+              className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-semibold transition-colors ${
+                selectedSection === k ? 'bg-white text-chicken-brown shadow-sm ring-1 ring-chicken-brown/15' : 'text-chicken-brown/70 hover:bg-chicken-brown/[0.05]'
+              }`}>
+              {SECTION_TITLES[k] || k}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* 雲端同步狀態列：隨時可見地反映「本機變更是否已真的寫入 Firebase」，
           解決「按了儲存卻看不出到底有沒有存到雲端」。offline 時提供一鍵重試（本機資料不會遺失）。 */}
@@ -532,6 +642,8 @@ export default function SettingsView({ onOpenCustomer }) {
       {/* B14：未儲存變更提示 + 統一儲存 CTA：有插槽則固定在頁面底部，否則原地顯示 */}
       {actionBarSlot ? createPortal(saveBar, actionBarSlot) : saveBar}
 
+      {/* 區塊內容：主從式版面時這一層自己捲（整頁不捲）；手機維持原本的清單、整頁捲 */}
+      <div ref={detailRef} data-testid="settings-detail" className={wide ? 'min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain pb-2 pr-1' : 'space-y-4'}>
       <SettingsSection sectionKey="hours" title="營業時段" description="控制客人可選日期、時段與營業起訖時間。" summary={hoursSummary}>
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -1101,6 +1213,7 @@ export default function SettingsView({ onOpenCustomer }) {
           </button>
         </div>
       )}
+      </div>{/* 區塊內容 */}
       </div>{/* 內容欄 */}
       </div>{/* flex gap-4 */}
 
@@ -1759,12 +1872,28 @@ function DefaultBadge({ current, fallback, unit = '' }) {
 
 function SettingsSection({ title, description, children, defaultOpen = false, danger = false, sectionKey, summary, badge }) {
   // 依目前分類自我隱藏：不屬當前分類則不渲染（隱藏時 unmount，但 form 在父層 → 編輯不遺失）。
-  const activeSections = useContext(CategoryContext)
+  const { sections: activeSections = [], wide = false, selected = null, linked = null } = useContext(CategoryContext) || {}
   const readOnlyRole = useContext(ReadOnlyContext)
   if (sectionKey && !activeSections.includes(sectionKey)) return null
   const locked = readOnlyRole && !READONLY_EXEMPT_SECTIONS.includes(sectionKey)
+  const body = locked ? <fieldset disabled className="m-0 min-w-0 border-0 p-0">{children}</fieldset> : children
+  // 主從式版面：只畫選中的那一個區塊，直接展開（不用 <details>，免得還要再點一下）
+  if (wide && sectionKey) {
+    if (sectionKey !== selected) return null
+    return (
+      <section data-settings-section={sectionKey} aria-labelledby={`settings-h-${sectionKey}`} className={`card ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`}>
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 id={`settings-h-${sectionKey}`} className={`font-bold ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
+          {badge && <span className="badge bg-chicken-brown/10 text-chicken-brown/70">{badge}</span>}
+        </div>
+        {description && <p className="mt-0.5 text-xs text-chicken-brown/55">{description}</p>}
+        <div className="mt-4">{body}</div>
+      </section>
+    )
+  }
   return (
-    <details className={`card group ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`} open={defaultOpen}>
+    // 手機清單版：網址帶了合法的 block（書籤／分享連結）就預先展開那一塊
+    <details className={`card group ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`} open={defaultOpen || (!!sectionKey && sectionKey === linked)}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -1778,7 +1907,7 @@ function SettingsSection({ title, description, children, defaultOpen = false, da
         <span className="rounded-full bg-chicken-brown/5 px-2 py-1 text-xs font-bold text-chicken-brown/45 group-open:rotate-180">⌄</span>
       </summary>
       <div className="mt-4">
-        {locked ? <fieldset disabled className="m-0 min-w-0 border-0 p-0">{children}</fieldset> : children}
+        {body}
       </div>
     </details>
   )

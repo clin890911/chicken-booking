@@ -371,8 +371,12 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
     <SegmentedControl options={[{ key: 'day', label: '當日總覽' }, { key: 'seat', label: '當日排位' }, { key: 'map', label: '排位地圖' }]} value={pane} onChange={setPane} ariaLabel="規劃視圖" />
   )
 
+  // 當日總覽 lg↑＝一面式（頁面捲動第 3 批）：整頁不捲，左月曆、右當日內容各自在欄內捲動。
+  // 高度鏈：AdminPage 內容區（flex-1 min-h-0）→ 這層 lg:h-full flex-col → 兩欄 grid（flex-1 min-h-0）→ 欄內 overflow-y-auto。
+  // 只套在 day 態（seat／map 維持原本的版面）；lg 以下（直向 iPad、手機）維持整頁捲動。不加固定高、不加 transform。
+  const dayFill = pane === 'day'
   return (
-    <div ref={rootRef} className="space-y-3">
+    <div ref={rootRef} className={dayFill ? 'space-y-3 lg:space-y-0 lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:gap-3' : 'space-y-3'}>
       {/* 視圖切換 +（map 態）精簡日期列。
           sticky：手機上當日總覽很長，捲到下面要切地圖／換日不必先捲回頂端。 */}
       {/* 當日排位自帶一列控制（日期／場次），這列收起來把垂直空間讓給地圖；
@@ -414,7 +418,8 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
       )}
 
       {pane === 'day' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(340px,380px)] gap-3 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(340px,380px)] lg:grid-rows-[minmax(0,1fr)] gap-3 items-start lg:items-stretch lg:flex-1 lg:min-h-0">
+          <div data-testid="plan-day-calendar" className="lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain">
           <GroupCalendar
             value={selectedDate}
             onSelect={setSelectedDate}
@@ -426,6 +431,8 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
             totalSeats={totalSeats}
             walkinByDate={walkinByDate}
           />
+          </div>
+          <div data-testid="plan-day-panel" className="lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain lg:pr-1 lg:pb-2">
           <GroupDayPanel
             date={selectedDate}
             daySummary={daySummary}
@@ -442,6 +449,7 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
             onFocusTable={focusWalkinOnMap}
             onFocusBatch={focusBatchOnMap}
           />
+          </div>
         </div>
       ) : pane === 'seat' ? (
         <DaySeatingPanel

@@ -181,6 +181,9 @@ test('規劃：散客名單出現在當日總覽，「→ 配桌」跳排位地�
   // 統計格「散客」+ 場次區塊內散客小標可見
   await expect(page.getByText('散客', { exact: true }).first()).toBeVisible()
   await expect(page.getByText(/散客 1 組 · 4 位/)).toBeVisible()
+  // 散客名單預設收合（頁面捲動第 3 批）：摘要帶未配桌數，點開才列名單
+  await expect(page.getByText('王小明')).toHaveCount(0)
+  await page.getByTestId('walkin-toggle').filter({ hasText: '未配桌 1' }).click()
   await expect(page.getByText('王小明')).toBeVisible()
 
   // 點「配桌」→ 跳排位地圖並自動進入預配模式
@@ -306,6 +309,7 @@ test('規劃：當日總覽「新增散客」快速表單 → 落地當日散客
 
   // 成功 toast + 散客出現在當日總覽（場次散客列，exact 避開 toast 長字串）
   await expect(page.getByText(/規劃散客 4 位 .* 已新增/)).toBeVisible()
+  await page.getByTestId('walkin-toggle').filter({ hasText: '散客 1 組 · 4 位' }).click()
   await expect(page.getByText('規劃散客', { exact: true })).toBeVisible()
 })
 
