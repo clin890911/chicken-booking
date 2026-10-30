@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 // 訂位「今日」（2026-10-31，Barry）：
 //   1) 來源分段鈕＋「隱藏已離」併成一顆「篩選」鈕（details[data-popover]，來源多選勾選）；
 //      點外面、Esc、按選單裡的按鈕會收；勾選框勾來勾去不收（多選）。
-//   2) 統計卡每格可點：今日訂位→看全部、未指派→今天的當日排位、用餐中→現場頁、已到/離→原地只看已到。
+//   2) 統計卡每格可點：今日訂位→重設篩選（預設仍隱藏已離）、未指派→今天的當日排位、用餐中→現場頁、已到/離→原地只看已到。
 //   3) iPad 1180×820：頁首固定、清單自己捲（#196）仍成立。
 // SHOTS_DIR 有值時存截圖（驗收用）。
 test.use({ timezoneId: 'Asia/Taipei', viewport: { width: 1180, height: 820 } })
@@ -99,13 +99,25 @@ test('篩選鈕：預設清單不變、勾選多選、點外面／Esc／按鈕�
   await expect(menu).toBeHidden()
   await expect(summary).toHaveText('篩選')
   expect(await visibleIds(page)).toEqual(phonesOf(b => b.status !== 'completed'))
+  // #198 收尾：鍵盤 Tab 在選單內移動不收；Tab 出最後一顆（完成）→ 焦點到下方卡片，選單要收（不再蓋在卡片上）
+  await summary.focus()
+  await page.keyboard.press('Enter')
+  await expect(menu).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(menu.getByRole('checkbox').first()).toBeFocused()
+  await expect(menu).toBeVisible()
+  await menu.getByRole('button', { name: '完成' }).focus()
+  await expect(menu).toBeVisible()
+  await page.keyboard.press('Tab')
+  await expect(menu).toBeHidden()
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[data-testid="today-list"]'))).toBe(true)
   // 頁首固定、清單自己捲仍成立
   const list = page.getByTestId('today-list')
   expect(await list.evaluate(el => el.scrollHeight - el.clientHeight)).toBeGreaterThan(100)
   expect(await pageOverflow(page)).toBeLessThanOrEqual(1)
 })
 
-test('統計卡：已到/離原地篩選（再點還原）、今日訂位看全部', async ({ page }) => {
+test('統計卡：已到/離原地篩選（再點還原）、今日訂位重設篩選', async ({ page }) => {
   await shot(page, 'after-stats-row')
   const arrived = page.getByTestId('stat-arrived')
   const done = BOOKINGS.filter(b => b.status === 'arrived' || b.status === 'completed')
@@ -118,7 +130,8 @@ test('統計卡：已到/離原地篩選（再點還原）、今日訂位看全�
   await arrived.click()
   expect(await visibleIds(page)).toEqual(phonesOf(b => b.status !== 'completed'))
 
-  // 今日訂位：搜尋＋篩選都回預設、清單捲回頂端
+  // 今日訂位：提示字「重設篩選」；搜尋＋篩選都回預設、清單捲回頂端（預設仍隱藏已離，所以清單筆數可少於卡上組數）
+  await expect(page.getByTestId('stat-total')).toContainText('重設篩選')
   await page.getByPlaceholder('搜尋姓名 / 電話 / 桌號 / 編號').fill('蔡')
   await page.getByTestId('stat-arrived').click()
   await page.getByTestId('stat-total').click()
