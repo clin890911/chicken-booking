@@ -1,6 +1,8 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { execSync } from 'node:child_process'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 // 版本戳記：每次 build 產生唯一 id，同時寫進前端程式（__BUILD_ID__）與 dist/version.json。
 // 店裡 iPad 常駐在現場頁、好幾天不重新整理 → 一直跑舊版（2026-10 實例：新功能已上線一週，
@@ -72,8 +74,35 @@ function firebaseAuthHelperPlugin(env) {
   }
 }
 
+// 後台「加入主畫面」要拿到後台 manifest（雞王後台、開啟 /admin）。原本只靠 React 掛載後換 <link rel=manifest>，
+// 但 Safari 可能在 JS 換之前就讀了 HTML 裡的客人 manifest → 裝出來的是「雞王訂位」或根本不是後台 App（2026-10 店主回報）。
+// 改成 build 時另外輸出 admin.html、login.html：內容同 index.html，只把 manifest／App 名稱／標題換成後台版。
+// Cloudflare Pages 會以 /admin、/login 直接提供這兩個檔（優先於 SPA fallback），瀏覽器第一個位元組就看到後台 manifest。
+export const ADMIN_HTML_PAGES = ['admin', 'login']
+export function toAdminHtml(html) {
+  const out = html
+    .replace(/(<link rel="manifest" href=")\/manifest\.webmanifest(")/, '$1/manifest-admin.webmanifest$2')
+    .replace(/(<meta name="apple-mobile-web-app-title" content=")[^"]*(")/, '$1雞王後台$2')
+    .replace(/<title>[^<]*<\/title>/, '<title>雞王管理後台</title>')
+  if (!out.includes('/manifest-admin.webmanifest')) throw new Error('[admin-html] index.html 找不到 manifest 連結，無法產生後台頁')
+  return out
+}
+
+function adminHtmlPlugin() {
+  let outDir = 'dist'
+  return {
+    name: 'emit-admin-html',
+    apply: 'build',
+    configResolved(config) { outDir = resolve(config.root, config.build.outDir) },
+    closeBundle() {
+      const html = toAdminHtml(readFileSync(resolve(outDir, 'index.html'), 'utf8'))
+      for (const name of ADMIN_HTML_PAGES) writeFileSync(resolve(outDir, `${name}.html`), html)
+    },
+  }
+}
+
 export default defineConfig(({ command, mode }) => ({
-  plugins: [react(), versionJsonPlugin(), firebaseAuthHelperPlugin(loadEnv(mode, process.cwd(), 'VITE_'))],
+  plugins: [react(), versionJsonPlugin(), firebaseAuthHelperPlugin(loadEnv(mode, process.cwd(), 'VITE_')), adminHtmlPlugin()],
   define: {
     // dev server 不檢查新版本（沒有 version.json）
     __BUILD_ID__: JSON.stringify(command === 'build' ? BUILD_ID : 'dev'),
