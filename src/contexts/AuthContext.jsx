@@ -1,8 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import {
-  auth, googleProvider, isFirebaseConfigured,
-  signInWithPopup, signOut as fbSignOut, onAuthStateChanged, getIdToken,
+  auth, googleProvider, isFirebaseConfigured, authOnSameOrigin,
+  signInWithPopup, signInWithRedirect, getRedirectResult, signOut as fbSignOut, onAuthStateChanged, getIdToken,
 } from '../services/firebase'
+import { isStandaloneApp } from '../hooks/useAppManifest'
+import { describeAuthError } from '../utils/authErrors'
 import { staffWhoAmI } from '../services/cloudDataService'
 import { createStaffGate, verifyStaffRole } from '../utils/staffGate'
 import { STAFF_DENIED_CODE, STAFF_DENIED_MESSAGE, STAFF_UNVERIFIED_CODE, STAFF_UNVERIFIED_MESSAGE } from '../utils/authErrors'
@@ -188,6 +190,15 @@ export function AuthProvider({ children }) {
     return p
   }, [])
 
+  // 整頁導向登入回來：成功由 onAuthStateChanged 接手；失敗（未授權網域、網路…）在登入頁顯示原因
+  useEffect(() => {
+    if (!isFirebaseConfigured) return
+    getRedirectResult(auth).catch((err) => {
+      const d = describeAuthError(err)
+      if (!d.silent) setAuthNotice({ kind: 'error', message: d.message })
+    })
+  }, [])
+
   useEffect(() => {
     // 正式模式：交由 Firebase Auth 維護登入狀態（onAuthStateChanged）。
     if (isFirebaseConfigured) {
@@ -223,10 +234,31 @@ export function AuthProvider({ children }) {
 
   // 正式模式用 Google 彈窗登入；開發模式 fallback 用 email 模擬。
   // Firebase 路徑：只負責彈窗，權限驗證交給 processFbUser（與 onAuthStateChanged 共用 in-flight）。
+  // 整頁導向登入：頁面直接換到 Google，回來後由 getRedirectResult／onAuthStateChanged 接手。
+  // 「加入主畫面」App 一律用這個（彈窗會跳去 Safari、結果回不來 App → 永遠「登入中…」）；
+  // 登入頁「改用整頁方式登入」也走這裡。
+  const signInRedirect = async () => {
+    setAuthNotice(null)
+    await signInWithRedirect(auth, googleProvider)
+    return new Promise(() => {}) // 頁面即將離開；不 resolve，按鈕維持「登入中…」
+  }
+
   const signIn = async (email) => {
     if (isFirebaseConfigured) {
+      // 整頁導向需要同網域的登入輔助頁（authOnSameOrigin）；否則 iOS 跨站隔離下回來會拿不到結果
+      if (authOnSameOrigin && isStandaloneApp()) return signInRedirect()
       setAuthNotice(null)
-      const result = await signInWithPopup(auth, googleProvider)
+      let result
+      try {
+        result = await signInWithPopup(auth, googleProvider)
+      } catch (err) {
+        // 彈窗被擋／此環境不支援彈窗 → 改整頁導向
+        const code = err?.code || ''
+        if (authOnSameOrigin && (code === 'auth/popup-blocked' || code === 'auth/operation-not-supported-in-this-environment')) {
+          return signInRedirect()
+        }
+        throw err
+      }
       return outcomeOrThrow(await processFbUser(result.user))
     }
     const e = (email || '').trim().toLowerCase()
@@ -267,7 +299,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, loading, signIn, signOut, can, authNotice, retryVerify,
+      user, loading, signIn, signInRedirect, signOut, can, authNotice, retryVerify,
       // 本機模擬登入沒有 Firebase Auth，getIdToken 永遠回 null；照樣注入的話，
       // cloudDataService.staffRequest（#168）會把它當成「token 暫時取不到」→ 員工端點一律不送、
       // 無限補推。沒有 token 來源就不提供提供者，讓請求照舊不帶 Authorization 送出。

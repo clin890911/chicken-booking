@@ -1,4 +1,10 @@
-const SITE_ORIGIN = 'https://chicken-booking.zeabur.app'
+// 正式訂位網站可接受的 origin。搬家過渡期新舊並收：先部署這份，再改後台 publicSiteUrl，
+// 任一步都可單獨回滾；舊站（Zeabur）收掉後再把它移出清單。
+const SITE_ORIGINS = [
+  'https://chicken-booking.zeabur.app',
+  'https://chicken-booking.pages.dev',
+  'https://booking.masterofchicken.com',
+]
 const FUNCTION_ORIGIN = 'https://us-central1-chicken-booking-tw.cloudfunctions.net'
 const ENDPOINTS = {
   lineLoginStartEndpoint: ['lineLoginStart', 'https://lineloginstart-reaor76eyq-uc.a.run.app'],
@@ -27,7 +33,7 @@ export function validateLineReadiness(settings = {}) {
     add(field, field === 'lineLoginCallbackUrl' ? 'LINE Login 回呼網址' : 'LINE Login 綁定入口', allowed, '請使用此訂位系統已部署的 HTTPS LINE 端點；回呼網址仍需與 LINE Console 完全一致。')
   }
   const site = httpsUrl(settings.publicSiteUrl)
-  add('publicSiteUrl', '訂位網站網址', site && site.origin === SITE_ORIGIN && site.pathname === '/', '請填入正式訂位網站的 HTTPS 首頁網址。')
+  add('publicSiteUrl', '訂位網站網址', site && SITE_ORIGINS.includes(site.origin) && site.pathname === '/', '請填入正式訂位網站的 HTTPS 首頁網址。')
   const official = httpsUrl(settings.lineOfficialUrl)
   add('lineOfficialUrl', '官方帳號加入連結', official && ['lin.ee', 'line.me'].includes(official.hostname), '請填入 LINE 官方帳號的 HTTPS 加好友連結。')
   if (settings.lineUseLiff === true) {
