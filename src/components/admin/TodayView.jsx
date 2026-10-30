@@ -99,9 +99,13 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
   return (
     <div className="space-y-4">
       {/* 統計（散客口徑） */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <StatsCard label="今日訂位" value={`${stats.totalGroups}`} color="red" />
-        <StatsCard label="總人數" value={`${stats.totalGuests}`} color="yellow" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {/* 今日訂位＋總人數合併一格（店主 2026-10-30）：「12 組 · 48 人」 */}
+        <StatsCard
+          label="今日訂位"
+          color="red"
+          value={<>{stats.totalGroups}<span className="text-sm font-semibold text-chicken-brown/60"> 組 · </span>{stats.totalGuests}<span className="text-sm font-semibold text-chicken-brown/60"> 人</span></>}
+        />
         <StatsCard label="未指派" value={`${stats.unassigned}`} color="red" />
         <StatsCard label="用餐中" value={`${stats.dining}`} color="brown" />
         <StatsCard label="已到/離" value={`${stats.arrivedGroups}`} color="green" />
