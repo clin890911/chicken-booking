@@ -7,14 +7,24 @@ import { describeAuthError } from '../utils/authErrors'
 import { useAdminAppManifest } from '../hooks/useAppManifest'
 import { KeyRound, LockKeyhole, TriangleAlert } from 'lucide-react'
 
+// 彈窗登入多久沒回應就顯示「改用整頁方式登入」
+export const SLOW_LOGIN_MS = 15000
+
 export default function LoginPage() {
-  const { signIn, usingFirebase, user, authNotice, retryVerify } = useAuth()
+  const { signIn, signInRedirect, usingFirebase, user, authNotice, retryVerify } = useAuth()
   useAdminAppManifest() // 從登入頁「加入主畫面」＝後台 App
   const nav = useNavigate()
   const [email, setEmail] = useState('')
   const [err, setErr] = useState('')
   const [errDetail, setErrDetail] = useState('')
   const [busy, setBusy] = useState(false)
+  // 「登入中…」超過 15 秒沒結果：多半是彈窗的結果回不來（iOS／主畫面 App），給整頁導向的出口，不讓人卡死
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    if (!busy) { setSlow(false); return }
+    const t = setTimeout(() => setSlow(true), SLOW_LOGIN_MS)
+    return () => clearTimeout(t)
+  }, [busy])
 
   // 登入成功後才導向，而且要「等 user 真的被設定」才導向：
   // Google 登入時 signIn() 不直接 setUser（由 onAuthStateChanged 非同步接手，
@@ -61,6 +71,18 @@ export default function LoginPage() {
     }
   }
 
+  const doRedirect = async () => {
+    setErr('')
+    setErrDetail('')
+    setBusy(true)
+    try {
+      await signInRedirect()
+    } catch (ex) {
+      showError(ex)
+      setBusy(false)
+    }
+  }
+
   const handleSubmit = (e) => {
     e.preventDefault()
     doSignIn(email)
@@ -84,6 +106,15 @@ export default function LoginPage() {
               <Button onClick={() => doSignIn()} disabled={busy} className="w-full">
                 {busy ? '登入中…' : '使用 Google 登入'}
               </Button>
+              {busy && slow && (
+                <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3">
+                  <p className="text-sm font-bold text-amber-800">登入一直沒有回應？</p>
+                  <p className="text-xs leading-5 text-amber-800">
+                    Google 登入視窗的結果可能沒傳回來（常見於 iPhone／iPad 或主畫面 App）。改用整頁方式登入，會直接跳到 Google 再回來。
+                  </p>
+                  <Button onClick={doRedirect} className="w-full">改用整頁方式登入</Button>
+                </div>
+              )}
               {(err || authNotice) && (
                 <div role="alert" className="space-y-2">
                   <p className="text-sm text-chicken-red font-bold">{err || authNotice.message}</p>
