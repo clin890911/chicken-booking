@@ -184,3 +184,16 @@ it('任務 Escape 與取消一致恢復來源，不寫資料', () => {
   expect(container.querySelector('[data-rail]').dataset.rail).toBe('waitlist')
   expect(harness.ctx.seatWaitlist).not.toHaveBeenCalled()
 })
+
+it('現場指派：無單桌可容、併桌建議要擠一擠 → 橫幅標「（擠一擠）」，用建議桌整組選好且確認鈕可按', async () => {
+  harness.ctx.tables = harness.ctx.tables.filter(t => !['A','D'].includes(t.number))
+  harness.ctx.findReserveCandidates = () => ({ tables: [], kind: 'hold' })
+  harness.ctx.suggestTableCombo = () => ({ enough: true, squeezed: true, tableNumbers: ['B','C'], seats: 8, maxSeats: 10, floor: '1F' })
+  begin('booking', 10)
+  expect(container.textContent).toContain('建議 1F・B + C（擠一擠）（自行選桌）')
+  act(() => container.querySelector('[data-testid="mode-apply-suggestion"]').click())
+  expect(container.textContent).toContain('擠一擠 · 超坐 2 位')
+  expect(confirm().disabled).toBe(false)
+  await act(async () => confirm().click())
+  expect(harness.ctx.assignBookingTablesMulti).toHaveBeenCalledWith('B1', ['B','C'])
+})

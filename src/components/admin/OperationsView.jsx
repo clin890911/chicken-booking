@@ -334,8 +334,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     //   hold＝此刻空桌；preassign＝桌子不必此刻空著，只要此刻的佔用不延續進預配區間
     const suitable = (lockKind === 'preassign' ? preassignableTables(1, reserveOpts) : findSuitableTables(1)).map(t => t.number)
     const suggestion = findReserveCandidates(guests, reserveOpts).tables[0]
-    const suggestionTables = suggestion ? [] : comboSuggestionFor(guests, suitable, { ...reserveOpts, mode: lockKind })
-    startMultiMode({ kind: 'booking', booking, need: guests, lockKind, suitable, suggestion: suggestion?.number, suggestionTables })
+    const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { ...reserveOpts, mode: lockKind })
+    startMultiMode({ kind: 'booking', booking, need: guests, lockKind, suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
   }
 
   // 卡片上「指派 ○○○」一鍵指派：建議桌與 startAssign 同一個來源（findReserveCandidates，鎖桌時機同 lockKindFor）。
@@ -377,22 +377,25 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 無單桌可容時的併桌建議（suggestTableCombo：此刻空桌、排除時段重疊的他筆預配與今日團保桌）。
   // 只採用「每張都在可選集合內、且至少兩張」的組合——「用建議桌」選到的桌一定點得到；
   // 選到的桌若仍有預配／團保，照樣走 multiWarnings 勾選解鎖（防呆不因一鍵套用而跳過）。
+  // 回傳 { tables, squeezed }：squeezed＝原席數湊不到、要擠一擠（每桌多坐 1 位）才坐得下的組合（橫幅照實標出）。
   const comboSuggestionFor = (need, suitable, opts) => {
-    if (!(need > 0)) return []
+    if (!(need > 0)) return { tables: [], squeezed: false }
     const combo = suggestTableCombo(need, opts)
     const nums = (combo?.enough ? combo.tableNumbers || [] : []).map(String)
     const pool = new Set((suitable || []).map(String))
-    return nums.length > 1 && nums.every(n => pool.has(n)) ? nums : []
+    const ok = nums.length > 1 && nums.every(n => pool.has(n))
+    return { tables: ok ? nums : [], squeezed: ok && !!combo?.squeezed }
   }
 
   // 單桌與多桌共用人工選桌；推薦只提示，不自動勾桌。
   // suggestionTables：建議的整組桌（單桌建議＝[suggestion]；無單桌可容時為併桌組合）——
   // 只給「用建議桌」一鍵套用，進模式時仍不自動勾（PR #137：要店員自己決定）。
-  const startMultiMode = ({ kind, booking = null, wait = null, need, lockKind = 'hold', suitable, suggestion, suggestionTables = [], replacing = false }) => {
+  const startMultiMode = ({ kind, booking = null, wait = null, need, lockKind = 'hold', suitable, suggestion, suggestionTables = [], suggestionSqueezed = false, replacing = false }) => {
     rememberModeSource()
     const sugTables = suggestion ? [String(suggestion)] : (suggestionTables || []).map(String)
     setMode({ type: 'assign-multi', kind, booking, wait, need, lockKind,
-      selected: [], suitable, suggestion: suggestion || sugTables[0], suggestionTables: sugTables, replacing, confirmedWarning: null })
+      selected: [], suitable, suggestion: suggestion || sugTables[0], suggestionTables: sugTables,
+      suggestionSqueezed: !suggestion && sugTables.length > 1 && !!suggestionSqueezed, replacing, confirmedWarning: null })
     setSelectedTable(null)
     setPendingConfirm(null)
     const suggestedTable = tables.find(t => String(t.number) === String(suggestion || sugTables[0]))
@@ -424,8 +427,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const guests = Number(wait.partySize) || 0
     const suitable = findSuitableTables(1).map(t => t.number)
     const suggestion = suggestTable(guests, { date: todayStr(), mode: 'now' })
-    const suggestionTables = suggestion ? [] : comboSuggestionFor(guests, suitable, { date: todayStr(), mode: 'now' })
-    startMultiMode({ kind: 'waitlist', wait, need: guests, suitable, suggestion: suggestion?.number, suggestionTables })
+    const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { date: todayStr(), mode: 'now' })
+    startMultiMode({ kind: 'waitlist', wait, need: guests, suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
   }
 
   // 未配桌的訂位到店：「到了 · 選桌入座」（今日訂位卡／報到列）。
@@ -440,8 +443,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const guests = Number(booking.guests) || 0
     const suitable = findSuitableTables(1).map(t => t.number)
     const suggestion = suggestTable(guests, { bookingId: booking.id, date: todayStr(), mode: 'now' })
-    const suggestionTables = suggestion ? [] : comboSuggestionFor(guests, suitable, { bookingId: booking.id, date: todayStr(), mode: 'now' })
-    startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number, suggestionTables })
+    const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { bookingId: booking.id, date: todayStr(), mode: 'now' })
+    startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
   }
 
   // 改派桌位模式：團體梯次入座被佔桌卡住 → 逐桌挑替代空桌（queue 依序處理）

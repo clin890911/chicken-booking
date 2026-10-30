@@ -86,7 +86,7 @@ export default function FastWalkInPanel({
       const combo = suggestTableCombo(g, { date: todayStr(), mode: 'now' })
       if (combo.enough) recommendation = { number: combo.tableNumbers?.[0], floor: combo.floor, tableNumbers: (combo.tableNumbers || []).map(String) }
       verdict = combo.enough
-        ? { tone: 'multi', icon: 'chair', text: `無單桌可容 → 建議 ${combo.floor}・${(combo.tableNumbers || []).join(' + ')}（自行選 ${combo.tableNumbers?.length || 2} 張桌）` }
+        ? { tone: 'multi', icon: 'chair', text: `無單桌可容 → 建議 ${combo.floor}・${(combo.tableNumbers || []).join(' + ')}${combo.squeezed ? `（擠一擠：${combo.seats} 席坐 ${g} 位）` : ''}（自行選 ${combo.tableNumbers?.length || 2} 張桌）` }
         : { tone: 'none', icon: 'hourglass', text: '目前座位不足 → 建議改候位取號' }
     }
   }

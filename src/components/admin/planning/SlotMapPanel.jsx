@@ -7,7 +7,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../ui/Toast'
 import { seatingPerms } from '../../../utils/seatingPerms'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
-import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures, CAPACITY_EXCLUDED_STATUSES } from '../../../utils/capacity'
+import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures, CAPACITY_EXCLUDED_STATUSES, squeezeSeats } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import SegmentedControl from '../../ui/SegmentedControl'
 import Icon from '../../ui/Icon'
@@ -123,11 +123,20 @@ export default function SlotMapPanel({
   const assignMulti = !!assignBooking
   const highlightTables = freeTables.map(t => t.number)
 
-  // 併桌已選席數（合計選中桌的容量）
-  const assignSelectedSeats = useMemo(
-    () => assignSelected.reduce((s, n) => s + (Number(tables.find(t => t.number === n)?.capacity) || 0), 0),
+  // 併桌已選席數（合計選中桌的容量）與擠一擠上限（每桌可多坐 1 位，capacity.squeezeSeats）。
+  // 與現場指派／帶位同口徑（ModeBanner、FastWalkInPanel）：確認門檻看擠一擠上限，超過原席數只標黃字。
+  // ⚠️ 只用在散客預配；團體預排另走 groupEditorChecks（只警告、不設上限），線上場次容量 calcSlotCapacity 不動。
+  const assignSelectedTables = useMemo(
+    () => assignSelected.map(n => tables.find(t => t.number === n)).filter(Boolean),
     [assignSelected, tables],
   )
+  const assignSelectedSeats = useMemo(
+    () => assignSelectedTables.reduce((s, t) => s + (Number(t.capacity) || 0), 0),
+    [assignSelectedTables],
+  )
+  const assignMaxSeats = useMemo(() => squeezeSeats(assignSelectedTables), [assignSelectedTables])
+  const assignEnough = assignSelected.length > 0 && assignMaxSeats >= guestsNeeded
+  const assignSqueezed = assignEnough && assignSelectedSeats < guestsNeeded
 
   const startAssign = (booking) => { if (!canPreassign) return; setDetailBookingId(null); setAssignBooking(booking); setAssignSelected([]); setSelectedTable(null); setFocus(null) }
   const cancelAssign = () => { setAssignBooking(null); setAssignSelected([]) }
@@ -165,14 +174,14 @@ export default function SlotMapPanel({
   // 併桌預配確認：席數夠 → 一筆 booking 記多桌（主桌 + 額外桌），不動今日桌況
   const confirmAssignMulti = () => {
     if (!assignBooking) return
-    if (assignSelectedSeats < guestsNeeded) return toast.error(`還差 ${guestsNeeded - assignSelectedSeats} 席，請再加桌`)
+    if (!assignEnough) return toast.error(`擠一擠也還差 ${guestsNeeded - assignMaxSeats} 位，請再加桌`)
     const picked = assignSelected
     // 確認前重驗同場次占用與日期可用性，避免選桌後資料被另一台裝置改變。
     if (!picked.length || picked.some(n => !freeTables.some(t => t.number === n))) return toast.error('所選桌已不可用，請重新選桌')
     if (new Set(picked.map(n => tables.find(t => t.number === n)?.floor)).size > 1) return toast.error('併桌需在同一樓層')
     if (picked.length === 1) preassignBookingTable(assignBooking.id, picked[0])
     else preassignBookingTables(assignBooking.id, picked)
-    toast.success(`${assignBooking.name}（${guestsNeeded} 位）已${picked.length > 1 ? '併桌' : ''}預配到 ${picked.join(' + ')}`)
+    toast.success(`${assignBooking.name}（${guestsNeeded} 位）已${picked.length > 1 ? '併桌' : ''}預配到 ${picked.join(' + ')}${assignSqueezed ? `（擠一擠超坐 ${guestsNeeded - assignSelectedSeats} 位）` : ''}`)
     setAssignBooking(null)
     setAssignSelected([])
     setSelectedTable(picked[0])
@@ -241,27 +250,30 @@ export default function SlotMapPanel({
               <Icon name="chair" size={18} />
               <span>{'預先配桌'}：{assignBooking.name}（{assignBooking.guests} 位 · {assignBooking.timeSlot}）</span>
               {assignMulti ? (
-                <span className={`inline-flex items-center gap-1 px-2.5 h-7 rounded-lg font-semibold text-sm ${assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
+                <span className={`inline-flex items-center gap-1 px-2.5 h-7 rounded-lg font-semibold text-sm ${assignEnough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
                   已選 {assignSelectedSeats}/{guestsNeeded} 席 · {assignSelected.length} 桌
                 </span>
               ) : (
                 <span className="text-xs opacity-90">請點地圖上高亮的空桌</span>
               )}
             </div>
-            <button type="button" onClick={cancelAssign} className={`${bannerBtn} text-orange-700`}>取消</button>
+            <div className="flex items-center gap-2">
+              {assignSqueezed && <span data-testid="squeeze-badge" className="text-xs font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded">擠一擠 · 超坐 {guestsNeeded - assignSelectedSeats} 位</span>}
+              <button type="button" onClick={cancelAssign} className={`${bannerBtn} text-orange-700`}>取消</button>
+            </div>
           </div>
           {assignMulti && (
             <div className="bg-white/15 rounded-lg px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
               <div className="text-sm font-semibold">
                 {assignSelected.length ? `已選：${assignSelected.join(' + ')}` : '尚未選桌（點同層空桌加入，可併多張小桌）'}
-                {assignSelectedSeats < guestsNeeded && <span className="ml-2 opacity-90">還差 {guestsNeeded - assignSelectedSeats} 席</span>}
+                {!assignEnough && <span className="ml-2 opacity-90">— 擠一擠也還差 {guestsNeeded - assignMaxSeats} 位</span>}
               </div>
               <button
                 type="button"
                 onClick={confirmAssignMulti}
-                disabled={assignSelectedSeats < guestsNeeded}
+                disabled={!assignEnough}
                 className={`tap text-xs px-4 h-8 rounded-lg font-semibold whitespace-nowrap ${
-                  assignSelectedSeats >= guestsNeeded ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
+                  assignEnough ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
               ><GlyphText size={14}>{`✓ ${assignSelected.length > 1 ? '確認併桌預配' : '確認預配'}`}</GlyphText></button>
             </div>
           )}
