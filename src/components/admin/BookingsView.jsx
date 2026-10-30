@@ -7,6 +7,7 @@ import CalendarView from './CalendarView'
 import AddBookingView from './AddBookingView'
 import SearchBookingsView from './SearchBookingsView'
 import SegmentedControl from '../ui/SegmentedControl'
+import PageTitle from '../layout/PageTitle'
 import { useAuth } from '../../contexts/AuthContext'
 
 const SUB_TABS = [
@@ -67,7 +68,9 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
 
   return (
     <div ref={rootRef} data-fill-page={fill ? '' : undefined} className={`space-y-3${fillCls}`}>
-      <div className="sticky top-0 z-20 py-1 bg-chicken-cream md:flex-shrink-0">
+      {/* 頁名與子分頁籤同一列（桌機不再有獨立標題列，見 layout/PageTitle） */}
+      <div className="sticky top-0 z-20 py-1 bg-chicken-cream flex items-center gap-3 md:flex-shrink-0">
+      <PageTitle className="pl-1">訂位</PageTitle>
       <SegmentedControl options={canCreate ? SUB_TABS : SUB_TABS.filter(t => t.key !== 'add')} value={sub} onChange={setSub} ariaLabel="訂位子分頁" />
       </div>
 
