@@ -59,3 +59,48 @@ describe('phaseLine：一天節奏單句（移到摘要分頁）', () => {
     expect(phaseLine({ settings: s, now: NOW, pulse: { soon: [{}], later: [{}, {}] }, groups: [] })).toBe('晚餐 · 今日還有 3 組訂位')
   })
 })
+
+describe('seatableNowTables：「可入座／可坐」唯一口徑', () => {
+  it('有桌況字典走 canSeatNow；可依樓層篩；兩層相加＝全店 computeStoreStats.vacant', async () => {
+    const { seatableNowTables, isSeatableNow } = await import('../../src/utils/opsAlerts')
+    const { buildOpsTablePresentation } = await import('../../src/utils/opsTablePresentation')
+    const { INITIAL_TABLES } = await import('../../src/data/tables')
+    // 用出廠 52 桌，混入各種狀態：用餐、待清、停用、維修、時段衝突（30 分內有下一組）
+    const tables = INITIAL_TABLES.map((t, i) => ({ ...t,
+      status: i % 7 === 0 ? 'dining' : i % 11 === 0 ? 'cleaning' : 'vacant',
+      isActive: i % 13 !== 5,
+      seatedAt: i % 7 === 0 ? iso(18) : undefined,
+    }))
+    const bookings = tables.filter((t, i) => t.status === 'vacant' && i % 5 === 0)
+      .map((t, i) => ({ id: `N${i}`, guests: 2, status: 'confirmed', date: '2026-10-10', timeSlot: '19:15', assignedTableId: t.number }))
+    const presentation = buildOpsTablePresentation({ tables, bookings, settings, date: '2026-10-10', now: NOW })
+    const floors = [...new Set(tables.map(t => t.floor))]
+    expect(floors.sort()).toEqual(['1F', '2F']) // 樓層只有兩層，相加才會等於全店
+    const f1 = seatableNowTables(tables, presentation, { floor: '1F' }).length
+    const f2 = seatableNowTables(tables, presentation, { floor: '2F' }).length
+    const st = computeStoreStats({ tables, bookings, waitlist: [], tablePresentation: presentation, pulse: empty, today: '2026-10-10' })
+    expect(f1 + f2).toBe(st.vacant)
+    expect(st.vacant).toBeGreaterThan(0)
+    // 時段衝突的空桌不算
+    const conflict = tables.find(t => t.number === bookings[0].assignedTableId)
+    expect(isSeatableNow(conflict, presentation)).toBe(false)
+  })
+  it('沒有桌況字典：退回 vacant 且今日可用', async () => {
+    const { seatableNowTables } = await import('../../src/utils/opsAlerts')
+    const tables = [{ number: '1', status: 'vacant', isActive: true }, { number: '2', status: 'vacant', isActive: false }, { number: '3', status: 'dining', isActive: true }]
+    expect(seatableNowTables(tables, null, { today: '2026-10-10' }).map(t => t.number)).toEqual(['1'])
+  })
+})
+
+describe('pickOpsAlerts：無障礙名稱', () => {
+  it('aria-label 先講幾件、再講點了去哪', () => {
+    const tables = [{ number: '107', status: 'dining', seatedAt: iso(16, 0) }, { number: '203', status: 'cleaning', updatedAt: iso(18) }]
+    const list = pickOpsAlerts({ pulse: { overdue: [], soon: [{ guests: 2 }], later: [] }, tables, settings, waitlist: [{ status: 'waiting', partySize: 2 }], now: NOW })
+    expect(list.map(a => a.ariaLabel)).toEqual([
+      '超時 1 桌，點擊開啟 107',
+      '將到 1 組（90 分內），點擊開啟今日訂位',
+      '待清 1 桌，點擊開啟 203',
+      '候位 1 組，點擊開啟候位',
+    ])
+  })
+})

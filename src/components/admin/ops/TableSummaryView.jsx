@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { History } from 'lucide-react'
 import { diffMin, stageOf } from '../../../utils/diningStage'
 import { buildOpsTablePresentation } from '../../../utils/opsTablePresentation'
+import { isSeatableNow } from '../../../utils/opsAlerts'
 
 // 桌況「摘要」視圖：以「可坐存量 + 依可操作狀態分組」快速回答『現在能坐多少、哪些要處理』。
 // 共同桌況字典補下組與用餐＋清桌估占；tables 已由父層依樓層過濾。
@@ -55,7 +56,7 @@ export default function TableSummaryView({ store = null, onOpenLog, tables = [],
     tables.forEach(t => {
       const state = presentation[t.number]
       if (state?.unavailableReason) { unavailable.push(t); return }
-      if (t.status === 'vacant') (state?.canSeatNow ? vacant : conflicts).push(t)
+      if (t.status === 'vacant') (isSeatableNow(t, presentation) ? vacant : conflicts).push(t)
       else if (t.status === 'dining') dining.push(t)
       else if (t.status === 'cleaning') cleaning.push(t)
       else if (t.status === 'reserved') held.push(t)

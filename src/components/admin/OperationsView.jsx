@@ -7,7 +7,7 @@ import TableDrawer from './floormap/TableDrawer'
 import ModeBanner from './ops/ModeBanner'
 import OpsRail from './ops/OpsRail'
 import OpsHintBar from './ops/OpsHintBar'
-import { computeStoreStats, phaseLine } from '../../utils/opsAlerts'
+import { computeStoreStats, phaseLine, seatableNowTables } from '../../utils/opsAlerts'
 import { classifyTodayPulse } from '../../utils/bookingPulse'
 import { listToday as opsLogToday } from '../../services/opsLogService'
 import OpsLogModal from './ops/OpsLogModal'
@@ -1157,18 +1157,21 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     modeSource.current = null
   }
 
-  // 樓層分頁上的數字（B，2026-10-17）：選桌模式＝「這一組可選的桌」、帶位籤＝帶位可加的空桌、平常＝現在可坐。
-  // 本層一張都選不到、另一層有 → 另一層分頁亮紅點提示切換。
+  // 樓層分頁上的數字（B，2026-10-17）：選桌模式（指派/改桌）＝「可選 N」這一組可選的桌；其餘一律「可坐 N」。
+  // 「可坐 N」與頂端常駐「可入座」同一支 seatableNowTables（Barry 2026-10-30 可入座統一）：1F＋2F＝常駐列。
+  //   帶位籤以前顯示「依目前人數可選的桌」（walkinSelectable），會跟常駐列差一兩桌；現在只改「顯示的數字」，
+  //   帶位面板的選桌池（walkinSelectable）不動。
+  // 紅點（nudge）仍看選桌池：本層一張都選不到、另一層有 → 另一層分頁亮紅點提示切換。
   const floorCounts = (() => {
     const selecting = mode?.suitable ? 'mode' : (!mode && !reserveOpen && railTab === 'walkin' && canWalkIn) ? 'walkin' : null
     const pool = selecting === 'mode' ? new Set((mode.suitable || []).map(String))
       : selecting === 'walkin' ? new Set(walkinSelectable.map(String)) : null
-    const count = f => tables.filter(t => t.floor === f && (pool ? pool.has(String(t.number)) : tablePresentation[t.number]?.canSeatNow)).length
-    const c = { '1F': count('1F'), '2F': count('2F') }
+    const poolCount = f => tables.filter(t => t.floor === f && pool.has(String(t.number))).length
+    const seatable = f => seatableNowTables(tables, tablePresentation, { floor: f }).length
     const label = selecting === 'mode' ? '可選' : '可坐'
     return ['1F', '2F'].map(f => ({
-      key: f, value: c[f], label, total: tables.filter(t => t.floor === f).length,
-      nudge: !!selecting && f !== floor && c[floor] === 0 && c[f] > 0,
+      key: f, value: selecting === 'mode' ? poolCount(f) : seatable(f), label, total: tables.filter(t => t.floor === f).length,
+      nudge: !!pool && f !== floor && poolCount(floor) === 0 && poolCount(f) > 0,
     }))
   })()
 

@@ -58,11 +58,27 @@ export function pickOpsAlerts({ pulse, tables, settings, waitlist, now }) {
     alerts.push({ key: 'waitlist', level: 'queue', label: '候位', count: w.length, unit: '組', people: sumGuests(w, 'partySize'),
       text: `候位 ${w.length} 組`, action: 'open-waitlist', title: '點開候位' })
   }
-  return alerts
+  // 無障礙名稱（螢幕閱讀器／語音控制）：「超時 1 桌，點擊開啟 107」——先講是什麼、幾件，再講點了會去哪
+  const dest = (a) => a.action === 'open-table' ? `點擊開啟 ${a.tableNumber}`
+    : a.action === 'open-waitlist' ? '點擊開啟候位' : '點擊開啟今日訂位'
+  return alerts.map(a => ({ ...a, ariaLabel: `${a.text}，${dest(a)}` }))
+}
+
+// 「可入座／可坐」唯一口徑（Barry 2026-10-30「可入座統一」）：現在就能坐的桌＝opsTablePresentation.canSeatNow
+// （空桌、今日可用、不撞下一組時段）。頂端常駐「可入座」、樓層鈕「可坐 N」、摘要分頁「可入座」三處一律走這支，
+// 所以 1F＋2F 一定等於常駐列。帶位面板「依人數篩可選桌」（walkinSelectable）是選桌邏輯，不走這支、也不受影響。
+// 沒有桌況字典時（極少數呼叫端）退回「vacant 且今日可用」。
+export function isSeatableNow(table, tablePresentation = null, today = undefined) {
+  if (!table) return false
+  if (tablePresentation) return !!tablePresentation[table.number]?.canSeatNow
+  return table.status === 'vacant' && isTableUsableOnDate(table, today)
+}
+export function seatableNowTables(tables, tablePresentation = null, { floor = null, today } = {}) {
+  return (tables || []).filter(t => (floor == null || t.floor === floor) && isSeatableNow(t, tablePresentation, today))
 }
 
 // 全店數字：頂端常駐兩格（可入座／用餐中）與摘要分頁共用。
-// 可入座＝tablePresentation.canSeatNow（與樓層鈕「可坐 N」同一口徑）；可坐人數＝那些桌的容量加總、用餐中桌數、在席人數、待清、候位、今日還沒到的訂位。
+// 可入座＝seatableNowTables（與樓層鈕「可坐 N」同一支）；可坐人數＝那些桌的容量加總、用餐中桌數、在席人數、待清、候位、今日還沒到的訂位。
 // 「在席人數」優先用 booking 實際人數；大組併桌只在主桌算一次；團體桌（無 booking）以桌容量估。
 export function computeStoreStats({ tables = [], bookings = [], waitlist = [], tablePresentation = null, pulse = null, today }) {
   const counts = { vacant: 0, reserved: 0, dining: 0, cleaning: 0, blocked: 0 }
@@ -85,11 +101,9 @@ export function computeStoreStats({ tables = [], bookings = [], waitlist = [], t
       }
     }
   })
-  const vacantTables = tablePresentation
-    ? tables.filter(t => tablePresentation[t.number]?.canSeatNow)
-    : tables.filter(t => t.status === 'vacant' && isTableUsableOnDate(t, today))
+  const vacantTables = seatableNowTables(tables, tablePresentation, { today })
   return {
-    vacant: tablePresentation ? vacantTables.length : counts.vacant,
+    vacant: vacantTables.length,
     vacantSeats: vacantTables.reduce((s, t) => s + (Number(t.capacity) || 0), 0),
     dining: counts.dining,
     cleaning: counts.cleaning,

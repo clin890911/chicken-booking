@@ -75,7 +75,7 @@ export default function OpsHintBar({ tablePresentation = null, onOpenUpcoming, o
                 data-alert={a.key}
                 onClick={() => run(a)}
                 title={a.title}
-                aria-label={`${a.text}：${a.title}`}
+                aria-label={a.ariaLabel}
                 className={`tap flex-none inline-flex items-center gap-1 min-h-[44px] px-2.5 rounded-xl border cursor-pointer hover:brightness-95 ${LEVEL_CLS[a.level]}`}
               >
                 {Icon && <Icon size={15} strokeWidth={2.25} aria-hidden className="flex-none" />}
