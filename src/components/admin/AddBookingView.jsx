@@ -221,17 +221,25 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   }
 
   // 日期快選 chips：今天 / 明天 / 後天 / 其他日期（展開緊湊月曆）
+  // 頁面捲動第 2 批・A：sm 以上 7 天＋「選月曆」排成單列 8 格（原本 2 排）。格子變窄，所以
+  // 第 4 天起改成「上 M/D、下 週X」兩行（原本 M/D(週X) 一行＋「N 天後」），字級不變。
   const quickDates = useMemo(() => {
-    // 連假期間電話訂位常問一週內的日子：0–6 天都給快選（第 4 天起標 M/D(週X)）
+    // 連假期間電話訂位常問一週內的日子：0–6 天都給快選
     const base = new Date()
     return [0, 1, 2, 3, 4, 5, 6].map(i => {
       const d = formatDate(addDays(base, i))
-      if (i < 3) return { date: d, label: i === 0 ? '今天' : i === 1 ? '明天' : '後天', sub: dayLabel(d) }
       const dt = new Date(d + 'T00:00:00')
-      return { date: d, label: `${dt.getMonth() + 1}/${dt.getDate()}(週${['日', '一', '二', '三', '四', '五', '六'][dt.getDay()]})`, sub: `${i} 天後` }
+      const md = `${dt.getMonth() + 1}/${dt.getDate()}`
+      const wk = ['日', '一', '二', '三', '四', '五', '六'][dt.getDay()]
+      if (i < 3) return { date: d, label: i === 0 ? '今天' : i === 1 ? '明天' : '後天', sub: `${md}(${wk})`, aria: `${i === 0 ? '今天' : i === 1 ? '明天' : '後天'} ${md} 週${wk}` }
+      return { date: d, label: md, sub: `週${wk}`, aria: `${md} 週${wk}（${i} 天後）` }
     })
   }, [])
   const isQuickDate = quickDates.some(q => q.date === date)
+  // 「選月曆」格的小字：選了快選以外的日期 → 已選 M/D；否則提示可展開／收合
+  const calSub = !isQuickDate
+    ? `已選 ${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`
+    : showCalendar ? '收合 ▴' : '更多 ▾'
 
   const handleSubmit = async () => {
     if (!valid) {
@@ -307,10 +315,13 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   }
 
   return (
-    <div className="max-w-3xl lg:max-w-6xl mx-auto">
+    <div className="w-full max-w-3xl lg:max-w-6xl mx-auto md:flex md:flex-col md:flex-1 md:min-h-0">
       {/* 版面：手機／直向單欄（客人 → 人數 → 日期時段 → 備註，與過去同順序）；
           lg 以上兩欄——左＝客人＋人數＋備註、右＝日期＋時段＋桌位，
-          讓整天的時段在 iPad 橫向 1180×820 一進來就看得到、不必往下捲（接電話時最常改的就是日期時段）。 */}
+          讓整天的時段在 iPad 橫向 1180×820 一進來就看得到、不必往下捲（接電話時最常改的就是日期時段）。
+          頁面捲動第 2 批・A：iPad（md 以上）不整頁捲動——表單區（data-testid=add-form-scroll）自己捲，
+          底部確認列固定在下方（高度鏈見 BookingsView／index.css [data-fill-page]，不加固定高）。 */}
+      <div data-testid="add-form-scroll" className="md:flex-1 md:min-h-0 md:overflow-y-auto md:overscroll-y-contain md:-mx-1 md:px-1 md:py-1">
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:grid-rows-[auto_auto_1fr] lg:items-start">
       {/* === ① 客人 === */}
       <Card className="lg:col-start-1 lg:row-start-1">
@@ -411,11 +422,12 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
           {/* 日期：今天/明天/後天 chips + 其他日期（展開緊湊月曆） */}
           <div>
             <label className="label">日期</label>
-            <div className="flex gap-1.5 flex-wrap">
+            {/* 手機 4 欄×2 排；sm 以上單列 8 格（7 天＋選月曆） */}
+            <div data-testid="quick-date-row" className="grid grid-cols-4 gap-1.5 sm:grid-cols-8 sm:gap-1">
               {quickDates.map(q => (
-                <button key={q.date} type="button"
+                <button key={q.date} type="button" aria-label={q.aria} aria-pressed={date === q.date}
                   onClick={() => { setDate(q.date); setShowCalendar(false) }}
-                  className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+                  className={`min-h-[44px] min-w-0 px-0.5 py-1.5 rounded-xl border-2 text-sm font-bold leading-tight whitespace-nowrap transition-all ${
                     date === q.date
                       ? 'border-chicken-red bg-chicken-red text-white'
                       : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
@@ -423,15 +435,13 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
                   <span className={`block text-[10px] font-bold ${date === q.date ? 'text-white/80' : 'text-chicken-brown/50'}`}>{q.sub}</span>
                 </button>
               ))}
-              <button type="button" onClick={() => setShowCalendar(s => !s)}
-                className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+              <button type="button" onClick={() => setShowCalendar(s => !s)} aria-expanded={showCalendar}
+                className={`min-h-[44px] min-w-0 px-0.5 py-1.5 rounded-xl border-2 text-sm font-bold leading-tight whitespace-nowrap transition-all ${
                   !isQuickDate
                     ? 'border-chicken-red bg-chicken-red/10 text-chicken-red'
                     : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
                 選月曆
-                <span className="block text-[10px] font-bold opacity-70">
-                  {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合 ▴' : '可排數月後 ▾'}
-                </span>
+                <span className="block text-[10px] font-bold opacity-70">{calSub}</span>
               </button>
             </div>
             {showCalendar && (
@@ -444,9 +454,10 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
           {/* 時段 */}
           <div ref={slotRef} className={attempted && !timeSlot ? 'rounded-xl ring-2 ring-chicken-red/40 p-2 -m-2' : ''}>
             <label className="label">時段（{dayLabel(date)}）</label>
-            {/* compact：4 欄小晶片（一天 17 個時段約 5 排），兩欄版面下整天的時段都在第一屏 */}
+            {/* compact 小晶片：sm 以上 6 欄（一天 17 個時段 3 排），兩欄版面下整天的時段都在第一屏 */}
             <TimeSlotPicker
               variant="compact"
+              compactCols={6}
               date={date}
               value={timeSlot}
               onChange={pickSlot}
@@ -513,11 +524,13 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
         />
       </Card>
       </div>
+      </div>
 
       {/* === 底部黏性操作列：缺欄時收成一列「還差」pills（點捲到該欄），
              填齊才展開確認鈕——避免手機上整塊蓋住日期/時段。
              確認鈕帶出所選桌號（今天），存檔前就看得到會指派哪張桌 === */}
-      <div className="sticky bottom-20 lg:bottom-3 z-20 pt-2">
+      {/* md 以上表單區自己捲、這列本來就固定在下方 → md:static（sticky 的 bottom 位移會把它往上推、蓋到表單） */}
+      <div className="sticky bottom-20 lg:bottom-3 z-20 pt-2 md:static md:flex-shrink-0">
         <div className="rounded-xl border border-chicken-brown/10 bg-white/95 p-2.5 shadow-lg backdrop-blur">
           {valid ? (
             <Button onClick={handleSubmit} disabled={busy} className="w-full min-h-[44px]">

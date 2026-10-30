@@ -143,3 +143,23 @@ button, a, [role="button"] {
 /* Safe area */
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 .safe-top { padding-top: env(safe-area-inset-top); }
+
+/* 一面式子頁（頁面捲動第 2 批・A，2026-10-31）：訂位「今日／新增」在 iPad（md 以上）不整頁捲動，
+   頁首固定、只有清單／表單自己捲。子頁根元素標 data-fill-page，這裡把 AdminPage 內容區
+   （[data-testid=admin-content]）到子頁之間的高度鏈改成 flex column＋min-height:0。
+   - 不改 AdminPage.jsx：內容區本身的 overflow-y:auto 保留當安全網（頁首比視窗還高時仍可整頁捲）。
+   - 只認「沒被 hidden 的那層」：交班帶回時訂位分頁可能被隱藏掛載，不可讓它影響別的分頁。
+   - 不加固定高、不加 transform；:has 不支援的瀏覽器自動退回原本的整頁捲動。
+   - 手機（< md）維持整頁捲動：頁首固定會把清單擠到只剩半屏。 */
+@media (min-width: 768px) {
+  [data-testid="admin-content"]:has(> div:not([hidden]) > [data-fill-page]) {
+    display: flex;
+    flex-direction: column;
+  }
+  [data-testid="admin-content"] > div:not([hidden]):has(> [data-fill-page]) {
+    flex: 1 1 0%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+}

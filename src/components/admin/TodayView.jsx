@@ -96,8 +96,13 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
     return peak
   }, [entries])
 
+  // 版面（頁面捲動第 2 批・A，2026-10-31）：iPad（md 以上）頁首（統計、團體一覽、搜尋＋來源篩選）固定，
+  // 只有下方清單自己捲（data-testid=today-list）；lg 以上清單改 2 欄格狀（每個時段一組，時段標題橫跨兩欄）。
+  // 高度鏈由 BookingsView／index.css 的 [data-fill-page] 串起來，這裡只接 flex-1＋min-h-0，不加固定高。
+  // 手機（< md）維持原本整頁捲動。
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 md:flex md:flex-col md:flex-1 md:min-h-0">
+      <div data-testid="today-header" className="space-y-3 md:flex-shrink-0">
       {/* 統計（散客口徑） */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {/* 今日訂位＋總人數合併一格（店主 2026-10-30）：「12 組 · 48 人」 */}
@@ -118,9 +123,9 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
         </div>
       )}
 
-      {/* 搜尋 + Filter */}
-      <div className="space-y-2">
-        <div className="flex gap-2 items-center">
+      {/* 搜尋 + Filter：lg 以上併成一列（搜尋｜來源篩選｜隱藏已離），省下一整列給清單 */}
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+        <div className="flex gap-2 items-center lg:flex-1 lg:min-w-0">
           <input
             type="search"
             placeholder="搜尋姓名 / 電話 / 桌號 / 編號"
@@ -133,13 +138,15 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
             <span>隱藏已離</span>
           </label>
         </div>
-        {/* py-2 !mt-0 -mb-2：overflow 容器會裁掉分段控制 ::after 外擴的 44px 可點區，上下各留 8px padding 讓它露出；父層 space-y-2 的 8px mt 與 py-2 抵銷（!mt-0），底部 -mb-2 抵銷 padding → 版面不變 */}
-        <div className="overflow-x-auto no-scrollbar -mx-1 px-1 py-2 !mt-0 -mb-2">
+        {/* py-2 -my-2：overflow 容器會裁掉分段控制 ::after 外擴的 44px 可點區，上下各留 8px padding 讓它露出；-my-2 抵銷 padding → 版面不變 */}
+        <div className="overflow-x-auto no-scrollbar -mx-1 px-1 py-2 -my-2 lg:mx-0 lg:flex-shrink-0">
           <SegmentedControl size="sm" options={SOURCE_FILTERS} value={source} onChange={setSource} ariaLabel="來源篩選" />
         </div>
       </div>
+      </div>
 
-      {/* 列表（散客卡 + 團體梯次卡同時段同框） */}
+      {/* 列表（散客卡 + 團體梯次卡同時段同框）：iPad 上自己捲動；lg 以上卡片 2 欄 */}
+      <div data-testid="today-list" className="space-y-4 md:flex-1 md:min-h-0 md:overflow-y-auto md:overscroll-y-contain md:-mx-1 md:px-1 md:pb-2">
       {entries.length === 0 ? (
         filtered.length === 0 && (query || source !== 'all') ? (
           <EmptyState icon="search" title="找不到符合的訂位" hint="試試其他關鍵字或清除過濾條件" />
@@ -174,7 +181,7 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
                 </span>
               )}
             </div>
-            <div className="space-y-2">
+            <div className="grid grid-cols-1 gap-2 lg:grid-cols-2 lg:items-start">
               {list.map(b => (
                 <BookingCard key={b.id} booking={b} onAssign={onAssignTable} onMove={onMoveTable} />
               ))}
@@ -186,6 +193,7 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
           )
         })
       )}
+      </div>
     </div>
   )
 }

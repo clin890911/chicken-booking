@@ -59,14 +59,20 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   // 子分頁切換捲回頂端（今日清單捲到很下面再切「新增」，表單不該停在半路）
   const rootRef = useScrollToTopOn(seatDate ? `seat:${sub}` : sub)
 
+  // 一面式子頁（頁面捲動第 2 批・A）：今日／新增在 iPad（md 以上）不整頁捲動——頁首固定、清單／表單自己捲。
+  // 高度鏈：AdminPage 內容區（index.css 的 [data-fill-page] 規則）→ 這層 → 子頁根元素，一路 flex column＋min-h-0，不加固定高。
+  // 日曆／查詢維持整頁捲動（日曆收合區、查詢結果長度不定，另案處理）。
+  const fill = sub === 'today' || (sub === 'add' && canCreate)
+  const fillCls = fill ? ' md:flex md:flex-col md:flex-1 md:min-h-0' : ''
+
   return (
-    <div ref={rootRef} className="space-y-3">
-      <div className="sticky top-0 z-20 py-1 bg-chicken-cream">
+    <div ref={rootRef} data-fill-page={fill ? '' : undefined} className={`space-y-3${fillCls}`}>
+      <div className="sticky top-0 z-20 py-1 bg-chicken-cream md:flex-shrink-0">
       <SegmentedControl options={canCreate ? SUB_TABS : SUB_TABS.filter(t => t.key !== 'add')} value={sub} onChange={setSub} ariaLabel="訂位子分頁" />
       </div>
 
       {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
-      <div key={sub} className="animate-soft-enter">
+      <div key={sub} className={`animate-soft-enter${fillCls}`}>
           {sub === 'today' && <TodayView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} />}
           {sub === 'calendar' && (
             <>

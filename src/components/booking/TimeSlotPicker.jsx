@@ -6,6 +6,8 @@ import Icon from '../ui/Icon'
 // now：目前時間，預設 new Date()——呼叫端／測試可注入固定值，讓「今天」的已過時段判斷可測。
 // variant：'cards'（預設，所有既有呼叫點）｜'compact'（現場內嵌新增面板：左欄只有 470px 寬、
 //          可視高約 506pt，大卡片一天 17 個時段會吃掉整欄 → 改成 4 欄小晶片，仍標示已滿／已關閉）。
+// compactCols：compact 版的欄數。4（預設，現場內嵌面板 470px 寬）｜6（後台新增訂位右欄／編輯訂位寬版彈窗：
+//          sm 以上 6 欄，一天 17 個時段 3 排就排完；手機仍 4 欄，晶片不會窄到點不到）。
 // ignoreOnlineClosure：後台員工訂位專用（預設 false＝舊行為：三種關閉都禁用）。
 //   店家「關閉場次 / 時段」（closures.closedSeatings / closedSlots）只停線上客人 → 傳 true 時這些時段
 //   照樣可選、標小字「線上已關」，剩餘席數照實際佔用算（「已滿」行為不變）；公休日（closedDates）仍禁用。
@@ -13,7 +15,12 @@ import Icon from '../ui/Icon'
 // allowFull：後台員工訂位專用（預設 false＝「已滿」禁用）。傳 true 時「已滿」改成黃字提示、仍可選——
 //   店員接電話時常是熟客／可擠一擠／知道有人會取消，容量判斷交給店員；後端 adminPushData 不對員工訂位
 //   做容量檢查（只有線上客人的 guestCreateBooking／guestUpdateBooking 會擋）。公休、已過時段照擋。
-export default function TimeSlotPicker({ date, value, onChange, settings, tables, bookings, groupReservations = [], guests = 1, hideFull = true, now = new Date(), variant = 'cards', ignoreOnlineClosure = false, allowFull = false }) {
+const COMPACT_COLS = {
+  4: 'grid-cols-4',
+  6: 'grid-cols-4 sm:grid-cols-6',
+}
+
+export default function TimeSlotPicker({ date, value, onChange, settings, tables, bookings, groupReservations = [], guests = 1, hideFull = true, now = new Date(), variant = 'cards', compactCols = 4, ignoreOnlineClosure = false, allowFull = false }) {
   // 只在日期＝今天（本地日）才套用「已過時段」判斷；非今天完全不受影響。
   const isToday = date === formatDate(now)
   // nowSlot 向下取整到 30 分＝目前這個時段本身仍算「還來得及」，要保留顯示；早於它的才算過時。
@@ -64,7 +71,7 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
   if (variant === 'compact') {
     return (
       <div>
-        <div className="grid grid-cols-4 gap-1.5">
+        <div data-testid="slot-grid" className={`grid gap-1.5 ${COMPACT_COLS[compactCols] || COMPACT_COLS[4]}`}>
           {visible.map(s => {
             const active = value === s.time
             const disabled = s.closed || (s.full && !allowFull)

@@ -122,10 +122,119 @@ export default function EditBookingModal({ booking, onClose }) {
     }
   }
 
+  // ── 欄位 ──
+  const nameField = !seated && <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />
+  const phoneField = !seated && <Input label={phoneOptional ? '電話（選填 · 現場客可不填）' : '電話'} type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder={phoneOptional ? '現場客可不填' : '0912345678'} />
+
+  // 人數：大人 1–8 快選 + 9+ 自由輸入＋小孩步進器（總數上限 200）；桌位預告緊接在下面
+  const guestsField = (
+    <div className="space-y-2">
+      <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); setGuests(t) }} />
+      {tableNote && (
+        <p data-testid="edit-table-note" role="status"
+          className={`text-xs font-bold ${tableNote.tone === 'ok' ? 'text-chicken-green' : 'text-amber-700'}`}>
+          {tableNote.text}
+        </p>
+      )}
+    </div>
+  )
+
+  // 日期：快選 chips + 月曆（已入座不開放）
+  const dateField = !seated && (
+    <div>
+      <label className="label">日期</label>
+      <div className="flex flex-wrap gap-1.5">
+        {quickDates.map(q => (
+          <button key={q.date} type="button" onClick={() => pickDate(q.date)}
+            className={`min-h-[44px] px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+              date === q.date ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
+            {q.label}
+          </button>
+        ))}
+        <button type="button" onClick={() => setShowCalendar(s => !s)}
+          className={`min-h-[44px] px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+            !isQuickDate ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
+          {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合月曆 ▴' : '選月曆 ▾'}
+        </button>
+      </div>
+      {showCalendar && (
+        <div className="mt-2">
+          <MonthCalendar value={date} onChange={pickDate} />
+        </div>
+      )}
+    </div>
+  )
+
+  // 來源（已入座不開放）
+  const sourceField = !seated && (
+    <div>
+      <label className="label">來源</label>
+      <div className="flex flex-wrap gap-1.5">
+        {SOURCE_OPTIONS.map(o => (
+          <button key={o.value} type="button" onClick={() => setSource(o.value)}
+            className={`min-h-[44px] px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
+              source === o.value ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+
+  // 時段（已入座不開放）：compact 晶片（與後台新增訂位同款），sm 以上 6 欄，一天的時段 3 排排完
+  const slotField = !seated && (
+    <div>
+      <label className="label">時段（{dayLabel(date)}）</label>
+      <TimeSlotPicker
+        variant="compact"
+        compactCols={6}
+        date={date}
+        value={timeSlot}
+        onChange={setTimeSlot}
+        settings={settings}
+        tables={tables}
+        bookings={bookings}
+        groupReservations={groupReservations}
+        guests={guests}
+        hideFull={false}
+        ignoreOnlineClosure
+        allowFull
+      />
+    </div>
+  )
+
+  // 備註
+  const notesField = (
+    <div>
+      <label className="label">特殊需求（選填）</label>
+      <div className="mb-2 grid grid-cols-3 gap-2">
+        {NOTE_OPTIONS.map(n => {
+          const locked = n.key === 'child' && hasKids
+          const active = notes[n.key] || locked
+          return (
+            <button key={n.key} type="button" aria-pressed={!!active} disabled={locked}
+              title={locked ? '有小孩已自動標記' : undefined}
+              onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
+              className={`min-h-[44px] px-3 py-2.5 rounded-xl border-2 text-sm font-bold transition-all disabled:cursor-not-allowed ${
+                active ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
+              {n.label}
+            </button>
+          )
+        })}
+      </div>
+      {hasKids && <p className="-mt-1 mb-2 text-xs font-bold text-chicken-red/80">有小孩，已自動標記「兒童」</p>}
+      <Textarea aria-label="訂位備註" value={notes.text} onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}
+        placeholder="例：靠窗、慶生、長輩需軟食..." />
+    </div>
+  )
+
   return (
     <Modal
       open
       onClose={onClose}
+      // 已入座只剩人數＋備註兩欄 → 維持窄版；待到訂位用寬版、lg 以上兩欄（頁面捲動第 2 批・A：
+      // 窄版單欄在 iPad 橫向要在彈窗內捲 640px 以上，時段卡片 3 欄 × 6 排是大宗）。
+      size={seated ? 'md' : 'xl'}
       title={seated ? `改人數／備註 · ${booking.name}` : `編輯訂位 · #${booking.id}`}
       footer={
         <>
@@ -136,98 +245,28 @@ export default function EditBookingModal({ booking, onClose }) {
         </>
       }
     >
-      <div className="space-y-4">
-        {!seated && <Input label="姓名" value={name} onChange={e => setName(e.target.value)} placeholder="王小姐" />}
-        {!seated && <Input label={phoneOptional ? '電話（選填 · 現場客可不填）' : '電話'} type="tel" inputMode="numeric" value={phone} onChange={e => setPhone(e.target.value)} placeholder={phoneOptional ? '現場客可不填' : '0912345678'} />}
-
-        {/* 人數：大人 1–8 快選 + 9+ 自由輸入＋小孩步進器（總數上限 200） */}
-        <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); setGuests(t) }} />
-        {tableNote && (
-          <p data-testid="edit-table-note" role="status"
-            className={`-mt-2 text-xs font-bold ${tableNote.tone === 'ok' ? 'text-chicken-green' : 'text-amber-700'}`}>
-            {tableNote.text}
-          </p>
-        )}
-
-        {/* 日期：快選 chips + 月曆（已入座不開放） */}
-        {!seated && <div>
-          <label className="label">日期</label>
-          <div className="flex flex-wrap gap-1.5">
-            {quickDates.map(q => (
-              <button key={q.date} type="button" onClick={() => pickDate(q.date)}
-                className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
-                  date === q.date ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
-                {q.label}
-              </button>
-            ))}
-            <button type="button" onClick={() => setShowCalendar(s => !s)}
-              className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
-                !isQuickDate ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-              {!isQuickDate ? `已選 ${dayLabel(date)}` : showCalendar ? '收合月曆 ▴' : '選月曆 ▾'}
-            </button>
-          </div>
-          {showCalendar && (
-            <div className="mt-2">
-              <MonthCalendar value={date} onChange={pickDate} />
-            </div>
-          )}
-        </div>}
-
-        {/* 來源 */}
-        {!seated && <div>
-          <label className="label">來源</label>
-          <div className="flex flex-wrap gap-1.5">
-            {SOURCE_OPTIONS.map(o => (
-              <button key={o.value} type="button" onClick={() => setSource(o.value)}
-                className={`px-3 py-2 rounded-xl border-2 text-sm font-bold transition-all ${
-                  source === o.value ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>}
-
-        {/* 時段（已入座不開放） */}
-        {!seated && <div>
-          <label className="label">時段（{dayLabel(date)}）</label>
-          <TimeSlotPicker
-            date={date}
-            value={timeSlot}
-            onChange={setTimeSlot}
-            settings={settings}
-            tables={tables}
-            bookings={bookings}
-            groupReservations={groupReservations}
-            guests={guests}
-            hideFull={false}
-            ignoreOnlineClosure
-            allowFull
-          />
-        </div>}
-
-        {/* 備註 */}
-        <div>
-          <label className="label">特殊需求（選填）</label>
-          <div className="mb-2 grid grid-cols-3 gap-2">
-            {NOTE_OPTIONS.map(n => {
-              const locked = n.key === 'child' && hasKids
-              const active = notes[n.key] || locked
-              return (
-                <button key={n.key} type="button" aria-pressed={!!active} disabled={locked}
-                  title={locked ? '有小孩已自動標記' : undefined}
-                  onClick={() => setNotes(p => ({ ...p, [n.key]: !p[n.key] }))}
-                  className={`px-3 py-2.5 rounded-xl border-2 text-sm font-bold transition-all disabled:cursor-not-allowed ${
-                    active ? 'border-chicken-red bg-chicken-red/10 text-chicken-red' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}>
-                  {n.label}
-                </button>
-              )
-            })}
-          </div>
-          {hasKids && <p className="-mt-1 mb-2 text-xs font-bold text-chicken-red/80">有小孩，已自動標記「兒童」</p>}
-          <Textarea aria-label="訂位備註" value={notes.text} onChange={e => setNotes(p => ({ ...p, text: e.target.value }))}
-            placeholder="例：靠窗、慶生、長輩需軟食..." />
+      {seated ? (
+        <div className="space-y-4">
+          {guestsField}
+          {notesField}
         </div>
-      </div>
+      ) : (
+        // lg 以上兩欄：左＝什麼時候、幾位（日期 → 時段 → 人數＋桌位預告），右＝誰（姓名、電話、來源、備註）。
+        // lg 以下單欄同順序。
+        <div data-testid="edit-booking-columns" className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-x-6 lg:items-start">
+          <div data-testid="edit-col-when" className="space-y-4 min-w-0">
+            {dateField}
+            {slotField}
+            {guestsField}
+          </div>
+          <div data-testid="edit-col-who" className="space-y-4 min-w-0">
+            {nameField}
+            {phoneField}
+            {sourceField}
+            {notesField}
+          </div>
+        </div>
+      )}
     </Modal>
   )
 }

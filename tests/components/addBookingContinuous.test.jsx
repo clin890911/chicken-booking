@@ -106,14 +106,17 @@ describe('AddBookingView continuous（電話訂位連續新增）', () => {
     expect(container.textContent).not.toContain('王小明小姐')
   })
 
-  it('日期快選涵蓋 0–6 天：第 4 天起標 M/D(週X)', () => {
+  it('日期快選涵蓋 0–6 天：第 4 天起上 M/D、下 週X（單列 8 格，格子窄改兩行）', () => {
     render({})
     const labels = [...container.querySelectorAll('button')].map(b => b.textContent)
     expect(labels.some(t => t.startsWith('今天'))).toBe(true)
     expect(labels.some(t => t.startsWith('後天'))).toBe(true)
     // 2026-10-09 週五 → +3 = 10/12 週一、+6 = 10/15 週四
-    expect(labels.some(t => t.startsWith('10/12(週一)'))).toBe(true)
-    expect(labels.some(t => t.startsWith('10/15(週四)'))).toBe(true)
+    expect(labels).toContain('10/12週一')
+    expect(labels).toContain('10/15週四')
     expect(labels.some(t => t.startsWith('10/16'))).toBe(false)
+    // 完整日期＋幾天後留在 aria-label（讀屏不會只聽到「10/12」）
+    const b = [...container.querySelectorAll('button')].find(x => x.textContent === '10/12週一')
+    expect(b.getAttribute('aria-label')).toBe('10/12 週一（3 天後）')
   })
 })
