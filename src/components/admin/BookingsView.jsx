@@ -23,6 +23,7 @@ const SUB_TABS = [
 // 所有新增入口（直接點「新增」、日曆選日、名冊帶預填）都是連續新增：存檔後留在新增畫面、
 // 保留日期＋時段，只清客人欄位——電話一通接一通，不必每存一筆就被帶回「今日」再點回來。
 // 日曆點日期 → 直接進「當日排位」（與規劃頁同一個 DaySeatingPanel）；「月曆」返回回到這裡的日曆（停在該日清單）。
+// 訂位卡的動作（聯絡／編輯／取消訂位／更多／交班事項）在排位畫面選中訂位時都有（同一份 useBookingActions）。
 export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, onCreated, openAdd }) {
   // 新增訂位要 booking.create；唯讀角色（kitchen）沒有「新增」子分頁、日曆也不出現「＋ 新增訂位」，
   // 名冊預填（openAdd）更不會把他送進新增表單。fail-closed：useAuth() 無 Provider 時視為無權。
@@ -80,6 +81,8 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
                   onShiftDay={(d) => setSeatDate(prev => formatDate(addDays(new Date(prev + 'T00:00:00'), d)))}
                   onBackToCalendar={closeSeating}
                   onOpenGroup={onOpenGroup ? (groupId) => onOpenGroup({ id: groupId, date: seatDate }) : undefined}
+                  onMoveTable={onMoveTable}
+                  onAddBooking={canCreate ? handleAddBookingFromCalendar : undefined}
                 />
               )}
             </>

@@ -1,5 +1,5 @@
 // 開發專用：「當日排位」demo 假資料（網址加 ?demo=dayplan 才會灌）。
-// ⚠️ 只在 dev 生效：main.jsx 以 import.meta.env.DEV 守住動態 import，正式 build 不會打包本檔
+// 注意：只在 dev 生效：main.jsx 以 import.meta.env.DEV 守住動態 import，正式 build 不會打包本檔
 //    （build 後 grep dist 驗證過：dist 內沒有本檔任何字串）。
 // 寫入本機 localStorage（本機開發模式＝後端），只動 DEMO- 開頭的訂位、GDEMO- 開頭的團單，其餘資料不碰。
 // 內容：明天 16 筆（午餐兩批＋晚餐、已配／未配、11 人與 10 人大組、1 筆取消、1 個旅行社團）＋後天 6 筆；

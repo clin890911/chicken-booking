@@ -1,6 +1,6 @@
 import {
   buildDaySeatingList, sectionSummaryText, firstUnassigned, nextUnassigned,
-  assignableTables, pickTableError, evaluatePick, walkinState,
+  assignableTables, pickTableError, evaluatePick, walkinState, heldTableNumbers,
 } from '../../src/utils/daySeatingPlan'
 import { suggestComboFromPool } from '../../src/services/seatingService'
 
@@ -167,5 +167,15 @@ describe('suggestComboFromPool（suggestTableCombo 的純函式核心）', () =>
   })
   it('空桌池 → 不夠', () => {
     expect(suggestComboFromPool([], 4)).toMatchObject({ enough: false, tableNumbers: [] })
+  })
+})
+
+describe('heldTableNumbers：今天已在現場鎖給本筆的桌（這裡不可改桌／取消配桌）', () => {
+  it('reserved／dining 且 currentBookingId＝本筆才算；別人持有或空桌＝只是預配', () => {
+    const b = B('甲', '11:00', 8, { assignedTableId: '101', extraTableIds: ['102'] })
+    expect(heldTableNumbers(b, [T('101', 6, '1F', { status: 'reserved', currentBookingId: '甲' }), T('102', 6, '1F', { status: 'vacant' })])).toEqual(['101'])
+    expect(heldTableNumbers(b, [T('101', 6, '1F', { status: 'dining', currentBookingId: '乙' }), T('102', 6)])).toEqual([])
+    expect(heldTableNumbers(B('丙', '11:00', 2), TABLES)).toEqual([])
+    expect(heldTableNumbers(null, TABLES)).toEqual([])
   })
 })

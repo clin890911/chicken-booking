@@ -1,18 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { User, Bus, ChevronLeft, ChevronRight, CalendarDays, Check, X, ArrowLeftRight, Ban, ExternalLink, Lightbulb, Armchair } from 'lucide-react'
+import {
+  User, Bus, ChevronLeft, ChevronRight, CalendarDays, Check, X, ArrowLeftRight, Ban, ExternalLink, Lightbulb, Armchair,
+  Phone, Pencil, Ellipsis, Plus, Lock, History,
+} from 'lucide-react'
 import FloorMap from '../floormap/FloorMap'
 import SegmentedControl from '../../ui/SegmentedControl'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
+import { useHandoff } from '../../../contexts/HandoffContext'
 import { useToast } from '../../ui/Toast'
 import { seatingPerms } from '../../../utils/seatingPerms'
-import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
+import { dayLabel, seatingForSlot, todayStr } from '../../../utils/timeSlots'
 import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures } from '../../../utils/capacity'
+import { formatPhone } from '../../../utils/phoneFormat'
 import {
   buildDaySeatingList, sectionSummaryText, firstUnassigned, nextUnassigned,
-  assignableTables, pickTableError, evaluatePick, EDITABLE_STATUSES,
+  assignableTables, pickTableError, evaluatePick, heldTableNumbers, EDITABLE_STATUSES,
 } from '../../../utils/daySeatingPlan'
 import { suggestComboFromPool } from '../../../services/seatingService'
+import { useBookingActions } from '../../booking/useBookingActions'
+import EditBookingModal from '../../booking/EditBookingModal'
+import BookingDetailSheet from '../../booking/BookingDetailSheet'
 
 // 當日排位：點日期就看到「當天全部訂位」＋同畫面排桌（Barry 2026-10-30：「按入日期後直接展開當天所有的訂位，並且可以排位子」）。
 //   左：當天訂位（散客＋團體），依場次分組、組內依時段；每筆標未配桌／已配桌（桌號）／已到。
@@ -21,13 +29,23 @@ import { suggestComboFromPool } from '../../../services/seatingService'
 // 寫入只走既有的預配路徑（BookingContext.preassignBookingTable(s)／clearBookingPreassign → bookingService.assignTable(s)／unassignTable），
 // 可選桌與防呆全在 utils/daySeatingPlan（沿用 resolveSlotOccupancy／assignmentWindow／squeezeSeats／isTableUsableOnDate）。
 // 團體只顯示＋開團單詳情，這版不在這裡改圈桌。
+// 選中散客時，訂位卡（BookingCard）原本的動作搬進來：聯絡／編輯／交班事項／更多（詳情、現場改桌、直接釋出、No-show、取消訂位），
+// 一律走 useBookingActions（顯示條件、確認框、復原、權限門與訂位卡同一份），這裡不另寫一套。
+// 不能排位的情況（只能看）：唯讀角色（kitchen，無 booking.update）、公休、過去日期、今天已在現場鎖桌（改桌走現場頁）。
+// props：
+//   headerStart（選用）：放在控制列最前面的節點（規劃頁放「當日總覽／當日排位／排位地圖」分頁，一下就切得回當日總覽）
+//   onBackToCalendar（選用）：「月曆」返回鈕（訂位頁用）
+//   onMoveTable（選用）：今天已鎖桌訂位的「改桌」→ 現場頁 move 模式（同訂位卡 onMove）
+//   onAddBooking（選用）：當天沒有訂位時的「新增訂位」入口（過去日期不給）
 export default function DaySeatingPanel({
-  date, onShiftDay, onBackToCalendar, onOpenGroup,
+  date, onShiftDay, onBackToCalendar, onOpenGroup, headerStart, onMoveTable, onAddBooking,
   seatingId: seatingIdProp, onSeatingChange, floor: floorProp, onFloorChange,
 }) {
   const { settings, bookings, groupReservations, tables, fixtures, zones, preassignBookingTable, preassignBookingTables, clearBookingPreassign } = useBooking()
+  // 預配只改 booking → 權限＝seatingPerms.booking（booking.update），與規劃「排位地圖」的配桌同一道門
   const canPreassign = seatingPerms(useAuth()?.can).booking
   const toast = useToast()
+  const isPast = date < todayStr()
 
   const seatings = useMemo(() => (Array.isArray(settings?.seatings) ? settings.seatings : []), [settings])
   const [seatingLocal, setSeatingLocal] = useState('')
@@ -52,8 +70,11 @@ export default function DaySeatingPanel({
   const activeItem = activeKey ? allItems.find(i => i.key === activeKey) || null : null
   const activeBooking = activeItem?.kind === 'walkin' ? activeItem.booking : null
   const dayClosed = isDayClosedForClosures(settings, date)
-  // 公休日一律唯讀（畫面不給入口；utils 的 assignableTables／evaluatePick 也各自再擋一次）
-  const editable = !!activeBooking && canPreassign && !dayClosed && EDITABLE_STATUSES.includes(activeBooking.status)
+  // 能不能在這裡配桌／改桌／取消配桌（單一判斷，清單選人、動作列、確認都用它）：
+  //   公休日（utils 的 assignableTables／evaluatePick 也各自再擋一次）、過去日期、今天已現場鎖桌 → 只能看
+  const canEditBooking = (b) => !!b && canPreassign && !dayClosed && !isPast
+    && EDITABLE_STATUSES.includes(b.status) && heldTableNumbers(b, tables).length === 0
+  const editable = canEditBooking(activeBooking)
   const assignMode = editing && editable
   const onlineClosed = seating ? isSeatingClosed(settings, date, seating) && !dayClosed : false
 
@@ -67,8 +88,7 @@ export default function DaySeatingPanel({
     setPicked([])
     const sid = seatingForSlot(settings, item.timeSlot)?.id
     if (sid && sid !== seatingId) setSeatingId(sid)
-    const canEdit = item.kind === 'walkin' && canPreassign && !dayClosed && EDITABLE_STATUSES.includes(item.booking.status)
-    setEditing(canEdit && item.state === 'unassigned')
+    setEditing(item.kind === 'walkin' && canEditBooking(item.booking) && item.state === 'unassigned')
     // 地圖切到這筆的桌所在樓層（已配桌／團體）；未配桌的等建議桌算出來再切（見下方 effect）
     const first = item.tables?.[0] && tables.find(t => String(t.number) === String(item.tables[0]))
     if (first?.floor && first.floor !== floor) setFloor(first.floor)
@@ -206,6 +226,7 @@ export default function DaySeatingPanel({
       {/* 控制層（玻璃）：月曆／日期／場次／一行摘要，一列放完（iPad 橫向的垂直空間留給地圖）。
           sticky：清單捲很長時仍可換場次／換日 */}
       <div className="lg-chrome sticky top-0 z-20 rounded-2xl px-2.5 py-1.5 flex items-center gap-x-2 gap-y-1.5 flex-wrap">
+        {headerStart}
         {onBackToCalendar && (
           <button type="button" onClick={onBackToCalendar} className="tap inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-xl bg-white/80 border border-chicken-brown/15 text-[13px] font-semibold text-chicken-brown">
             <CalendarDays size={16} strokeWidth={2} aria-hidden="true" />月曆
@@ -240,6 +261,18 @@ export default function DaySeatingPanel({
           <span>本日公休：只能看，不能配桌。要營業請先到「設定 → 休店」取消公休。</span>
         </div>
       )}
+      {isPast && !dayClosed && (
+        <div role="status" className="flex items-start gap-2 rounded-xl bg-slate-100 border border-slate-200 px-3 py-2 text-[13px] font-semibold text-slate-800">
+          <History size={16} className="shrink-0 mt-px" aria-hidden="true" />
+          <span>過去的日期：只能看，不能配桌（未到、取消等補登照訂位卡規則）。</span>
+        </div>
+      )}
+      {!canPreassign && (
+        <div role="status" className="flex items-start gap-2 rounded-xl bg-slate-100 border border-slate-200 px-3 py-2 text-[13px] font-semibold text-slate-800">
+          <Lock size={16} className="shrink-0 mt-px" aria-hidden="true" />
+          <span>唯讀：你的帳號只能查看當日訂位與桌況，不能配桌。</span>
+        </div>
+      )}
       {onlineClosed && (
         <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-[13px] font-semibold text-amber-900">
           <Ban size={16} className="shrink-0 mt-px" aria-hidden="true" />
@@ -250,19 +283,31 @@ export default function DaySeatingPanel({
       <div className="grid grid-cols-1 md:grid-cols-[minmax(250px,320px)_minmax(0,1fr)] gap-3 items-start">
         {/* 左：當天這個場次的全部訂位 */}
         <div ref={listRef} className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden" aria-label={`${seating.name} 訂位清單`}>
-          {section.items.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-chicken-brown/70">{seating.name} 沒有訂位。</p>
+          {allItems.length === 0 ? (
+            <div data-testid="day-seating-empty" className="px-4 py-8 text-center space-y-3">
+              <p className="text-sm font-semibold text-chicken-brown/75">{dayLabel(date)} 還沒有任何訂位。</p>
+              {onAddBooking && !isPast && !dayClosed && (
+                <button type="button" onClick={() => onAddBooking(date)}
+                  className="tap inline-flex items-center gap-1.5 min-h-[44px] px-4 rounded-lg bg-chicken-red text-white text-sm font-bold">
+                  <Plus size={16} strokeWidth={2.4} aria-hidden="true" />新增訂位
+                </button>
+              )}
+            </div>
+          ) : section.items.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-chicken-brown/70">{seating.name} 沒有訂位，可切換上方場次。</p>
           ) : (
             <ul className="divide-y divide-chicken-brown/[0.08]">
               {section.items.map(item => (
                 <li key={item.key}>
                   <BookingRow item={item} active={item.key === activeKey} onSelect={() => selectItem(item)} />
-                  {item.key === activeKey && !assignMode && (
-                    <ActiveDetail item={item} editable={editable} dayClosed={dayClosed}
+                  {item.key === activeKey && !assignMode && (item.kind === 'group' ? (
+                    <GroupDetail group={item.group} onOpenGroup={onOpenGroup} />
+                  ) : (
+                    <WalkinDetail item={item} editable={editable}
+                      dayClosed={dayClosed} isPast={isPast} held={heldTableNumbers(item.booking, tables).length > 0}
                       onAssign={() => { setEditing(true); setPicked([]) }}
-                      onMove={startMove} onUnassign={unassign}
-                      onOpenGroup={onOpenGroup} />
-                  )}
+                      onMove={startMove} onUnassign={unassign} onMoveTable={onMoveTable} />
+                  ))}
                 </li>
               ))}
             </ul>
@@ -370,39 +415,121 @@ function BookingRow({ item, active, onSelect }) {
   )
 }
 
-// 選中那筆的動作列（不在排位中時）：散客→配桌／改桌／取消配桌；團體→開團單詳情
-function ActiveDetail({ item, editable, dayClosed, onAssign, onMove, onUnassign, onOpenGroup }) {
-  const btn = 'tap inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-lg text-sm font-bold'
-  if (item.kind === 'group') {
-    const g = item.group
-    return (
-      <div className="px-3 pb-3 pt-1 bg-orange-50 space-y-2">
-        <p className="text-xs text-chicken-brown/75 leading-5">
-          {g.guideName ? `導遊 ${g.guideName}${g.guidePhone ? ` ${g.guidePhone}` : ''} · ` : ''}團體圈桌請在團單裡改（這裡只顯示）
-        </p>
-        {onOpenGroup && <button type="button" onClick={() => onOpenGroup(g.id)} className={`${btn} bg-white border border-indigo-200 text-indigo-800`}><ExternalLink size={16} aria-hidden="true" />開團單詳情</button>}
-      </div>
-    )
-  }
-  const b = item.booking
-  const note = b.notes?.text || (typeof b.notes === 'string' ? b.notes : '')
+const BTN = 'tap inline-flex items-center justify-center gap-1.5 min-h-[44px] px-3 rounded-lg text-sm font-bold'
+
+// 團體：只顯示＋開團單詳情（圈桌在團單裡改）
+function GroupDetail({ group: g, onOpenGroup }) {
   return (
     <div className="px-3 pb-3 pt-1 bg-orange-50 space-y-2">
-      {(b.phone || note) && <p className="text-xs text-chicken-brown/75 leading-5 tabular-nums">{b.phone || ''}{note ? ` ·「${note}」` : ''}</p>}
-      {item.state === 'arrived' ? (
-        <p className="text-xs font-semibold text-chicken-brown/75">客人已到，換桌請到現場頁。</p>
-      ) : !editable ? (
-        <p className="text-xs font-semibold text-chicken-brown/75">{dayClosed ? '本日公休，無法配桌。' : '你的帳號沒有配桌權限。'}</p>
-      ) : dayClosed ? (
-        <p className="text-xs font-semibold text-rose-800">本日公休，無法配桌。</p>
-      ) : item.state === 'assigned' ? (
+      <p className="text-xs text-chicken-brown/75 leading-5">
+        {g.guideName ? `導遊 ${g.guideName}${g.guidePhone ? ` ${g.guidePhone}` : ''} · ` : ''}團體圈桌請在團單裡改（這裡只顯示）
+      </p>
+      {onOpenGroup && <button type="button" onClick={() => onOpenGroup(g.id)} className={`${BTN} bg-white border border-indigo-200 text-indigo-800`}><ExternalLink size={16} aria-hidden="true" />開團單詳情</button>}
+    </div>
+  )
+}
+
+// 不能在這裡排位的原因（kitchen 的唯讀提示在頂部橫幅，這裡不重複）
+function seatNoteFor({ item, isPast, dayClosed, held }) {
+  if (item.state === 'arrived') return '客人已到，換桌請到現場頁。'
+  if (isPast) return '過去的日期，不能配桌。'
+  if (dayClosed) return '本日公休，無法配桌。'
+  if (held) return '今天已在現場鎖桌，改桌／取消配桌請到現場頁。'
+  return null
+}
+
+// 散客：上半＝排位動作（配桌／改桌／取消配桌，只走預配路徑）；下半＝訂位卡原本的動作（useBookingActions）。
+// 每顆鈕的顯示條件都來自 useBookingActions.show（內含 seatingPerms 權限門與日期三態），與訂位卡一致：
+//   kitchen 這類唯讀角色只剩「聯絡」與「訂位詳情」。
+function WalkinDetail({ item, editable, dayClosed, isPast, held, onAssign, onMove, onUnassign, onMoveTable }) {
+  const b = item.booking
+  // onAssign：訂位卡的「指派桌位」在這裡就是本畫面的配桌；onMove：已現場鎖桌的改桌 → 現場頁（容器沒給就不顯示）
+  const toast = useToast()
+  // 不能排時（公休／過去／已現場鎖桌）詳情裡的「指派桌位」要講原因，不能按了沒反應
+  const assignOrExplain = editable ? onAssign : () => toast.info(seatNoteFor({ item, isPast, dayClosed, held }) || '這筆訂位目前不能在這裡配桌')
+  const act = useBookingActions(b, { onAssign: assignOrExplain, onMove: onMoveTable })
+  const { show } = act
+  const handoff = useHandoff()
+  const [editingBooking, setEditingBooking] = useState(false)
+  const [detail, setDetail] = useState(false)
+  const note = b.notes?.text || (typeof b.notes === 'string' ? b.notes : '')
+  const tags = [b.notes?.pet && '寵物', b.notes?.child && '兒童', b.notes?.mobility && '行動不便'].filter(Boolean)
+  const pendingTasks = (handoff.tasks || []).filter(t => t?.bookingId === b.id && t?.status === 'pending').length
+  const phone = formatPhone(b.phone)
+
+  const seatNote = seatNoteFor({ item, isPast, dayClosed, held })
+
+  return (
+    <div className="px-3 pb-3 pt-1 bg-orange-50 space-y-2" data-testid="day-seating-detail">
+      <div className="text-xs text-chicken-brown/80 leading-5 space-y-0.5">
+        {phone && <p className="text-sm font-bold text-chicken-brown tabular-nums">{phone}</p>}
+        {(tags.length > 0 || act.noshowCount > 0) && (
+          <p className="flex flex-wrap gap-1.5">
+            {act.noshowCount > 0 && <span className="rounded px-1.5 py-0.5 bg-rose-100 text-rose-800 font-bold">no-show ×{act.noshowCount}</span>}
+            {tags.map(t => <span key={t} className="rounded px-1.5 py-0.5 bg-white text-chicken-brown font-semibold ring-1 ring-inset ring-chicken-brown/15">{t}</span>)}
+          </p>
+        )}
+        {note && <p>「{note}」</p>}
+        {pendingTasks > 0 && <p className="font-bold text-amber-900">交班待辦 {pendingTasks} 筆（在現場頁「交班」處理）</p>}
+      </div>
+
+      {/* 排位動作 */}
+      {seatNote ? (
+        <p className="text-xs font-semibold text-chicken-brown/75">{seatNote}</p>
+      ) : editable && item.state === 'assigned' ? (
         <div className="flex gap-2 flex-wrap">
-          <button type="button" onClick={onMove} className={`${btn} bg-white border border-chicken-brown/15 text-chicken-brown`}><ArrowLeftRight size={16} aria-hidden="true" />改桌</button>
-          <button type="button" onClick={onUnassign} className={`${btn} bg-white border border-rose-200 text-rose-800`}><X size={16} aria-hidden="true" />取消配桌</button>
+          <button type="button" onClick={onMove} className={`${BTN} bg-white border border-chicken-brown/15 text-chicken-brown`}><ArrowLeftRight size={16} aria-hidden="true" />改桌</button>
+          <button type="button" onClick={onUnassign} className={`${BTN} bg-white border border-rose-200 text-rose-800`}><X size={16} aria-hidden="true" />取消配桌</button>
         </div>
-      ) : (
-        <button type="button" onClick={onAssign} className={`${btn} bg-chicken-red text-white`}><Armchair size={16} aria-hidden="true" />配桌</button>
-      )}
+      ) : editable ? (
+        <button type="button" onClick={onAssign} className={`${BTN} bg-chicken-red text-white`}><Armchair size={16} aria-hidden="true" />配桌</button>
+      ) : null}
+
+      {/* 訂位卡原本的動作（同一份 useBookingActions） */}
+      <div className="flex gap-2 flex-wrap items-start pt-1 border-t border-orange-200/70">
+        {b.phone && (
+          <a href={`tel:${b.phone.replace(/[^+\d]/g, '')}`} aria-label={`聯絡 ${b.name} ${b.phone}`}
+            className={`${BTN} bg-white border border-chicken-brown/15 text-chicken-brown`}>
+            <Phone size={15} strokeWidth={2.2} aria-hidden="true" />聯絡
+          </a>
+        )}
+        {show.seat && <button type="button" onClick={act.seat} className={`${BTN} bg-chicken-green text-white`}>客人到了</button>}
+        {show.checkout && <button type="button" onClick={act.checkout} className={`${BTN} bg-orange-700 text-white`}>客人已離席</button>}
+        {show.edit && (
+          <button type="button" onClick={() => setEditingBooking(true)} className={`${BTN} bg-white border border-chicken-brown/15 text-chicken-brown`}>
+            <Pencil size={15} aria-hidden="true" />{b.status === 'arrived' ? '改人數／備註' : '編輯'}
+          </button>
+        )}
+        {handoff.canWrite && (
+          <button type="button" onClick={() => handoff.openTask({ bookingId: b.id })} className={`${BTN} bg-white border border-chicken-brown/15 text-chicken-brown`}>
+            <Plus size={15} aria-hidden="true" />交班事項
+          </button>
+        )}
+        {/* 更多：「訂位詳情」所有角色都有，所以這顆永遠在 */}
+        <details data-popover className="relative">
+          <summary aria-label={`${b.name} 更多操作`} className={`${BTN} cursor-pointer list-none bg-white border border-chicken-brown/15 text-chicken-brown`}>
+            <Ellipsis size={16} aria-hidden="true" />更多
+          </summary>
+          <div className="mt-1 min-w-[200px] bg-white border border-chicken-brown/15 rounded-lg shadow-lg p-1 flex flex-col"
+            onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
+            <button type="button" onClick={() => setDetail(true)} className="min-h-[44px] px-3 text-left text-sm text-chicken-brown">訂位詳情（顧客紀錄）</button>
+            {show.move && <button type="button" onClick={act.move} className="min-h-[44px] px-3 text-left text-sm text-chicken-brown">到現場頁改桌</button>}
+            {show.checkout && <button type="button" onClick={act.finalize} className="min-h-[44px] px-3 text-left text-sm text-chicken-brown">直接釋出（已清桌）</button>}
+            {show.noshow && (
+              <>
+                <p className="px-3 py-2 text-xs text-chicken-brown/70">未到客人請先聯絡，確認後再標記（會累計爽約次數）。</p>
+                <button type="button" onClick={act.noshow} className="min-h-[44px] px-3 text-left text-sm text-rose-800">標 No-show</button>
+              </>
+            )}
+            {/* 取消訂位跟訂位卡一樣收在「更多」：不跟上面的「取消配桌」並排，避免誤按（另有確認框＋復原） */}
+            {show.cancel && <button type="button" onClick={act.cancel} className="min-h-[44px] px-3 text-left text-sm text-rose-800">取消訂位</button>}
+          </div>
+        </details>
+      </div>
+
+      {editingBooking && <EditBookingModal booking={b} onClose={() => setEditingBooking(false)} />}
+      {/* 詳情裡的「指派桌位」＝本畫面的配桌（詳情會先關自己再呼叫） */}
+      {detail && <BookingDetailSheet bookingId={b.id} onClose={() => setDetail(false)} onAssign={assignOrExplain} onMove={onMoveTable} />}
     </div>
   )
 }

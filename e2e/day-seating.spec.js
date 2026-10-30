@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
 
-// 規劃「當日排位」（2026-10-30 demo）：月曆點日期 → 直接看到當天全部訂位＋桌況圖、同畫面排桌。
+// 規劃「當日排位」（2026-10-30 起）：月曆點日期 → 直接看到當天全部訂位＋桌況圖、同畫面排桌。
 // 假資料走 dev 專用的 ?demo=dayplan 種子（src/dev/dayplanDemoSeed.js），順便驗證種子機制本身。
 // 時間固定 2026-11-02 09:00（台北）→ 明天＝11/3、後天＝11/4，不跨月。
-// SHOTS_DIR 有值時順手存截圖（給 Barry 的 demo 圖），沒設就不存。
+// SHOTS_DIR 有值時順手存截圖（驗收用），沒設就不存。
 test.use({ timezoneId: 'Asia/Taipei', viewport: { width: 1180, height: 820 } })
 
 const NOW = '2026-11-02T09:00:00+08:00'
@@ -176,11 +176,63 @@ test('訂位頁日曆點日期 → 直接進同一個當日排位；排好後「
   await expect(page.getByTestId('day-seating')).toBeVisible()
 })
 
-test('規劃頁進來的「月曆」回規劃月曆', async ({ page }) => {
+test('規劃頁：排位控制列上就有「當日總覽」分頁，一下回月曆＋當日總覽', async ({ page }) => {
   await loginWithDemo(page)
   await openPlanningDay(page, 3)
-  await page.getByRole('button', { name: '月曆', exact: true }).click()
+  const tabs = page.getByTestId('day-seating').getByLabel('規劃視圖')
+  await expect(tabs.getByRole('button', { name: '當日排位' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(tabs.getByRole('button', { name: '排位地圖' })).toBeVisible() // 舊排位地圖本版保留
+  await tabs.getByRole('button', { name: '當日總覽' }).click()
   await expect(page).toHaveURL(/tab=planning/)
   await expect(page.getByRole('button', { name: /^11月3日/ })).toBeVisible()
   await expect(page.getByTestId('day-seating')).toHaveCount(0)
+})
+
+test('訂位頁當日排位：選中訂位就有訂位卡的動作——聯絡、編輯、交班、更多（含取消訂位：保留確認框＋復原）', async ({ page }) => {
+  await loginWithDemo(page)
+  await page.locator('aside').getByRole('button', { name: '訂位' }).click()
+  await page.getByRole('button', { name: /日曆/ }).click()
+  await page.getByRole('button').filter({ has: page.getByText('3', { exact: true }) }).filter({ hasText: '組' }).first().click()
+  await expect(page.getByTestId('day-seating')).toBeVisible()
+
+  await row(page, '王小姐').click()
+  const detail = page.getByTestId('day-seating-detail')
+  await expect(detail.getByRole('link', { name: /聯絡 王小姐/ })).toHaveAttribute('href', 'tel:0912000101')
+  await expect(detail.getByRole('button', { name: '改桌' })).toBeVisible()
+  await expect(detail.getByRole('button', { name: '交班事項' })).toBeVisible()
+  await shot(page, '09-bookings-actions')
+
+  // 編輯：走既有 EditBookingModal
+  await detail.getByRole('button', { name: '編輯' }).click()
+  await expect(page.getByText(/編輯訂位 · #DEMO-/)).toBeVisible()
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+  await expect(page.getByText(/編輯訂位 · #DEMO-/)).toHaveCount(0)
+
+  // 更多：訂位詳情（未來日沒有 No-show）
+  await detail.getByLabel('王小姐 更多操作').click()
+  await expect(detail.getByRole('button', { name: '訂位詳情（顧客紀錄）' })).toBeVisible()
+  await expect(detail.getByRole('button', { name: '標 No-show' })).toHaveCount(0)
+
+  // 取消訂位（在「更多」裡，同訂位卡）：確認框保留（LINE 通知收不回）→ 取消 → 清單不再列 → 復原
+  await detail.getByRole('button', { name: '取消訂位' }).click()
+  await expect(page.getByText('取消 王小姐 11:00 的訂位？')).toBeVisible()
+  await page.getByRole('button', { name: '取消訂位', exact: true }).last().click()
+  await expect(page.getByText('已取消 王小姐 的訂位')).toBeVisible()
+  expect(await storedBooking(page, '王小姐')).toMatchObject({ status: 'cancelled' })
+  await expect(row(page, '王小姐')).toHaveCount(0)
+  await page.getByTestId('toast-action').click()
+  await expect.poll(async () => (await storedBooking(page, '王小姐')).status).toBe('confirmed')
+  await expect(row(page, '王小姐')).toBeVisible()
+})
+
+test('過去日期：清單照看、沒有配桌入口', async ({ page }) => {
+  await loginWithDemo(page)
+  await openPlanningDay(page, 3)
+  await page.getByRole('button', { name: '前一日' }).click()
+  await page.getByRole('button', { name: '前一日' }).click() // 11/1（今天是 11/2）
+  await expect(page.getByTestId('day-seating-date')).toContainText('11/1')
+  await expect(page.getByText(/過去的日期：只能看，不能配桌/)).toBeVisible()
+  await expect(banner(page)).toHaveCount(0)
+  await expect(page.getByTestId('day-seating-empty')).toContainText('還沒有任何訂位')
+  await expect(page.getByRole('button', { name: '新增訂位' })).toHaveCount(0)
 })

@@ -23,6 +23,7 @@ import {
   isDayClosedForClosures,
 } from './capacity'
 import { isTableUsableOnDate } from './tableAvailability'
+import { assignmentKind } from './tableStatus'
 
 // 可以在這裡配桌／改桌／取消配桌的訂位狀態（已到、已完成的不動；那是現場頁的事）
 export const EDITABLE_STATUSES = ['pending', 'confirmed']
@@ -207,4 +208,15 @@ export function evaluatePick({ booking, picked = [], free = [], tables = [], dat
   if (new Set(chosen.map(t => t.floor)).size > 1) return fail('併桌需在同一樓層')
   if (short > 0) return fail(`擠一擠也還差 ${short} 位，請再加桌`)
   return { ...base, ok: true, error: null }
+}
+
+// 今天已在現場「鎖桌」的訂位（桌況 reserved／dining 且 currentBookingId＝本筆，口徑＝tableStatus.assignmentKind）。
+// 當日排位的寫入只改 booking（預配路徑），不碰桌況；對已鎖桌的訂位改桌／取消配桌會留下仍鎖著的孤兒桌，
+// 違反「釋桌只動本筆持有、走現場釋桌路徑」→ 這種訂位在這裡唯讀，改桌請到現場頁（useBookingActions 的 move）。
+export function heldTableNumbers(booking, tables = []) {
+  if (!booking) return []
+  return bookingTableList(booking).filter(n => {
+    const t = tables.find(x => String(x.number) === n)
+    return assignmentKind({ ...booking, assignedTableId: n }, t) === 'held'
+  })
 }

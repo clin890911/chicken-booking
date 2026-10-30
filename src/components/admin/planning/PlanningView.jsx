@@ -364,14 +364,20 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
     )
   }
 
+  // 規劃視圖分頁（當日總覽／當日排位／排位地圖）。排位地圖本版保留（團體流程仍在用），下一版評估下架。
+  const paneSwitch = (
+    <SegmentedControl options={[{ key: 'day', label: '當日總覽' }, { key: 'seat', label: '當日排位' }, { key: 'map', label: '排位地圖' }]} value={pane} onChange={setPane} ariaLabel="規劃視圖" />
+  )
+
   return (
     <div ref={rootRef} className="space-y-3">
       {/* 視圖切換 +（map 態）精簡日期列。
           sticky：手機上當日總覽很長，捲到下面要切地圖／換日不必先捲回頂端。 */}
-      {/* 當日排位自帶一列控制（月曆／日期／場次），這列收起來把垂直空間讓給地圖 */}
+      {/* 當日排位自帶一列控制（日期／場次），這列收起來把垂直空間讓給地圖；
+          同一顆分頁（paneSwitch）改放進排位控制列最前面——「當日總覽」一下就切得回去 */}
       <div className={`${pane === 'seat' ? 'hidden' : 'sticky top-0 z-20'} py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap`}>
         {/* 分段控制（segmented control）：灰底槽 + 白色浮起的選中段，與 iPadOS 一致 */}
-        <SegmentedControl options={[{ key: 'day', label: '當日總覽' }, { key: 'seat', label: '當日排位' }, { key: 'map', label: '排位地圖' }]} value={pane} onChange={setPane} ariaLabel="規劃視圖" />
+        {paneSwitch}
         {pane === 'map' && (
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => shiftDay(-1)} aria-label="前一日" className="tap w-8 h-8 rounded-lg bg-white border border-chicken-brown/15 text-chicken-brown flex items-center justify-center"><Icon name="chevronLeft" size={14} strokeWidth={2.2} /></button>
@@ -433,8 +439,9 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
         <DaySeatingPanel
           date={selectedDate}
           onShiftDay={shiftDay}
-          onBackToCalendar={() => setPane('day')}
+          headerStart={paneSwitch}
           onOpenGroup={openExisting}
+          onAddBooking={canAddWalkin ? () => setShowAddWalkin(true) : undefined}
           seatingId={mapSeatingId}
           onSeatingChange={setMapSeatingId}
           floor={mapFloor}
