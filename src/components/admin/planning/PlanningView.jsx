@@ -375,7 +375,10 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
           sticky：手機上當日總覽很長，捲到下面要切地圖／換日不必先捲回頂端。 */}
       {/* 當日排位自帶一列控制（日期／場次），這列收起來把垂直空間讓給地圖；
           同一顆分頁（paneSwitch）改放進排位控制列最前面——「當日總覽」一下就切得回去 */}
-      <div className={`${pane === 'seat' ? 'hidden' : 'sticky top-0 z-20'} py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap`}>
+      {/* 不渲染而不是 display:none：space-y-3 會替 display:none 的第一個子元素照算下一個的 margin-top，
+          當日排位頂端白白多 12px（頁面捲動檢查：1180×820 整頁溢出 32px 的一部分） */}
+      {pane !== 'seat' && (
+      <div className="sticky top-0 z-20 py-1.5 bg-chicken-cream flex items-center gap-2 flex-wrap">
         {/* 分段控制（segmented control）：灰底槽 + 白色浮起的選中段，與 iPadOS 一致 */}
         {paneSwitch}
         {pane === 'map' && (
@@ -404,6 +407,7 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
           </div>
         )}
       </div>
+      )}
 
       {pane === 'day' ? (
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(340px,380px)] gap-3 items-start">
