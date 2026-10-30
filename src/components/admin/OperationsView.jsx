@@ -40,7 +40,7 @@ import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
 // dashed：對應地圖上「同色但虛線」的狀態（預配＝桌實體仍空），圖例與地圖的線型也要對得上，
 // 否則兩格同樣的藍會被讀成圖例畫錯。
 // 地圖卡片頂端的樓層大分頁（取代頂列的小分段控制）。目前樓層深色實心；另一層白底粗框。
-// nudge＝本層選不到桌、另一層可以 → 紅點＋輕微脈動提示切換（motion-safe 才動）。
+// nudge＝本層分頁數字是 0、另一層 >0 → 紅點＋輕微脈動提示切換（motion-safe 才動）；口徑同分頁上的數字。
 function FloorTabs({ floor, onChange, counts }) {
   // 一顆膠囊切兩半（Barry 2026-10-17）：外框一圈、中間無縫；選中那半實心深色「滑塊」，另一半透明。
   return (
@@ -56,7 +56,7 @@ function FloorTabs({ floor, onChange, counts }) {
                 : 'text-chicken-brown/70 hover:bg-chicken-brown/[0.06]'}`}>
             <span className="text-lg">{c.key}</span>
             <span className={`text-sm tabular-nums ${active ? 'text-white/85' : 'text-chicken-brown/60'}`}>{c.label} {c.value}</span>
-            {c.nudge && <span aria-label="另一層有可選的桌" className="absolute top-1 right-1.5 w-3 h-3 rounded-full bg-chicken-red" />}
+            {c.nudge && <span aria-label={`另一層有${c.label}的桌`} className="absolute top-1 right-1.5 w-3 h-3 rounded-full bg-chicken-red" />}
           </button>
         )
       })}
@@ -1161,17 +1161,19 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 「可坐 N」與頂端常駐「可入座」同一支 seatableNowTables（Barry 2026-10-30 可入座統一）：1F＋2F＝常駐列。
   //   帶位籤以前顯示「依目前人數可選的桌」（walkinSelectable），會跟常駐列差一兩桌；現在只改「顯示的數字」，
   //   帶位面板的選桌池（walkinSelectable）不動。
-  // 紅點（nudge）仍看選桌池：本層一張都選不到、另一層有 → 另一層分頁亮紅點提示切換。
+  // 紅點（nudge）＝跟分頁上「顯示的數字」同一個口徑（#194 收尾，2026-10-31）：本層顯示 0、另一層顯示 >0
+  //   → 另一層亮紅點提示切換。以前紅點看選桌池、數字看 seatableNowTables，會出現「紅點亮著、旁邊寫可坐 0」
+  //   （另一層只剩時段衝突的空桌：選得到、但不是現在就能坐）。紅點只在選桌情境（指派/改桌、帶位籤）出現。
   const floorCounts = (() => {
     const selecting = mode?.suitable ? 'mode' : (!mode && !reserveOpen && railTab === 'walkin' && canWalkIn) ? 'walkin' : null
-    const pool = selecting === 'mode' ? new Set((mode.suitable || []).map(String))
-      : selecting === 'walkin' ? new Set(walkinSelectable.map(String)) : null
-    const poolCount = f => tables.filter(t => t.floor === f && pool.has(String(t.number))).length
-    const seatable = f => seatableNowTables(tables, tablePresentation, { floor: f }).length
+    const pool = selecting === 'mode' ? new Set((mode.suitable || []).map(String)) : null
+    const shown = f => selecting === 'mode'
+      ? tables.filter(t => t.floor === f && pool.has(String(t.number))).length
+      : seatableNowTables(tables, tablePresentation, { floor: f }).length
     const label = selecting === 'mode' ? '可選' : '可坐'
     return ['1F', '2F'].map(f => ({
-      key: f, value: selecting === 'mode' ? poolCount(f) : seatable(f), label, total: tables.filter(t => t.floor === f).length,
-      nudge: !!pool && f !== floor && poolCount(floor) === 0 && poolCount(f) > 0,
+      key: f, value: shown(f), label, total: tables.filter(t => t.floor === f).length,
+      nudge: !!selecting && f !== floor && shown(floor) === 0 && shown(f) > 0,
     }))
   })()
 
@@ -1194,7 +1196,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           兄弟照樣算一份 margin，白吃 8px 高度，
           左欄就會從「剛好不捲」變成捲。flex gap 不會替 display:none 的子項留空隙。 */}
       <div className="flex-shrink-0 flex flex-col gap-2">
-      {/* 頂列＝一條（Barry 2026-10-30）：左＝常駐「可入座 N 桌 · 可坐 M 人｜用餐中 N 桌 · M 人」＋有事才接在後面的
+      {/* 頂列＝一條（Barry 2026-10-30）：左＝常駐「可入座 N 桌 · 可坐 M 位｜用餐中 N 桌 · M 人」＋有事才接在後面的
           「需要處理」（過時未到／超時／將到／待清／候位，0 不顯示、點了帶到那件事）；右＝地圖／摘要／排程。
           取代原本「全店」六格統計列（lg 以下）／三格 pill（lg 以上）＋另一列的提示列：同一件事不再顯示兩次，
           iPad 頂部也少一列。用餐中以外的管理數字在「摘要」分頁。
@@ -1202,8 +1204,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           Liquid Glass：.lg-toolbar＝玻璃膠囊（只加水平內距、不加高度；不帶 transform/filter，見 styles/glass.css）；
           提示鈕本身是實心淡底（不在玻璃上疊玻璃、字色維持 AA）。 */}
       <div className="lg-toolbar flex items-center gap-2 flex-wrap lg:flex-nowrap">
-        {/* flex-1：佔掉 地圖／摘要／排程 左邊的全部空間（分段控制自然靠右）；擠不下才在條內換行，不會被裁掉 */}
-        <div className="flex-1 min-w-0">
+        {/* flex-1：佔掉 地圖／摘要／排程 左邊的全部空間（分段控制自然靠右）；擠不下才在條內換行，不會被裁掉。
+            手機（< md，#194 收尾）：提示區 basis-full 佔滿一整行、分段鈕換到下一行自己一行並撐滿；
+            否則 flex-1 的 basis 0 會讓提示區只剩分段鈕左邊那一小塊，提示鈕被擠成一顆一列（375 寬實測頂列 238px）。
+            md 以上 md:basis-0 ＝ 原本的 flex-1，iPad 直向／橫向版面不變。 */}
+        <div className="flex-1 basis-full md:basis-0 min-w-0">
           <OpsHintBar
             tablePresentation={tablePresentation}
             onOpenUpcoming={() => { setSelectedTable(null); setView('map'); setRailTab('upcoming') }}
@@ -1217,7 +1222,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
         {!mode && !reserveOpen && (
           <SegmentedControl
-            className="flex-none"
+            className="flex-none max-md:w-full max-md:mb-1 max-md:[&>button]:flex-1"
             options={[{ key: 'map', label: '地圖' }, { key: 'summary', label: '摘要' }, { key: 'schedule', label: '排程' }]}
             value={view} onChange={setView} ariaLabel="現場視圖" />
         )}

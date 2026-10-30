@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
 
-// 現場頁頂端「一條」（Barry 2026-10-30）：常駐「可入座 N 桌 · 可坐 M 人｜用餐中 N 桌 · M 人」，
+// 現場頁頂端「一條」（Barry 2026-10-30）：常駐「可入座 N 桌 · 可坐 M 位｜用餐中 N 桌 · M 人」，
 // 有事才接「需要處理」（數字 0 的不出現），點了帶到那件事。
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -29,7 +29,7 @@ describe('OpsHintBar：常駐一條＋有事才出現的提示', () => {
     state.bookings = [{ id: 'B', guests: 3, status: 'arrived', date: '2026-10-10', timeSlot: '18:30', assignedTableId: '103' }]
     state.waitlist = []
     mount({ tablePresentation: { 101: { canSeatNow: true }, 102: { canSeatNow: true }, 103: { canSeatNow: false } } })
-    expect(container.querySelector('[data-stat="vacant"]').textContent).toBe('可入座2桌 · 10 人')
+    expect(container.querySelector('[data-stat="vacant"]').textContent).toBe('可入座2桌 · 可坐 10 位')
     expect(container.querySelector('[data-stat="dining"]').textContent).toBe('用餐中1桌 · 3 人')
     expect(container.querySelector('[aria-label="需要處理"]')).toBeNull()
   })

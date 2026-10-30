@@ -61,6 +61,22 @@ describe('非現場頁頂端標題列合併', () => {
     expect(narrow.className).toMatch(/text-xs/)
   })
 
+  it('側欄收合（#197 收尾）：細條底部仍有登入者頭像縮寫，title／aria-label 帶名字與角色；純展示不可點', () => {
+    localStorage.setItem('chicken_sidebar_collapsed_v1', '1')
+    try {
+      const tabs = [{ key: 'bookings', label: '訂位', icon: 'bookings' }]
+      mount(<SidebarNav tabs={tabs} active="bookings" onChange={() => {}} />)
+      expect(container.querySelector('[aria-label="展開選單"]')).not.toBeNull()
+      const av = container.querySelector('[data-testid="sidebar-user-collapsed"]')
+      expect(av.textContent).toBe('王')
+      expect(av.getAttribute('title')).toBe('王小明 · 店長')
+      expect(av.getAttribute('aria-label')).toBe('登入者：王小明 · 店長')
+      expect(av.tagName).not.toBe('BUTTON')
+      expect(av.closest('button')).toBeNull()
+      expect(av.className).toMatch(/\bmt-auto\b/) // 釘在細條底部
+    } finally { localStorage.removeItem('chicken_sidebar_collapsed_v1') }
+  })
+
   it('名冊：頁名 h1 與子分頁籤在同一列，子分頁切換照舊', () => {
     mount(<RosterView />)
     const h1 = container.querySelector('h1')
@@ -103,6 +119,14 @@ describe('團單詳情左右兩欄', () => {
     act(() => btn('改期').click()); expect(onReschedule).toHaveBeenCalled()
     act(() => btn('編輯').click()); expect(onEdit).toHaveBeenCalled()
     act(() => btn('回傳單').click()); expect(container.querySelector('[data-group-sheet]')).not.toBeNull()
+  })
+
+  it('#197 收尾：lg↑ 頁名「規劃」在頂列最前面（PageTitle，手機隱藏）', () => {
+    mount(<GroupDetailStage group={group()} tables={tables} settings={{}} onBack={() => {}} />)
+    const h1 = container.querySelector('h1')
+    expect(h1.textContent).toBe('規劃')
+    expect(h1.className).toMatch(/hidden lg:block/)
+    expect(h1.nextElementSibling.textContent).toContain('返回當日總覽')
   })
 
   it('沒有圈桌：不渲染地圖欄，左欄改成單欄撐滿', () => {

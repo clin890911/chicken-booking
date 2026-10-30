@@ -6,6 +6,7 @@ import { Button, Input, Select, Textarea } from '../../ui'
 import SeatGauge from '../../ui/SeatGauge'
 import FloorMap from '../floormap/FloorMap'
 import GroupSheet from '../group/GroupSheet'
+import PageTitle from '../../layout/PageTitle'
 import Icon from '../../ui/Icon'
 import SegmentedControl from '../../ui/SegmentedControl'
 import AgencyPicker from '../group/AgencyPicker'
@@ -591,8 +592,9 @@ export default function GroupEditorStage({
 
   return (
     <div className="space-y-3">
-      {/* 頂部：返回 + 標題 */}
+      {/* 頂部：頁名（lg↑，比照其他頁坐在最前面；#197 收尾）+ 返回 + 標題 */}
       <div className="flex flex-wrap items-center gap-2 px-1">
+        <PageTitle className="mr-1">規劃</PageTitle>
         <button type="button" onClick={onBack} className="tap inline-flex h-8 items-center gap-0.5 rounded-lg pr-2 text-[13px] font-semibold text-chicken-brown/60 hover:text-chicken-brown">
           <Icon name="chevronLeft" size={14} strokeWidth={2.4} />返回當日總覽
         </button>

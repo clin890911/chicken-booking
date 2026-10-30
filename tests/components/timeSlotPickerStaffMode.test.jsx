@@ -126,6 +126,34 @@ describe.each(['cards', 'compact'])('TimeSlotPicker allowFull（variant=%s）', 
   })
 })
 
+// #196 收尾：寬版晶片（compactCols=6，後台新增／編輯訂位）狀態字回到 11px，且有「已滿仍可選」時補一行說明；
+// 現場內嵌面板（compact 預設 4 欄）維持 10px、不加說明行（面板高度不變）。
+describe('TimeSlotPicker compact 寬版（6 欄）狀態字與「已滿仍可訂」說明', () => {
+  const full = [{ id: 'b1', date: DATE, timeSlot: '11:00', guests: 10, status: 'confirmed' }]
+  const status = (time) => btn(time).querySelectorAll('span')[1]
+  it('6 欄：狀態字 11px；有已滿可選的時段 → 格子下方「仍可訂（請確認坐得下）」', () => {
+    render({ variant: 'compact', compactCols: 6, ignoreOnlineClosure: true, allowFull: true, bookings: full })
+    expect(status('11:00').className).toContain('text-[11px]')
+    expect(status('11:00').className).not.toContain('text-[10px]')
+    expect(container.querySelector('[data-testid="slot-full-hint"]').textContent).toContain('仍可訂（請確認坐得下）')
+  })
+  it('6 欄但沒有已滿時段 → 不顯示說明行', () => {
+    render({ variant: 'compact', compactCols: 6, ignoreOnlineClosure: true, allowFull: true })
+    expect(container.querySelector('[data-testid="slot-full-hint"]')).toBeNull()
+  })
+  it('6 欄、不傳 allowFull（已滿禁用）→ 不顯示「仍可訂」', () => {
+    render({ variant: 'compact', compactCols: 6, ignoreOnlineClosure: true, bookings: full })
+    expect(container.querySelector('[data-testid="slot-full-hint"]')).toBeNull()
+  })
+  it('現場預設 4 欄不受影響：仍 10px、不加說明行、grid-cols-4', () => {
+    render({ variant: 'compact', ignoreOnlineClosure: true, allowFull: true, bookings: full })
+    expect(status('11:00').className).toContain('text-[10px]')
+    expect(container.querySelector('[data-testid="slot-full-hint"]')).toBeNull()
+    expect(container.querySelector('[data-testid="slot-grid"]').className).toContain('grid-cols-4')
+    expect(container.querySelector('[data-testid="slot-grid"]').className).not.toContain('sm:grid-cols-6')
+  })
+})
+
 describe('calcSlotCapacity ignoreOnlineClosure', () => {
   const bookings = [{ id: 'b1', date: DATE, timeSlot: '11:00', guests: 4, status: 'confirmed' }]
   it('預設（線上口徑）：關閉場次/時段/公休都回 0', () => {

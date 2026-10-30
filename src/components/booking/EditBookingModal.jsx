@@ -251,17 +251,22 @@ export default function EditBookingModal({ booking, onClose }) {
           {notesField}
         </div>
       ) : (
-        // lg 以上兩欄：左＝什麼時候、幾位（日期 → 時段 → 人數＋桌位預告），右＝誰（姓名、電話、來源、備註）。
-        // lg 以下單欄同順序。
-        <div data-testid="edit-booking-columns" className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-x-6 lg:items-start">
-          <div data-testid="edit-col-when" className="space-y-4 min-w-0">
+        // lg 以上兩欄：左＝什麼時候、幾位（日期 → 時段 → 人數＋桌位預告），右＝誰（姓名、電話；下方來源、備註）。
+        // lg 以下單欄（#196 收尾）：姓名、電話在最前面（店員改單最常確認的是「人」，與改版前一致）→ 日期 → 時段 → 人數 → 來源 → 備註。
+        // 做法：DOM 順序就是單欄順序（Tab 鍵順序與畫面一致），lg 以上用 grid 位置排成兩欄；
+        //   右欄拆成上下兩塊（姓名電話／來源備註），左欄跨兩列；grid-rows-[auto_1fr] 讓左欄多出的高度只撐第二列，
+        //   姓名電話與來源之間不會被拉開空白。
+        <div data-testid="edit-booking-columns" className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-[auto_1fr] lg:gap-x-6 lg:items-start">
+          <div data-testid="edit-col-who" className="space-y-4 min-w-0 lg:col-start-2 lg:row-start-1">
+            {nameField}
+            {phoneField}
+          </div>
+          <div data-testid="edit-col-when" className="space-y-4 min-w-0 lg:col-start-1 lg:row-start-1 lg:row-span-2">
             {dateField}
             {slotField}
             {guestsField}
           </div>
-          <div data-testid="edit-col-who" className="space-y-4 min-w-0">
-            {nameField}
-            {phoneField}
+          <div data-testid="edit-col-who-more" className="space-y-4 min-w-0 lg:col-start-2 lg:row-start-2">
             {sourceField}
             {notesField}
           </div>

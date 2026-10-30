@@ -163,3 +163,16 @@ button, a, [role="button"] {
     flex-direction: column;
   }
 }
+
+/* :has() 退路（#196 收尾）：不支援 :has() 的瀏覽器（Safari < 15.4、Chrome < 105、Firefox < 121）上面那段整段不生效，
+   新增訂位退回整頁捲動；確認列在 md 以上是 md:static → 會跟著表單捲到最底下、看不到。
+   這裡讓它維持 sticky、貼齊捲動區底部（BottomNav 在捲動區外、不會被蓋住，所以 md 以上一律 0.75rem）。
+   選擇器帶 admin-content 前綴提高特異度，確保蓋過 Tailwind 的 md:static。 */
+@supports not selector(:has(*)) {
+  @media (min-width: 768px) {
+    [data-testid="admin-content"] [data-add-confirm-bar] {
+      position: sticky;
+      bottom: 0.75rem;
+    }
+  }
+}

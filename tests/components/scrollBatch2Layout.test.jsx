@@ -102,9 +102,23 @@ describe('EditBookingModal 寬版兩欄', () => {
     expect(cls(container.querySelector('[data-testid="edit-booking-columns"]'))).toContain('lg:grid-cols-2')
     const when = container.querySelector('[data-testid="edit-col-when"]').textContent
     const who = container.querySelector('[data-testid="edit-col-who"]').textContent
+    const whoMore = container.querySelector('[data-testid="edit-col-who-more"]').textContent
     for (const t of ['日期', '時段（', '大人']) expect(when).toContain(t)
-    for (const t of ['姓名', '電話', '來源', '特殊需求']) expect(who).toContain(t)
+    for (const t of ['姓名', '電話']) expect(who).toContain(t)
+    for (const t of ['來源', '特殊需求']) expect(whoMore).toContain(t)
+    // lg 以上：右欄兩塊都在第 2 欄、左欄跨兩列
+    expect(cls(container.querySelector('[data-testid="edit-col-who"]'))).toEqual(expect.arrayContaining(['lg:col-start-2', 'lg:row-start-1']))
+    expect(cls(container.querySelector('[data-testid="edit-col-who-more"]'))).toEqual(expect.arrayContaining(['lg:col-start-2', 'lg:row-start-2']))
+    expect(cls(container.querySelector('[data-testid="edit-col-when"]'))).toEqual(expect.arrayContaining(['lg:col-start-1', 'lg:row-span-2']))
     expect(cls(container.querySelector('[data-testid="slot-grid"]'))).toContain('sm:grid-cols-6')
+  })
+
+  it('lg 以下單欄（#196 收尾）：DOM／Tab 順序＝姓名、電話在前 → 日期 → 時段 → 人數 → 來源 → 備註', () => {
+    mount(<EditBookingModal booking={base} onClose={() => {}} />)
+    const txt = container.querySelector('[data-testid="edit-booking-columns"]').textContent
+    const order = ['姓名', '電話', '日期', '時段（', '大人', '來源', '特殊需求'].map(t => txt.indexOf(t))
+    expect(order.every(i => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
 
   it('已入座（#171）：維持窄版、只有人數＋備註，送出 patch 不含日期／時段／姓名／電話／來源', () => {

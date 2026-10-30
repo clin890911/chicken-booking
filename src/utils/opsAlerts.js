@@ -78,7 +78,7 @@ export function seatableNowTables(tables, tablePresentation = null, { floor = nu
 }
 
 // 全店數字：頂端常駐兩格（可入座／用餐中）與摘要分頁共用。
-// 可入座＝seatableNowTables（與樓層鈕「可坐 N」同一支）；可坐人數＝那些桌的容量加總、用餐中桌數、在席人數、待清、候位、今日還沒到的訂位。
+// 可入座＝seatableNowTables（與樓層鈕「可坐 N」同一支）；可坐位數（vacantSeats，畫面寫「可坐 M 位」）＝那些桌的容量加總、用餐中桌數、在席人數、待清、候位、今日還沒到的訂位。
 // 「在席人數」優先用 booking 實際人數；大組併桌只在主桌算一次；團體桌（無 booking）以桌容量估。
 export function computeStoreStats({ tables = [], bookings = [], waitlist = [], tablePresentation = null, pulse = null, today }) {
   const counts = { vacant: 0, reserved: 0, dining: 0, cleaning: 0, blocked: 0 }

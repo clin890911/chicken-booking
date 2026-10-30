@@ -5,6 +5,7 @@ import StatGroup from '../../ui/StatGroup'
 import SegmentedControl from '../../ui/SegmentedControl'
 import FloorMap from '../floormap/FloorMap'
 import GroupSheet from '../group/GroupSheet'
+import PageTitle from '../../layout/PageTitle'
 import { dayLabel, seatingForSlot } from '../../../utils/timeSlots'
 import { groupTableNumbers, guestBatches } from '../../../utils/capacity'
 
@@ -72,8 +73,9 @@ export default function GroupDetailStage({ group, tables, settings, onBack, onEd
   // 左欄內容較長時只在左欄內捲動、地圖固定在右欄；lg 以下（手機／iPad 直向）維持原本單欄由上而下。
   return (
     <div data-testid="group-detail" className="space-y-3 lg:space-y-0 lg:h-full lg:min-h-0 lg:flex lg:flex-col lg:gap-3">
-      {/* 頂部：返回 + 標題 + 動作 */}
+      {/* 頂部：頁名（lg↑，比照其他頁坐在最前面；#197 收尾）+ 返回 + 標題 + 動作 */}
       <div className="flex items-center gap-2 flex-wrap px-1 lg:shrink-0">
+        <PageTitle className="mr-1">規劃</PageTitle>
         <button type="button" onClick={onBack} className="tap inline-flex items-center gap-0.5 h-8 pr-2 rounded-lg text-[13px] font-semibold text-chicken-brown/60 hover:text-chicken-brown">
           <Icon name="chevronLeft" size={14} strokeWidth={2.4} />返回當日總覽
         </button>

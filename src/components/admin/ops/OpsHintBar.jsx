@@ -6,7 +6,8 @@ import { classifyTodayPulse } from '../../../utils/bookingPulse'
 import { pickOpsAlerts, computeStoreStats } from '../../../utils/opsAlerts'
 
 // 現場頁頂端「一條」（Barry 2026-10-30，取代「全店」六格統計列＋原本另一列的提示列）：
-//   常駐兩格：可入座 N 桌 · 可坐 M 人｜用餐中 N 桌 · M 人（大字主數字、小字單位與人數，比照訂位頁「12 組 · 48 人」）
+//   常駐兩格：可入座 N 桌 · 可坐 M 位｜用餐中 N 桌 · M 人（大字主數字、小字單位與人數，比照訂位頁「12 組 · 48 人」）
+//   「· M 人」一律是實際客數；可入座那格的 M 是那些桌的容量（空位），所以寫「可坐 M 位」，不與客數混成同一種字樣。
 //   有事才接在後面：過時未到／超時／將到／待清／候位，數字 0 的不出現；點了直接帶到那件事。
 // 只渲染在頂列裡（與 地圖／摘要／排程 同一列），不另外多一列 → iPad 頂部高度不增加。
 // 用餐中以外的管理數字（待清總數、系統自動處理紀錄、一天節奏）在摘要分頁。
@@ -22,12 +23,13 @@ const LEVEL_CLS = {
 }
 
 // 「將到 3 組 · 10 人」：label 小字、主數字大字、單位與人數小字
-function Figure({ label, value, unit, people, small = 'text-chicken-brown/60' }) {
+// people＝實際客數（· N 人）；seats＝空位容量（· 可坐 N 位），兩者擇一。
+function Figure({ label, value, unit, people, seats, small = 'text-chicken-brown/60' }) {
   return (
     <span className="inline-flex items-baseline gap-0.5 whitespace-nowrap">
       <span className={`text-sm font-semibold ${small}`}>{label}</span>
       <span className="text-xl font-bold tabular-nums leading-none">{value}</span>
-      <span className={`text-sm font-semibold ${small}`}>{unit}{people != null ? ` · ${people} 人` : ''}</span>
+      <span className={`text-sm font-semibold ${small}`}>{unit}{people != null ? ` · ${people} 人` : ''}{seats != null ? ` · 可坐 ${seats} 位` : ''}</span>
     </span>
   )
 }
@@ -59,7 +61,7 @@ export default function OpsHintBar({ tablePresentation = null, onOpenUpcoming, o
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 min-w-0 text-chicken-brown">
       {/* 常駐：看一眼就知道「還能坐多少、場內多少人」（口徑同樓層鈕「可坐」＝現在就能坐的桌） */}
       <div role="group" aria-label="全店概況" className="flex items-center gap-2.5 min-h-[44px] flex-none">
-        <span data-stat="vacant" className="text-emerald-800"><Figure label="可入座" value={stats.vacant} unit="桌" people={stats.vacantSeats} /></span>
+        <span data-stat="vacant" className="text-emerald-800"><Figure label="可入座" value={stats.vacant} unit="桌" seats={stats.vacantSeats} /></span>
         <span aria-hidden className="h-5 w-px bg-chicken-brown/15" />
         <span data-stat="dining"><Figure label="用餐中" value={stats.dining} unit="桌" people={stats.occSeats} /></span>
       </div>
