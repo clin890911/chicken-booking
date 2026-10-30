@@ -9,7 +9,7 @@ import { getSettings } from './settingsService'
 import { statusZh, assignmentKind } from '../utils/tableStatus'
 import { bookingTableNumbers } from '../utils/bookingTables'
 import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability'
-import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor, preassignConflicts, squeezeSeats } from '../utils/capacity'
+import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor, preassignConflicts, squeezeSeats, SQUEEZE_PER_TABLE } from '../utils/capacity'
 import { seatedMoveWarningSignature } from '../utils/seatedMoveWarnings'
 import { buildGroupHolds } from '../utils/groupLive'
 import { todayStr, nowSlot, formatDate } from '../utils/timeSlots'
@@ -1063,7 +1063,10 @@ export function undoAssignBooking(bookingId, tableNumber) {
 //   且隔壁兩桌直接併（店主 2026-10 回報：該推 107/110 卻推 101+102）。
 // 跨樓層：桌數少 → 浪費少 → 1F 優先。
 // 沒有任何單一樓層能湊夠 → 回座位最多的單層（該層全部可用桌，enough:false），由 UI 提示改候位/分桌。
-// 回傳 { tableNumbers, seats, enough, floor }。
+// ★ 擠一擠（capacity.squeezeSeats，每桌可多坐 SQUEEZE_PER_TABLE 位）：先找「原席數就坐得下」的組合（任何樓層）；
+//   全部樓層都湊不到才改用擠一擠容量再找一次，找到就標 squeezed:true（UI 要講明是擠一擠建議）。
+//   例：13 位、只剩兩張 6 人桌 → 原席 12 不夠、擠一擠 14 夠 → 建議兩桌＋squeezed。
+// 回傳 { tableNumbers, seats（原席數合計）, maxSeats（擠一擠上限）, enough, squeezed, floor }。
 export function suggestTableCombo(partySize, opts = {}) {
   const need = Math.max(0, Number(partySize) || 0)
   const today = opts?.now ? formatDate(opts.now) : todayStr()
@@ -1073,14 +1076,25 @@ export function suggestTableCombo(partySize, opts = {}) {
     .filter(t => !conflicts.has(String(t.number)))
 
   const floors = [...new Set(pool.map(t => t.floor))]
-  const perFloor = floors.map(f => bestComboOnFloor(pool.filter(t => t.floor === f), need, f))
-  const enoughFloors = perFloor.filter(r => r.enough)
-    .sort((a, b) =>
-      a.tableNumbers.length - b.tableNumbers.length ||
-      a.seats - b.seats ||
-      (a.floor === b.floor ? 0 : a.floor === '1F' ? -1 : 1))
-  if (enoughFloors.length) return enoughFloors[0]
-  return perFloor.sort((a, b) => b.seats - a.seats)[0] || { tableNumbers: [], seats: 0, enough: false, floor: null }
+  const pickBest = (extra) => {
+    const perFloor = floors.map(f => bestComboOnFloor(pool.filter(t => t.floor === f), need, f, extra))
+    const enoughFloors = perFloor.filter(r => r.enough)
+      .sort((a, b) =>
+        a.tableNumbers.length - b.tableNumbers.length ||
+        a.effSeats - b.effSeats ||
+        (a.floor === b.floor ? 0 : a.floor === '1F' ? -1 : 1))
+    return { best: enoughFloors[0] || null, perFloor }
+  }
+  const finish = (r, squeezed) => {
+    const picked = pool.filter(t => r.tableNumbers.includes(String(t.number)))
+    return { tableNumbers: r.tableNumbers, seats: r.seats, maxSeats: squeezeSeats(picked), enough: r.enough, squeezed, floor: r.floor }
+  }
+  const raw = pickBest(0)
+  if (raw.best) return finish(raw.best, false)
+  const squeezed = pickBest(SQUEEZE_PER_TABLE)
+  if (squeezed.best) return finish(squeezed.best, true)
+  const partial = raw.perFloor.sort((a, b) => b.seats - a.seats)[0]
+  return partial ? finish(partial, false) : { tableNumbers: [], seats: 0, maxSeats: 0, enough: false, squeezed: false, floor: null }
 }
 
 const byTableNumber = (a, b) => String(a.number).localeCompare(String(b.number))
@@ -1092,16 +1106,20 @@ const tableCenter = (t) => ({
 // 單一樓層的最佳組合。先在「容量組成」層級列舉（桌型種類很少：4P/6P…，列舉量極小），
 // 一旦座位 ≥ 需求就停止往下加桌（再加只會更浪費），取桌數最少、再浪費最少的組成；
 // 同分的組成再比「挑出來的實際桌子」誰最緊湊。
-function bestComboOnFloor(list, need, floor) {
-  const total = list.reduce((s, t) => s + (Number(t.capacity) || 0), 0)
+// extra＝每桌額外可坐的位數（0＝原席數；SQUEEZE_PER_TABLE＝擠一擠口徑）。
+// 回傳的 seats 一律是「原席數」合計；effSeats 是本次口徑（含 extra）的合計，用來比較。
+function bestComboOnFloor(list, need, floor, extra = 0) {
+  const effCap = (t) => (Number(t.capacity) || 0) + extra
+  const rawSum = (arr) => arr.reduce((s, t) => s + (Number(t.capacity) || 0), 0)
+  const total = list.reduce((s, t) => s + effCap(t), 0)
   if (total < need || need <= 0) {
     // 湊不夠：回該層全部可用桌（座位最多的 partial）
     const all = [...list].sort(byTableNumber)
-    return { tableNumbers: all.map(t => String(t.number)), seats: total, enough: total >= need && all.length > 0, floor }
+    return { tableNumbers: all.map(t => String(t.number)), seats: rawSum(all), effSeats: total, enough: total >= need && all.length > 0, floor }
   }
   const groups = new Map()
   for (const t of list) {
-    const c = Number(t.capacity) || 0
+    const c = effCap(t)
     if (!groups.has(c)) groups.set(c, [])
     groups.get(c).push(t)
   }
@@ -1133,7 +1151,7 @@ function bestComboOnFloor(list, need, floor) {
   // 依組成挑實際桌：以每張候選桌為錨點，各容量取離錨點最近的 k 張；總距離最小者勝（同分依桌號）。
   let pick = null // { score, tables }
   for (const mix of best.mixes) {
-    const anchors = [...list].filter(t => mix[caps.indexOf(Number(t.capacity) || 0)] > 0).sort(byTableNumber)
+    const anchors = [...list].filter(t => mix[caps.indexOf(effCap(t))] > 0).sort(byTableNumber)
     for (const anchor of anchors) {
       const ac = tableCenter(anchor)
       const dist = (t) => { const c = tableCenter(t); return Math.hypot(c.x - ac.x, c.y - ac.y) }
@@ -1148,7 +1166,7 @@ function bestComboOnFloor(list, need, floor) {
     }
   }
   const tables = pick.tables.sort(byTableNumber)
-  return { tableNumbers: tables.map(t => String(t.number)), seats: best.seats, enough: true, floor }
+  return { tableNumbers: tables.map(t => String(t.number)), seats: rawSum(tables), effSeats: best.seats, enough: true, floor }
 }
 
 // === 停用/維修 × 團體圈桌的衝突檢查（integration 層：tableService 看不到團體資料）===

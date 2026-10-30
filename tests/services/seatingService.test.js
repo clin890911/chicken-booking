@@ -1112,12 +1112,50 @@ describe('seatingService 整合層', () => {
         expect(r.seats).toBe(10)
       })
 
-      it('同層都湊不夠 → enough:false + 回座位最多的單層 partial（不跨樓層）', () => {
+      it('同層都湊不夠（連擠一擠也不夠）→ enough:false + 回座位最多的單層 partial（不跨樓層）', () => {
         tableService.bulkWrite([mkTable('101', 4, '1F'), mkTable('201', 4, '2F'), mkTable('202', 4, '2F')])
-        const r = seating.suggestTableCombo(10) // 1F 最多 4、2F 最多 8，都 < 10 → 不跨層
+        const r = seating.suggestTableCombo(11) // 1F 最多 4(+1)、2F 最多 8(+2=10)，都 < 11 → 不跨層
         expect(r.enough).toBe(false)
+        expect(r.squeezed).toBe(false)
         expect(r.seats).toBe(8)
         expect(r.floor).toBe('2F')
+      })
+
+      // 擠一擠（每桌可多坐 1 位，capacity.squeezeSeats）：原席數湊不到才用，且要標 squeezed
+      it('擠一擠：13 位、只剩兩張 6 人桌 → 建議這兩桌並標 squeezed（原席 12、上限 14）', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 6, '1F')])
+        const r = seating.suggestTableCombo(13)
+        expect(r.enough).toBe(true)
+        expect(r.squeezed).toBe(true)
+        expect([...r.tableNumbers].sort()).toEqual(['101', '102'])
+        expect(r.seats).toBe(12)
+        expect(r.maxSeats).toBe(14)
+      })
+
+      it('擠一擠：有原席數就坐得下的組合時優先建議它（即使桌數較多），不標 squeezed', () => {
+        // 13 位：6+6 擠一擠 14 夠（2 張），但 6+6+4=16 原席就夠（3 張）→ 原席優先
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 6, '1F'), mkTable('103', 4, '1F')])
+        const r = seating.suggestTableCombo(13)
+        expect(r.enough).toBe(true)
+        expect(r.squeezed).toBe(false)
+        expect([...r.tableNumbers].sort()).toEqual(['101', '102', '103'])
+        expect(r.seats).toBe(16)
+      })
+
+      it('擠一擠：別層原席數就夠 → 選別層的原席組合，不在本層擠', () => {
+        // 1F 6+6=12 擠一擠才夠 13；2F 6+6+6=18 原席就夠 → 2F、不標 squeezed
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 6, '1F'), mkTable('201', 6, '2F'), mkTable('202', 6, '2F'), mkTable('203', 6, '2F')])
+        const r = seating.suggestTableCombo(13)
+        expect(r.floor).toBe('2F')
+        expect(r.squeezed).toBe(false)
+      })
+
+      it('擠一擠：建議池仍排除時段重疊的他筆預配與團保桌（PR #169）', () => {
+        tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('102', 6, '1F'), mkTable('103', 6, '1F')])
+        bookingService.create({ name: '預配', phone: '0911000000', date: '2026-06-15', timeSlot: '12:30', guests: 6, status: 'confirmed', assignedTableId: '103' })
+        const r = seating.suggestTableCombo(13, { date: '2026-06-15', mode: 'now' })
+        expect(r.squeezed).toBe(true)
+        expect([...r.tableNumbers].sort()).toEqual(['101', '102'])
       })
 
       it('全部空桌仍湊不夠 → enough:false + 最大集合', () => {
@@ -2280,7 +2318,10 @@ describe('併桌建議排除重疊預配與團保（suggestTableCombo）', () =>
     const r = seating.suggestTableCombo(9)
     expect(r.tableNumbers).not.toContain('101')
     expect(r.tableNumbers).not.toContain('102')
-    expect(r.enough).toBe(false)                                // 只剩 4+4=8 < 9
+    // 只剩 4+4=8 < 9：原席不夠，擠一擠 10 ≥ 9 → 建議 103+104 並標擠一擠（團保桌照樣不進池）
+    expect(r.enough).toBe(true)
+    expect(r.squeezed).toBe(true)
+    expect([...r.tableNumbers].sort()).toEqual(['103', '104'])
     expect(r.seats).toBe(8)
   })
 })

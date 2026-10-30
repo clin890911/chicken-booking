@@ -60,7 +60,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
             {squeezed && <span data-testid="squeeze-badge" className="text-xs font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded">擠一擠 · 超坐 {need - multiSeats} 位</span>}
             <span className="text-xs opacity-90">點桌加 / 減 · 可選單桌或多桌</span>
             {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</span>}
-            {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {comboLabel}（自行選桌）</span>}
+            {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {comboLabel}{comboNums && mode.suggestionSqueezed ? '（擠一擠）' : ''}（自行選桌）</span>}
             {!seatsNow && <span className="text-xs opacity-90">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
             {isArrive && <span className="text-xs opacity-90">確認即入座 · 只能選此刻空桌</span>}
           </div>

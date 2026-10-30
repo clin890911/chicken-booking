@@ -28,7 +28,14 @@ export function prepareCommand({ owner, store, action, id, expectedVersion = 0, 
 export function completeCommand(envelope) {
   write(read().filter(entry => !(entry.owner === envelope.owner && entry.store === envelope.store && entry.command.commandId === envelope.command.commandId)))
 }
-export const commandError = error => error?.status === 409 ? '另一台已更新或操作已過期，未套用此操作；請確認最新候位與桌況'
+// 後端 functions/lib/waitlistCommands.js 的錯誤碼（err.code）→ 中文。有對照的先講真正原因，
+// 沒有的退回依 HTTP 狀態的通用說法（409 原本一律講「另一台已更新」，座位不足時會誤導店員）。
+export const COMMAND_ERROR_MESSAGES = {
+  // 後端口徑同 capacity.squeezeSeats：所選桌合計容量＋每桌擠一擠 1 位仍小於人數
+  'table-capacity-insufficient': '座位不足（已含每桌擠一擠 1 位），未入座；請再加一桌',
+}
+export const commandError = error => Object.hasOwn(COMMAND_ERROR_MESSAGES, error?.code ?? '') ? COMMAND_ERROR_MESSAGES[error.code]
+  : error?.status === 409 ? '另一台已更新或操作已過期，未套用此操作；請確認最新候位與桌況'
   : error?.status === 403 ? '此帳號沒有操作權限，未套用此操作'
   : error?.status >= 400 && error?.status < 500 ? '候位操作未成立，請確認資料後再試'
   : '結果待確認，請恢復連線後確認原操作；請勿另建同一組候位'

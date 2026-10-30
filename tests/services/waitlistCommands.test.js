@@ -55,3 +55,10 @@ it('partial local ACK persistence rolls back every canonical collection; keeps b
   expect(cloud.localDataset().bookings).toEqual([])
   expect(cloud.localDataset().tables[0].status).toBe('vacant')
 })
+it('錯誤碼中文化：table-capacity-insufficient 講座位不足（已含擠一擠），不誤報成「另一台已更新」', () => {
+  expect(service.commandError({ status: 409, code: 'table-capacity-insufficient' })).toBe('座位不足（已含每桌擠一擠 1 位），未入座；請再加一桌')
+  // 沒有對照的錯誤碼仍依 HTTP 狀態退回通用說法；原型鏈上的鍵不可被當成對照
+  expect(service.commandError({ status: 409, code: 'waitlist-changed' })).toMatch(/另一台已更新/)
+  expect(service.commandError({ status: 409, code: 'constructor' })).toMatch(/另一台已更新/)
+  expect(service.commandError({ status: 403 })).toMatch(/沒有操作權限/)
+})
