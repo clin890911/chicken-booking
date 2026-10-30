@@ -136,14 +136,15 @@ describe('訂位・今日：頁首固定、清單自己捲、lg 兩欄', () => {
     const list = container.querySelector('[data-testid="today-list"]')
     expect(header.textContent).toContain('今日訂位')
     expect(header.querySelector('input[type="search"]')).not.toBeNull()
-    expect(header.textContent).toContain('LINE') // 來源篩選
+    expect(header.querySelector('details[data-popover] summary')).not.toBeNull() // 篩選鈕（來源多選＋隱藏已離，2026-10-31 併成一顆）
+    expect(header.textContent).toContain('LINE')
     expect(cls(header)).toContain('md:flex-shrink-0')
     expect(cls(list)).toEqual(expect.arrayContaining(['md:flex-1', 'md:min-h-0', 'md:overflow-y-auto']))
     expect(cls(list.parentElement)).toEqual(expect.arrayContaining(['md:flex', 'md:flex-col', 'md:flex-1', 'md:min-h-0']))
     expect(list.querySelectorAll('[data-testid="card"]')).toHaveLength(3)
     expect(cls(list.querySelector('[data-testid="card"]').parentElement)).toContain('lg:grid-cols-2')
-    // 一面式規則：不加固定高
-    expect(container.innerHTML).not.toMatch(/\bh-\[\d+px\]|max-h-\[\d+px\]/)
+    // 一面式規則：不加固定高（min-h-[44px] 觸控下限不算固定高）
+    expect(container.innerHTML).not.toMatch(/(?<![\w-])h-\[\d+px\]|max-h-\[\d+px\]/)
   })
 })
 

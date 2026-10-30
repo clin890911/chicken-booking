@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { Filter } from 'lucide-react'
 import BookingCard from '../booking/BookingCard'
 import GroupBatchCard from '../booking/GroupBatchCard'
 import StatsCard from './StatsCard'
@@ -6,17 +7,11 @@ import { EmptyState } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { todayStr } from '../../utils/timeSlots'
 import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
-import SegmentedControl from '../ui/SegmentedControl'
-import { bookingTableNumbers } from '../../utils/bookingTables'
-
-const SOURCE_FILTERS = [
-  { key: 'all',    label: '全部' },
-  { key: 'online', label: '線上' },
-  { key: 'phone',  label: '電話' },
-  { key: 'walkin', label: '現場' },
-  { key: 'group',  label: '團體' },
-  { key: 'line',   label: 'LINE' },
-]
+import { computeStoreStats } from '../../utils/opsAlerts'
+import {
+  SOURCE_OPTIONS, defaultTodayFilter, isAllSources, isDefaultTodayFilter, toggleSource, selectAllSources, onlySource,
+  isArrivedFilter, toggleArrivedFilter, filterTodayBookings, filterTodayGroups, summarizeTodayFilter,
+} from '../../utils/todayFilter'
 
 const STATUS_PRIORITY = {
   confirmed: 0,
@@ -26,26 +21,21 @@ const STATUS_PRIORITY = {
   noshow: 4,
 }
 
-export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
-  const { bookings, groupReservations } = useBooking()
+// onOpenSeating：統計卡「未指派」→ 今天的「當日排位」（BookingsView 的日曆子分頁＋DaySeatingPanel，預設選最早一筆未配桌）
+// onGoOps：統計卡「用餐中」→ 現場頁（用餐中的桌在現場管理）
+export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable, onOpenSeating, onGoOps }) {
+  const { bookings, groupReservations, tables } = useBooking()
   const today = todayStr()
   const [query, setQuery] = useState('')
-  const [source, setSource] = useState('all')
-  const [hideCompleted, setHideCompleted] = useState(true)
+  // 篩選（來源多選＋隱藏已離＋只看已到/離）：一顆「篩選」鈕收起來，見 utils/todayFilter。
+  // 不持久化（原本「隱藏已離」就只是元件 state，重新整理回預設）。
+  const [filter, setFilter] = useState(defaultTodayFilter)
+  const listRef = useRef(null)
+  const allSources = isAllSources(filter.sources)
+  const summary = summarizeTodayFilter(filter)
 
   const filtered = useMemo(() => {
-    let list = bookings.filter(b => b.date === today && b.status !== 'cancelled')
-    if (hideCompleted) list = list.filter(b => b.status !== 'completed')
-    if (source !== 'all') list = list.filter(b => b.source === source)
-    if (query.trim()) {
-      const q = query.trim().toLowerCase()
-      list = list.filter(b =>
-        (b.name || '').toLowerCase().includes(q) ||
-        (b.phone || '').includes(q) ||
-        bookingTableNumbers(b).some(n => n.toLowerCase().includes(q)) ||
-        (b.id || '').toLowerCase().includes(q)
-      )
-    }
+    const list = filterTodayBookings(bookings, today, filter, query)
     return [...list].sort((a, b) => {
       const byTime = (a.timeSlot || '').localeCompare(b.timeSlot || '')
       if (byTime) return byTime
@@ -54,26 +44,35 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
       if (aUnassigned !== bUnassigned) return aUnassigned - bUnassigned
       return (STATUS_PRIORITY[a.status] ?? 9) - (STATUS_PRIORITY[b.status] ?? 9)
     })
-  }, [bookings, today, source, query, hideCompleted])
+  }, [bookings, today, filter, query])
 
+  // 統計不受篩選影響（一律今日全部散客）。用餐中改用現場頂列同一支 computeStoreStats（桌數＋在席人數，含團體桌），
+  // 跟現場頁「用餐中 N 桌 · M 人」同口徑——點了就是去現場頁看那些桌。
   const stats = useMemo(() => {
     const todayAll = bookings.filter(b => b.date === today && b.status !== 'cancelled')
-    const totalGroups = todayAll.length
-    const totalGuests = todayAll.reduce((s, b) => s + Number(b.guests || 0), 0)
-    const arrivedGroups = todayAll.filter(b => b.status === 'arrived' || b.status === 'completed').length
-    const dining = todayAll.filter(b => b.status === 'arrived').length
-    const unassigned = todayAll.filter(b => b.status === 'confirmed' && !b.assignedTableId).length
-    return { totalGroups, totalGuests, arrivedGroups, dining, unassigned }
-  }, [bookings, today])
+    const sum = (list) => list.reduce((s, b) => s + Number(b.guests || 0), 0)
+    const arrived = todayAll.filter(b => b.status === 'arrived' || b.status === 'completed')
+    const unassigned = todayAll.filter(b => b.status === 'confirmed' && !b.assignedTableId)
+    const store = computeStoreStats({ tables: tables || [], bookings, today })
+    return {
+      totalGroups: todayAll.length, totalGuests: sum(todayAll),
+      arrivedGroups: arrived.length, arrivedGuests: sum(arrived),
+      unassigned: unassigned.length, unassignedGuests: sum(unassigned),
+      diningTables: store.dining, diningGuests: store.occSeats,
+    }
+  }, [bookings, tables, today])
 
-  // 團體梯次同框（判斷時段用餐狀況）：source filter 只在「全部/團體」時顯示團體卡；
-  // 「隱藏已離」同步隱藏已完成的團。
-  const visibleGroups = useMemo(() => {
-    if (source !== 'all' && source !== 'group') return []
-    let list = groupReservations || []
-    if (hideCompleted) list = list.filter(g => g.status !== 'completed')
-    return list
-  }, [groupReservations, source, hideCompleted])
+  // 團體梯次同框（判斷時段用餐狀況）：有勾「團體」才顯示團體卡；「隱藏已離」同步隱藏已完成的團。
+  const visibleGroups = useMemo(() => filterTodayGroups(groupReservations, filter), [groupReservations, filter])
+
+  const scrollListTop = () => { if (listRef.current) listRef.current.scrollTop = 0 }
+  const showAll = () => { setFilter(defaultTodayFilter()); setQuery(''); scrollListTop() }
+  const toggleArrived = () => { setFilter(f => toggleArrivedFilter(f)); scrollListTop() }
+  const arrivedActive = isArrivedFilter(filter)
+  const menuKeyDown = (e) => {
+    if (e.key !== 'Escape') return
+    const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus()
+  }
 
   const entries = useMemo(
     () => mergeDayEntries(filtered, visibleGroups, today),
@@ -103,17 +102,33 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
   return (
     <div className="space-y-4 md:flex md:flex-col md:flex-1 md:min-h-0">
       <div data-testid="today-header" className="space-y-3 md:flex-shrink-0">
-      {/* 統計（散客口徑） */}
+      {/* 統計（散客口徑；用餐中＝現場口徑）：每格都可以點（Barry 2026-10-31）。
+          漏斗＝在本頁篩選（今日訂位→看全部、已到/離→只看已到）；箭頭＝跳去別頁（未指派→當日排位、用餐中→現場）。 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {/* 今日訂位＋總人數合併一格（店主 2026-10-30）：「12 組 · 48 人」 */}
         <StatsCard
-          label="今日訂位"
-          color="red"
-          value={<>{stats.totalGroups}<span className="text-sm font-semibold text-chicken-brown/60"> 組 · </span>{stats.totalGuests}<span className="text-sm font-semibold text-chicken-brown/60"> 人</span></>}
+          testId="stat-total" label="今日訂位" color="red" kind="filter" hint="看全部"
+          value={<Pair a={stats.totalGroups} unitA="組" b={stats.totalGuests} />}
+          onClick={showAll} active={false}
+          ariaLabel={`今日訂位 ${stats.totalGroups} 組 ${stats.totalGuests} 人，顯示全部`}
         />
-        <StatsCard label="未指派" value={`${stats.unassigned}`} color="red" />
-        <StatsCard label="用餐中" value={`${stats.dining}`} color="brown" />
-        <StatsCard label="已到/離" value={`${stats.arrivedGroups}`} color="green" />
+        <StatsCard
+          testId="stat-unassigned" label="未指派" color="red" kind="nav" hint="去排位" disabledHint="都排好了"
+          value={<Pair a={stats.unassigned} unitA="組" b={stats.unassignedGuests} />}
+          onClick={onOpenSeating ? () => onOpenSeating(today) : undefined} disabled={stats.unassigned === 0}
+          ariaLabel={`未指派 ${stats.unassigned} 組 ${stats.unassignedGuests} 人，前往排位`}
+        />
+        <StatsCard
+          testId="stat-dining" label="用餐中" color="brown" kind="nav" hint="去現場"
+          value={<Pair a={stats.diningTables} unitA="桌" b={stats.diningGuests} />}
+          onClick={onGoOps}
+          ariaLabel={`用餐中 ${stats.diningTables} 桌 ${stats.diningGuests} 人，前往現場`}
+        />
+        <StatsCard
+          testId="stat-arrived" label="已到/離" color="green" kind="filter" hint={arrivedActive ? '取消' : '看已到'}
+          value={<Pair a={stats.arrivedGroups} unitA="組" b={stats.arrivedGuests} />}
+          onClick={toggleArrived} active={arrivedActive}
+          ariaLabel={`已到/離 ${stats.arrivedGroups} 組 ${stats.arrivedGuests} 人，${arrivedActive ? '取消只看已到' : '只看已到和已離'}`}
+        />
       </div>
 
       {/* 今日團體一覽（與散客分開計，避免口徑混淆） */}
@@ -123,32 +138,113 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
         </div>
       )}
 
-      {/* 搜尋 + Filter：lg 以上併成一列（搜尋｜來源篩選｜隱藏已離），省下一整列給清單 */}
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-        <div className="flex gap-2 items-center lg:flex-1 lg:min-w-0">
-          <input
-            type="search"
-            placeholder="搜尋姓名 / 電話 / 桌號 / 編號"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            className="input flex-1"
-          />
-          <label className="flex items-center gap-1.5 text-xs text-chicken-brown/70 whitespace-nowrap">
-            <input type="checkbox" checked={hideCompleted} onChange={e => setHideCompleted(e.target.checked)} />
-            <span>隱藏已離</span>
-          </label>
-        </div>
-        {/* py-2 -my-2：overflow 容器會裁掉分段控制 ::after 外擴的 44px 可點區，上下各留 8px padding 讓它露出；-my-2 抵銷 padding → 版面不變 */}
-        <div className="overflow-x-auto no-scrollbar -mx-1 px-1 py-2 -my-2 lg:mx-0 lg:flex-shrink-0">
-          <SegmentedControl size="sm" options={SOURCE_FILTERS} value={source} onChange={setSource} ariaLabel="來源篩選" />
-        </div>
+      {/* 搜尋＋「篩選」鈕同一列（2026-10-31：來源分段鈕＋「隱藏已離」併成一顆可勾選的選單，省掉一整列）。
+          選單沿用 details[data-popover]（utils/popoverDismiss：點外面／Esc／按下選單裡的按鈕會收）；
+          勾選框不是按鈕 → 勾來勾去選單不會收，多選才方便；「只看」「重設」「完成」是按鈕 → 按了就收。 */}
+      <div className="flex gap-2 items-center">
+        <input
+          type="search"
+          placeholder="搜尋姓名 / 電話 / 桌號 / 編號"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          className="input flex-1 min-w-0"
+        />
+        <details data-popover data-testid="today-filter" className="relative flex-shrink-0">
+          <summary
+            aria-label={summary.aria}
+            className={`tap cursor-pointer list-none [&::-webkit-details-marker]:hidden min-h-[44px] px-3 flex items-center gap-1.5 rounded-[10px] border text-sm font-bold whitespace-nowrap
+              focus:outline-none focus-visible:ring-2 focus-visible:ring-chicken-red/50
+              ${summary.isDefault ? 'bg-white border-chicken-brown/15 text-chicken-brown' : 'bg-chicken-brown text-white border-chicken-brown'}`}
+          >
+            <Filter size={16} strokeWidth={2.2} aria-hidden="true" />
+            <span className="max-w-[12rem] truncate">{summary.label}</span>
+            {!summary.isDefault && (
+              <span aria-hidden="true" className="min-w-[20px] h-5 px-1 rounded-full bg-white text-chicken-brown text-xs font-black tabular-nums flex items-center justify-center">{summary.count}</span>
+            )}
+          </summary>
+          <div
+            role="group"
+            aria-label="訂位篩選選項"
+            onKeyDown={menuKeyDown}
+            className="absolute right-0 z-30 mt-1 w-[17rem] max-w-[calc(100vw-2rem)] bg-white border border-chicken-brown/15 rounded-xl shadow-lg p-1.5 flex flex-col text-chicken-brown"
+          >
+            <p className="px-2 pt-1 pb-0.5 text-xs font-bold text-chicken-brown/70">來源</p>
+            <label className="min-h-[44px] px-2 flex items-center gap-2.5 rounded-lg hover:bg-chicken-brown/5 cursor-pointer text-sm font-bold">
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-chicken-red"
+                checked={allSources}
+                ref={el => { if (el) el.indeterminate = !allSources }}
+                onChange={() => setFilter(f => ({ ...f, sources: selectAllSources() }))}
+              />
+              <span>全部來源</span>
+            </label>
+            {SOURCE_OPTIONS.map(o => {
+              const checked = filter.sources.has(o.key)
+              const last = checked && filter.sources.size === 1
+              return (
+                <div key={o.key} className="flex items-center rounded-lg hover:bg-chicken-brown/5">
+                  <label className="flex-1 min-h-[44px] pl-6 pr-2 flex items-center gap-2.5 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      className="w-5 h-5 accent-chicken-red"
+                      checked={checked}
+                      disabled={last}
+                      onChange={() => setFilter(f => ({ ...f, sources: toggleSource(f.sources, o.key) }))}
+                    />
+                    <span>{o.label}</span>
+                    {last && <span className="text-xs text-chicken-brown/70">至少留一個</span>}
+                  </label>
+                  <button
+                    type="button"
+                    aria-label={`只看${o.label}`}
+                    onClick={() => setFilter(f => ({ ...f, sources: onlySource(o.key) }))}
+                    className="min-h-[44px] min-w-[44px] px-2.5 text-xs font-bold text-chicken-brown/70 rounded-lg hover:bg-chicken-brown/10"
+                  >只看</button>
+                </div>
+              )
+            })}
+            <div className="my-1 border-t border-chicken-brown/10" />
+            <p className="px-2 pt-1 pb-0.5 text-xs font-bold text-chicken-brown/70">狀態</p>
+            <label className="min-h-[44px] px-2 flex items-center gap-2.5 rounded-lg hover:bg-chicken-brown/5 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-chicken-red"
+                checked={filter.hideCompleted}
+                onChange={e => { const v = e.target.checked; setFilter(f => ({ ...f, hideCompleted: v })) }}
+              />
+              <span>隱藏已離</span>
+            </label>
+            <label className="min-h-[44px] px-2 flex items-center gap-2.5 rounded-lg hover:bg-chicken-brown/5 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                className="w-5 h-5 accent-chicken-red"
+                checked={filter.arrivedOnly}
+                onChange={e => { const v = e.target.checked; setFilter(f => ({ ...f, arrivedOnly: v })) }}
+              />
+              <span>只看已到／已離</span>
+            </label>
+            <div className="mt-1 pt-1 border-t border-chicken-brown/10 flex gap-1">
+              <button
+                type="button"
+                onClick={() => setFilter(defaultTodayFilter())}
+                disabled={isDefaultTodayFilter(filter)}
+                className="flex-1 min-h-[44px] rounded-lg text-sm font-bold text-chicken-brown/80 hover:bg-chicken-brown/5 disabled:text-chicken-brown/55 disabled:cursor-default"
+              >重設</button>
+              <button
+                type="button"
+                className="flex-1 min-h-[44px] rounded-lg text-sm font-bold bg-chicken-brown text-white"
+              >完成</button>
+            </div>
+          </div>
+        </details>
       </div>
       </div>
 
       {/* 列表（散客卡 + 團體梯次卡同時段同框）：iPad 上自己捲動；lg 以上卡片 2 欄 */}
-      <div data-testid="today-list" className="space-y-4 md:flex-1 md:min-h-0 md:overflow-y-auto md:overscroll-y-contain md:-mx-1 md:px-1 md:pb-2">
+      <div ref={listRef} data-testid="today-list" className="space-y-4 md:flex-1 md:min-h-0 md:overflow-y-auto md:overscroll-y-contain md:-mx-1 md:px-1 md:pb-2">
       {entries.length === 0 ? (
-        filtered.length === 0 && (query || source !== 'all') ? (
+        filtered.length === 0 && (query || !allSources || filter.arrivedOnly) ? (
           <EmptyState icon="search" title="找不到符合的訂位" hint="試試其他關鍵字或清除過濾條件" />
         ) : (
           <EmptyState icon="utensils" title="今日尚無訂位" hint="客人線上訂位後會出現在這裡" />
@@ -196,4 +292,9 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable }) {
       </div>
     </div>
   )
+}
+
+// 「12 組 · 48 人」：主數字大字、單位與人數小字（同現場頂列）
+function Pair({ a, unitA, b }) {
+  return <>{a}<span className="text-sm font-semibold text-chicken-brown/60"> {unitA} · </span>{b}<span className="text-sm font-semibold text-chicken-brown/60"> 人</span></>
 }

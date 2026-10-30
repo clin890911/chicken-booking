@@ -25,7 +25,7 @@ const SUB_TABS = [
 // 保留日期＋時段，只清客人欄位——電話一通接一通，不必每存一筆就被帶回「今日」再點回來。
 // 日曆點日期 → 直接進「當日排位」（與規劃頁同一個 DaySeatingPanel）；「月曆」返回回到這裡的日曆（停在該日清單）。
 // 訂位卡的動作（聯絡／編輯／取消訂位／更多／交班事項）在排位畫面選中訂位時都有（同一份 useBookingActions）。
-export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, onCreated, openAdd }) {
+export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, onCreated, openAdd, onGoOps }) {
   // 新增訂位要 booking.create；唯讀角色（kitchen）沒有「新增」子分頁、日曆也不出現「＋ 新增訂位」，
   // 名冊預填（openAdd）更不會把他送進新增表單。fail-closed：useAuth() 無 Provider 時視為無權。
   const canCreate = !!useAuth()?.can?.('booking.create')
@@ -35,6 +35,8 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   const [calFocus, setCalFocus] = useState(null) // 從排位返回時，日曆停在排位最後看的那天
   const setSub = (k) => { setSeatDate(null); setSubRaw(k === 'add' && !canCreate ? 'today' : k) }
   const closeSeating = () => { setCalFocus({ date: seatDate, seq: Date.now() }); setSeatDate(null) }
+  // 今日統計卡「未指派」→ 直接進該日的當日排位（＝日曆點那天，同一個 DaySeatingPanel；它自己會預設選最早一筆未配桌）
+  const openSeating = (date) => { setSubRaw('calendar'); setSeatDate(date) }
   // 新增表單的預填：可能來自名冊（openAdd prop）或日曆選日期後按「＋ 新增訂位」（本地觸發）。
   // 兩條路共用同一個 state，誰後觸發就以誰為準（都帶 seq，AddBookingView 依 seq 變更才重灌欄位）。
   const [addPrefill, setAddPrefill] = useState(openAdd || null)
@@ -76,7 +78,7 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
 
       {/* 子頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
       <div key={sub} className={`animate-soft-enter${fillCls}`}>
-          {sub === 'today' && <TodayView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} />}
+          {sub === 'today' && <TodayView onAssignTable={onAssignTable} onMoveTable={onMoveTable} onOpenGroup={onOpenGroup} onOpenSeating={openSeating} onGoOps={onGoOps} />}
           {sub === 'calendar' && (
             <>
               <div hidden={!!seatDate} style={seatDate ? { display: 'none' } : undefined}>

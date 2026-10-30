@@ -241,7 +241,7 @@ export default function AdminPage() {
               )}
               {(tab === 'bookings' || taskSource?.tab === 'bookings') && (
                 <div hidden={tab !== 'bookings'} aria-hidden={tab !== 'bookings'} inert={tab !== 'bookings' ? '' : undefined} style={tab !== 'bookings' ? { display: 'none' } : undefined}>
-                <BookingsView onAssignTable={handleAssignTable} onMoveTable={canMoveTable ? handleMoveTable : null} onOpenGroup={handleOpenGroup} openAdd={addPrefill} />
+                <BookingsView onAssignTable={handleAssignTable} onMoveTable={canMoveTable ? handleMoveTable : null} onOpenGroup={handleOpenGroup} openAdd={addPrefill} onGoOps={() => navTo('ops')} />
                 </div>
               )}
               {tab === 'roster' && (

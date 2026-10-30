@@ -32,7 +32,10 @@ describe('TodayView 統計卡', () => {
     const text = container.textContent
     expect(text).not.toContain('LINE 已綁')
     expect(text).not.toContain('總人數')
-    expect(text).toContain('今日訂位2 組 · 10 人')
+    // 2026-10-31 起統計卡可點，右上多了去處提示（「看全部」），數字區仍是「N 組 · M 人」
+    const total = container.querySelector('[data-testid="stat-total"]')
+    expect(total.textContent).toContain('今日訂位')
+    expect(total.textContent).toContain('2 組 · 10 人')
     for (const label of ['未指派', '用餐中', '已到/離']) expect(text).toContain(label)
   })
 })

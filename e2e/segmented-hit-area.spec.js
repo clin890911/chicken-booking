@@ -74,9 +74,11 @@ test('SegmentedControl md：視覺 32px、可點區外擴到 44px、左右不重
 })
 
 test('SegmentedControl sm：視覺 28px、可點區外擴到 44px、左右不重疊', async ({ page }) => {
+  // 原本量訂位「今日」的來源篩選；2026-10-31 它併進「篩選」選單（多選勾選），改量名冊「顧客篩選」（同為 sm）
   await login(page)
-  await expect(page.getByLabel('來源篩選')).toBeVisible()
-  const rows = await probe(page, '來源篩選', 8)
+  await page.locator('aside').getByRole('button', { name: '名冊' }).click()
+  await expect(page.getByLabel('顧客篩選')).toBeVisible()
+  const rows = await probe(page, '顧客篩選', 8)
   expect(rows.length).toBeGreaterThanOrEqual(2)
   for (const r of rows) {
     expect(r.height, r.label).toBeCloseTo(28, 0)
