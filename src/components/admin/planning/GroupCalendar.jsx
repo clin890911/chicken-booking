@@ -19,7 +19,8 @@ function heatLevel(ratio) {
   return 5
 }
 
-export default function GroupCalendar({ value, onSelect, cursor, onCursorChange, monthSummary, settings, totalSeats = 0, walkinByDate }) {
+// onOpenDay（選用）：點日期格後再呼叫（規劃頁用它直接進「當日排位」）；「今天」鈕只選日、不跳頁。
+export default function GroupCalendar({ value, onSelect, onOpenDay, cursor, onCursorChange, monthSummary, settings, totalSeats = 0, walkinByDate }) {
   const byDate = monthSummary?.byDate || {}
   const month = monthSummary?.month || { groupCount: 0, guests: 0 }
   const closedDates = settings?.closures?.closedDates || []
@@ -109,7 +110,7 @@ export default function GroupCalendar({ value, onSelect, cursor, onCursorChange,
             <button
               key={dateStr}
               type="button"
-              onClick={() => onSelect(dateStr)}
+              onClick={() => { onSelect(dateStr); onOpenDay?.(dateStr) }}
               aria-pressed={isSelected}
               aria-label={`${cursor.month + 1}月${dayNum}日${total ? `，${total} 位` : ''}${isClosed ? '，公休' : ''}`}
               style={{ backgroundColor: bg }}

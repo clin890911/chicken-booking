@@ -18,8 +18,25 @@ if (liffTarget) window.history.replaceState(null, '', liffTarget)
 initOpaqueMode()
 installPopoverDismiss()
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+const boot = () => ReactDOM.createRoot(document.getElementById('root')).render(
   <BrowserRouter>
     <App />
   </BrowserRouter>
 )
+
+// 開發專用 demo 假資料：?demo=dayplan → 掛載前把「當日排位」示範訂位灌進本機 localStorage。
+// import.meta.env.DEV 在正式 build 會被換成 false，整段（含動態 import 的檔案）不會進 dist。
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('demo') === 'dayplan') {
+  import('./dev/dayplanDemoSeed.js')
+    .then(m => {
+      const r = m.seedDayplanDemo()
+      console.info(`[demo] 已灌入當日排位假資料：${r.bookings} 筆訂位、${r.groups} 個團`)
+      const url = new URL(window.location.href)
+      url.searchParams.delete('demo') // 重新整理不會再灌一次（要重置就再帶一次 ?demo=dayplan）
+      window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+    })
+    .catch(e => console.error('[demo] 假資料灌入失敗', e))
+    .finally(boot)
+} else {
+  boot()
+}

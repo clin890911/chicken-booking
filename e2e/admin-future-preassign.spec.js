@@ -68,6 +68,9 @@ test('日曆點明天 → 收合週條 → 日期 guard → 預配導到規劃�
     .filter({ has: page.getByText(String(tomorrow.getDate()), { exact: true }) })
     .filter({ hasText: '組' }) // 有訂位統計的那一格
     .first().click()
+  // 未來日：點日期直接進「當日排位」（2026-10-30）；這條測的是清單→預配跨頁，先按「月曆」回到當日清單
+  await expect(page.getByTestId('day-seating')).toBeVisible()
+  await page.getByRole('button', { name: '月曆', exact: true }).click()
 
   // 月曆收合成週條、當日清單成為主體
   await expect(page.getByRole('button', { name: /展開月曆/ })).toBeVisible()
@@ -123,6 +126,9 @@ test('未來日 12 人訂位 → 規劃地圖併桌預配（選兩張桌）成�
     .filter({ has: page.getByText(String(tomorrow.getDate()), { exact: true }) })
     .filter({ hasText: '組' })
     .first().click()
+  // 未來日：點日期直接進「當日排位」（2026-10-30）；這條測的是清單→預配跨頁，先按「月曆」回到當日清單
+  await expect(page.getByTestId('day-seating')).toBeVisible()
+  await page.getByRole('button', { name: '月曆', exact: true }).click()
   await expect(page.getByText('李大團')).toBeVisible()
 
   // 指派桌位（預配）→ 規劃地圖 → 無單桌可容 12 人 → 併桌預配模式
@@ -169,6 +175,9 @@ async function openSqueezePreassign(page, guests) {
     .filter({ has: page.getByText(String(tomorrow.getDate()), { exact: true }) })
     .filter({ hasText: '組' })
     .first().click()
+  // 未來日：點日期直接進「當日排位」（2026-10-30）；這條測的是清單→預配跨頁，先按「月曆」回到當日清單
+  await expect(page.getByTestId('day-seating')).toBeVisible()
+  await page.getByRole('button', { name: '月曆', exact: true }).click()
   await expect(page.getByText('林老師')).toBeVisible()
   await page.getByRole('button', { name: '指派桌位（預配）' }).click()
   await expect(page.getByText(/預先配桌：林老師/)).toBeVisible()

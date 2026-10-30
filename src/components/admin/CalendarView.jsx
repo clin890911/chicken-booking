@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import BookingCard from '../booking/BookingCard'
 import GroupBatchCard from '../booking/GroupBatchCard'
 import { Card, EmptyState, Button } from '../ui'
 import { useBooking } from '../../contexts/BookingContext'
 import { totalActiveSeats } from '../../utils/capacity'
 import Icon from '../ui/Icon'
+import { Armchair } from 'lucide-react'
 import { todayStr, formatDate, addDays, dayLabel } from '../../utils/timeSlots'
 import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
 
@@ -13,7 +14,9 @@ import { mergeDayEntries, summarizeDayGroups } from '../../utils/slotEntries'
 //   week＝週條（7 日快切 + 前後週）+ 當日訂位清單為主體（散客卡 + 團體梯次卡同框）
 // 解決「點日期後清單在月曆下方、使用者以為沒反應」：收合後清單直接在視口內。
 // 視圖切換用純條件渲染 + animate-soft-enter（動畫不變量：內容可見性不依賴 JS 回呼）。
-export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking, onMoveTable }) {
+// onOpenDay（選用）：月曆格點日期後再呼叫——訂位頁用它直接進「當日排位」（週條換日不觸發，留在清單）。
+// onPlanDay（選用）：當日清單標頭「排位」鈕。focusDate（選用，{date, seq}）：外部要求日曆停在某天（排位返回）。
+export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking, onMoveTable, onPlanDay, onOpenDay, focusDate }) {
   const { bookings, groupReservations, tables } = useBooking()
   const totalSeats = useMemo(() => totalActiveSeats(tables || []), [tables]) // 熱圖分母；測試的 mock context 可能不帶 tables
   const [cursor, setCursor] = useState(() => {
@@ -114,7 +117,11 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking,
   const pickDate = (dateStr) => {
     setSelected(dateStr)
     setView('week')
+    if (dateStr >= todayStr()) onOpenDay?.(dateStr) // 過去的日子不排位，留在清單看紀錄
   }
+  useEffect(() => {
+    if (focusDate?.date) { setSelected(focusDate.date); setView('week') }
+  }, [focusDate?.seq]) // eslint-disable-line react-hooks/exhaustive-deps
   // 週條前後週：selected 平移 7 天（同星期幾換週）
   const shiftWeek = (delta) => setSelected(formatDate(addDays(new Date(selected + 'T00:00:00'), delta * 7)))
   // 展開月曆：游標同步到 selected 的年月
@@ -271,12 +278,22 @@ export default function CalendarView({ onAssignTable, onOpenGroup, onAddBooking,
                   待指派 {daySummary.unassigned}
                 </span>
               )}
+              {/* 當日排位：同畫面看當天全部訂位＋排桌（規劃頁）。過去的日期不排。 */}
+              {onPlanDay && !isPastSelected && dayEntries.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onPlanDay(selected)}
+                  className="ml-auto inline-flex items-center gap-1 px-3 rounded-lg text-xs font-bold bg-white border border-chicken-brown/20 text-chicken-brown hover:bg-chicken-brown/[0.04] whitespace-nowrap min-h-[44px]"
+                >
+                  <Armchair size={15} aria-hidden="true" />排位{daySummary.unassigned > 0 ? `（${daySummary.unassigned} 筆未配桌）` : ''}
+                </button>
+              )}
               {/* 過去的日期不該新增訂位；空狀態時另有 EmptyState 內建的入口 */}
               {onAddBooking && !isPastSelected && dayEntries.length > 0 && (
                 <button
                   type="button"
                   onClick={() => onAddBooking(selected)}
-                  className="ml-auto px-3 py-1.5 rounded-lg text-xs font-bold bg-chicken-red text-white hover:bg-chicken-red/90 active:scale-[.98] transition-all whitespace-nowrap min-h-[32px]"
+                  className={`${onPlanDay ? '' : 'ml-auto '}px-3 py-1.5 rounded-lg text-xs font-bold bg-chicken-red text-white hover:bg-chicken-red/90 active:scale-[.98] transition-all whitespace-nowrap min-h-[32px]`}
                 >
                   ＋ 新增訂位
                 </button>
