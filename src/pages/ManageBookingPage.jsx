@@ -18,6 +18,8 @@ import {
 import { Button, Input, Textarea, Badge, SlotSkeleton } from '../components/ui'
 import { useConfirm, useToast } from '../components/ui/Toast'
 import { useBooking } from '../contexts/BookingContext'
+import { trackEvent } from '../services/analytics'
+import { bookingParams } from '../utils/analyticsSanitize'
 import * as bookingService from '../services/bookingService'
 import { lineBindUrl, lineOfficialUrl, resendLineBooking } from '../services/lineService'
 import { guestCancelBooking, guestGetAvailability, guestGetBooking, guestUpdateBooking } from '../services/cloudDataService'
@@ -200,6 +202,7 @@ export default function ManageBookingPage() {
       setForm(toForm(result.booking))
       setMode('success')
       setError('')
+      trackEvent('booking_modify', bookingParams(result.booking, todayStr()))
       // Telegram 與 LINE 通知皆由後端 guestUpdateBooking 經 outbox 權威送出，
       // 不再由前端觸發（客人關頁/斷網會漏發）。
       toast.success('訂位已更新，同仁端也會同步看到')
@@ -231,6 +234,8 @@ export default function ManageBookingPage() {
       setForm(toForm(result.booking))
       setMode('cancelled')
       setError('')
+      // 「其他」是客人自由輸入，可能含個資 → 只送 other
+      trackEvent('booking_cancel', { ...bookingParams(result.booking, todayStr()), cancel_reason: cancelReason === '其他' ? 'other' : cancelReason })
       // Telegram 與 LINE 通知皆由後端 guestCancelBooking 經 outbox 權威送出。
       toast.success('訂位已取消')
     } finally {

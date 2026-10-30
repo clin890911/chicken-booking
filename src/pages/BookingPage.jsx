@@ -11,6 +11,8 @@ import { bookingOccupancyLabel } from '../utils/capacity'
 import { isValidTwPhone } from '../utils/validation'
 import { loadGuestDraft, saveGuestDraft, clearGuestDraft, prepareGuestDraft, isUncertainDraft } from '../utils/guestDraft'
 import { onlineLeadLabel } from '../utils/guestPolicy'
+import { trackEvent } from '../services/analytics'
+import { bookingParams, classifyBookingError } from '../utils/analyticsSanitize'
 
 const NOTE_OPTIONS = [
   { key: 'pet', label: '攜帶寵物' },
@@ -80,6 +82,17 @@ export default function BookingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.date])
 
+  // GA4：這一天、這個人數完全沒有可訂時段＝客人想來但訂不到（需求流失訊號）。同一組合只記一次。
+  const noAvailabilityLogged = useRef(new Set())
+  useEffect(() => {
+    if (slotsLoading || slotsError) return
+    const hasRoom = serverSlots.some(s => s && !s.closed && Number(s.remaining) >= data.guests)
+    const key = `${data.date}|${data.guests}`
+    if (hasRoom || noAvailabilityLogged.current.has(key)) return
+    noAvailabilityLogged.current.add(key)
+    trackEvent('booking_no_availability', bookingParams({ guests: data.guests, date: data.date }, todayStr()))
+  }, [slotsLoading, slotsError, serverSlots, data.guests, data.date])
+
   // 「找最近可訂日」：當天沒有符合人數的時段時，往後逐日查詢，找到第一個有空位的日期就跳過去，
   // 避免客人一天一天手動點。最多掃描到可預訂範圍上限為止。
   const [findingNext, setFindingNext] = useState(false)
@@ -97,9 +110,13 @@ export default function BookingPage() {
         try {
           const res = await guestGetAvailability(d)
           const hasRoom = (res.slots || []).some(s => Number(s.remaining) >= data.guests)
-          if (hasRoom) { setDate(d); window.scrollTo({ top: 0, behavior: 'smooth' }); return }
+          if (hasRoom) {
+            trackEvent('booking_find_next', { found: 'yes', party_size: data.guests, days_skipped: i })
+            setDate(d); window.scrollTo({ top: 0, behavior: 'smooth' }); return
+          }
         } catch { /* 這天查詢失敗就略過，繼續往後找 */ }
       }
+      trackEvent('booking_find_next', { found: 'no', party_size: data.guests })
       setFindNextMsg('接下來的可預訂日期都沒有符合人數的時段，請來電由專人協助安排。')
     } finally {
       setFindingNext(false)
@@ -156,6 +173,7 @@ export default function BookingPage() {
   const set = (key, value) => {
     if (inFlight.current || isUncertainDraft(draftRef.current)) return
     updateData(d => ({ ...d, [key]: value }))
+    if (key === 'timeSlot' && value) trackEvent('booking_select_slot', bookingParams({ ...data, timeSlot: value }, todayStr()))
     if (key === 'timeSlot' && value) setError(current => current.slotRejection ? { ...current, submit: undefined, slotRejection: false } : current)
   }
   const setGuests = next => updateData(d => ({ ...d, guests: Math.max(1, Math.min(12, next)), timeSlot: '' }))
@@ -165,6 +183,7 @@ export default function BookingPage() {
 
   const continueToInfo = () => {
     if (!selectedReady) return
+    trackEvent('booking_begin_info', bookingParams(data, todayStr()))
     setStep('info')
     // 即時捲頂（不用 smooth）：步驟切換時整頁內容同步替換、文件高度大幅塌縮，
     // iOS 上平滑捲動與高度塌縮並行會有捲動位置異常的怪癖。
@@ -178,7 +197,12 @@ export default function BookingPage() {
     if (!data.phone.trim()) errs.phone = '請填電話'
     else if (!isValidTwPhone(data.phone)) errs.phone = '電話格式不正確，請輸入正確的台灣電話號碼'
     setError(errs)
-    if (Object.keys(errs).length > 0) return
+    if (Object.keys(errs).length > 0) {
+      trackEvent('booking_validation_error', { fields: Object.keys(errs).sort().join(',') })
+      return
+    }
+    const eventParams = { ...bookingParams(data, todayStr()), in_liff: lineIdentity?.idToken ? 'yes' : 'no' }
+    trackEvent('booking_submit', { ...eventParams, retry: uncertain ? 'yes' : 'no' })
 
     inFlight.current = true
     setBusy(true)
@@ -205,6 +229,7 @@ export default function BookingPage() {
       clearGuestDraft()
       draftRef.current = null
       setUncertain(false)
+      trackEvent('booking_complete', eventParams)
       // 後端回傳完整訂位（含 manageToken），用 route state 帶到確認頁。
       // 同時把 token 放進網址：重新整理或把連結傳到另一支手機時，確認頁可用 id+token 向後端補抓，
       // 不會再因 route state 消失而「找不到此訂位」。
@@ -217,10 +242,12 @@ export default function BookingPage() {
         draftRef.current = draft
         try { saveGuestDraft(draft) } catch { /* The already-saved pending key remains recoverable. */ }
         setUncertain(true)
+        trackEvent('booking_error', { ...eventParams, error_type: 'uncertain' })
         setError({ submit: '尚未確認訂位結果。請按「確認同一筆訂位」取回結果，請勿重複建立新訂位；也可來電確認。' })
       } else {
         if (draftRef.current) { draftRef.current = { ...draftRef.current, phase: 'editing' }; try { saveGuestDraft(draftRef.current) } catch {} }
         setUncertain(false)
+        trackEvent('booking_error', { ...eventParams, error_type: classifyBookingError(err), status: Number(err.status) || 0 })
         setError({ submit: err.message || '未能送出訂位，請稍後再試' })
         const rejectedSlot = knownRejected && ['booking-deadline-passed', 'booking-slot-past'].includes(err.reasonCode)
         if (rejectedSlot) {

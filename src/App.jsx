@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { MotionConfig } from 'framer-motion'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
@@ -15,6 +16,7 @@ import LineMyBookingsPage from './pages/LineMyBookingsPage'
 import LoginPage from './pages/LoginPage'
 import AdminPage from './pages/AdminPage'
 import SlotMapDemoPage from './pages/SlotMapDemoPage'
+import { trackPageView } from './services/analytics'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -26,6 +28,9 @@ function AppRoutes() {
   // 用目前路徑當作 ErrorBoundary 的 resetKey：使用者切換頁面時自動清除錯誤狀態，
   // 避免某頁崩潰後即使導到別頁仍卡在錯誤畫面。
   const location = useLocation()
+  // GA4 手動 page_view（網址清洗、後台不追蹤都在 services/analytics 裡處理）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { trackPageView(location) }, [location.pathname, location.search])
   return (
     <ErrorBoundary resetKey={location.pathname + location.search}>
       <Routes>
