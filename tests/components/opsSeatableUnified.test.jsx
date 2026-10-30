@@ -63,7 +63,7 @@ it('帶位籤：常駐「可入座」＝ 1F「可坐」＋ 2F「可坐」，時�
   expect(floorCount('2F')).toBe(2) // 201、202（203 待清）
   expect(vacantFigure()).toBe(3)
   expect(floorCount('1F') + floorCount('2F')).toBe(vacantFigure())
-  expect(container.querySelector('[data-stat="vacant"]').textContent).toContain('· 14 人') // 101(4)+201(4)+202(6)
+  expect(container.querySelector('[data-stat="vacant"]').textContent).toContain('· 可坐 14 位') // 101(4)+201(4)+202(6)
   // 選桌邏輯不動：帶位面板的選桌池仍來自 findSuitableTables（人數 1 起算）
   expect(findSuitableTables).toHaveBeenCalledWith(1)
 })
@@ -72,6 +72,36 @@ it('摘要分頁：全店「可入座」與樓層鈕同一個數字；本樓層�
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
   act(() => root.render(<OperationsView />))
   act(() => [...container.querySelectorAll('button, [role="radio"], [role="tab"]')].find(b => b.textContent === '摘要').click())
-  expect(container.querySelector('[data-store-stats]').textContent).toContain('可入座3 桌 · 14 人')
+  expect(container.querySelector('[data-store-stats]').textContent).toContain('可入座3 桌 · 可坐 14 位')
   expect(container.textContent).toContain(`可入座（${floorCount('1F')} 桌`)
+})
+
+// #194 收尾：樓層分頁紅點與「可坐 N」同一個口徑——本層顯示 0、另一層顯示 >0 才亮；顯示「可坐 0」的那層永不亮紅點。
+const hasNudge = f => !!floorTab(f).querySelector('[aria-label^="另一層有"]')
+it('紅點：另一層只剩時段衝突桌（選桌池有、可坐 0）→ 不亮紅點，不出現「紅點＋可坐 0」', () => {
+  const t = harness.ctx.tables
+  t.find(x => x.number === '101').status = 'dining' // 1F 唯一可坐的桌也坐了
+  t.find(x => x.number === '201').status = 'dining'
+  // 2F 只剩 202 在選桌池，但 19:15 有下一組 → 時段衝突，可坐 0
+  harness.ctx.bookings.push({ id: 'N2', guests: 4, status: 'confirmed', date: '2026-10-10', timeSlot: '19:15', assignedTableId: '202', extraTableIds: [] })
+  findSuitableTables.mockImplementation(() => t.filter(x => x.number === '202'))
+  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
+  act(() => root.render(<OperationsView />))
+  expect(floorCount('1F')).toBe(0)
+  expect(floorCount('2F')).toBe(0)
+  expect(hasNudge('2F')).toBe(false) // 舊口徑（看選桌池）這裡會亮
+  expect(hasNudge('1F')).toBe(false)
+})
+
+it('紅點：本層可坐 0、另一層可坐 >0 → 另一層亮紅點（即使本層選桌池還有時段衝突桌）', () => {
+  harness.ctx.tables.find(x => x.number === '101').status = 'dining' // 1F 只剩衝突的 102 → 可坐 0
+  container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
+  act(() => root.render(<OperationsView />))
+  expect(floorCount('1F')).toBe(0)
+  expect(floorCount('2F')).toBe(2)
+  expect(hasNudge('2F')).toBe(true)
+  expect(floorTab('2F').querySelector('[aria-label^="另一層有"]').getAttribute('aria-label')).toBe('另一層有可坐的桌')
+  expect(hasNudge('1F')).toBe(false)
+  // 選桌池不動：仍由 findSuitableTables 提供
+  expect(findSuitableTables).toHaveBeenCalledWith(1)
 })

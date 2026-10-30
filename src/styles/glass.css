@@ -121,9 +121,6 @@
   border-radius: 28px;
 }
 
-/* 桌面版頁首（現場頁以外）：一條玻璃列 */
-.lg-topbar { box-shadow: inset 0 -1px 0 var(--lg-edge); }
-
 /* 現場頁頂列：一條玻璃膠囊收納統計 pill／樓層／視圖。只加水平內距：一面式的垂直預算一 px 都不能多吃 */
 .lg-toolbar {
   border-radius: 22px;

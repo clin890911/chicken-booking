@@ -8,10 +8,12 @@ import { act } from 'react'
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 const ctx = {}
+// deny：個別拿掉某權限（預設空＝manager 全權），用來證明權限門綁的是哪一個 permission 字串
+const auth = vi.hoisted(() => ({ deny: new Set() }))
 vi.mock('../../src/contexts/BookingContext', () => ({ useBooking: () => ctx }))
 vi.mock('../../src/contexts/AuthContext', async (importOriginal) => {
   const actual = await importOriginal()
-  return { ...actual, useAuth: () => ({ can: (p) => actual.PERMISSIONS.manager.has(p), user: { email: 'x@test' } }) }
+  return { ...actual, useAuth: () => ({ can: (p) => !auth.deny.has(p) && actual.PERMISSIONS.manager.has(p), user: { email: 'x@test' } }) }
 })
 vi.mock('../../src/components/ui/Toast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }), useConfirm: () => vi.fn(async () => true) }))
 
@@ -68,6 +70,18 @@ describe('名冊', () => {
     act(() => { inCard(card, '加黑名單').click() })
     expect(document.body.textContent).toContain('王小明')
     expect(ctx.setCustomerBlacklist).not.toHaveBeenCalled() // 先填原因，不直接寫
+  })
+
+  it('#193 收尾：只少 customer.update（其餘含 customer.blacklist、booking.create 都有）→ 顧客卡整個動作區不渲染（編輯、⋯ 更多、黑名單、歸檔都沒有）', () => {
+    auth.deny = new Set(['customer.update'])
+    try {
+      mount(<CustomersView onAddBooking={vi.fn()} />)
+      expect(container.textContent).toContain('王小明')
+      expect(container.querySelector('details[data-popover]')).toBeNull()
+      expect(container.querySelector('summary[aria-label$="更多操作"]')).toBeNull()
+      for (const t of ['編輯', '加黑名單', '解除黑名單', '歸檔']) expect(btn(t), t).toBeUndefined()
+      expect(ctx.updateCustomer).not.toHaveBeenCalled()
+    } finally { auth.deny = new Set() }
   })
 
   it('旅行社：lg 以上 2 欄；編輯／封存 ≥44px', () => {

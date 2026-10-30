@@ -529,8 +529,10 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
       {/* === 底部黏性操作列：缺欄時收成一列「還差」pills（點捲到該欄），
              填齊才展開確認鈕——避免手機上整塊蓋住日期/時段。
              確認鈕帶出所選桌號（今天），存檔前就看得到會指派哪張桌 === */}
-      {/* md 以上表單區自己捲、這列本來就固定在下方 → md:static（sticky 的 bottom 位移會把它往上推、蓋到表單） */}
-      <div className="sticky bottom-20 lg:bottom-3 z-20 pt-2 md:static md:flex-shrink-0">
+      {/* md 以上表單區自己捲、這列本來就固定在下方 → md:static（sticky 的 bottom 位移會把它往上推、蓋到表單）。
+          不支援 :has() 的瀏覽器（高度鏈接不起來、退回整頁捲）→ index.css 以 @supports not selector(:has(*))
+          把 [data-add-confirm-bar] 改回 sticky，確認列仍黏在底部（#196 收尾）。 */}
+      <div data-add-confirm-bar className="sticky bottom-20 lg:bottom-3 z-20 pt-2 md:static md:flex-shrink-0">
         <div className="rounded-xl border border-chicken-brown/10 bg-white/95 p-2.5 shadow-lg backdrop-blur">
           {valid ? (
             <Button onClick={handleSubmit} disabled={busy} className="w-full min-h-[44px]">

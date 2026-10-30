@@ -95,3 +95,14 @@ describe('GroupEditorStage × 線上關閉場次 / 超坐', () => {
     expect(saveButtons().every(b => b.disabled)).toBe(true)
   })
 })
+
+// #197 收尾：團單編輯精靈頂列 lg↑ 補頁名「規劃」（比照其他頁的 PageTitle，手機隱藏）
+describe('GroupEditorStage 頁名', () => {
+  it('頂列最前面是 h1「規劃」，後面接「返回當日總覽」', () => {
+    mount()
+    const h1 = container.querySelector('h1')
+    expect(h1.textContent).toBe('規劃')
+    expect(h1.className).toMatch(/hidden lg:block/)
+    expect(h1.nextElementSibling.textContent).toContain('返回當日總覽')
+  })
+})

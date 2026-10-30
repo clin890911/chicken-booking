@@ -69,6 +69,12 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
   }
 
   if (variant === 'compact') {
+    // 寬版（compactCols=6：後台新增訂位、編輯訂位彈窗，#196 收尾）：晶片狀態字 11px（與卡片版同級，不再縮到 10px）；
+    //   有「已滿但仍可選」的時段時，格子下方補一行說明——卡片版每張卡都寫「仍可訂（請確認坐得下）」，
+    //   晶片放不下，改成整組一行，店員才知道黃框的「已滿」點得下去。
+    // 4 欄（現場 QuickReservePanel，左欄 470px）維持原樣：10px、不加說明行，不改變現場面板高度。
+    const wide = compactCols === 6
+    const anyFullWarn = wide && visible.some(s => s.full && !s.closed && allowFull)
     return (
       <div>
         <div data-testid="slot-grid" className={`grid gap-1.5 ${COMPACT_COLS[compactCols] || COMPACT_COLS[4]}`}>
@@ -99,7 +105,7 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
               >
                 <span className="text-[17px] font-bold leading-none tabular-nums">{s.time}</span>
                 {(disabled || fullWarn || low || s.onlineClosed) && (
-                  <span className={`mt-1 text-[10px] font-bold leading-none ${active ? 'text-white' : fullWarn || (s.onlineClosed && !disabled) ? 'text-amber-700' : low ? 'text-chicken-yellow' : ''}`}>
+                  <span className={`mt-1 ${wide ? 'text-[11px]' : 'text-[10px]'} font-bold leading-none ${active ? 'text-white' : fullWarn || (s.onlineClosed && !disabled) ? 'text-amber-700' : low ? 'text-chicken-yellow' : ''}`}>
                     {s.closed ? '已關閉' : s.full ? '已滿' : s.onlineClosed ? '線上已關' : '少量'}
                   </span>
                 )}
@@ -107,6 +113,9 @@ export default function TimeSlotPicker({ date, value, onChange, settings, tables
             )
           })}
         </div>
+        {anyFullWarn && (
+          <p data-testid="slot-full-hint" className="mt-1.5 text-xs font-bold text-amber-700">黃框「已滿」仍可訂（請確認坐得下）</p>
+        )}
         {hiddenPastCount > 0 && (
           <p className="mt-1 text-[11px] text-chicken-brown/40">已隱藏 {hiddenPastCount} 個已過時段</p>
         )}

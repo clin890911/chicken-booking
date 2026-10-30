@@ -8,13 +8,14 @@ import { isSeatableNow } from '../../../utils/opsAlerts'
 // 共同桌況字典補下組與用餐＋清桌估占；tables 已由父層依樓層過濾。
 // 「全店」管理數字（Barry 2026-10-30：原頂端六格統計列移到這裡給店長看；前台頂端只留可入座／用餐中＋有事才出現的提示）。
 // 大字主數字、小字單位與人數，比照訂位頁「12 組 · 48 人」。
+// 「· N 人」只用在實際客數；可入座那格是空位容量，寫「· 可坐 N 位」（與頂端常駐列同一種寫法）。
 function StoreCard({ store, onOpenLog }) {
-  const cell = (label, value, unit, people, cls = 'text-chicken-brown') => (
+  const cell = (label, value, unit, people, cls = 'text-chicken-brown', seats = null) => (
     <div className="bg-chicken-cream rounded-xl px-3 py-2">
       <div className="text-[11px] font-bold text-chicken-brown/60">{label}</div>
       <div className={`whitespace-nowrap ${cls}`}>
         <span className="text-2xl font-bold tabular-nums">{value}</span>
-        <span className="text-sm font-semibold text-chicken-brown/60"> {unit}{people != null ? ` · ${people} 人` : ''}</span>
+        <span className="text-sm font-semibold text-chicken-brown/60"> {unit}{people != null ? ` · ${people} 人` : ''}{seats != null ? ` · 可坐 ${seats} 位` : ''}</span>
       </div>
     </div>
   )
@@ -27,7 +28,7 @@ function StoreCard({ store, onOpenLog }) {
       <div data-store-stats className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {cell('用餐中', store.dining, '桌', store.occSeats, 'text-orange-800')}
         {cell('在席人數', store.occSeats, '人', null)}
-        {cell('可入座', store.vacant, '桌', store.vacantSeats, 'text-emerald-800')}
+        {cell('可入座', store.vacant, '桌', null, 'text-emerald-800', store.vacantSeats)}
         {cell('90 分內將到', store.soon, '組', null, 'text-sky-800')}
         {cell('待清桌', store.cleaning, '桌', null, 'text-amber-800')}
         {cell('候位需處理', store.waitlist, '組', store.waitlistPeople, 'text-violet-800')}

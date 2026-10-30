@@ -103,13 +103,15 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable, onO
     <div className="space-y-4 md:flex md:flex-col md:flex-1 md:min-h-0">
       <div data-testid="today-header" className="space-y-3 md:flex-shrink-0">
       {/* 統計（散客口徑；用餐中＝現場口徑）：每格都可以點（Barry 2026-10-31）。
-          漏斗＝在本頁篩選（今日訂位→看全部、已到/離→只看已到）；箭頭＝跳去別頁（未指派→當日排位、用餐中→現場）。 */}
+          漏斗＝在本頁篩選（今日訂位→重設篩選、已到/離→只看已到）；箭頭＝跳去別頁（未指派→當日排位、用餐中→現場）。 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {/* 提示字是「重設篩選」不是「看全部」（#198 收尾）：重設＝回預設篩選，預設仍隱藏已離，
+            卡上 20 組、點了清單可能只列 19 筆；點擊行為不變（篩選＋搜尋回預設、清單捲回頂端）。 */}
         <StatsCard
-          testId="stat-total" label="今日訂位" color="red" kind="filter" hint="看全部"
+          testId="stat-total" label="今日訂位" color="red" kind="filter" hint="重設篩選"
           value={<Pair a={stats.totalGroups} unitA="組" b={stats.totalGuests} />}
           onClick={showAll} active={false}
-          ariaLabel={`今日訂位 ${stats.totalGroups} 組 ${stats.totalGuests} 人，顯示全部`}
+          ariaLabel={`今日訂位 ${stats.totalGroups} 組 ${stats.totalGuests} 人，重設篩選`}
         />
         <StatsCard
           testId="stat-unassigned" label="未指派" color="red" kind="nav" hint="去排位" disabledHint="都排好了"

@@ -21,6 +21,8 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const toggle = (v) => { setCollapsed(v); writeCollapsed(v) }
   const anyBadge = tabs.some(t => t.badgeKey && badges[t.badgeKey] > 0)
+  const initial = (user?.displayName || '?').trim().charAt(0).toUpperCase()
+  const userTitle = `${user?.displayName || ''}${user?.roleLabel ? ` · ${user.roleLabel}` : ''}`
 
   if (collapsed) {
     return (
@@ -30,6 +32,12 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
           <ChevronsRight size={22} strokeWidth={2.2} aria-hidden="true" />
           {anyBadge && <span aria-hidden="true" className="absolute top-2 right-1.5 w-2.5 h-2.5 rounded-full bg-chicken-red" />}
         </button>
+        {/* 收合時也看得到登入者（#197 收尾）：非現場頁已沒有頂端標題列，側欄是唯一顯示處。
+            純展示、不可點（不佔觸控目標）；滑鼠停留 title、讀屏 aria-label 帶名字與角色。登出要先展開側欄。 */}
+        <div data-testid="sidebar-user-collapsed" role="img" aria-label={`登入者：${userTitle}`} title={userTitle}
+          className="mt-auto mb-[env(safe-area-inset-bottom)] w-8 h-8 rounded-full bg-[#e9e5df] text-chicken-brown/80 text-[13px] font-bold flex items-center justify-center flex-shrink-0 select-none">
+          <span aria-hidden="true">{initial}</span>
+        </div>
       </aside>
     )
   }
@@ -83,9 +91,9 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
       <div className="border-t border-chicken-brown/10 p-2 pb-[calc(0.5rem_+_env(safe-area-inset-bottom))]">
         <div data-testid="sidebar-user" className="flex flex-col xl:flex-row items-center justify-center xl:justify-start gap-1 xl:gap-2.5 px-1 xl:px-2 py-2">
           <div className="w-8 h-8 rounded-full bg-[#e9e5df] text-chicken-brown/80 text-[13px] font-bold flex items-center justify-center flex-shrink-0" title={user?.displayName}>
-            {(user?.displayName || '?').trim().charAt(0).toUpperCase()}
+            {initial}
           </div>
-          <div className="xl:hidden w-full min-w-0 text-center text-xs leading-tight" title={`${user?.displayName || ''}${user?.roleLabel ? ` · ${user.roleLabel}` : ''}`}>
+          <div className="xl:hidden w-full min-w-0 text-center text-xs leading-tight" title={userTitle}>
             <div className="font-semibold text-chicken-brown truncate">{user?.displayName}</div>
             <div className="text-chicken-brown/55 truncate">{user?.roleLabel || '—'}</div>
           </div>

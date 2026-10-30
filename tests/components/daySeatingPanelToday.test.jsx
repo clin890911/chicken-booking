@@ -112,6 +112,31 @@ describe('今天：走現場指派語意', () => {
     expect(ctx.assignBookingTablesMulti).not.toHaveBeenCalled()
   })
 
+  it('#191 收尾：選桌時還是預配、按確認時已跨過 30 分門檻 → 不以舊口徑寫入，重算可選桌、要求再按一次；再按才鎖桌', () => {
+    // 11:40 時 12:15 的訂位離用餐 35 分 → 預配型
+    setup({ tables: [TABLE('105'), TABLE('106')], bookings: [BK('B1', '跨門檻', TODAY, '12:15')] })
+    mount({ date: TODAY })
+    expect(container.querySelector('[data-testid="hold-badge"]')).toBeNull()
+    clickTable('105')
+    ctx.findSuitableTables.mockClear()
+    // 店員選好桌後拖到 11:46（離用餐 29 分）才按確認
+    vi.setSystemTime(new Date(2026, 10, 2, 11, 46))
+    act(() => { btn('確認').click() })
+    expect(toast.info).toHaveBeenCalledWith(expect.stringContaining('已接近用餐時段，配桌將鎖桌'))
+    expect(ctx.preassignBookingTable).not.toHaveBeenCalled()
+    expect(ctx.preassignBookingTables).not.toHaveBeenCalled()
+    expect(ctx.assignBookingTablesMulti).not.toHaveBeenCalled()
+    expect(toast.success).not.toHaveBeenCalled()
+    // 重算：改成鎖桌口徑（hold 徽章出現、可選桌改走現場 findSuitableTables＝此刻空桌）
+    expect(container.querySelector('[data-testid="hold-badge"]')).toBeTruthy()
+    expect(ctx.findSuitableTables).toHaveBeenCalled()
+    // 再按一次 → 鎖桌寫入（assignBookingTablesMulti），仍不走預配
+    act(() => { btn('確認').click() })
+    expect(ctx.assignBookingTablesMulti).toHaveBeenCalledWith('B1', ['105'])
+    expect(ctx.preassignBookingTable).not.toHaveBeenCalled()
+    expect(toast.success.mock.calls[0][0]).toContain('指派並鎖桌 105')
+  })
+
   it('今天但離用餐還早 → 預配（不鎖桌），可選桌帶現場口徑 preassignableTables', () => {
     setup({ tables: [TABLE('105'), TABLE('106')], bookings: [BK('B1', '晚客', TODAY, '18:00')] })
     mount({ date: TODAY })
