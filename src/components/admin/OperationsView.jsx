@@ -3,11 +3,13 @@ import HandoffPanel from './ops/HandoffPanel'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import FloorMap from './floormap/FloorMap'
 import ArrivalStrip from './floormap/ArrivalStrip'
-import StatusBar from './floormap/StatusBar'
 import TableDrawer from './floormap/TableDrawer'
 import ModeBanner from './ops/ModeBanner'
 import OpsRail from './ops/OpsRail'
 import OpsHintBar from './ops/OpsHintBar'
+import { computeStoreStats, phaseLine, seatableNowTables } from '../../utils/opsAlerts'
+import { classifyTodayPulse } from '../../utils/bookingPulse'
+import { listToday as opsLogToday } from '../../services/opsLogService'
 import OpsLogModal from './ops/OpsLogModal'
 import TableScheduleView from './ops/TableScheduleView'
 import TableSummaryView from './ops/TableSummaryView'
@@ -1155,45 +1157,60 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     modeSource.current = null
   }
 
-  // 樓層分頁上的數字（B，2026-10-17）：選桌模式＝「這一組可選的桌」、帶位籤＝帶位可加的空桌、平常＝現在可坐。
-  // 本層一張都選不到、另一層有 → 另一層分頁亮紅點提示切換。
+  // 樓層分頁上的數字（B，2026-10-17）：選桌模式（指派/改桌）＝「可選 N」這一組可選的桌；其餘一律「可坐 N」。
+  // 「可坐 N」與頂端常駐「可入座」同一支 seatableNowTables（Barry 2026-10-30 可入座統一）：1F＋2F＝常駐列。
+  //   帶位籤以前顯示「依目前人數可選的桌」（walkinSelectable），會跟常駐列差一兩桌；現在只改「顯示的數字」，
+  //   帶位面板的選桌池（walkinSelectable）不動。
+  // 紅點（nudge）仍看選桌池：本層一張都選不到、另一層有 → 另一層分頁亮紅點提示切換。
   const floorCounts = (() => {
     const selecting = mode?.suitable ? 'mode' : (!mode && !reserveOpen && railTab === 'walkin' && canWalkIn) ? 'walkin' : null
     const pool = selecting === 'mode' ? new Set((mode.suitable || []).map(String))
       : selecting === 'walkin' ? new Set(walkinSelectable.map(String)) : null
-    const count = f => tables.filter(t => t.floor === f && (pool ? pool.has(String(t.number)) : tablePresentation[t.number]?.canSeatNow)).length
-    const c = { '1F': count('1F'), '2F': count('2F') }
+    const poolCount = f => tables.filter(t => t.floor === f && pool.has(String(t.number))).length
+    const seatable = f => seatableNowTables(tables, tablePresentation, { floor: f }).length
     const label = selecting === 'mode' ? '可選' : '可坐'
     return ['1F', '2F'].map(f => ({
-      key: f, value: c[f], label, total: tables.filter(t => t.floor === f).length,
-      nudge: !!selecting && f !== floor && c[floor] === 0 && c[f] > 0,
+      key: f, value: selecting === 'mode' ? poolCount(f) : seatable(f), label, total: tables.filter(t => t.floor === f).length,
+      nudge: !!pool && f !== floor && poolCount(floor) === 0 && poolCount(f) > 0,
     }))
   })()
+
+  // 摘要分頁「全店」管理數字（原頂端統計列移過來的）＋一天節奏＋系統自動處理紀錄入口；只在摘要分頁時算
+  const storeSummary = showSummary ? (() => {
+    const today = todayStr()
+    const now = opsNow
+    const pulse = classifyTodayPulse(bookings, today, now)
+    return {
+      ...computeStoreStats({ tables, bookings, waitlist, tablePresentation, pulse, today }),
+      phase: phaseLine({ settings, now, pulse, groups: todayActiveGroups(groupReservations, today) }),
+      autoCount: opsLogToday(today).length,
+    }
+  })() : null
 
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* 上部チップ群：高さ固定（捲動しない）。地図＋右側欄に最大高さを譲る。
           ⚠️ 用 flex gap 而不是 space-y-*：`space-y` 的 `> * + *` 會替 display:none 的
-          兄弟（lg 以上被隱藏的手機版 StatusBar）照樣算一份 margin，白吃 8px 高度，
+          兄弟照樣算一份 margin，白吃 8px 高度，
           左欄就會從「剛好不捲」變成捲。flex gap 不會替 display:none 的子項留空隙。 */}
       <div className="flex-shrink-0 flex flex-col gap-2">
-      {/* 統計列：lg 以上壓成單列 pill（把高度還給桌況圖）；lg 以下用原本的六格 grid。
-          ⚠️ compact 單列不可用在窄螢幕——375px 時六格 pill 會被整個擠出可視範圍
-          （不是可橫向捲，是直接看不到），店員在手機上永遠讀不到那些數字。 */}
-      <div className="lg:hidden">
-        <span className="text-xs font-bold text-chicken-brown/60">全店</span>
-        <StatusBar tablePresentation={tablePresentation} tables={tables} waitlist={waitlist} bookings={bookings} />
-      </div>
-
-      {/* lg 以上＝一條頂列（約 44px）：現場・時間 + 六格 pill + 樓層 + 視圖 + 編輯佈局 + 登入者。
-          lg 以下＝改版前的樓層/視圖列（大尺寸、可換行），統計已在上面那塊 grid。
-          Liquid Glass：.lg-toolbar＝玻璃膠囊（只加水平內距、不加高度；不帶 transform/filter，見 styles/glass.css）。 */}
+      {/* 頂列＝一條（Barry 2026-10-30）：左＝常駐「可入座 N 桌 · 可坐 M 人｜用餐中 N 桌 · M 人」＋有事才接在後面的
+          「需要處理」（過時未到／超時／將到／待清／候位，0 不顯示、點了帶到那件事）；右＝地圖／摘要／排程。
+          取代原本「全店」六格統計列（lg 以下）／三格 pill（lg 以上）＋另一列的提示列：同一件事不再顯示兩次，
+          iPad 頂部也少一列。用餐中以外的管理數字在「摘要」分頁。
+          lg 以下可換行（窄螢幕不能把項目擠出可視範圍）；lg 以上單列。
+          Liquid Glass：.lg-toolbar＝玻璃膠囊（只加水平內距、不加高度；不帶 transform/filter，見 styles/glass.css）；
+          提示鈕本身是實心淡底（不在玻璃上疊玻璃、字色維持 AA）。 */}
       <div className="lg-toolbar flex items-center gap-2 flex-wrap lg:flex-nowrap">
-        <div className="hidden lg:flex min-w-0">
-          <StatusBar tablePresentation={tablePresentation} variant="compact" tables={tables} waitlist={waitlist} bookings={bookings} />
+        {/* flex-1：佔掉 地圖／摘要／排程 左邊的全部空間（分段控制自然靠右）；擠不下才在條內換行，不會被裁掉 */}
+        <div className="flex-1 min-w-0">
+          <OpsHintBar
+            tablePresentation={tablePresentation}
+            onOpenUpcoming={() => { setSelectedTable(null); setView('map'); setRailTab('upcoming') }}
+            onOpenWaitlist={() => { setSelectedTable(null); setRailTab('waitlist') }}
+            onOpenTable={openHintTable}
+          />
         </div>
-
-        <div className="hidden lg:block flex-1 min-w-0" />
 
         {/* 樓層切換已移到右欄地圖卡片頂端（FloorTabs，2026-10-17）：選桌時眼睛和手都在地圖上 */}
 
@@ -1210,12 +1227,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       </div>
 
       {waitlistSeatPending && <p role="status" className="px-4 py-2 bg-amber-50 text-amber-800 font-bold">正在確認候位入座，雲端確認後才會占桌；請稍候。</p>}
-      {/* 「現在該做什麼」提示列：過時未到 / 超時 / 待清 / 自動處理紀錄 / 節奏單句 */}
-      <OpsHintBar
-        onOpenUpcoming={() => { setSelectedTable(null); setRailTab('upcoming') }}
-        onOpenLog={() => setShowOpsLog(true)}
-        onOpenTable={openHintTable}
-      />
 
       {/* Mode banner — 依模式不同底色 + 圖示，避免誤判 */}
       <ModeBanner
@@ -1348,6 +1359,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
             // 摘要視圖＝可坐存量 + 依狀態分組（不估時間）
             <div className="flex-1 min-h-0">
               <TableSummaryView
+                store={storeSummary}
+                onOpenLog={() => setShowOpsLog(true)}
                 tablePresentation={tablePresentation}
                 tables={tables.filter(t => t.floor === floor)}
                 groupHoldTables={groupHoldTables}

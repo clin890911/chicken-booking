@@ -10,7 +10,6 @@ vi.mock('../../src/components/admin/floormap/FloorMap', () => ({ default: ({ tab
 vi.mock('../../src/components/admin/ops/OpsRail', () => ({ default: ({ onSeatWaitlist, activeTab, onTabChange, showNextWaitlist, onNextWaitlist }) => <div data-rail={activeTab}><span>散客表單</span><button onClick={() => onTabChange('waitlist')}>查看候位</button><button onClick={() => onSeatWaitlist(harness.ctx.waitlist[0])}>開始候位</button>{showNextWaitlist && <button onClick={onNextWaitlist}>帶下一組候位</button>}</div> }))
 vi.mock('../../src/components/admin/floormap/TableDrawer', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/floormap/ArrivalStrip', () => ({ default: () => null }))
-vi.mock('../../src/components/admin/floormap/StatusBar', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/ops/OpsHintBar', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/ops/OpsLogModal', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/LayoutEditor', () => ({ default: () => null }))

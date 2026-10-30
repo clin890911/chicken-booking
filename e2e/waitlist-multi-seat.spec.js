@@ -45,7 +45,7 @@ test('候位 9 位、無單桌可容 → 自動進併桌模式，確認後入座
   await page.goto('/admin')
   await page.locator('aside').getByRole('button', { name: /現場/ }).click()
 
-  await page.getByRole('button', { name: /^候位/ }).click()
+  await page.getByRole('button', { name: /^候位\s*\d*$/ }).click()
   await expect(page.getByText('訪客')).toBeVisible()
 
   // 入座 → 沒有單桌容納 9 位，應進併桌模式而不是跳「目前無符合容量的空桌」
@@ -73,7 +73,7 @@ test('候位 9 位、無單桌可容 → 自動進併桌模式，確認後入座
 
   // 入座後不開桌況抽屜、直接切回「帶位」籤（店主指定 UX：候位客人選定位子後直接回帶位頁），
   // 不必再 ESC 收抽屜。切回「候位」籤即可看到列表已清空。
-  await page.getByRole('button', { name: /^候位/ }).click()
+  await page.getByRole('button', { name: /^候位\s*\d*$/ }).click()
   // 候位列表清空（該筆已轉為 seated）
   await expect(page.getByText('訪客')).toHaveCount(0)
 })
@@ -82,7 +82,7 @@ test('併桌模式下把桌減到席數不足（擠一擠也不夠）→ 確認�
   await page.goto('/admin')
   await page.locator('aside').getByRole('button', { name: /現場/ }).click()
 
-  await page.getByRole('button', { name: /^候位/ }).click()
+  await page.getByRole('button', { name: /^候位\s*\d*$/ }).click()
   await page.getByRole('button', { name: /^入座$/ }).click()
   // 用橫幅專屬文案定位（PR #137/#138 後頁面上另有同名「候位入座」標題，裸 /候位入座/ 會撞 strict mode）
   await expect(page.getByText(/候位入座：訪客 #3/)).toBeVisible()
