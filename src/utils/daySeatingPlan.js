@@ -4,8 +4,11 @@
 // 口徑全部沿用既有引擎，不另立一套：
 //   - 場次歸屬：timeSlots.seatingForSlot
 //   - 同場次佔用（散客主桌＋併桌副桌、團體整桌保留）：capacity.resolveSlotOccupancy（ignoreOnlineClosure＝後台口徑）
-//   - 跨場次的時間重疊：佔用區間只走 capacity.assignmentWindow（'preassign'＝[時段, 時段+佔位)），
+//   - 跨場次的時間重疊：佔用區間只走 capacity.assignmentWindow（未來日／今天較早＝'preassign' [時段, 時段+佔位)；
+//     今天離用餐 ≤ 30 分＝'hold' [min(現在, 時段), max(現在, 時段)+佔位)，鎖桌時機 capacity.lockKindFor），
 //     散客用 capacity.overlappingBookedTables、團體用同一個 window 比梯次區間
+//   - 今天的即時桌況：鎖桌型只能選此刻空桌（同 seatingService.findSuitableTables／assignBookingTablesMulti）；
+//     今天的預配型由容器帶入 seatingService.preassignableTables 的結果（liveAllowed）
 //   - 停用／維修：tableAvailability.isTableUsableOnDate
 //   - 公休：capacity.isDayClosedForClosures（公休日不配桌）
 //   - 席數門檻：capacity.squeezeSeats（擠一擠：每桌多坐 1 位；超過原席數只標黃字）
@@ -23,7 +26,7 @@ import {
   isDayClosedForClosures,
 } from './capacity'
 import { isTableUsableOnDate } from './tableAvailability'
-import { assignmentKind } from './tableStatus'
+import { assignmentKind, statusZh } from './tableStatus'
 
 // 可以在這裡配桌／改桌／取消配桌的訂位狀態（已到、已完成的不動；那是現場頁的事）
 export const EDITABLE_STATUSES = ['pending', 'confirmed']
@@ -157,31 +160,55 @@ function overlappingGroupTables(groupReservations = [], { date, window } = {}, s
 
 // 這筆訂位此刻可選的桌（地圖高亮）：
 //   該日可用（非停用／維修）∧ 同場次沒人佔（扣掉自己，改桌時自己的舊桌可再選）
-//   ∧ 不與同日他筆預配／團體在 assignmentWindow('preassign') 重疊。公休日一律空。
+//   ∧ 不與同日他筆預配／團體在 assignmentWindow 重疊。公休日一律空。
+// lockKind（capacity.lockKindFor）：'preassign'（預設；未來日一律如此）／'hold'（今天、離用餐 ≤ 30 分 → 寫入會鎖桌）：
+//   hold 的佔用區間起點＝min(現在, 時段)，且只能選此刻空桌（或本筆自己鎖著的桌）。
+// liveAllowed（選用，今天才帶）：現場口徑的可選桌號（seatingService.findSuitableTables／preassignableTables），再取交集。
 // 回傳 { free: 桌號[], byTable }（byTable＝扣掉自己後的同場次佔用，給地圖上色）
-export function assignableTables({ tables = [], bookings = [], groupReservations = [], date, seating, settings = {}, booking } = {}) {
+export function assignableTables({ tables = [], bookings = [], groupReservations = [], date, seating, settings = {}, booking, lockKind = 'preassign', now = new Date(), liveAllowed = null } = {}) {
   if (!booking || !seating) return { free: [], byTable: {} }
   const others = (bookings || []).filter(b => b.id !== booking.id)
   const { byTable } = resolveSlotOccupancy(tables, others, groupReservations, date, seating, settings, { ignoreOnlineClosure: true })
   if (isDayClosedForClosures(settings, date)) return { free: [], byTable }
-  const window = assignmentWindow({ mode: 'preassign', timeSlot: booking.timeSlot, date }, settings)
+  const hold = lockKind === 'hold'
+  const window = assignmentWindow({ mode: hold ? 'hold' : 'preassign', timeSlot: booking.timeSlot, date, now }, settings)
   const bookedOverlap = overlappingBookedTables(bookings, { date, window, excludeBookingId: booking.id }, settings)
   const groupOverlap = overlappingGroupTables(groupReservations, { date, window }, settings)
+  const live = liveAllowed ? new Set([...liveAllowed].map(String)) : null
+  const ownLocked = (t) => t.status === 'reserved' && t.currentBookingId != null && String(t.currentBookingId) === String(booking.id)
   const free = (tables || [])
     .filter(t => isTableUsableOnDate(t, date))
     .filter(t => (Number(t.capacity) || 0) > 0)
+    .filter(t => !hold || (t.status || 'vacant') === 'vacant' || ownLocked(t))
     .map(t => String(t.number))
+    .filter(n => !live || live.has(n))
     .filter(n => !byTable[n] && !bookedOverlap.has(n) && !groupOverlap.has(n))
   return { free, byTable }
 }
 
+// 「取消配桌 → 復原」寫回前的訂位重驗（toast 還在的期間，這筆可能被取消、標 No-show、到店、改日或已重新配桌）。
+// 回傳錯誤字串（安全失敗、不寫回）；null＝訂位本身仍可寫回（桌是否仍可用另由 assignableTables 判斷）。
+const UNDO_STATUS_TEXT = { cancelled: '已取消', noshow: '已標 No-show', arrived: '已到店', completed: '已完成' }
+export function undoUnassignBlocker(fresh, date) {
+  if (!fresh) return '無法復原：這筆訂位已不存在'
+  if (!EDITABLE_STATUSES.includes(fresh.status)) return `無法復原：這筆訂位${UNDO_STATUS_TEXT[fresh.status] || '狀態已變更'}`
+  if (fresh.date !== date) return `無法復原：這筆訂位已改到 ${fresh.date || '其他日期'}，請到該日重新配桌`
+  if (bookingTableList(fresh).length) return '無法復原：這筆訂位已有新配桌'
+  return null
+}
+
 // 點桌時的即時防呆（回傳錯誤字串；null＝可以加入）。已選的桌一律可移除（不走這裡）。
-export function pickTableError({ number, picked = [], free = [], tables = [], date, settings = {}, byTable = {} } = {}) {
+// lockKind／bookingId／liveAllowed 同 assignableTables（今天才有意義），只用來把「為什麼不能選」講清楚。
+export function pickTableError({ number, picked = [], free = [], tables = [], date, settings = {}, byTable = {}, lockKind = 'preassign', bookingId = null, liveAllowed = null } = {}) {
   const n = String(number)
   if (isDayClosedForClosures(settings, date)) return '本日公休，無法配桌'
   const t = (tables || []).find(x => String(x.number) === n)
   if (!t || !isTableUsableOnDate(t, date)) return `${n} 停用/維修中`
   if (byTable[n]) return `${n} 在此場次已被佔用`
+  const status = t.status || 'vacant'
+  const own = status === 'reserved' && bookingId != null && String(t.currentBookingId) === String(bookingId)
+  if (lockKind === 'hold' && status !== 'vacant' && !own) return `${n} 此刻不是空桌（${statusZh(status)}），接近用餐時段只能配此刻的空桌`
+  if (liveAllowed && !liveAllowed.map(String).includes(n)) return `${n} 目前有人使用，會延續到這組的用餐時段`
   if (!free.includes(n)) return `${n} 與同日其他預配或團體時間重疊`
   if (picked.length) {
     const f0 = (tables || []).find(x => String(x.number) === String(picked[0]))?.floor

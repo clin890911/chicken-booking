@@ -245,6 +245,7 @@ export default function AdminPage() {
               {tab === 'planning' && (
                 <PlanningView
                   onGoToday={() => setTab('ops')}
+                  onMoveTable={canMoveTable ? handleMoveTable : null}
                   pendingPreassign={pendingPlanAssign}
                   onPreassignConsumed={() => setPendingPlanAssign(null)}
                   pendingGroupOpen={pendingGroupOpen}

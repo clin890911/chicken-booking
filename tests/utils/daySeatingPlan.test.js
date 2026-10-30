@@ -1,6 +1,6 @@
 import {
   buildDaySeatingList, sectionSummaryText, firstUnassigned, nextUnassigned,
-  assignableTables, pickTableError, evaluatePick, walkinState, heldTableNumbers,
+  assignableTables, pickTableError, evaluatePick, walkinState, heldTableNumbers, undoUnassignBlocker,
 } from '../../src/utils/daySeatingPlan'
 import { suggestComboFromPool } from '../../src/services/seatingService'
 
@@ -177,5 +177,54 @@ describe('heldTableNumbers：今天已在現場鎖給本筆的桌（這裡不可
     expect(heldTableNumbers(b, [T('101', 6, '1F', { status: 'dining', currentBookingId: '乙' }), T('102', 6)])).toEqual([])
     expect(heldTableNumbers(B('丙', '11:00', 2), TABLES)).toEqual([])
     expect(heldTableNumbers(null, TABLES)).toEqual([])
+  })
+})
+
+describe('今天的配桌：鎖桌型只能選此刻空桌、佔用區間起點 min(現在, 時段)', () => {
+  // DATE 當天 11:45：11:30 的訂位已過時段（lockKindFor＝hold）
+  const NOW = new Date(2026, 10, 2, 11, 45)
+  it('hold：用餐中／待清／別筆鎖著的桌都不能選；本筆自己鎖著的可選', () => {
+    const me = B('me', '11:30', 4)
+    const tables = TABLES.map(t => ({
+      ...t,
+      status: t.number === '105' ? 'dining' : t.number === '106' ? 'cleaning' : t.number === '107' ? 'reserved' : t.number === '113' ? 'reserved' : 'vacant',
+      currentBookingId: t.number === '107' ? 'other' : t.number === '113' ? 'me' : null,
+    }))
+    const { free } = assignableTables({ tables, bookings: [me], date: DATE, seating: seat('lunch1'), settings: SETTINGS, booking: me, lockKind: 'hold', now: NOW })
+    expect(free).not.toContain('105')
+    expect(free).not.toContain('106')
+    expect(free).not.toContain('107')
+    expect(free).toContain('113')
+    expect(free).toContain('101')
+    expect(pickTableError({ number: '105', free, tables, date: DATE, settings: SETTINGS, lockKind: 'hold', bookingId: 'me' })).toMatch(/此刻不是空桌（用餐中）/)
+    // 預配型（未來日口徑）不看此刻桌況
+    expect(assignableTables({ tables, bookings: [me], date: DATE, seating: seat('lunch1'), settings: SETTINGS, booking: me }).free).toContain('105')
+  })
+  it('hold 的區間從「現在」起算：11:00 的遲到客在 11:45 指派，會撞到 13:00 的預配（preassign 區間 11:00–12:40 不會）', () => {
+    const me = B('me', '11:00', 4)
+    const bookings = [me, B('o', '13:00', 2, { assignedTableId: '107' })]
+    const hold = assignableTables({ tables: TABLES, bookings, date: DATE, seating: seat('lunch1'), settings: SETTINGS, booking: me, lockKind: 'hold', now: NOW })
+    const pre = assignableTables({ tables: TABLES, bookings, date: DATE, seating: seat('lunch1'), settings: SETTINGS, booking: me, lockKind: 'preassign', now: NOW })
+    expect(hold.free).not.toContain('107') // [11:00, 11:45+100) 與 13:00 重疊
+    expect(pre.free).toContain('107')      // [11:00, 12:40) 不重疊
+  })
+  it('liveAllowed（現場口徑的可選桌）取交集，點到被排除的桌有原因', () => {
+    const me = B('me', '18:00', 2)
+    const { free } = assignableTables({ tables: TABLES, bookings: [me], date: DATE, seating: seat('dinner1'), settings: SETTINGS, booking: me, liveAllowed: ['101', '102'] })
+    expect(free.sort()).toEqual(['101', '102'])
+    expect(pickTableError({ number: '105', free, tables: TABLES, date: DATE, settings: SETTINGS, liveAllowed: ['101', '102'] })).toMatch(/目前有人使用/)
+  })
+})
+
+describe('undoUnassignBlocker：取消配桌的復原前重驗', () => {
+  it('已取消／No-show／到店／改到別天／已重新配桌／不存在 → 擋；仍待到同一天未配桌 → 放行', () => {
+    expect(undoUnassignBlocker(B('a', '11:00', 2, { status: 'cancelled' }), DATE)).toMatch(/已取消/)
+    expect(undoUnassignBlocker(B('a', '11:00', 2, { status: 'noshow' }), DATE)).toMatch(/No-show/)
+    expect(undoUnassignBlocker(B('a', '11:00', 2, { status: 'arrived' }), DATE)).toMatch(/已到店/)
+    expect(undoUnassignBlocker({ ...B('a', '11:00', 2), date: '2026-11-05' }, DATE)).toMatch(/已改到 2026-11-05/)
+    expect(undoUnassignBlocker(B('a', '11:00', 2, { assignedTableId: '101' }), DATE)).toMatch(/新配桌/)
+    expect(undoUnassignBlocker(null, DATE)).toMatch(/不存在/)
+    expect(undoUnassignBlocker(B('a', '11:00', 2), DATE)).toBeNull()
+    expect(undoUnassignBlocker(B('a', '11:00', 2, { status: 'pending' }), DATE)).toBeNull()
   })
 })

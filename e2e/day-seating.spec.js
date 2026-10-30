@@ -236,3 +236,44 @@ test('過去日期：清單照看、沒有配桌入口', async ({ page }) => {
   await expect(page.getByTestId('day-seating-empty')).toContainText('還沒有任何訂位')
   await expect(page.getByRole('button', { name: '新增訂位' })).toHaveCount(0)
 })
+
+test('今天：開桌前 30 分內配桌＝現場指派（鎖桌、非空桌不能選）；已鎖桌的從規劃頁「到現場頁改桌」', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-11-02T10:45:00+08:00')) // 11:00 的訂位離用餐 15 分
+  await loginWithDemo(page)
+  await page.evaluate(() => {
+    const today = '2026-11-02'
+    const bk = (id, name, extra = {}) => ({ id, name, phone: '', guests: 2, date: today, timeSlot: '11:00', source: 'phone', status: 'confirmed', assignedTableId: null, extraTableIds: [], notes: {}, createdBy: 'staff', createdAt: new Date().toISOString(), ...extra })
+    const bookings = JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]')
+    localStorage.setItem('chicken_bookings_v1', JSON.stringify([...bookings, bk('E2E-T1', '近客'), bk('E2E-T2', '鎖桌客', { assignedTableId: '108' })]))
+    const tables = JSON.parse(localStorage.getItem('chicken_tables_v3'))
+    localStorage.setItem('chicken_tables_v3', JSON.stringify(tables.map(t =>
+      String(t.number) === '108' ? { ...t, status: 'reserved', currentBookingId: 'E2E-T2' }
+        : String(t.number) === '106' ? { ...t, status: 'dining', currentBookingId: null, seatedAt: new Date().toISOString() } : t)))
+  })
+  // 重新載入讓 app 讀到注入的資料：/admin 頁面本身放行（beforeEach 的 **/admin* 只該攔後端端點）
+  await page.route('**/admin*', route => route.request().resourceType() === 'document' ? route.continue() : route.fallback())
+  await page.reload()
+  await page.locator('aside').getByRole('button', { name: '規劃' }).click()
+  await page.getByRole('button', { name: /^11月2日/ }).click()
+  await expect(page.getByTestId('day-seating')).toBeVisible()
+  await expect(banner(page)).toContainText('排位：近客')
+  await expect(page.getByTestId('hold-badge')).toBeVisible()
+
+  await table(page, '106').click() // 此刻用餐中
+  await expect(page.getByText(/106 此刻不是空桌/)).toBeVisible()
+  await table(page, '105').click()
+  await page.getByRole('button', { name: '確認', exact: true }).click()
+  await expect(page.getByText('近客（2 位）已指派並鎖桌 105')).toBeVisible()
+  expect(await storedBooking(page, '近客')).toMatchObject({ assignedTableId: '105' })
+  const t105 = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_tables_v3')).find(t => String(t.number) === '105'))
+  expect(t105).toMatchObject({ status: 'reserved', currentBookingId: 'E2E-T1' })
+
+  // 已鎖桌：這裡不給改桌／取消配桌，改給「到現場頁改桌」→ 現場頁改桌模式
+  await row(page, '鎖桌客').click()
+  const detail = page.getByTestId('day-seating-detail')
+  await expect(detail.getByText('今天已在現場鎖桌')).toBeVisible()
+  await expect(detail.getByRole('button', { name: '取消配桌' })).toHaveCount(0)
+  await detail.getByRole('button', { name: '到現場頁改桌' }).click()
+  await expect(page).toHaveURL(/tab=ops/)
+  await expect(page.getByText(/重新選桌：鎖桌客/)).toBeVisible()
+})

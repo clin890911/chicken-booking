@@ -11,11 +11,11 @@ import { useHandoff } from '../../../contexts/HandoffContext'
 import { useToast } from '../../ui/Toast'
 import { seatingPerms } from '../../../utils/seatingPerms'
 import { dayLabel, seatingForSlot, todayStr } from '../../../utils/timeSlots'
-import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures } from '../../../utils/capacity'
+import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures, lockKindFor } from '../../../utils/capacity'
 import { formatPhone } from '../../../utils/phoneFormat'
 import {
   buildDaySeatingList, sectionSummaryText, firstUnassigned, nextUnassigned,
-  assignableTables, pickTableError, evaluatePick, heldTableNumbers, EDITABLE_STATUSES,
+  assignableTables, pickTableError, evaluatePick, heldTableNumbers, undoUnassignBlocker, EDITABLE_STATUSES,
 } from '../../../utils/daySeatingPlan'
 import { suggestComboFromPool } from '../../../services/seatingService'
 import { useBookingActions } from '../../booking/useBookingActions'
@@ -26,7 +26,13 @@ import BookingDetailSheet from '../../booking/BookingDetailSheet'
 //   左：當天訂位（散客＋團體），依場次分組、組內依時段；每筆標未配桌／已配桌（桌號）／已到。
 //   右：該場次桌況圖（散客暖色、團客冷色）。
 // Smart defaults：進來就選「最早一筆未配桌」及其場次、地圖切到建議桌的樓層；排完自動跳下一筆。
-// 寫入只走既有的預配路徑（BookingContext.preassignBookingTable(s)／clearBookingPreassign → bookingService.assignTable(s)／unassignTable），
+// 寫入依日期分流（專案規則：今天走現場指派語意、未來走預配），一律呼叫既有的 BookingContext 函式，不另寫一套：
+//   未來日 → 預配（preassignBookingTable(s)／clearBookingPreassign，只改 booking、不動桌況）
+//   今天   → 與現場頁指派模式同一支：鎖桌時機 capacity.lockKindFor（離用餐 ≤ 30 分＝鎖桌）
+//            新配桌：鎖桌型 assignBookingTablesMulti（此刻空桌才行、桌況鎖 reserved）；預配型 preassignBookingTable(s)
+//            改桌：replacePendingBookingTables（現場改桌同一支，自己判斷鎖桌時機、只釋放本筆持有的桌）
+//            取消配桌：releaseOverriddenAssignment（只釋放本筆持有的 reserved 桌）；復原走 restoreOverriddenAssignment
+//            可選桌帶入現場口徑（鎖桌型 findSuitableTables＝此刻空桌；預配型 preassignableTables）
 // 可選桌與防呆全在 utils/daySeatingPlan（沿用 resolveSlotOccupancy／assignmentWindow／squeezeSeats／isTableUsableOnDate）。
 // 團體只顯示＋開團單詳情，這版不在這裡改圈桌。
 // 選中散客時，訂位卡（BookingCard）原本的動作搬進來：聯絡／編輯／交班事項／更多（詳情、現場改桌、直接釋出、No-show、取消訂位），
@@ -41,11 +47,19 @@ export default function DaySeatingPanel({
   date, onShiftDay, onBackToCalendar, onOpenGroup, headerStart, onMoveTable, onAddBooking,
   seatingId: seatingIdProp, onSeatingChange, floor: floorProp, onFloorChange,
 }) {
-  const { settings, bookings, groupReservations, tables, fixtures, zones, preassignBookingTable, preassignBookingTables, clearBookingPreassign } = useBooking()
-  // 預配只改 booking → 權限＝seatingPerms.booking（booking.update），與規劃「排位地圖」的配桌同一道門
-  const canPreassign = seatingPerms(useAuth()?.can).booking
-  const toast = useToast()
+  const {
+    settings, bookings, groupReservations, tables, fixtures, zones,
+    preassignBookingTable, preassignBookingTables, clearBookingPreassign,
+    assignBookingTablesMulti, replacePendingBookingTables, releaseOverriddenAssignment, restoreOverriddenAssignment,
+    findSuitableTables, preassignableTables,
+  } = useBooking()
+  // 未來日預配只改 booking → 權限＝seatingPerms.booking（booking.update），與規劃「排位地圖」的配桌同一道門；
+  // 今天走現場指派（可能鎖桌、釋桌 → 也寫 tables）→ 權限＝seatingPerms.seat（同現場指派）
+  const perms = seatingPerms(useAuth()?.can)
   const isPast = date < todayStr()
+  const isToday = date === todayStr()
+  const canPreassign = isToday ? perms.seat : perms.booking
+  const toast = useToast()
 
   const seatings = useMemo(() => (Array.isArray(settings?.seatings) ? settings.seatings : []), [settings])
   const [seatingLocal, setSeatingLocal] = useState('')
@@ -58,6 +72,7 @@ export default function DaySeatingPanel({
   const [activeKey, setActiveKey] = useState(null) // 'b:<bookingId>' | 'g:<groupId>:<batchId>'
   const [editing, setEditing] = useState(false)    // 排位中（地圖可點選桌）
   const [picked, setPicked] = useState([])         // 已選桌（併桌累加）
+  const [clock, setClock] = useState(0)            // 確認時跨過鎖桌門檻 → 重算可選桌（見 confirm）
   const listRef = useRef(null)
 
   const list = useMemo(
@@ -80,7 +95,7 @@ export default function DaySeatingPanel({
 
   // 最新資料給「復原」閉包用（toast 的 onClick 會在之後才觸發）
   const latest = useRef({})
-  latest.current = { bookings, tables, groupReservations, settings }
+  latest.current = { bookings, tables, groupReservations, settings, preassignableTables, restoreOverriddenAssignment, preassignBookingTable, preassignBookingTables }
 
   const selectItem = (item, { scroll = false } = {}) => {
     if (!item) { setActiveKey(null); setEditing(false); setPicked([]); return }
@@ -109,10 +124,21 @@ export default function DaySeatingPanel({
 
   // 可選桌（排位中才算）：扣掉自己後的同場次佔用＋assignmentWindow 重疊＋停用／維修＋公休
   const activeSeating = activeBooking ? (seatingForSlot(settings, activeBooking.timeSlot) || seating) : seating
+  // 寫入語意：未來日一律預配；今天依鎖桌時機（與現場頁指派同一個判斷）。clock 只是讓確認時能強制重算
+  const assignKind = assignMode && isToday ? lockKindFor({ date, timeSlot: activeBooking.timeSlot }) : 'preassign'
+  // 今天：現場口徑的可選桌（鎖桌型＝此刻空桌；預配型＝此刻的佔用不延續進預配區間），與現場頁 startAssign 同一支
+  const liveAllowed = useMemo(() => {
+    if (!assignMode || !isToday) return null
+    const list = assignKind === 'hold'
+      ? findSuitableTables?.(1)
+      : preassignableTables?.(1, { bookingId: activeBooking.id, date, timeSlot: activeBooking.timeSlot })
+    return (list || []).map(t => String(t.number))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignMode, isToday, assignKind, tables, bookings, activeBooking, date, clock])
   const assign = useMemo(() => {
     if (!assignMode) return null
-    return assignableTables({ tables, bookings, groupReservations, date, seating: activeSeating, settings, booking: activeBooking })
-  }, [assignMode, tables, bookings, groupReservations, date, activeSeating, settings, activeBooking])
+    return assignableTables({ tables, bookings, groupReservations, date, seating: activeSeating, settings, booking: activeBooking, lockKind: assignKind, liveAllowed })
+  }, [assignMode, tables, bookings, groupReservations, date, activeSeating, settings, activeBooking, assignKind, liveAllowed])
   const free = useMemo(() => assign?.free || [], [assign])
 
   const occupancy = useMemo(
@@ -145,7 +171,7 @@ export default function DaySeatingPanel({
     const n = String(number)
     if (assignMode) {
       if (picked.includes(n)) return setPicked(prev => prev.filter(x => x !== n))
-      const err = pickTableError({ number: n, picked, free, tables, date, settings, byTable: mapByTable })
+      const err = pickTableError({ number: n, picked, free, tables, date, settings, byTable: mapByTable, lockKind: assignKind, bookingId: activeBooking?.id, liveAllowed })
       if (err) return toast.error(err)
       return setPicked(prev => [...prev, n])
     }
@@ -157,14 +183,33 @@ export default function DaySeatingPanel({
 
   const confirm = () => {
     if (!assignMode) return
-    const ev = evaluatePick({ booking: activeBooking, picked, free, tables, date, settings })
-    if (!ev.ok) return toast.error(ev.error)
     const b = activeBooking
+    // 選桌期間跨過鎖桌門檻（同現場頁 confirmWalkinMulti）：先重算可選桌與語意，讓店員再確認，不以舊口徑寫入
+    const kindNow = isToday ? lockKindFor({ date, timeSlot: b.timeSlot }) : 'preassign'
+    if (kindNow !== assignKind) {
+      setClock(c => c + 1)
+      return toast.info('已接近用餐時段，配桌將鎖桌；請確認更新後的可選桌，再按確認')
+    }
+    const ev = evaluatePick({ booking: b, picked, free, tables, date, settings })
+    if (!ev.ok) return toast.error(ev.error)
     const wasUnassigned = activeItem.state === 'unassigned'
-    const ok = picked.length === 1 ? preassignBookingTable(b.id, picked[0]) : preassignBookingTables(b.id, picked)
-    if (!ok) return toast.error('配桌失敗：訂位不存在（可能已被其他裝置刪除）')
+    if (isToday && !wasUnassigned) {
+      // 今天改桌：現場改桌同一支（自己判斷鎖桌時機、只釋放本筆持有的桌、雙寫失敗會還原）
+      const r = replacePendingBookingTables(b.id, picked)
+      if (!r?.ok) return toast.error('改桌失敗：' + (r?.error || '未知錯誤'))
+    } else if (assignKind === 'hold') {
+      // 今天、離用餐 ≤ 30 分：現場指派同一支（此刻空桌才行，桌況鎖成 reserved）
+      const r = assignBookingTablesMulti(b.id, picked)
+      if (!r?.ok) return toast.error('配桌失敗：' + (r?.error || '未知錯誤'))
+    } else {
+      const ok = picked.length === 1 ? preassignBookingTable(b.id, picked[0]) : preassignBookingTables(b.id, picked)
+      if (!ok) return toast.error('配桌失敗：訂位不存在（可能已被其他裝置刪除）')
+    }
     const tail = ev.squeezed ? `（擠一擠超坐 ${ev.need - ev.seats} 位）` : ''
-    toast.success(`${b.name}（${ev.need} 位）已${picked.length > 1 ? '併桌' : ''}配到 ${picked.join(' + ')}${tail}`)
+    const how = assignKind === 'hold' ? `已${picked.length > 1 ? '併桌' : ''}指派並鎖桌 ${picked.join(' + ')}`
+      : isToday ? `已${picked.length > 1 ? '併桌' : ''}預配 ${picked.join(' + ')}（桌子現在仍可帶位）`
+        : `已${picked.length > 1 ? '併桌' : ''}配到 ${picked.join(' + ')}`
+    toast.success(`${b.name}（${ev.need} 位）${how}${tail}`)
     // 排完自動跳下一筆未配桌（改桌則留在原筆）
     const next = wasUnassigned ? nextUnassigned(list, b.id) : null
     if (next) {
@@ -185,20 +230,37 @@ export default function DaySeatingPanel({
     if (!editable || !activeItem.tables.length) return
     const b = activeBooking
     const prev = activeItem.tables.slice()
-    clearBookingPreassign(b.id)
+    const today = isToday
+    let released = []
+    if (today) {
+      // 今天：只釋放本筆持有的 reserved 桌（別人的桌、已入座的桌不動），再清桌號
+      const r = releaseOverriddenAssignment(b.id)
+      if (!r?.ok) return toast.error('取消配桌失敗：' + (r?.error || '未知錯誤'))
+      released = r.released || []
+    } else {
+      clearBookingPreassign(b.id)
+    }
     setEditing(true); setPicked([])
     toast.action(`已取消 ${b.name} 的配桌（${prev.join(' + ')}）`, {
       label: '復原',
       onClick: () => {
-        // 復原前重驗：桌要仍可選（期間可能被別筆配走／停用），否則安全失敗，不硬搶
+        // 復原前重驗（toast 還在的期間資料可能已變）：訂位仍待到、仍是這一天、仍未配桌；
+        // 桌要仍可選（期間可能被別筆配走／停用）。任一不符就安全失敗，不硬搶
         const L = latest.current
         const fresh = L.bookings.find(x => x.id === b.id)
-        if (!fresh || fresh.assignedTableId) return toast.error('無法復原：這筆訂位已有新配桌或已不存在')
+        const blocker = undoUnassignBlocker(fresh, date)
+        if (blocker) return toast.error(blocker)
         const s = seatingForSlot(L.settings, fresh.timeSlot)
-        const { free: f } = assignableTables({ tables: L.tables, bookings: L.bookings, groupReservations: L.groupReservations, date, seating: s, settings: L.settings, booking: fresh })
+        // 寫回的是原本的預配（不鎖桌）；今天再帶現場口徑（此刻的佔用不可延續進用餐區間）
+        const live = today ? (L.preassignableTables?.(1, { bookingId: b.id, date, timeSlot: fresh.timeSlot }) || []).map(t => String(t.number)) : null
+        const { free: f } = assignableTables({ tables: L.tables, bookings: L.bookings, groupReservations: L.groupReservations, date, seating: s, settings: L.settings, booking: fresh, liveAllowed: live })
         const lost = prev.filter(n => !f.includes(n))
         if (lost.length) return toast.error(`無法復原：桌 ${lost.join('、')} 已被佔用或停用，請重新選桌`)
-        if (prev.length === 1) preassignBookingTable(b.id, prev[0]); else preassignBookingTables(b.id, prev)
+        if (today) {
+          // 與現場覆蓋預配的復原同一支：原本鎖著的桌只在仍是空桌時才重新鎖回
+          const r = L.restoreOverriddenAssignment({ bookingId: b.id, tableNumbers: prev, released })
+          if (!r?.ok) return toast.error('無法復原：' + (r?.error || '未知錯誤'))
+        } else if (prev.length === 1) L.preassignBookingTable(b.id, prev[0]); else L.preassignBookingTables(b.id, prev)
         setEditing(false); setPicked([])
         toast.success(`已復原 ${b.name} 的配桌（${prev.join(' + ')}）`)
       },
@@ -327,6 +389,7 @@ export default function DaySeatingPanel({
                 <span className={`inline-flex items-center px-2 h-7 rounded-lg text-[13px] font-bold tabular-nums ${evalPick?.ok ? 'bg-white text-emerald-800' : 'bg-white text-chicken-brown'}`}>
                   已選 {evalPick?.seats || 0}/{evalPick?.need} 席 · {picked.length} 桌
                 </span>
+                {assignKind === 'hold' && <span data-testid="hold-badge" className="text-xs font-bold bg-white/20 text-white px-2 py-1 rounded">接近用餐：確認後鎖桌</span>}
                 {evalPick?.squeezed && <span data-testid="squeeze-badge" className="text-xs font-bold bg-amber-300 text-amber-950 px-2 py-1 rounded">擠一擠 · 超坐 {evalPick.need - evalPick.seats} 位</span>}
                 <span className="flex-1" />
                 <button type="button" onClick={() => { setEditing(false); setPicked([]) }} aria-label="取消排位" className="tap inline-flex items-center justify-center w-11 h-11 rounded-lg bg-white/15 text-white"><X size={18} aria-hidden="true" /></button>
@@ -475,7 +538,15 @@ function WalkinDetail({ item, editable, dayClosed, isPast, held, onAssign, onMov
 
       {/* 排位動作 */}
       {seatNote ? (
-        <p className="text-xs font-semibold text-chicken-brown/75">{seatNote}</p>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-chicken-brown/75">{seatNote}</p>
+          {/* 今天已鎖桌：改桌／取消配桌要走現場頁（同訂位卡「改桌」→ 現場頁 move 模式）；容器沒給（無 table.update）就只留提示 */}
+          {held && item.state === 'assigned' && show.move && (
+            <button type="button" onClick={act.move} className={`${BTN} bg-white border border-chicken-brown/15 text-chicken-brown`}>
+              <ArrowLeftRight size={16} aria-hidden="true" />到現場頁改桌
+            </button>
+          )}
+        </div>
       ) : editable && item.state === 'assigned' ? (
         <div className="flex gap-2 flex-wrap">
           <button type="button" onClick={onMove} className={`${BTN} bg-white border border-chicken-brown/15 text-chicken-brown`}><ArrowLeftRight size={16} aria-hidden="true" />改桌</button>
@@ -513,7 +584,7 @@ function WalkinDetail({ item, editable, dayClosed, isPast, held, onAssign, onMov
           <div className="mt-1 min-w-[200px] bg-white border border-chicken-brown/15 rounded-lg shadow-lg p-1 flex flex-col"
             onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
             <button type="button" onClick={() => setDetail(true)} className="min-h-[44px] px-3 text-left text-sm text-chicken-brown">訂位詳情（顧客紀錄）</button>
-            {show.move && <button type="button" onClick={act.move} className="min-h-[44px] px-3 text-left text-sm text-chicken-brown">到現場頁改桌</button>}
+            {show.move && !held && <button type="button" onClick={act.move} className="min-h-[44px] px-3 text-left text-sm text-chicken-brown">到現場頁改桌</button>}
             {show.checkout && <button type="button" onClick={act.finalize} className="min-h-[44px] px-3 text-left text-sm text-chicken-brown">直接釋出（已清桌）</button>}
             {show.noshow && (
               <>

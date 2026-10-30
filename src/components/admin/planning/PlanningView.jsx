@@ -39,7 +39,7 @@ const PURGE_FLAG = 'chicken_group_blank_purge_v1'
 //   pendingGroupOpen：訂位頁團體卡點擊 → 切到該日 + 開團單詳情
 // pane='seat'（當日排位，2026-10-30）：月曆點日期直接進來——左邊當天全部訂位、右邊該場次桌況圖、同畫面排桌。
 //   訂位頁日曆也用同一個 DaySeatingPanel（嵌在 BookingsView 裡，返回回訂位頁日曆）。
-export default function PlanningView({ onGoToday, pendingPreassign, onPreassignConsumed, pendingGroupOpen, onGroupOpenConsumed }) {
+export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign, onPreassignConsumed, pendingGroupOpen, onGroupOpenConsumed }) {
   const {
     groupReservations, agencies, guides, tables, bookings, settings,
     reserveGroupTables, removeGroupReservation, addAgency, addGuide,
@@ -441,6 +441,7 @@ export default function PlanningView({ onGoToday, pendingPreassign, onPreassignC
           onShiftDay={shiftDay}
           headerStart={paneSwitch}
           onOpenGroup={openExisting}
+          onMoveTable={onMoveTable}
           onAddBooking={canAddWalkin ? () => setShowAddWalkin(true) : undefined}
           seatingId={mapSeatingId}
           onSeatingChange={setMapSeatingId}
