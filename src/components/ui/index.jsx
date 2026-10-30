@@ -66,14 +66,21 @@ export function Badge({ color = 'red', children, className = '' }) {
   return <span className={`badge ${map[color] || map.gray} ${className}`}>{children}</span>
 }
 
-// size：md（預設，表單）/ lg（詳情頁等資訊較多的表）。手機一律全寬 bottom sheet。
+// size：md（預設，表單）/ lg（詳情頁等資訊較多的表）/ xl（寬表單：lg 以上可排兩欄，例如編輯訂位；
+//   sm–lg 之間仍是 max-w-lg，iPad 直向不會撐成一大片）。手機一律全寬 bottom sheet。
 // 內容區 overscroll-contain：手機上捲到底不會把捲動「穿透」到底下的頁面（bottom sheet 常見的卡頓感來源）。
 // Liquid Glass：面板是浮動玻璃（.lg-float，模糊畫在 ::before）。
 //   - 面板本身不捲動、裡層才捲：::before 是 absolute inset:0，若宿主自己捲動，玻璃底會跟著捲走、下半段變透明。
 //   - 進場只動 transform（spring）；外層不做 opacity 進場——外層 opacity<1 會變成 backdrop root，
 //     面板的模糊在進場時只取得到遮罩、看起來先灰後清。遮罩的淡入放在獨立的子層。退場整層淡出。
+const MODAL_WIDTH = {
+  md: 'sm:max-w-md',
+  lg: 'sm:max-w-lg',
+  xl: 'sm:max-w-lg lg:max-w-4xl',
+}
+
 export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
-  const width = size === 'lg' ? 'sm:max-w-lg' : 'sm:max-w-md'
+  const width = MODAL_WIDTH[size] || MODAL_WIDTH.md
   return (
     <AnimatePresence>
       {open && (
