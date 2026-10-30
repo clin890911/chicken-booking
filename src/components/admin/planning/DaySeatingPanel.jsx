@@ -285,7 +285,9 @@ export default function DaySeatingPanel({
 
   return (
     <div className="space-y-3" data-testid="day-seating">
-      {/* 控制層（玻璃）：月曆／日期／場次／一行摘要，一列放完（iPad 橫向的垂直空間留給地圖）。
+      {/* 控制層（玻璃）：月曆／日期／場次，一列放完（iPad 橫向的垂直空間留給地圖）。
+          場次摘要（N 組・未配桌 M）原本也在這列，但 1180 寬放不下、折成第二行多吃 26px（頁面捲動檢查：整頁溢出 32px 的主因之一）
+          → 改當左欄清單的標題列（左欄比右欄短，有空間）。
           sticky：清單捲很長時仍可換場次／換日 */}
       <div className="lg-chrome sticky top-0 z-20 rounded-2xl px-2.5 py-1.5 flex items-center gap-x-2 gap-y-1.5 flex-wrap">
         {headerStart}
@@ -311,10 +313,6 @@ export default function DaySeatingPanel({
             title: `${s.seating.start}–${s.seating.end} · ${s.count} 組${s.unassigned ? `，未配桌 ${s.unassigned}` : ''}`,
           }))}
         />
-        <div className="ml-auto text-[13px] font-semibold text-chicken-brown/75 tabular-nums" data-testid="day-seating-summary">
-          {sectionSummaryText(section)}
-          {totalUnassigned > section.unassigned && <span className="ml-1.5 font-medium text-chicken-brown/60">（全天 {totalUnassigned}）</span>}
-        </div>
       </div>
 
       {dayClosed && (
@@ -345,6 +343,10 @@ export default function DaySeatingPanel({
       <div className="grid grid-cols-1 md:grid-cols-[minmax(250px,320px)_minmax(0,1fr)] gap-3 items-start">
         {/* 左：當天這個場次的全部訂位 */}
         <div ref={listRef} className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden" aria-label={`${seating.name} 訂位清單`}>
+          <div className="px-3 py-2 border-b border-chicken-brown/[0.08] text-[13px] font-semibold text-chicken-brown/75 tabular-nums" data-testid="day-seating-summary">
+            {sectionSummaryText(section)}
+            {totalUnassigned > section.unassigned && <span className="ml-1.5 font-medium text-chicken-brown/60">（全天 {totalUnassigned}）</span>}
+          </div>
           {allItems.length === 0 ? (
             <div data-testid="day-seating-empty" className="px-4 py-8 text-center space-y-3">
               <p className="text-sm font-semibold text-chicken-brown/75">{dayLabel(date)} 還沒有任何訂位。</p>

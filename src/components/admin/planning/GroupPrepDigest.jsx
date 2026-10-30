@@ -45,51 +45,49 @@ export default function GroupPrepDigest({ prep }) {
   const { counts, allergies, tableSideNeeds, buses, byGroup = [] } = prep
   const toggle = (k) => setOpen(o => (o === k ? null : k))
   const fmtTables = (nums) => (nums && nums.length ? nums.join('、') : '未圈桌')
+  const named = (items, field) => items.map((it, i) => (
+    <SubRow key={i}><span className="font-semibold text-chicken-brown shrink-0">{it.agencyName}</span><span className="text-chicken-brown/70">{it[field]}</span></SubRow>
+  ))
+  // 數量為 0 的需求列不顯示（2026-10-30 頁面捲動檢查：7 列常有 4–5 列是 0，每列 46px 白佔）；
+  // 全部都是 0 → 一行「今日無特殊備餐」。留下來的列一定有內容可展開，所以不再需要 disabled 態。
+  const rows = [
+    ...NEEDS.map(n => {
+      const groups = byGroup.filter(g => (g.counts?.[n.key] || 0) > 0)
+      return {
+        key: n.key, icon: n.icon, color: n.color, label: n.label, value: counts[n.key] || 0, unit: n.unit, hint: n.hint, count: groups.length,
+        children: groups.map(g => (
+          <SubRow key={g.id}>
+            <span className="font-semibold text-chicken-brown truncate">{g.agencyName}</span>
+            {g.firstTimeSlot && <span className="text-chicken-brown/55 tabular-nums shrink-0">{g.firstTimeSlot}</span>}
+            <span className="flex-1" />
+            <span className={`font-semibold tabular-nums shrink-0 ${n.color}`}>{g.counts[n.key]} {n.unit}</span>
+            <span className="text-chicken-brown/50 tabular-nums shrink-0">{fmtTables(g.tableNumbers)}</span>
+          </SubRow>
+        )),
+      }
+    }),
+    { key: 'allergy', icon: 'warning', color: 'text-chicken-red', label: '過敏 / 禁忌', value: allergies.length, unit: '團', count: 0, children: named(allergies, 'text') },
+    { key: 'tableside', icon: 'utensils', color: 'text-chicken-brown/70', label: '桌邊需求', value: tableSideNeeds.length, unit: '團', count: 0, children: named(tableSideNeeds, 'text') },
+    { key: 'bus', icon: 'bus', color: 'text-chicken-brown/70', label: '遊覽車 / 司機', value: buses.length, unit: '團', count: 0, children: named(buses, 'busInfo') },
+  ].filter(r => r.value > 0)
 
   return (
     <div className="space-y-1.5">
       <div className="flex items-center px-1">
         <h3 className="text-xs font-semibold text-chicken-brown/55 tracking-wide">備餐重點 <span className="font-medium text-chicken-brown/40">· {prep.groupCount} 團彙總</span></h3>
       </div>
-      <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden">
-        {NEEDS.map(n => {
-          const groups = byGroup.filter(g => (g.counts?.[n.key] || 0) > 0)
-          const value = counts[n.key] || 0
-          return (
-            <Row key={n.key} open={open === n.key} onToggle={() => toggle(n.key)} disabled={groups.length === 0}
-              icon={n.icon} color={n.color} label={n.label} value={value} unit={n.unit} hint={n.hint} count={groups.length}>
-              {groups.map(g => (
-                <SubRow key={g.id}>
-                  <span className="font-semibold text-chicken-brown truncate">{g.agencyName}</span>
-                  {g.firstTimeSlot && <span className="text-chicken-brown/55 tabular-nums shrink-0">{g.firstTimeSlot}</span>}
-                  <span className="flex-1" />
-                  <span className={`font-semibold tabular-nums shrink-0 ${n.color}`}>{g.counts[n.key]} {n.unit}</span>
-                  <span className="text-chicken-brown/50 tabular-nums shrink-0">{fmtTables(g.tableNumbers)}</span>
-                </SubRow>
-              ))}
+      {rows.length === 0 ? (
+        <p data-testid="prep-none" className="bg-white rounded-xl border border-chicken-brown/10 px-3.5 py-3 text-sm text-chicken-brown/70">今日無特殊備餐</p>
+      ) : (
+        <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden">
+          {rows.map(r => (
+            <Row key={r.key} open={open === r.key} onToggle={() => toggle(r.key)}
+              icon={r.icon} color={r.color} label={r.label} value={r.value} unit={r.unit} hint={r.hint} count={r.count}>
+              {r.children}
             </Row>
-          )
-        })}
-
-        <Row open={open === 'allergy'} onToggle={() => toggle('allergy')} disabled={allergies.length === 0}
-          icon="warning" color="text-chicken-red" label="過敏 / 禁忌" value={allergies.length} unit="團" count={0}>
-          {allergies.map((it, i) => (
-            <SubRow key={i}><span className="font-semibold text-chicken-brown shrink-0">{it.agencyName}</span><span className="text-chicken-brown/70">{it.text}</span></SubRow>
           ))}
-        </Row>
-        <Row open={open === 'tableside'} onToggle={() => toggle('tableside')} disabled={tableSideNeeds.length === 0}
-          icon="utensils" color="text-chicken-brown/70" label="桌邊需求" value={tableSideNeeds.length} unit="團" count={0}>
-          {tableSideNeeds.map((it, i) => (
-            <SubRow key={i}><span className="font-semibold text-chicken-brown shrink-0">{it.agencyName}</span><span className="text-chicken-brown/70">{it.text}</span></SubRow>
-          ))}
-        </Row>
-        <Row open={open === 'bus'} onToggle={() => toggle('bus')} disabled={buses.length === 0}
-          icon="bus" color="text-chicken-brown/70" label="遊覽車 / 司機" value={buses.length} unit="團" count={0}>
-          {buses.map((it, i) => (
-            <SubRow key={i}><span className="font-semibold text-chicken-brown shrink-0">{it.agencyName}</span><span className="text-chicken-brown/70">{it.busInfo}</span></SubRow>
-          ))}
-        </Row>
-      </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -79,7 +79,9 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
       {visibleAgencies.length === 0 ? (
         <EmptyState icon="building" title="尚無旅行社" hint={editable ? '點右上「新增旅行社」建立名冊' : ''} />
       ) : (
-        visibleAgencies.map((a, idx) => {
+        // lg 以上 2 欄（2026-10-30 頁面捲動檢查：單欄時卡片右半全空）
+        <div className="grid gap-3 lg:grid-cols-2 items-start">
+        {visibleAgencies.map((a, idx) => {
           const s = statsByAgency[a.id] || { visits: 0, totalGuests: 0, totalSpend: 0, lastVisit: '', history: [] }
           return (
             <div key={a.id} className="bg-white rounded-xl border border-chicken-brown/10 p-4">
@@ -95,8 +97,9 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
                 </div>
                 {editable && (
                   <div className="flex gap-1.5">
-                    <button onClick={() => setAgencyModal({ mode: 'edit', data: { ...a } })} className="text-xs px-2.5 py-1 rounded-lg border border-chicken-brown/10 text-chicken-brown font-bold">編輯</button>
-                    <button onClick={() => { if (confirm(`封存旅行社「${a.name}」？歷史保留。`)) { archiveAgency(a.id); toast.success('已封存') } }} className="text-xs px-2.5 py-1 rounded-lg border border-chicken-brown/10 text-chicken-brown/60 font-bold">封存</button>
+                    {/* 觸控 ≥44px（原本 py-1 只有約 28px） */}
+                    <button onClick={() => setAgencyModal({ mode: 'edit', data: { ...a } })} className="tap text-xs px-3 min-h-[44px] rounded-lg border border-chicken-brown/10 text-chicken-brown font-bold">編輯</button>
+                    <button onClick={() => { if (confirm(`封存旅行社「${a.name}」？歷史保留。`)) { archiveAgency(a.id); toast.success('已封存') } }} className="tap text-xs px-3 min-h-[44px] rounded-lg border border-chicken-brown/10 text-chicken-brown/60 font-bold">封存</button>
                   </div>
                 )}
               </div>
@@ -132,7 +135,8 @@ export default function AgencyDirectoryView({ onGoPlanning }) {
               </button>
             </div>
           )
-        })
+        })}
+        </div>
       )}
 
       {/* 旅行社 新增/編輯 */}

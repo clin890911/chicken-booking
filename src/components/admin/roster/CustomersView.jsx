@@ -153,7 +153,8 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
       {list.length === 0 ? (
         <EmptyState icon="users" title="尚無顧客資料" hint="客人訂位後會自動建立顧客檔" />
       ) : (
-        <div className="space-y-2">
+        // lg 以上 2 欄：寬螢幕單欄時每張卡右半全空、30 筆要捲 5000px（2026-10-30 頁面捲動檢查）
+        <div className="grid gap-2 lg:grid-cols-2 items-start">
           {list.map(c => {
             const noshow = getNoshowCount(c.phone)
             const risk = noshowRisk(c.phone)
@@ -201,28 +202,32 @@ export default function CustomersView({ initialQuery, onAddBooking }) {
                     </div>
                     {c.notes && <p className="text-xs text-chicken-brown/70 italic mt-2">「{c.notes}」</p>}
                   </div>
-                  {canEditCustomer && <div className="flex flex-col gap-1.5 flex-shrink-0">
+                  {/* 動作改橫排：原本 3 顆直疊（卡片被撐到 178px）。第一層只留「編輯」，黑名單／歸檔收進「⋯ 更多」
+                      （沿用訂位卡的 details[data-popover]，點外面／按動作／Esc 會自動收，見 utils/popoverDismiss） */}
+                  {canEditCustomer && <div className="flex items-start gap-1.5 flex-shrink-0">
                     <button onClick={() => openEdit(c)} className="text-xs px-3 min-h-[44px] bg-chicken-cream rounded-lg font-bold text-chicken-brown">編輯</button>
-                    <button
-                      onClick={async () => {
-                        if (c.blacklisted) {
-                          const ok = await confirm(`解除 ${c.name} 黑名單？`, { title: '解除黑名單', confirmLabel: '解除' })
-                          if (ok) setCustomerBlacklist(c.phone, false)
-                        } else {
-                          setBlacklistReason('')
-                          setBlacklisting({ phone: c.phone, name: c.name })
-                        }
-                      }}
-                      className={`text-xs px-3 min-h-[44px] rounded-lg font-bold ${
-                        c.blacklisted
-                          ? 'bg-chicken-brown/10 text-chicken-brown hover:bg-chicken-brown/15'
-                          : 'bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5'
-                      }`}
-                    >{c.blacklisted ? '解除黑名單' : '加黑名單'}</button>
-                    <button
-                      onClick={() => updateCustomer(c.phone, { archived: !c.archived })}
-                      className="text-xs px-3 min-h-[44px] rounded-lg font-bold bg-white border border-chicken-brown/15 text-chicken-brown/70 hover:bg-chicken-brown/5"
-                    ><GlyphText size={14}>{c.archived ? '↩ 取消歸檔' : '歸檔'}</GlyphText></button>
+                    <details data-popover className="relative">
+                      <summary aria-label={`${c.name || c.phone} 更多操作`} className="tap cursor-pointer list-none text-xs px-3 min-h-[44px] flex items-center rounded-lg font-bold bg-white border border-chicken-brown/15 text-chicken-brown">⋯ 更多</summary>
+                      <div className="absolute right-0 z-20 mt-1 min-w-[160px] bg-white border border-chicken-brown/15 rounded-lg shadow-lg p-1 flex flex-col"
+                        onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
+                        <button
+                          onClick={async () => {
+                            if (c.blacklisted) {
+                              const ok = await confirm(`解除 ${c.name} 黑名單？`, { title: '解除黑名單', confirmLabel: '解除' })
+                              if (ok) setCustomerBlacklist(c.phone, false)
+                            } else {
+                              setBlacklistReason('')
+                              setBlacklisting({ phone: c.phone, name: c.name })
+                            }
+                          }}
+                          className={`text-sm min-h-[44px] px-3 text-left rounded-md font-bold ${c.blacklisted ? 'text-chicken-brown' : 'text-chicken-red'} hover:bg-chicken-brown/5`}
+                        >{c.blacklisted ? '解除黑名單' : '加黑名單'}</button>
+                        <button
+                          onClick={() => updateCustomer(c.phone, { archived: !c.archived })}
+                          className="text-sm min-h-[44px] px-3 text-left rounded-md font-bold text-chicken-brown/70 hover:bg-chicken-brown/5"
+                        ><GlyphText size={14} className="!justify-start">{c.archived ? '↩ 取消歸檔' : '歸檔'}</GlyphText></button>
+                      </div>
+                    </details>
                   </div>}
                 </div>
               </Card>

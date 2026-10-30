@@ -36,6 +36,8 @@ const button=text=>[...document.querySelectorAll('button')].find(b=>b.textConten
 const click=async text=>{expect(button(text)).toBeTruthy();await act(async()=>button(text).click())}
 const input=(selector,value)=>act(()=>{const el=document.querySelector(selector);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}))})
 beforeEach(()=>{
+ // 交班面板預設收合（2026-10-30）；這組測的是建立／完成流程，以「這台裝置選了展開」為前提
+ localStorage.setItem('handoffPanelCollapsed','0')
  vi.useFakeTimers();vi.setSystemTime(new Date(2026,9,5,12));state.role='floor';state.records=[];state.receipts.clear();state.requests=[];state.fail=false;state.lost=false;confirm.mockResolvedValue(true)
  state.ctx={bookings:[structuredClone(booking)],tables:[structuredClone(table)],settings:{},groupReservations:[],waitlist:[],findReserveCandidates:()=>({tables:[]})}
 })
@@ -78,13 +80,15 @@ describe('真卡片/桌抽屜交班建立與跨班操作',()=>{
   expect(document.querySelector('[role="alert"]')).toBeNull()
   expect(state.requests).toHaveLength(1);await click('已完成 1');expect(button('恢復待辦')).toBeTruthy()
  })
- it('交班區預設展開、固定最高260px內捲動，收合顯示待辦數且不丟任務/篩選',async()=>{
+ it('交班區展開時固定最高260px內捲動，收合顯示待辦數且不丟任務/篩選',async()=>{
   state.records=Array.from({length:4},(_,i)=>({id:'T'+i,version:1,label:'需協助'+i,bookingId:'B1',status:'pending',date:'2026-10-05',createdAt:'2026-10-05T04:00:00Z'}))
   await render();const panel=document.querySelector('[aria-label="現場交班待辦"]')
   expect(panel.className).toContain('max-h-[260px]');expect(document.querySelector('[data-testid="handoff-task-list"]').className).toContain('overflow-y-auto')
   expect(button('完成').className).toContain('min-h-[44px]')
-  await click('交班待辦 4 收合');expect(panel.querySelector('[data-testid="handoff-task-list"]')).toBeNull();expect(button('交班待辦 4 展開').getAttribute('aria-expanded')).toBe('false')
-  await click('交班待辦 4 展開');expect(panel.textContent).toContain('需協助3');expect(state.records).toHaveLength(4);expect(state.requests).toEqual([])
+  await click('交班待辦 4 收合');expect(document.querySelector('[data-testid="handoff-task-list"]')).toBeNull()
+  const row=document.querySelector('[aria-label="現場交班待辦"] button[aria-expanded]')
+  expect(row.getAttribute('aria-expanded')).toBe('false');expect(row.textContent).toContain('4 筆')
+  await act(async()=>row.click());expect(document.querySelector('[aria-label="現場交班待辦"]').textContent).toContain('需協助3');expect(state.records).toHaveLength(4);expect(state.requests).toEqual([])
  })
  it('廚房只讀：看到交班事項，沒有新增/完成/恢復寫入口',async()=>{
   state.role='kitchen';state.records=[{id:'T',version:1,label:'需協助',bookingId:'B1',status:'pending',date:'2026-10-05',createdAt:'2026-10-05T04:00:00Z'}]
