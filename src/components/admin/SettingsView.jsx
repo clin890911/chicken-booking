@@ -19,6 +19,7 @@ import GlyphText from '../ui/GlyphText'
 import { Ban, Check, Repeat, TriangleAlert, X } from 'lucide-react'
 import { dirtySettingsKeys, describeSettingsChanges, rebaseSettingsForm } from '../../utils/settingsDiff'
 import { buildLabel, addReloadBlocker } from '../../utils/appVersion'
+import { isStandaloneApp } from '../../hooks/useAppManifest'
 import { validateLineReadiness } from '../../utils/lineReadiness'
 import { WEEKDAY_LABELS, WEEKDAY_ORDER, closureDayOfWeek, weeklyClosedSeatingIds, openSeatingIdsOn, effectiveClosedSeatings, describeWeeklyClosures } from '../../utils/weeklyClosures'
 import { onlineLeadLabel } from '../../utils/guestPolicy'
@@ -1089,6 +1090,14 @@ export default function SettingsView({ onOpenCustomer }) {
       <p className="text-center text-xs text-chicken-brown/40 pt-4">
         雞王涮涮鍋訂位系統 · 版本 {buildLabel()}
       </p>
+      {/* 主畫面 App 模式沒有網址列與重新整理鈕：卡住或想確認最新版時從這裡重新載入 */}
+      {isStandaloneApp() && (
+        <div className="flex justify-center">
+          <button type="button" onClick={() => window.location.reload()} className="btn-secondary min-h-[44px] px-5 text-sm">
+            重新載入 App
+          </button>
+        </div>
+      )}
       </div>{/* 內容欄 */}
       </div>{/* flex gap-4 */}
 

@@ -1,0 +1,17 @@
+{
+  "id": "/admin",
+  "name": "雞王管理後台",
+  "short_name": "雞王後台",
+  "description": "雞王涮涮鍋 現場帶位、訂位、候位管理",
+  "lang": "zh-Hant-TW",
+  "start_url": "/admin",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F0",
+  "theme_color": "#FBFAF8",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
