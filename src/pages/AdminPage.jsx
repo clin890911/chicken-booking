@@ -40,7 +40,7 @@ export default function AdminPage() {
   const setTab = useCallback((next) => setSearchParams(prev => {
     const p = new URLSearchParams(prev)
     p.set('tab', next)
-    if (next !== 'settings') p.delete('section') // 離開設定頁時清掉殘留的 section 參數
+    if (next !== 'settings') { p.delete('section'); p.delete('block') } // 離開設定頁時清掉殘留的分類／區塊參數
     return p
   }), [setSearchParams]) // push（非 replace）→ 瀏覽器上一頁/下一頁可用
   // pendingAssign：訂位列表「指派桌」按鈕觸發；OperationsView 接收後進入指派模式

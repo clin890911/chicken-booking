@@ -54,7 +54,7 @@ function seatingTone(r) {
 }
 
 // 區段標題（右側「待填 / ✓ 完成」）
-function SectionHead({ n, title, hint, done }) {
+function SectionHead({ n, title, hint, done, onCollapse }) {
   return (
     <div className="mb-2.5 flex items-center gap-2">
       <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-chicken-brown/[0.08] text-[11px] font-bold text-chicken-brown/70">{n}</span>
@@ -64,6 +64,34 @@ function SectionHead({ n, title, hint, done }) {
       <span className={`inline-flex items-center gap-1 text-xs font-bold ${done ? 'text-[#5b8c1f]' : 'text-chicken-brown/40'}`}>
         {done && <Icon name="check" size={12} strokeWidth={3} />}{done ? '完成' : '待填'}
       </span>
+      {/* 收起成一行摘要。熱區 44px，用負 margin 不撐高標題列 */}
+      {onCollapse && (
+        <button type="button" onClick={onCollapse} aria-expanded="true" aria-label={`收起${title}`}
+          className="tap -my-3 -mr-2 inline-flex min-h-[44px] items-center gap-0.5 rounded-lg px-2 text-xs font-semibold text-chicken-brown/60 hover:bg-chicken-brown/[0.05]">
+          收起<Icon name="chevronDown" size={14} strokeWidth={2.4} className="rotate-180" />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// 收起後的一行摘要（頁面捲動第 3 批，iOS 設定式步驟收合）：整列可點、展開修改。
+// 標題留 <h3>（heading 語意不變）；可點區用 stretched button（::after 撐滿整列），所以 h3 不必塞進 button。
+// 摘要純條件渲染、沒有展開動畫：關鍵內容的可見性不依賴 JS 動畫回呼。
+function SectionRow({ n, title, done, attention, summary, summaryCls = '', onOpen }) {
+  const verb = done ? '修改' : '填寫'
+  return (
+    <div data-testid={`group-editor-row-${n}`} className="relative flex min-h-[56px] items-center gap-2.5 rounded-xl border border-chicken-brown/10 bg-white px-4 py-2 hover:border-chicken-brown/25">
+      <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${done ? 'bg-[#5b8c1f]/15 text-[#5b8c1f]' : 'bg-chicken-brown/[0.08] text-chicken-brown/70'}`}>
+        {done ? <Icon name="check" size={12} strokeWidth={3} /> : n}
+      </span>
+      <h3 className="shrink-0 text-sm font-semibold text-chicken-brown">{title}</h3>
+      <p className={`min-w-0 flex-1 truncate text-[13px] font-medium ${summaryCls || (done ? 'text-chicken-brown/70' : 'text-chicken-brown/50')}`} title={typeof summary === 'string' ? summary : undefined}>{summary}</p>
+      {attention && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">有提醒</span>}
+      <button type="button" onClick={onOpen} aria-expanded="false" aria-label={`${verb}${title}`}
+        className="inline-flex min-h-[44px] shrink-0 items-center gap-0.5 rounded-lg pl-2 text-xs font-semibold text-chicken-red after:absolute after:inset-0 after:rounded-xl after:content-['']">
+        {verb}<Icon name="chevronRight" size={14} strokeWidth={2.4} />
+      </button>
     </div>
   )
 }
@@ -448,6 +476,31 @@ export default function GroupEditorStage({
   const sec1Done = !!(draft.agencyId || (draft.agencyName || '').trim())
   const sec2Done = total > 0 && !specialErr
   const sec3Done = checks.find(c => c.key === 'seating').ok && checks.find(c => c.key === 'batches').ok
+  // 第 3 段有黃字／紅字提醒（線上已關、超坐、場次超收、停用桌）＝需要店員看一眼
+  const sec3Attention = checks.some(c => ['online', 'seats', 'overbooked', 'tables'].includes(c.key) && (c.warn || c.bad))
+
+  // === 步驟收合（頁面捲動第 3 批）===
+  // 已完成的段落收成一行摘要，點一下展開修改；還要處理的段落一開始就展開：
+  //   新增＝三段全開（維持 #128 店主拍板的「一頁三段」，不回到逐步精靈）；
+  //   編輯既有團（都填好）＝全收、一頁看完；複製／改期（桌被清空）＝只開③；③有黃字／紅字提醒＝③展開。
+  // 之後開合完全由店員決定（可同時展開多段）；打字途中不會自動收合，免得版面在手指下跳動。
+  const needsWork = { 1: !sec1Done, 2: !sec2Done, 3: !sec3Done || sec3Attention }
+  const [openSecs, setOpenSecs] = useState(() => ({ ...needsWork }))
+  const setSecOpen = (n, open) => setOpenSecs(o => ({ ...o, [n]: open }))
+  // 「完成，下一步」：收起這段，展開後面第一個還要處理的段落
+  const finishSection = (n) => {
+    const next = [1, 2, 3].find(k => k > n && needsWork[k] && !openSecs[k])
+    setOpenSecs(o => ({ ...o, [n]: false, ...(next ? { [next]: true } : {}) }))
+  }
+  const nextLabel = (n) => ([1, 2, 3].some(k => k > n && needsWork[k] && !openSecs[k]) ? '完成，下一步' : '完成，收起')
+  const renderFinish = (n, done) => (done ? (
+    <div className="mt-3 flex justify-end">
+      <button type="button" onClick={() => finishSection(n)}
+        className="tap inline-flex min-h-[44px] items-center gap-1 rounded-[10px] bg-chicken-brown/[0.06] px-4 text-sm font-semibold text-chicken-brown hover:bg-chicken-brown/10">
+        <Icon name="check" size={14} strokeWidth={2.6} />{nextLabel(n)}
+      </button>
+    </div>
+  ) : null)
 
   const specialsText = SPECIAL_FIELDS
     .filter(f => (Number(draft.counts?.[f.key]) || 0) > 0)
@@ -519,6 +572,21 @@ export default function GroupEditorStage({
     : ''
   const batchChips = [...gBatches, ...(escortBatch ? [escortBatch] : [])]
     .map(b => ({ id: b.id, label: b.label, timeSlot: b.timeSlot, isEscort: !!b.isEscort }))
+
+  // 收起時的一行摘要
+  const sec1Summary = sec1Done
+    ? [draft.agencyName || '（已選旅行社）', draft.guideName && `導遊 ${draft.guideName}`, draft.guidePhone].filter(Boolean).join(' · ')
+    : '請選旅行社'
+  const sec2Summary = specialErr || (total > 0 ? `${total} 人${specialsText ? ` · ${specialsText}` : ''}` : '請填總人數')
+  const sec3Summary = (() => {
+    const head = hasSeatings ? (primarySeating?.name || '') : (primaryBatch?.timeSlot || '')
+    const parts = [...gBatches, ...(escortBatch ? [escortBatch] : [])].map(b => {
+      const nums = b.tableNumbers || []
+      return `${b.isEscort ? '司領桌' : b.label} ${b.timeSlot || ''} ${nums.length ? `桌 ${nums.join('、')}` : '未圈桌'}`.trim()
+    })
+    if (!head && !parts.some(x => !x.endsWith('未圈桌'))) return '請選場次並圈桌'
+    return [head, ...parts, heldSeats ? `${heldSeats} 席` : ''].filter(Boolean).join(' · ')
+  })()
 
   // 「拆梯」的場次選擇器：梯次列與圈桌側欄兩個入口共用同一段 UI 與同一條 addBatchForSeating。
   const renderNewBatchPicker = () => (
@@ -620,8 +688,9 @@ export default function GroupEditorStage({
         <div className="space-y-3">
 
           {/* ① 旅行社與導遊 */}
-          <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">
-            <SectionHead n={1} title="旅行社與導遊" done={sec1Done} />
+          {openSecs[1] ? (
+          <div data-testid="group-editor-sec-1" className="rounded-xl border border-chicken-brown/10 bg-white p-4">
+            <SectionHead n={1} title="旅行社與導遊" done={sec1Done} onCollapse={() => setSecOpen(1, false)} />
             <AgencyPicker
               agencies={agencies}
               groupReservations={groupReservations}
@@ -666,11 +735,16 @@ export default function GroupEditorStage({
                 <Button onClick={createQuickGuide}>建立</Button>
               </div>
             )}
+            {renderFinish(1, sec1Done)}
           </div>
+          ) : (
+            <SectionRow n={1} title="旅行社與導遊" done={sec1Done} summary={sec1Summary} onOpen={() => setSecOpen(1, true)} />
+          )}
 
           {/* ② 人數 */}
-          <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">
-            <SectionHead n={2} title="人數" hint="特殊需求有才加" done={sec2Done} />
+          {openSecs[2] ? (
+          <div data-testid="group-editor-sec-2" className="rounded-xl border border-chicken-brown/10 bg-white p-4">
+            <SectionHead n={2} title="人數" hint="特殊需求有才加" done={sec2Done} onCollapse={() => setSecOpen(2, false)} />
             <div className="flex flex-wrap items-center gap-2">
               <NumberStepper ariaLabel="總人數" max={500} value={total} onChange={v => patchCount('total', v)} />
               <div className="flex flex-wrap gap-1.5">
@@ -719,11 +793,17 @@ export default function GroupEditorStage({
                 <p role="alert" className="mt-2 text-xs font-bold text-chicken-red">{specialErr}</p>
               )}
             </div>
+            {renderFinish(2, sec2Done)}
           </div>
+          ) : (
+            <SectionRow n={2} title="人數" done={sec2Done} summary={sec2Summary}
+              summaryCls={specialErr ? 'text-chicken-red font-bold' : ''} onOpen={() => setSecOpen(2, true)} />
+          )}
 
           {/* ③ 場次與梯次（含圈桌地圖） */}
-          <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">
-            <SectionHead n={3} title="場次與梯次" hint="兩段用餐可拆第二梯" done={sec3Done} />
+          {openSecs[3] ? (
+          <div data-testid="group-editor-sec-3" className="rounded-xl border border-chicken-brown/10 bg-white p-4">
+            <SectionHead n={3} title="場次與梯次" hint="兩段用餐可拆第二梯" done={sec3Done} onCollapse={() => setSecOpen(3, false)} />
 
             {hasSeatings ? (
               <>
@@ -864,7 +944,11 @@ export default function GroupEditorStage({
                 </div>
               </div>
             </div>
+            {renderFinish(3, sec3Done)}
           </div>
+          ) : (
+            <SectionRow n={3} title="場次與梯次" done={sec3Done} attention={sec3Attention} summary={sec3Summary} onOpen={() => setSecOpen(3, true)} />
+          )}
 
           {/* 其他（不同時機才用得到的事，收起來） */}
           <div className="rounded-xl border border-chicken-brown/10 bg-white p-4">

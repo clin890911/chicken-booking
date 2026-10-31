@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { EmptyState } from '../../ui'
 import Icon from '../../ui/Icon'
 import { dayLabel } from '../../../utils/timeSlots'
@@ -147,6 +148,11 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
   const closed = tone === 'closed' // 公休日（維持原狀：不從這裡建團/配桌）
   const onlineClosed = !closed && !!summary?.closed // 線上已關：只停線上客人，後台仍可建團、配桌
   const walkinGuests = walkinRows.reduce((s, r) => s + (r.guests || 0), 0)
+  const walkinUnassigned = walkinRows.filter(r => !r.assignedTableId).length
+  // 散客名單預設收合、只留一行摘要（頁面捲動第 3 批）：當日總覽的主角是團與場次容量，
+  // 一場次 6～10 組散客全展開會把右欄撐到兩三個螢幕高；要配桌／看詳情再點開。
+  // 條件渲染、不做展開動畫（關鍵內容的可見性不依賴 JS 動畫回呼）。
+  const [walkinOpen, setWalkinOpen] = useState(false)
   return (
     <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden">
       <div className="px-3.5 pt-3 pb-2.5 space-y-2">
@@ -176,11 +182,17 @@ function SessionSection({ seating, summary, rows, walkinRows = [], onNewGroup, o
           ))}
           {walkinRows.length > 0 && (
             <>
-              <div className="flex items-center gap-2 px-3.5 py-1.5 border-t border-chicken-brown/[0.06] bg-[#fbfaf8] text-[11px] font-semibold text-chicken-brown/55 tabular-nums">
-                散客 {walkinRows.length} 組 · {walkinGuests} 位
-                <span className="font-medium text-chicken-brown/40">· 點列看詳情</span>
-              </div>
-              {walkinRows.map(r => (
+              <button type="button" onClick={() => setWalkinOpen(o => !o)} aria-expanded={walkinOpen}
+                data-testid="walkin-toggle"
+                className="tap w-full flex items-center gap-2 min-h-[44px] px-3.5 border-t border-chicken-brown/[0.06] bg-[#fbfaf8] text-left text-xs font-semibold text-chicken-brown/70 tabular-nums">
+                <Icon name="person" size={16} className="text-amber-800" />
+                <span>散客 {walkinRows.length} 組 · {walkinGuests} 位</span>
+                {walkinUnassigned > 0 && <span className="text-amber-800">· 未配桌 {walkinUnassigned}</span>}
+                <span className="flex-1" />
+                <span className="text-chicken-brown/60">{walkinOpen ? '收起' : '看名單'}</span>
+                <Icon name="chevronDown" size={14} strokeWidth={2.4} className={`text-chicken-brown/50 ${walkinOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {walkinOpen && walkinRows.map(r => (
                 <WalkinRow key={r.booking.id} row={r} onAssign={closed ? null : onAssignWalkin} onOpen={onOpenWalkin} onFocusTable={onFocusTable} />
               ))}
             </>
@@ -233,8 +245,8 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
 
   return (
     <div className="space-y-3">
-      {/* 標題列 */}
-      <div className="flex items-center gap-1.5 flex-wrap px-1">
+      {/* 標題列：lg↑ 右欄自己捲動時黏在欄頂（日期與排位地圖入口一直看得到） */}
+      <div className="flex items-center gap-1.5 flex-wrap px-1 lg:sticky lg:top-0 lg:z-10 lg:bg-chicken-cream lg:pb-1">
         <h2 className="text-xl font-semibold tracking-tight text-chicken-brown">{dayLabel(date)}</h2>
         {s.closed && <Pill cls="bg-chicken-brown/[0.08] text-chicken-brown/70">公休</Pill>}
         {isToday && <Pill cls="bg-chicken-red/10 text-chicken-red">今天</Pill>}
@@ -283,7 +295,7 @@ export default function GroupDayPanel({ date, daySummary, dayGroups, isToday, on
             <div className="space-y-1.5">
               <SectionTitle>場次 <span className="font-medium text-chicken-brown/40">· 點列看詳情</span></SectionTitle>
               {sections.map(sec => (
-                <SessionSection key={sec.seating.id} {...sec}
+                <SessionSection key={`${date}:${sec.seating.id}`} {...sec}
                   onNewGroup={onNewGroup} onSelectGroup={onSelectGroup} onDuplicate={onDuplicate}
                   onAssignWalkin={onAssignWalkin} onOpenWalkin={onOpenWalkin} onFocusTable={onFocusTable} />
               ))}

@@ -51,7 +51,10 @@ test('訂位專員：關閉整天 → 儲存休店／關閉設定 → 寫進本�
 test('訂位專員：同時改了營業時間 → 儲存鈕停用，還原其他設定後才可存', async ({ page }) => {
   await openClosures(page)
   await page.getByRole('button', { name: '設為整天公休' }).click()
-  await page.getByRole('heading', { name: '營業時段' }).click()
+  // 寬螢幕設定頁＝主從式（頁面捲動第 3 批）：從區塊清單切到「營業時段」
+  await page.locator('[data-settings-list]:visible').getByRole('button', { name: '營業時段' }).click()
+  // 選到的區塊寫進網址（replace，可重整／書籤）
+  await expect(page).toHaveURL(/[?&]block=hours(&|$)/)
   await page.getByLabel('開始時間').fill('09:00')
   const save = page.getByRole('button', { name: '儲存休店／關閉設定' })
   await expect(save).toBeDisabled()
