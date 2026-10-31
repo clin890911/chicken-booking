@@ -13,6 +13,7 @@ import TableGrid from './TableGrid'
 import LayoutEditor from './LayoutEditor'
 import TelegramSettings from './TelegramSettings'
 import StaffAdminSection from './StaffAdminSection'
+import SmsSettingsSection from './SmsSettingsSection'
 import ExportCenter from './ExportCenter'
 import Icon from '../ui/Icon'
 import PageTitle from '../layout/PageTitle'
@@ -64,7 +65,7 @@ const SETTINGS_CATEGORIES = [
   { key: 'ops-rules', label: '營運規則',   icon: 'clock', sections: ['hours', 'seatings', 'closures'] },
   { key: 'online',    label: '線上訂位',   icon: 'globe', sections: ['online-guard', 'hero', 'contact'] },
   { key: 'floor',     label: '現場與桌位', icon: 'chair', sections: ['device-display', 'automation', 'layout', 'table-enable'] },
-  { key: 'line',      label: '通知與 LINE', icon: 'bell', sections: ['line', 'telegram'] },
+  { key: 'line',      label: '通知與 LINE', icon: 'bell', sections: ['line', 'telegram', 'sms'] },
   { key: 'data',      label: '資料與權限', icon: 'lock', sections: ['firestore', 'noshow', 'export', 'staff', 'account'] },
 ]
 const DEFAULT_CATEGORY = 'ops-rules'
@@ -1097,6 +1098,13 @@ export default function SettingsView({ onOpenCustomer }) {
       <SettingsSection sectionKey="telegram" title="通知與備份" description="Telegram 事件推送與備份狀態。">
         <TelegramSettings embedded />
       </SettingsSection>
+
+      {/* 叫號簡訊：設定存 system/smsConfig（adminSmsConfig 直接讀寫），不進 settings 同步管線 */}
+      {can('settings.update') && (
+        <SettingsSection sectionKey="sms" title="叫號簡訊" description="店員按「叫號」時發簡訊給留手機的候位客人（EVERY8D）。預設關閉。">
+          <SmsSettingsSection />
+        </SettingsSection>
+      )}
 
       <SettingsSection sectionKey="firestore" title="Firestore 資料同步" description="正式跨裝置資料來源；可手動上傳本機資料或重新拉取雲端資料。" badge={usingFirebase ? undefined : '本機模式'} defaultOpen>
         <div className="space-y-3">

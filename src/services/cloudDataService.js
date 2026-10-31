@@ -790,6 +790,18 @@ export async function guestCancelBooking(bookingId, token, reason) {
   })
 }
 
+// 叫號簡訊「踢一下」：後端只處理這個候位 pending 的簡訊。呼叫端一律 fire-and-forget、吞掉錯誤——
+// 失敗由每分鐘的 smsSweeper 補送，絕不影響叫號結果。
+export async function smsKick(waitlistId) {
+  return staffRequest(endpoint('smsKick'), { method: 'POST', body: JSON.stringify({ waitlistId }) })
+}
+
+// 叫號簡訊設定（僅店長；後端硬性檢查 settings.update）。刻意不走 settings 同步管線。
+// payload: { action: 'get' } | { action: 'set', patch } | { action: 'test', phone }
+export async function adminSmsConfig(payload) {
+  return staffRequest(endpoint('adminSmsConfig'), { method: 'POST', body: JSON.stringify(payload || {}) })
+}
+
 // 操作型API不進整份資料同步；只有server確認的單筆回應才能接受。
 export async function operationalRequest(name, command = null) {
   return staffRequest(endpoint(name), {method:command?'POST':'GET',...(command?{body:JSON.stringify(command)}:{})})
