@@ -54,7 +54,7 @@ function addDaysStr(dateStr, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export default function TableDrawer({ table: storedTable, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, onWaitlistSeated, mode }) {
+export default function TableDrawer({ table: storedTable, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, onGroupMove, onGroupAdd, onWaitlistSeated, mode }) {
   const handoff=useHandoff()
   const { can } = useAuth()
   const toast = useToast()
@@ -421,6 +421,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             perms={perms}
             onWalkInOverride={() => setShowWalkIn(true)}
             onReseatBatch={onReseatBatch}
+            onGroupMove={onGroupMove}
+            onGroupAdd={onGroupAdd}
             onClose={onClose}
           />
         )}

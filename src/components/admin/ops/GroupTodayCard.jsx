@@ -21,7 +21,7 @@ const STATUS_LABEL = {
 // 入座/離席/完成一次翻動多桌，誤觸成本高 → 一律 confirm（不走地圖二步確認，桌已預圈無選桌步驟）。
 // 已完成（status=completed）的卡片轉唯讀：灰階、無操作按鈕，僅保留回傳單列印。
 export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, onReseatBatch }) {
-  const { tables, seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
+  const { tables, seatGroupBatch, checkoutGroupBatch, undoGroupCheckout, releaseGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
   // 權限門（見 utils/seatingPerms.js）：梯次入座／整梯釋出／整團完成／標記已確認會寫 groupReservations（group.update），
@@ -60,7 +60,15 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
     if (!ok) return
     const r = checkoutGroupBatch(g.id, b.id)
     if (!r.ok) return toast.error('離席失敗：' + r.error)
-    toast.success(`${g.agencyName} ${b.label} 已離席，桌位待清`)
+    // 8 秒復原（與桌況抽屜「整梯離席」同一支 undoGroupCheckout）：只倒回仍待清、仍指向本梯的桌
+    toast.action(`${g.agencyName} ${b.label} 已離席，桌位待清`,
+      { label: '↩ 復原', onClick: () => {
+        const u = undoGroupCheckout(r.snapshot)
+        if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+        if (u.failed?.length) toast.info(`已復原 ${u.restored.join('、')} 為用餐中；${u.failed.join('、')} 已清桌或被使用，未復原`)
+        else toast.success(`已復原 ${u.restored.join('、')} 為用餐中`)
+      } },
+      { duration: 8000 })
   }
 
   // 整梯清桌釋出：把該梯所有待清桌一次清成空桌、釋放座位（不結束整團）

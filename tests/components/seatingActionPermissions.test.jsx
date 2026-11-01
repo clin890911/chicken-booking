@@ -114,6 +114,25 @@ describe('GroupTodayCard 動作鈕權限', () => {
     expect(hasBtn('梯次入座')).toBe(false)
     expect(hasBtn('整團完成')).toBe(false)
   })
+  it('梯次離席（整梯）後 toast 帶「↩ 復原」→ 走 undoGroupCheckout（2026-11）', async () => {
+    currentCan = roleCan('floor')
+    const snapshot = { groupId: 'G1', batchId: 'BT1', tables: [{ tableNumber: '105', seatedAt: null }] }
+    Object.assign(ctx, {
+      tables: [{ number: '105', capacity: 6, floor: '1F', isActive: true, status: 'dining', currentBookingId: null, currentRef: { type: 'group', groupId: 'G1', batchId: 'BT1' } }],
+      seatGroupBatch: vi.fn(), releaseGroupBatch: vi.fn(), finalizeGroup: vi.fn(), setGroupStatus: vi.fn(),
+      checkoutGroupBatch: vi.fn(() => ({ ok: true, tableNumbers: ['105'], snapshot })),
+      undoGroupCheckout: vi.fn(() => ({ ok: true, restored: ['105'], failed: [] })),
+    })
+    toast.action.mockClear()
+    mount(<GroupTodayCard group={{ ...group, status: 'arrived' }} />)
+    await act(async () => { [...container.querySelectorAll('button')].find(b => b.textContent.trim() === '梯次離席').click() })
+    expect(ctx.checkoutGroupBatch).toHaveBeenCalledWith('G1', 'BT1')
+    const [msg, action] = toast.action.mock.calls[0]
+    expect(msg).toContain('已離席，桌位待清')
+    expect(action.label).toBe('↩ 復原')
+    action.onClick()
+    expect(ctx.undoGroupCheckout).toHaveBeenCalledWith(snapshot)
+  })
 })
 
 describe('WaitlistPanel「入座」鈕權限（寫 waitlist＋bookings＋tables）', () => {

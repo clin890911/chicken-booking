@@ -1291,8 +1291,11 @@ export function seatGroupBatch(groupId, batchId) {
       blocked.push({ tableNumber: n, status: 'outage' })
       continue
     }
-    const sameGroupSeated = t.currentRef?.groupId === groupId
-    if (!['vacant', 'cleaning'].includes(t.status) && !sameGroupSeated) {
+    // 只有「本梯自己已坐著」的桌可放行（重按入座冪等）。同團別梯仍在用餐的桌一律算被佔、走改派：
+    // 舊寫法「同團就放行」會把第一梯還在吃的桌直接改指第二梯——第一梯客人從桌況圖消失，
+    // 收斂還會把第一梯誤標 releasedAt（逐桌清桌後第二梯團保會出現在空出來的桌上，這條路很好踩）。
+    const sameBatchSeated = t.currentRef?.groupId === groupId && t.currentRef?.batchId === batchId
+    if (!['vacant', 'cleaning'].includes(t.status) && !sameBatchSeated) {
       blocked.push({ tableNumber: n, status: t.status })
     }
   }
@@ -1307,8 +1310,20 @@ export function seatGroupBatch(groupId, batchId) {
       blocked,
     }
   }
+  // 接走「待清桌」（currentRef 由原梯改指本梯）：先記下被接走的原梯——同團前梯或別團的梯都算——
+  // 入座後檢查它是否已無桌可指（最後一桌被接走＝原梯跑完 → 落 releasedAt，必要時自動結團；
+  // 否則原梯清空的桌會在之後被畫回團保、「梯次入座」按鈕復活）。只收 cleaning：用餐中的別梯桌上面已擋下。
+  const displaced = new Map()
+  tables.forEach(n => {
+    const t = tableService.getByNumber(n)
+    const ref = t?.currentRef
+    if (t?.status !== 'cleaning' || !ref?.groupId || !ref.batchId) return
+    if (ref.groupId === groupId && ref.batchId === batchId) return
+    displaced.set(`${ref.groupId}|${ref.batchId}`, ref)
+  })
   tables.forEach(n => tableService.seatTableForGroup(n, groupId, batchId))
   if (group.status !== 'arrived') groupService.setStatus(groupId, 'arrived')
+  displaced.forEach(ref => settleBatchIfDone(ref.groupId, ref.batchId))
   return { ok: true, tableNumbers: tables }
 }
 
@@ -1343,26 +1358,102 @@ export function reseatGroupBatchTable(groupId, batchId, fromTable, toTable) {
   return { ok: true, seated: false, blocked: seat.blocked || [], error: seat.error }
 }
 
+// 這張桌此刻是否由某團某梯佔用（dining／cleaning 都算：離席後 currentRef 保留給接下梯）
+function heldByGroupBatch(t, groupId, batchId) {
+  return !!t && t.currentRef?.groupId === groupId && t.currentRef?.batchId === batchId
+}
+
+// 梯次收斂（共用）：梯次的某張桌剛「離開」這一梯（逐桌清桌／被下一梯接走／換桌）後呼叫。
+// 該梯已沒有任何桌的 currentRef 指向它 → 落 releasedAt（此梯跑完的唯一事實來源）；
+// 全部「有圈桌」的梯都已釋出 → 自動結團（與整梯清桌釋出同一口徑）。
+// 掃全部桌而不是只看 batch.tableNumbers：換桌／加桌後兩者應一致，但以桌況為準最穩。
+// 回傳 { batchReleased, groupCompleted, prevGroupStatus }——逐桌清桌的復原要靠它倒回。
+function settleBatchIfDone(groupId, batchId) {
+  const none = { batchReleased: false, groupCompleted: false }
+  const group = groupService.getById(groupId)
+  const batch = (group?.batches || []).find(b => b.id === batchId)
+  if (!group || !batch || batch.releasedAt) return none
+  if (tableService.listAll().some(t => heldByGroupBatch(t, groupId, batchId))) return none
+  groupService.markBatchReleased(groupId, batchId)
+
+  // 自動結團：所有可執行（有圈桌）的梯都已釋出 → 團收斂為 completed。
+  // 空圈桌的梯本來就不可入座，不擋結團；finalizeGroup 順帶防禦性清掉任何殘留 currentRef。
+  const after = groupService.getById(groupId)
+  const executable = (after?.batches || []).filter(b => (b.tableNumbers || []).length)
+  if (executable.length && executable.every(b => b.releasedAt) && after.status !== 'completed') {
+    const prevGroupStatus = after.status
+    finalizeGroup(groupId)
+    return { batchReleased: true, groupCompleted: true, prevGroupStatus }
+  }
+  return { batchReleased: true, groupCompleted: false }
+}
+
 // 團體梯次離席：把該梯次的桌 dining→cleaning（仍佔位、保留 currentRef 供接第二梯）。
+// 回傳復原快照 snapshot = { groupId, batchId, tables:[{ tableNumber, seatedAt }] }：
+// checkoutTable 會把 seatedAt 清掉，事後查不回原入座時間 → 只能在動手前先存（給 undoGroupCheckout）。
 export function checkoutGroupBatch(groupId, batchId) {
   const group = groupService.getById(groupId)
   if (!group) return { ok: false, error: '團單不存在' }
   const batch = (group.batches || []).find(b => b.id === batchId)
   if (!batch) return { ok: false, error: '梯次不存在' }
+  const snap = []
   ;(batch.tableNumbers || []).forEach(n => {
     const t = tableService.getByNumber(n)
-    if (t && t.status === 'dining' && t.currentRef?.groupId === groupId && t.currentRef?.batchId === batchId) {
+    if (t && t.status === 'dining' && heldByGroupBatch(t, groupId, batchId)) {
+      snap.push({ tableNumber: n, seatedAt: t.seatedAt || null })
       tableService.checkoutTable(n)
     }
   })
-  return { ok: true }
+  return { ok: true, tableNumbers: snap.map(x => x.tableNumber), snapshot: { groupId, batchId, tables: snap } }
+}
+
+// 團體「這桌離席」（S1）：只把這一張團體用餐中桌 dining→cleaning，同梯其他桌照常用餐。
+// 情境：團體一次佔很多桌，有一桌先吃完——過去只能整梯離席或整團完成，尖峰很尷尬。
+// currentRef 保留（同整梯離席）：之後可「清桌完成＋接下一梯」或逐桌清桌。
+// 只寫 tables（權限同整梯離席：table.update）。回傳與 checkoutGroupBatch 同形的復原快照。
+export function checkoutGroupTable(tableNumber) {
+  const t = tableService.getByNumber(tableNumber)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  if (t.status !== 'dining' || t.currentRef?.type !== 'group' || !t.currentRef.groupId) {
+    return { ok: false, error: `${tableNumber} 不是用餐中的團體桌` }
+  }
+  const { groupId, batchId } = t.currentRef
+  tableService.checkoutTable(tableNumber)
+  return { ok: true, tableNumber, snapshot: { groupId, batchId, tables: [{ tableNumber, seatedAt: t.seatedAt || null }] } }
+}
+
+// 離席的復原（S1 單桌／S5 整梯共用）：把快照裡的桌倒回 dining＋原入座時間。
+// ★ 復原鐵律：每張桌只在「仍是待清桌、且 currentRef 仍指向同團同梯」時才倒回——
+//   復原按鈕可能幾秒後才按，期間桌可能已被清掉、已接下一梯、甚至已帶散客；
+//   這些桌一律進 failed 安全失敗，不可用 setStatus 硬蓋（會把剛入座那組從桌況圖抹掉）。
+// 回傳 { ok, restored:[桌號], failed:[桌號], error? }；一張都沒倒回 → ok:false。
+export function undoGroupCheckout({ groupId, batchId, tables = [] } = {}) {
+  const restored = []
+  const failed = []
+  ;(tables || []).forEach(({ tableNumber, seatedAt }) => {
+    const t = tableService.getByNumber(tableNumber)
+    if (t && t.status === 'cleaning' && heldByGroupBatch(t, groupId, batchId)) {
+      tableService.setStatus(tableNumber, 'dining', {
+        currentBookingId: null,
+        currentRef: { type: 'group', groupId, batchId },
+        seatedAt: seatedAt || new Date().toISOString(),
+      })
+      restored.push(tableNumber)
+    } else {
+      failed.push(tableNumber)
+    }
+  })
+  if (!restored.length) {
+    return { ok: false, restored, failed, error: failed.length ? `${failed.join('、')} 已清桌或被使用，未復原` : '沒有可復原的桌' }
+  }
+  return { ok: true, restored, failed }
 }
 
 // 整梯清桌釋出：把該梯次目前「待清（cleaning）」的桌一次清成空桌（vacant）、釋放座位。
 // 與 finalizeGroup 不同：只釋放這一梯的桌、不結束整團；與 seatNextBatchOnTable 不同：不接下一梯。
 // 只動「currentRef 仍指向本梯且為 cleaning」的桌——已被下一梯接走（currentRef 改指）或仍在用餐的桌都不碰。
-// 釋出同時在 batch 落 releasedAt 持久標記（桌位痕跡清空後「此梯已消化」的唯一證據）；
-// 全部「有圈桌」的梯都釋出後自動結團——單梯團跑完整輪即收斂，多梯團維持逐梯釋出不提早結束。
+// 清完後走 settleBatchIfDone：本梯已沒有任何桌指向它才落 releasedAt（逐桌離席後可能還有桌在用餐，
+// 那時不可提早標「此梯完成」）；全部「有圈桌」的梯都釋出後自動結團。
 export function releaseGroupBatch(groupId, batchId) {
   const group = groupService.getById(groupId)
   if (!group) return { ok: false, error: '團單不存在' }
@@ -1371,26 +1462,73 @@ export function releaseGroupBatch(groupId, batchId) {
   const cleared = []
   ;(batch.tableNumbers || []).forEach(n => {
     const t = tableService.getByNumber(n)
-    if (t && t.status === 'cleaning' && t.currentRef?.groupId === groupId && t.currentRef?.batchId === batchId) {
+    if (t && t.status === 'cleaning' && heldByGroupBatch(t, groupId, batchId)) {
       tableService.clearTable(n)
       cleared.push(n)
     }
   })
   if (!cleared.length) return { ok: false, error: '此梯沒有待清桌可釋出' }
-  groupService.markBatchReleased(groupId, batchId)
+  const settled = settleBatchIfDone(groupId, batchId)
+  if (settled.groupCompleted) return { ok: true, cleared, batchReleased: true, groupCompleted: true }
+  return { ok: true, cleared, batchReleased: settled.batchReleased }
+}
 
-  // 自動結團：所有可執行（有圈桌）的梯都已釋出 → 團收斂為 completed。
-  // 空圈桌的梯本來就不可入座，不擋結團；finalizeGroup 順帶防禦性清掉任何殘留 currentRef。
-  const after = groupService.getById(groupId)
-  const executable = (after?.batches || []).filter(b => (b.tableNumbers || []).length)
-  if (executable.length && executable.every(b => b.releasedAt) && after.status !== 'completed') {
-    finalizeGroup(groupId)
-    return { ok: true, cleared, groupCompleted: true }
+// 團體待清桌「只清此桌」（S3）：清成空桌，並做梯次收斂——清的是本梯最後一張桌 → 落 releasedAt；
+// 所有有圈桌的梯都已釋出 → 自動結團（同 releaseGroupBatch 口徑，共用 settleBatchIfDone）。
+// 回傳復原快照 snapshot = { tableNumber, ref, batchReleased, groupCompleted, prevGroupStatus }：
+// clearTable 會清掉 currentRef，事後查不回是哪團哪梯 → 只能在動手前先存（給 undoClearGroupTable）。
+export function clearGroupTable(tableNumber) {
+  const t = tableService.getByNumber(tableNumber)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  if (t.status !== 'cleaning' || t.currentRef?.type !== 'group' || !t.currentRef.groupId) {
+    return { ok: false, error: `${tableNumber} 不是待清的團體桌` }
   }
-  return { ok: true, cleared }
+  const ref = { ...t.currentRef }
+  tableService.clearTable(tableNumber)
+  const settled = settleBatchIfDone(ref.groupId, ref.batchId)
+  return {
+    ok: true,
+    tableNumber,
+    batchReleased: settled.batchReleased,
+    groupCompleted: settled.groupCompleted,
+    snapshot: { tableNumber, ref, ...settled },
+  }
+}
+
+// 逐桌清桌的復原（S4）：桌倒回待清＋原 currentRef；若那次清桌落了 releasedAt／自動結團，一併倒回。
+// ★ 復原鐵律：桌必須「仍是空桌」才倒回（清桌後幾秒內下一組很可能已坐下），被佔走的安全失敗、不動團單。
+// ★ 團單也要「沒被別人動過」才倒：自動結團的復原要求團仍是 completed（之後被取消就不復活）；
+//   沒結團的情況團必須仍在進行中（未完成／未取消）——否則倒回一張指向已結束團的待清桌會變成孤兒。
+export function undoClearGroupTable({ tableNumber, ref, batchReleased = false, groupCompleted = false, prevGroupStatus } = {}) {
+  const t = tableService.getByNumber(tableNumber)
+  if (!t) return { ok: false, error: '桌位不存在' }
+  if (t.status !== 'vacant') {
+    return { ok: false, error: `${tableNumber} 已被下一組使用（${statusZh(t.status)}），未復原` }
+  }
+  const group = ref?.groupId ? groupService.getById(ref.groupId) : null
+  if (!group) return { ok: false, error: '團單不存在，未復原' }
+  if (groupCompleted ? group.status !== 'completed' : ['completed', 'cancelled'].includes(group.status)) {
+    return { ok: false, error: '團單狀態已變更，未復原' }
+  }
+  // 這次清桌沒落 releasedAt，但之後別桌清完已讓本梯收斂（releasedAt 由別次操作落下）→ 不倒回：
+  // 否則待清桌會指向一個「已跑完」的梯（面板顯示此梯完成、桌卻還掛著它）。
+  const batchNow = (group.batches || []).find(b => b.id === ref.batchId)
+  if (!batchNow) return { ok: false, error: '梯次不存在，未復原' }
+  if (!batchReleased && batchNow.releasedAt) {
+    return { ok: false, error: `${batchNow.label || '此梯'}已全部清完，${tableNumber} 未復原` }
+  }
+  if (groupCompleted) groupService.setStatus(group.id, prevGroupStatus && !['completed', 'cancelled'].includes(prevGroupStatus) ? prevGroupStatus : 'arrived')
+  if (batchReleased) groupService.clearBatchReleased(group.id, ref.batchId)
+  tableService.setStatus(tableNumber, 'cleaning', {
+    currentBookingId: null,
+    currentRef: { ...ref },
+    seatedAt: null,   // 待清桌本來就沒有入座時間（checkoutTable 同口徑）
+  })
+  return { ok: true, tableNumber, groupRestored: groupCompleted, batchRestored: batchReleased }
 }
 
 // 單桌「清桌完成 → 接第二梯入座」：先清空此桌，再把指定梯次坐進來（複合一鍵）。
+// 清掉的若是前梯在本團的最後一張桌（currentRef 由前梯改指本梯）→ 前梯收斂、落 releasedAt（S3）。
 export function seatNextBatchOnTable(tableNumber, groupId, batchId) {
   const t = tableService.getByNumber(tableNumber)
   if (!t) return { ok: false, error: '桌位不存在' }
@@ -1402,11 +1540,100 @@ export function seatNextBatchOnTable(tableNumber, groupId, batchId) {
   }
   const nextBatch = (group0.batches || []).find(b => b.id === batchId)
   if (nextBatch?.releasedAt) return { ok: false, error: '此梯已清桌釋出完成，無法再入座' }
+  // 原梯（同團前梯或別團）在這桌被接走 → 入座後做收斂（同 seatGroupBatch 口徑）
+  const prevRef = t.currentRef?.groupId && t.currentRef.batchId
+    && !(t.currentRef.groupId === groupId && t.currentRef.batchId === batchId) ? { ...t.currentRef } : null
   tableService.clearTable(tableNumber)
   tableService.seatTableForGroup(tableNumber, groupId, batchId)
   const group = groupService.getById(groupId)
   if (group && group.status !== 'arrived') groupService.setStatus(groupId, 'arrived')
-  return { ok: true }
+  const prevBatchReleased = prevRef ? settleBatchIfDone(prevRef.groupId, prevRef.batchId).batchReleased : false
+  return { ok: true, prevBatchReleased }
+}
+
+// 團體換桌／加桌的目標桌守門（S6/S7 共用，至少與 reseatGroupBatchTable 同等）：
+// 目標桌須存在、今日可用（非停用/維修）、此刻空桌、不在本梯圈桌內、未被其他今日團體（未釋出的梯）圈住，
+// 且現在入座的佔用區間內沒有他筆散客預配（預配不鎖桌況，桌雖空、客人等下就到——團體坐下去他就沒桌）。
+// 本團其他未跑完的梯圈的桌也擋（見下方註解，比 reseatCandidateTables 嚴）。回傳錯誤訊息；null＝通過。
+function groupTargetError(group, batch, toTable) {
+  const num = String(toTable)
+  const target = tableService.getByNumber(num)
+  if (!target) return '桌位不存在'
+  if (!tableUsableToday(target)) return outOfServiceError(num)
+  if (target.status !== 'vacant') return `${num} 目前為${statusZh(target.status)}，請改選空桌`
+  if ((batch.tableNumbers || []).map(String).includes(num)) return `${num} 已在此梯圈桌內`
+  const heldByOther = groupService.listActiveByDate(group.date).some(g =>
+    g.id !== group.id && (g.batches || []).some(b => !b.releasedAt && (b.tableNumbers || []).map(String).includes(num)))
+  if (heldByOther) return `${num} 已被其他團體保留`
+  // 本團其他還沒跑完的梯圈的桌也不給：搬進去後那一梯入座會撞到自己團的客人、被迫改派，
+  // 圈桌口徑也會亂掉。要調度請走梯次入座的「改派桌位」。
+  const sibling = (group.batches || []).find(b => b.id !== batch.id && !b.releasedAt && (b.tableNumbers || []).map(String).includes(num))
+  if (sibling) return `${num} 已圈給本團${sibling.label ? ` ${sibling.label}` : '其他梯次'}，請改選其他桌`
+  const settings = getSettings()
+  const conflict = preassignConflicts(bookingService.listAll(), num,
+    { date: todayStr(), window: assignmentWindow({ mode: 'now' }, settings) }, settings).find(c => c.overlaps)
+  if (conflict) return `${num} 已預配給 ${conflict.booking.name || '訂位客人'}（${conflict.booking.timeSlot || ''}），請改選其他桌`
+  return null
+}
+
+// 團體用餐中的桌找出所屬團與梯（S6/S7 共用前置）：回傳 { group, batch } 或 { error }
+function seatedGroupBatchOf(groupId, batchId) {
+  const group = groupService.getById(groupId)
+  if (!group) return { error: '團單不存在' }
+  if (['completed', 'cancelled'].includes(group.status)) return { error: '此團已結束，無法調整桌位' }
+  const batch = (group.batches || []).find(b => b.id === batchId)
+  if (!batch) return { error: '梯次不存在' }
+  if (batch.releasedAt) return { error: '此梯已清桌釋出完成，無法調整桌位' }
+  return { group, batch }
+}
+
+// 團體已入座換桌（S6）：from（本團用餐中）→ to（空桌）。to 設 dining＋同 currentRef＋保留原入座時間，
+// from 清成空桌，梯次圈桌 swapBatchTable 換掉（圈桌與桌況保持一致，後續整梯離席／釋出才找得到）。
+// 寫 tables＋groupReservations（權限＝group.update＋table.update）。
+// expected（{ groupId, batchId }，選填）：進選桌模式當下的團／梯。確認前桌況可能已變（被別台換走、離席後接下一梯），
+// 給了就比對 from 桌當下的 currentRef，不符即安全失敗——不可把別梯的客人搬走。
+export function moveGroupTable(fromTable, toTable, expected = {}) {
+  const from = tableService.getByNumber(fromTable)
+  if (!from) return { ok: false, error: '桌位不存在' }
+  if (from.status !== 'dining' || from.currentRef?.type !== 'group' || !from.currentRef.groupId) {
+    return { ok: false, error: `${fromTable} 不是用餐中的團體桌` }
+  }
+  if ((expected.groupId && from.currentRef.groupId !== expected.groupId)
+    || (expected.batchId && from.currentRef.batchId !== expected.batchId)) {
+    return { ok: false, error: `${fromTable} 桌況已變更（已不是原本那一梯），請重新操作` }
+  }
+  if (String(fromTable) === String(toTable)) return { ok: false, error: '請點要換過去的桌' }
+  const { groupId, batchId } = from.currentRef
+  const r = seatedGroupBatchOf(groupId, batchId)
+  if (r.error) return { ok: false, error: r.error }
+  const err = groupTargetError(r.group, r.batch, toTable)
+  if (err) return { ok: false, error: err }
+  tableService.setStatus(String(toTable), 'dining', {
+    currentBookingId: null,
+    currentRef: { type: 'group', groupId, batchId },
+    seatedAt: from.seatedAt || new Date().toISOString(),   // 換桌不重算用餐時間（自動清檯看它）
+  })
+  tableService.clearTable(fromTable)
+  if ((r.batch.tableNumbers || []).map(String).includes(String(fromTable))) {
+    groupService.swapBatchTable(groupId, batchId, fromTable, toTable)
+  } else {
+    groupService.addBatchTable(groupId, batchId, toTable)   // 圈桌與桌況不一致的舊資料：至少把新桌補進圈桌
+  }
+  return { ok: true, from: String(fromTable), to: String(toTable) }
+}
+
+// 團體臨時加桌（S7）：已入座的梯次（至少一張桌用餐中）追加一張空桌，立即 dining（入座時間＝現在）指向該梯。
+// 梯次圈桌同步追加（之後整梯離席／釋出／收斂都會算到它）。寫 tables＋groupReservations。
+export function addGroupBatchTable(groupId, batchId, tableNumber) {
+  const r = seatedGroupBatchOf(groupId, batchId)
+  if (r.error) return { ok: false, error: r.error }
+  const seated = tableService.listAll().some(t => t.status === 'dining' && heldByGroupBatch(t, groupId, batchId))
+  if (!seated) return { ok: false, error: '此梯尚未入座，請先梯次入座' }
+  const err = groupTargetError(r.group, r.batch, tableNumber)
+  if (err) return { ok: false, error: err }
+  groupService.addBatchTable(groupId, batchId, tableNumber)
+  tableService.seatTableForGroup(String(tableNumber), groupId, batchId)
+  return { ok: true, tableNumber: String(tableNumber) }
 }
 
 // 團體整團完成：清空所有 currentRef 指向此團的桌、團 status→completed。

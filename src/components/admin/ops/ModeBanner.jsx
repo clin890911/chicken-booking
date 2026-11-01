@@ -14,9 +14,12 @@ const BANNER_STYLE = {
   'seat-waitlist':{ bg: 'bg-emerald-800',btn: 'text-emerald-700', icon: 'traffic' },
   move:           { bg: 'bg-indigo-700', btn: 'text-indigo-700',  icon: 'move' },
   'group-reseat': { bg: 'bg-violet-700', btn: 'text-violet-700',  icon: 'bus' },
+  // 團體已入座換桌／臨時加桌（從團體桌抽屜進來）：同團體語義的紫
+  'group-move':   { bg: 'bg-violet-700', btn: 'text-violet-700',  icon: 'move' },
+  'group-add':    { bg: 'bg-violet-700', btn: 'text-violet-700',  icon: 'bus' },
 }
 
-const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat']
+const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat', 'group-move', 'group-add']
 
 // pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
 //   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
@@ -106,6 +109,8 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
       const remain = (mode.queue || []).length
       return `改派桌位：${mode.group?.agencyName || '團體'} ${mode.batch?.label || ''} — ${mode.current} 被佔，請點選替代桌${remain > 1 ? `（還有 ${remain - 1} 桌待處理）` : ''}`
     }
+    if (mode.type === 'group-move') return `團體換桌：${mode.group?.agencyName || '團體'} ${mode.batch?.label || ''} 從 ${mode.from} → 選新桌`
+    if (mode.type === 'group-add') return `團體加桌：${mode.group?.agencyName || '團體'} ${mode.batch?.label || ''} → 選要加的空桌`
     return null
   })()
 
@@ -113,7 +118,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
   const pendingTargetName = mode.type === 'assign' ? mode.booking?.name
     : mode.type === 'seat-waitlist' ? mode.wait?.name
     : mode.type === 'move' ? mode.booking?.name
-    : mode.type === 'group-reseat' ? (mode.group?.agencyName || '團體')
+    : ['group-reseat', 'group-move', 'group-add'].includes(mode.type) ? (mode.group?.agencyName || '團體')
     : ''
 
   // 單桌指派的寫入語意（mode.lockKind，見 capacity.lockKindFor）：'preassign'＝只預配、桌況不鎖。
@@ -125,6 +130,10 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
 
   const confirmText = mode.type === 'group-reseat'
     ? `把 ${mode.current} 改派為 ${pendingConfirm} 並整梯入座？（將更新該梯圈桌）`
+    : mode.type === 'group-move'
+      ? `確認把 ${pendingTargetName} ${mode.batch?.label || ''} 從 ${mode.from} 換到 ${pendingConfirm}？（用餐時間照舊，${mode.from} 清為空桌）`
+    : mode.type === 'group-add'
+      ? `確認幫 ${pendingTargetName} ${mode.batch?.label || ''} 加桌 ${pendingConfirm}？（立即入座、併入此梯）`
     : mode.type === 'move'
       ? `確認把 ${pendingTargetName} 從 ${formatBookingTables(mode.booking)} 改到桌 ${pendingConfirm}？`
       : mode.type === 'assign'
@@ -209,7 +218,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
                   (hasConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : 'bg-white text-emerald-700'}`}
               ><GlyphText>{(willRelease || pendingGroupHold) ? (assignPreassign ? '仍要覆蓋預配' : '仍要覆蓋指派')
                 : hasConflict ? (assignPreassign ? '仍要預配（他筆預配保留）' : '仍要指派（預配保留）')
-                : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'move' ? '✓ 確認改桌'
+                : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'group-move' ? '✓ 確認換桌' : mode.type === 'group-add' ? '✓ 確認加桌' : mode.type === 'move' ? '✓ 確認改桌'
                 : assignPreassign ? '✓ 確認預配' : '✓ 確認指派'}</GlyphText></button>
             </div>
           </div>

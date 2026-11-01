@@ -42,17 +42,32 @@ export function batchSeated(group, batch, tableByNumber) {
   })
 }
 
+// 某梯次是否「進行中」：任一桌（dining 或 cleaning）的 currentRef 指向此梯次。
+// 與 batchSeated 不同：逐桌離席／逐桌清桌後，梯次可能只剩部分桌在用餐或待清——
+// 只要還有一張桌指向它，這一梯就還沒跑完，它圈的「已清空」桌不可再被畫回團保（S2）。
+// 掃全部桌而非只看 batch.tableNumbers：換桌／加桌後兩者應一致，但以桌況為準最穩。
+export function batchInProgress(group, batch, tableByNumber) {
+  if (!group || !batch) return false
+  return Object.values(tableByNumber || {}).some(t =>
+    !!t && ['dining', 'cleaning'].includes(t.status)
+    && t.currentRef?.groupId === group.id && t.currentRef?.batchId === batch.id)
+}
+
 // 清桌中的團體桌「接下一梯」：同團依時段排序，從 afterBatchId 的下一個梯次開始，
 // 找第一個「圈了此桌、且尚未入座」的梯次。afterBatchId 通常取 table.currentRef.batchId
 // （離席後 currentRef 保留，正是剛用完的那一梯）；找不到該梯時退回從頭掃。
+// ★ 下一梯「已在別桌入座」不跳過：逐桌離席後常見「第二梯已接上 102、101 第一梯才剛吃完」，
+//   101 清完當然要能接第二梯（101 本來就在第二梯圈桌內）。只有「這張桌已經坐著這一梯」才跳過。
 export function nextBatchForTable(group, tableNumber, tableByNumber, afterBatchId) {
   if (!group || ['cancelled', 'completed'].includes(group.status)) return null
   const batches = sortedBatches(group)
   const fromIdx = afterBatchId ? batches.findIndex(b => b.id === afterBatchId) + 1 : 0
+  const t = tableByNumber?.[tableNumber]
   for (let i = Math.max(0, fromIdx); i < batches.length; i++) {
     const b = batches[i]
     if (b.releasedAt) continue // 已清桌釋出的梯不可再接（消化過的梯不得重跑）
-    if ((b.tableNumbers || []).includes(tableNumber) && !batchSeated(group, b, tableByNumber)) return b
+    const alreadyHere = !!t && t.status === 'dining' && t.currentRef?.groupId === group.id && t.currentRef?.batchId === b.id
+    if ((b.tableNumbers || []).includes(tableNumber) && !alreadyHere) return b
   }
   return null
 }
@@ -77,7 +92,7 @@ export function reseatCandidateTables({ tables, holds, group, batch, fromTable }
 
 // 今日團體 hold 對應：桌號 → { agencyName, holds: [{ group, batch }, ...] }
 // 涵蓋「有效團體（非取消/完成）圈到、且目前非用餐中」的桌——與地圖 🚌 標記同口徑；
-// holds 只列尚未入座的梯次（依時段先後），給桌位抽屜顯示與「梯次入座」按鈕用。
+// holds 只列尚未開始的梯次（沒有任何桌指向它，見 batchInProgress；依時段先後），給桌位抽屜顯示與「梯次入座」按鈕用。
 export function buildGroupHolds(groups, tables) {
   const tableByNumber = {}
   ;(tables || []).forEach(t => { tableByNumber[t.number] = t })
@@ -93,7 +108,9 @@ export function buildGroupHolds(groups, tables) {
           const t = tableByNumber[n]
           if (!t || t.status === 'dining') return
           if (!map[n]) map[n] = { agencyName: g.agencyName, holds: [] }
-          if (!batchSeated(g, b, tableByNumber)) map[n].holds.push({ group: g, batch: b })
+          // 進行中（任一桌 dining/cleaning 指向此梯）就不算團保：逐桌清桌後清空的那張桌
+          // 不可被畫回「團保」（S2）。下一梯若也圈這張桌，下一梯自己尚未開始 → 照常 hold。
+          if (!batchInProgress(g, b, tableByNumber)) map[n].holds.push({ group: g, batch: b })
         })
       })
     })

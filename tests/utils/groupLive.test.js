@@ -4,6 +4,7 @@ import {
   todayActiveGroups,
   todayGroupsByState,
   batchSeated,
+  batchInProgress,
   nextBatchForTable,
   buildGroupHolds,
   reseatCandidateTables,
@@ -142,7 +143,9 @@ describe('nextBatchForTable', () => {
     }
     expect(nextBatchForTable(g, '101', byNumber([mkTable('101', 'cleaning')]), 'B1')).toBe(null)
   })
-  it('下一梯已入座（他桌 dining 指向）→ 跳過為 null', () => {
+  // 2026-11 逐桌離席：第二梯已在 102 接上、101 第一梯才吃完 → 101 清完必須能接第二梯
+  //（舊行為「下一梯已在別桌入座就跳過」會讓 101 只剩「清桌完成」，第二梯在 101 永遠接不上）。
+  it('下一梯已在別桌入座（逐桌接梯）→ 這桌仍可接該梯', () => {
     const g = {
       ...GROUP,
       batches: [
@@ -154,6 +157,18 @@ describe('nextBatchForTable', () => {
       mkTable('101', 'cleaning', { type: 'group', groupId: 'G1', batchId: 'B1' }),
       mkTable('102', 'dining', { type: 'group', groupId: 'G1', batchId: 'B2' }),
     ])
+    expect(nextBatchForTable(g, '101', tables, 'B1')?.id).toBe('B2')
+  })
+  it('這張桌本身已坐著該梯 → 跳過', () => {
+    const g = {
+      ...GROUP,
+      batches: [
+        { id: 'B1', timeSlot: '11:30', tableNumbers: ['101'] },
+        { id: 'B2', timeSlot: '13:00', tableNumbers: ['101'] },
+      ],
+    }
+    const tables = byNumber([mkTable('101', 'dining', { type: 'group', groupId: 'G1', batchId: 'B2' })])
+    expect(nextBatchForTable(g, '101', tables)?.id).toBe('B1')
     expect(nextBatchForTable(g, '101', tables, 'B1')).toBe(null)
   })
   it('已完成/取消的團 → null', () => {
@@ -219,5 +234,44 @@ describe('releasedAt（整梯清桌釋出標記，2026-06-12 bug 防回歸）', 
     const tables = byNumber([mkTable('101', 'cleaning')])
     // 從頭掃也只會找到未消化的 B2，不會回到已釋出的 B1
     expect(nextBatchForTable(g, '101', tables)?.id).toBe('B2')
+  })
+})
+
+// S2：逐桌離席／逐桌清桌後，梯次只剩部分桌——只要還有一張桌指向它，它圈的已清空桌不可畫回團保
+describe('batchInProgress／buildGroupHolds（逐桌清桌不回團保）', () => {
+  const g = {
+    ...GROUP,
+    status: 'arrived',
+    batches: [
+      { id: 'B1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101', '102', '103'], guests: 15 },
+      { id: 'B2', label: '第二梯', timeSlot: '13:00', tableNumbers: ['103'], guests: 5 },
+    ],
+  }
+  const b1 = g.batches[0]
+  const ref = (batchId) => ({ type: 'group', groupId: 'G1', batchId })
+
+  it('batchInProgress：dining 或 cleaning 指向此梯都算進行中；全空才不算', () => {
+    expect(batchInProgress(g, b1, byNumber([mkTable('101', 'dining', ref('B1'))]))).toBe(true)
+    expect(batchInProgress(g, b1, byNumber([mkTable('101', 'cleaning', ref('B1'))]))).toBe(true)
+    expect(batchInProgress(g, b1, byNumber([mkTable('101', 'dining', ref('B2'))]))).toBe(false)
+    expect(batchInProgress(g, b1, byNumber([mkTable('101'), mkTable('102')]))).toBe(false)
+  })
+
+  it('第一梯 101 還在吃、102 已清空 → 102 不回團保', () => {
+    const holds = buildGroupHolds([g], [mkTable('101', 'dining', ref('B1')), mkTable('102'), mkTable('103', 'cleaning', ref('B1'))])
+    // 地圖「團保」只看 holds 非空（FloorMap holdLabel / 抽屜 activeHold 同口徑）
+    expect(holds['102']?.holds || []).toEqual([])
+  })
+
+  it('只剩待清桌（cleaning）也算進行中 → 已清空的桌不回團保', () => {
+    const holds = buildGroupHolds([g], [mkTable('101', 'cleaning', ref('B1')), mkTable('102'), mkTable('103')])
+    expect(holds['102']?.holds || []).toEqual([])
+    // 反向：103 第二梯也圈了，第二梯尚未開始 → 103 照常是第二梯的團保
+    expect(holds['103'].holds.map(h => h.batch.id)).toEqual(['B2'])
+  })
+
+  it('反向：下一梯圈同一張桌、尚未開始 → 該桌清空後顯示下一梯團保', () => {
+    const holds = buildGroupHolds([g], [mkTable('101', 'dining', ref('B1')), mkTable('102', 'dining', ref('B1')), mkTable('103')])
+    expect(holds['103'].holds.map(h => h.batch.id)).toEqual(['B2'])
   })
 })

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 
 // 今日團體現場帶位主線（已併入「現場」頁右側欄）：
 // 種一筆今日團體（兩梯次共用 101）→ 現場「今日團體」籤 梯次入座（confirm）
-// → 點地圖團體桌 → 此梯離席 → 清桌完成＋接下一梯入座。
+// → 點地圖團體桌 → 整梯離席 → 清桌完成＋接下一梯入座。
 // 後台本機模式以 localStorage 為後端；攔截 admin* 雲端端點。
 
 test.beforeEach(async ({ page }) => {
@@ -38,7 +38,7 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test('管理端：今日團體 梯次入座 → 此梯離席 → 清桌＋接下一梯', async ({ page }) => {
+test('管理端：今日團體 梯次入座 → 整梯離席 → 清桌＋接下一梯', async ({ page }) => {
   // 登入
   await page.goto('/login')
   await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
@@ -56,10 +56,10 @@ test('管理端：今日團體 梯次入座 → 此梯離席 → 清桌＋接下
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
   await expect(page.getByText(/第一梯 已入座/)).toBeVisible()
 
-  // 點地圖上的團體桌 101 → 抽屜顯示團體資訊與「此梯離席」
+  // 點地圖上的團體桌 101 → 抽屜顯示團體資訊與「整梯離席（N 桌）」（2026-11 原「此梯離席（整梯）」改名，單桌另有「這桌離席」）
   await page.locator('svg g:has(:text-is("101"))').first().click()
   await expect(page.getByText('快樂旅行社', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: /此梯離席/ }).click()
+  await page.getByRole('button', { name: '整梯離席（2 桌）', exact: true }).click()
   await page.getByRole('button', { name: '確認離席', exact: true }).click()
   await expect(page.getByText(/已離席，桌位待清/)).toBeVisible()
 
@@ -70,7 +70,7 @@ test('管理端：今日團體 梯次入座 → 此梯離席 → 清桌＋接下
 
   // 抽屜轉為第二梯用餐中
   await expect(page.getByText(/第二梯 13:00/)).toBeVisible()
-  await expect(page.getByRole('button', { name: /此梯離席/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /整梯離席/ })).toBeVisible()
 })
 
 // 2026-06-12 防回歸：整輪流程（入座→離席→整梯清桌釋出）後梯次必須收斂——

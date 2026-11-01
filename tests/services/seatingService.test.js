@@ -1737,7 +1737,7 @@ describe('executeSweepActions（自動清檯執行層：前置重驗、冪等）
     const t = tableService.getByNumber('102')
     expect(t.status).toBe('cleaning')
     expect(t.currentRef).toEqual({ type: 'group', groupId: g.id, batchId: b1.id }) // 保留 → 接梯靠它
-    // 等同人工「此梯離席」：清桌完成＋接第二梯流程不受影響
+    // 等同人工「這桌離席」：清桌完成＋接第二梯流程不受影響
     const r = seating.seatNextBatchOnTable('102', g.id, b2.id)
     expect(r.ok).toBe(true)
     expect(tableService.getByNumber('102').currentRef.batchId).toBe(b2.id)

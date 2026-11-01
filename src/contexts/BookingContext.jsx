@@ -270,7 +270,7 @@ export function BookingProvider({ children }) {
   // 防重複：跨分頁 45 秒節流戳記 + 換日掃除每裝置每日 marker + action 前置條件重驗。
   const sweepActionMsg = (a) => {
     if (a.type === 'finalize-booking') return `${a.tableNumber} 用餐 ${a.minutes} 分未清桌，已自動釋出`
-    if (a.type === 'checkout-group-table') return `團體桌 ${a.tableNumber} 用餐 ${a.minutes} 分，已自動「此梯離席」待清`
+    if (a.type === 'checkout-group-table') return `團體桌 ${a.tableNumber} 用餐 ${a.minutes} 分，已自動離席待清`
     if (a.type === 'clear-table') return `${a.tableNumber} ${a.reason === 'stale-day' ? '昨日殘留桌況' : '孤兒用餐狀態'}，已自動清為空桌`
     if (a.type === 'complete-booking') return `昨日訂位 ${a.bookingId} 已自動標記完成`
     if (a.type === 'complete-group') return `昨日已到店團體已自動整團結案`
@@ -883,6 +883,13 @@ export function BookingProvider({ children }) {
   const checkoutGroupBatch = (groupId, batchId) => { const r = seatingService.checkoutGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const releaseGroupBatch = (groupId, batchId) => { const r = seatingService.releaseGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const seatNextBatchOnTable = (tableNumber, groupId, batchId) => { const r = seatingService.seatNextBatchOnTable(tableNumber, groupId, batchId); refresh(); syncCloudSoon(); return r }
+  // 團體單桌操作（2026-11 尖峰：團體一桌先吃完不必整梯處理）：這桌離席／逐桌清桌（含收斂）／換桌／加桌，以及兩種復原
+  const checkoutGroupTable = (tableNumber) => { const r = seatingService.checkoutGroupTable(tableNumber); refresh(); syncCloudSoon(); return r }
+  const undoGroupCheckout = (snapshot) => { const r = seatingService.undoGroupCheckout(snapshot); refresh(); syncCloudSoon(); return r }
+  const clearGroupTable = (tableNumber) => { const r = seatingService.clearGroupTable(tableNumber); refresh(); syncCloudSoon(); return r }
+  const undoClearGroupTable = (snapshot) => { const r = seatingService.undoClearGroupTable(snapshot); refresh(); syncCloudSoon(); return r }
+  const moveGroupTable = (fromTable, toTable, expected) => { const r = seatingService.moveGroupTable(fromTable, toTable, expected); refresh(); syncCloudSoon(); return r }
+  const addGroupBatchTable = (groupId, batchId, tableNumber) => { const r = seatingService.addGroupBatchTable(groupId, batchId, tableNumber); refresh(); syncCloudSoon(); return r }
   const finalizeGroup = (groupId) => { const r = seatingService.finalizeGroup(groupId); refresh(); syncCloudSoon(); return r }
   const reseatGroupBatchTable = (groupId, batchId, fromTable, toTable) => { const r = seatingService.reseatGroupBatchTable(groupId, batchId, fromTable, toTable); refresh(); syncCloudSoon(); return r }
   const cancelGroup = (groupId) => { const r = seatingService.cancelGroup(groupId); refresh(); syncCloudSoon(); return r }
@@ -942,6 +949,7 @@ export function BookingProvider({ children }) {
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
     createAndReserveGroup, purgeBlankGroups,
     seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
+    checkoutGroupTable, undoGroupCheckout, clearGroupTable, undoClearGroupTable, moveGroupTable, addGroupBatchTable,
     updateSettings, flushCloudNow, discardRejectedChanges,
   }), [
     bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated, pendingWaitlistCommands, waitlistOwner,
