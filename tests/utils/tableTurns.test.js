@@ -105,3 +105,56 @@ describe('buildTableTurns — 整梯清桌釋出（releasedAt）', () => {
     expect(map['103'][0].status).toBe('done')
   })
 })
+
+// S3：逐桌清桌——梯次仍進行中（別桌還指向它）但這桌已清 → 這桌的 turn 顯示 done（不是 upcoming）
+describe('buildTableTurns — 團體逐桌清桌', () => {
+  const ref = (batchId) => ({ type: 'group', groupId: 'g2', batchId })
+  const mk = (number, status = 'vacant', currentRef = null) => ({ number, capacity: 6, floor: '1F', status, currentBookingId: null, currentRef, isActive: true, outage: null })
+  const group = {
+    id: 'g2', date: TODAY, status: 'arrived', agencyName: '快樂',
+    batches: [
+      { id: 'b1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['201', '202'], guests: 12 },
+      { id: 'b2', label: '第二梯', timeSlot: '13:00', tableNumbers: ['201', '202'], guests: 10 },
+    ],
+  }
+  const statusOf = (map, n, batchId) => map[n].find(t => t.batchId === batchId).status
+
+  it('第一梯 201 還在吃、202 已清 → 202 的第一梯 done、第二梯 upcoming', () => {
+    const map = buildTableTurns([mk('201', 'dining', ref('b1')), mk('202')], [], [group], TODAY)
+    expect(statusOf(map, '201', 'b1')).toBe('seated')
+    expect(statusOf(map, '202', 'b1')).toBe('done')
+    expect(statusOf(map, '202', 'b2')).toBe('upcoming')
+  })
+
+  it('第二梯已在 202 接上、201 第一梯還沒走 → 201 的第二梯仍 upcoming、202 的第一梯 done', () => {
+    const map = buildTableTurns([mk('201', 'dining', ref('b1')), mk('202', 'dining', ref('b2'))], [], [group], TODAY)
+    expect(statusOf(map, '201', 'b2')).toBe('upcoming')
+    expect(statusOf(map, '202', 'b1')).toBe('done')
+    expect(statusOf(map, '202', 'b2')).toBe('seated')
+  })
+
+  it('梯次尚未開始（沒有任何桌指向）→ 仍是 upcoming', () => {
+    const map = buildTableTurns([mk('201'), mk('202')], [], [group], TODAY)
+    expect(statusOf(map, '201', 'b1')).toBe('upcoming')
+    expect(statusOf(map, '202', 'b2')).toBe('upcoming')
+  })
+})
+
+// 已知限制（見 groupTurnStatus 註解）：沒有坐過歷史欄位，梯次進行中時「從沒坐過、已空出」的圈桌也顯示 done，
+// 與 buildGroupHolds 同口徑（不再替進行中的梯保留空出來的圈桌）。鎖住此口徑，改規則時要一起改團保。
+describe('buildTableTurns — 團體進行中梯次的已知限制', () => {
+  it('第二梯只在 302 接上、301 前梯走後選「只清桌」→ 301 的第二梯顯示 done', () => {
+    const ref = (batchId) => ({ type: 'group', groupId: 'g3', batchId })
+    const mk = (number, status = 'vacant', currentRef = null) => ({ number, capacity: 6, floor: '1F', status, currentBookingId: null, currentRef, isActive: true, outage: null })
+    const group = {
+      id: 'g3', date: TODAY, status: 'arrived', agencyName: '快樂',
+      batches: [
+        { id: 'b1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['301', '302'], guests: 12, releasedAt: '2026-06-11T05:00:00.000Z' },
+        { id: 'b2', label: '第二梯', timeSlot: '13:00', tableNumbers: ['301', '302'], guests: 10 },
+      ],
+    }
+    const map = buildTableTurns([mk('301'), mk('302', 'dining', ref('b2'))], [], [group], TODAY)
+    expect(map['301'].find(t => t.batchId === 'b2').status).toBe('done')
+    expect(map['302'].find(t => t.batchId === 'b2').status).toBe('seated')
+  })
+})

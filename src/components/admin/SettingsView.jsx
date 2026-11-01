@@ -768,7 +768,7 @@ export default function SettingsView({ onOpenCustomer }) {
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
               <div className="text-sm font-bold text-chicken-brown">超時自動釋桌</div>
-              <div className="text-xs text-chicken-brown/55 mt-0.5">用餐超過下方時數高概率是忘記按清桌：散客桌自動釋出、團體桌自動「此梯離席」待清。</div>
+              <div className="text-xs text-chicken-brown/55 mt-0.5">用餐超過下方時數高概率是忘記按清桌：散客桌自動釋出、團體桌自動「離席」待清。</div>
             </div>
             <input type="checkbox" className="w-5 h-5 accent-chicken-red"
               checked={form.autoReleaseEnabled !== false}

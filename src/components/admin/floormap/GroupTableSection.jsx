@@ -5,13 +5,20 @@ import { nextBatchForTable } from '../../../utils/groupLive'
 
 // TableDrawer 內的「團體桌」資訊與操作區，三種情境：
 // 1. vacant 但被今日團體 hold（groupHold）→ 顯示團資訊＋「梯次入座」；散客入座降為次按鈕＋confirm
-// 2. dining 且 currentRef 指向團（groupRef）→ 「此梯離席」「整團完成」
+// 2. dining 且 currentRef 指向團（groupRef）→ 單桌操作優先：「這桌離席」「換桌」「加桌」；
+//    整梯／整團次要：「整梯離席（N 桌）」「整團完成」。離席都有 8 秒「↩ 復原」。
+//    （2026-11 店主痛點：團體一次佔很多桌，一桌先吃完卻只能整梯或整團處理。）
 // 權限（perms 來自 utils/seatingPerms.seatingPerms）：每顆鈕依實際寫入的集合各自判定——
 //   梯次入座／整梯釋出／整團完成／接下一梯會寫 groupReservations（需 group.update）；
-//   梯次離席／只清桌只寫 tables；散客覆蓋入座走 walkInSeat 寫 bookings。
-// 3. cleaning 且 currentRef 指向團 → 有下一梯圈此桌時「清桌完成＋接下一梯」，否則「清桌完成」
-export default function GroupTableSection({ table, groupRef, groupBatch, groupHold, perms, onWalkInOverride, onReseatBatch, onClose }) {
-  const { tables, seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, seatNextBatchOnTable, clearTable } = useBooking()
+//   換桌／加桌改梯次圈桌、單桌清桌可能落 releasedAt／結團（group.update）；這桌離席／整梯離席只寫 tables；
+//   散客覆蓋入座走 walkInSeat 寫 bookings。
+// 3. cleaning 且 currentRef 指向團 → 有下一梯圈此桌時「清桌完成＋接下一梯」，否則「清桌完成」；
+//    單桌清桌走 clearGroupTable（清完本梯最後一桌自動落 releasedAt／結團），有「↩ 復原」。
+export default function GroupTableSection({ table, groupRef, groupBatch, groupHold, perms, onWalkInOverride, onReseatBatch, onGroupMove, onGroupAdd, onClose }) {
+  const {
+    tables, seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, seatNextBatchOnTable,
+    checkoutGroupTable, undoGroupCheckout, clearGroupTable, undoClearGroupTable,
+  } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -40,6 +47,26 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
       }).length
     : 0
 
+  // 本梯目前還有幾張「用餐中（dining）」桌（含本桌）→「整梯離席（N 桌）」的 N
+  const batchDiningCount = groupRef && batch
+    ? (batch.tableNumbers || []).filter(n => {
+        const t = tableByNumber[n]
+        return t && t.status === 'dining' && t.currentRef?.groupId === g.id && t.currentRef?.batchId === batch.id
+      }).length
+    : 0
+
+  // 離席（單桌／整梯共用）的 8 秒復原：只倒回「仍待清、仍指向同團同梯」的桌，被清掉／被佔走的安全失敗
+  const offerCheckoutUndo = (msg, snapshot) => {
+    toast.action(msg,
+      { label: '↩ 復原', onClick: () => {
+        const r = undoGroupCheckout(snapshot)
+        if (!r?.ok) return toast.error('復原失敗：' + (r?.error || '未知錯誤'))
+        if (r.failed?.length) toast.info(`已復原 ${r.restored.join('、')} 為用餐中；${r.failed.join('、')} 已清桌或被使用，未復原`)
+        else toast.success(`已復原 ${r.restored.join('、')} 為用餐中`)
+      } },
+      { duration: 8000 })
+  }
+
   const handleSeatHold = async () => {
     const tablesTxt = (batch.tableNumbers || []).join('、')
     const ok = await confirm(
@@ -60,15 +87,22 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
     toast.success(`${g.agencyName} ${batch.label} 已入座（${tablesTxt}）`)
   }
 
+  // 這桌離席（S1）：只動這一張桌，不跳 confirm（有復原），同梯其他桌照常用餐
+  const handleCheckoutTable = () => {
+    const r = checkoutGroupTable(table.number)
+    if (!r.ok) return toast.error('離席失敗：' + r.error)
+    offerCheckoutUndo(`${table.number} 已離席，桌位待清（${g.agencyName || '團體'} ${batch?.label || ''}）`, r.snapshot)
+  }
+
   const handleCheckout = async () => {
     const ok = await confirm(
-      `${g.agencyName || '團體'} ${batch?.label || '此梯'} 整梯離席？桌位將進入等待清桌。`,
+      `${g.agencyName || '團體'} ${batch?.label || '此梯'} 整梯離席（${batchDiningCount} 桌）？桌位將進入等待清桌。`,
       { title: '梯次離席', confirmLabel: '確認離席' },
     )
     if (!ok) return
     const r = checkoutGroupBatch(g.id, batch.id)
     if (!r.ok) return toast.error('離席失敗：' + r.error)
-    toast.success(`${g.agencyName} ${batch?.label || ''} 已離席，桌位待清`)
+    offerCheckoutUndo(`${g.agencyName} ${batch?.label || ''} 已離席，桌位待清`, r.snapshot)
   }
 
   const handleFinalize = async () => {
@@ -94,9 +128,20 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
     toast.success(`${table.number} 已清桌，${g.agencyName} ${nextBatch.label} 入座`)
   }
 
+  // 單桌清桌（S3/S4）：清完本梯最後一桌 → 本梯自動標「此梯完成」；全部梯都完成 → 自動整團完成。
+  // 8 秒復原連同自動標記／自動結團一起倒回；桌已被下一組坐走 → 安全失敗（undoClearGroupTable 守門）。
   const handleClearOnly = () => {
-    clearTable(table.number)
-    toast.success(`${table.number} 已清桌完成`)
+    const r = clearGroupTable(table.number)
+    if (!r.ok) return toast.error('清桌失敗：' + r.error)
+    const tail = r.groupCompleted ? `，${g.agencyName || '此團'} 整團完成`
+      : r.batchReleased ? `，${batch?.label || '此梯'} 全部清完` : ''
+    toast.action(`${table.number} 已清桌完成${tail}`,
+      { label: '↩ 復原', onClick: () => {
+        const u = undoClearGroupTable(r.snapshot)
+        if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+        toast.success(`已復原 ${table.number} 為等待清桌`)
+      } },
+      { duration: 8000 })
     onClose?.()
   }
 
@@ -164,11 +209,30 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
             </>
           )}
 
-          {/* 情境 2：dining 團體桌 */}
+          {/* 情境 2：dining 團體桌——單桌操作在前（店主痛點），整梯／整團次要 */}
           {groupRef && table.status === 'dining' && (
             <>
-              <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-xl w-full">
-                此梯離席（整梯）
+              <button onClick={handleCheckoutTable} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-xl w-full">
+                這桌離席
+              </button>
+              {perms.group && (onGroupMove || onGroupAdd) && (
+                <div className="grid grid-cols-2 gap-2">
+                  {onGroupMove && (
+                    <button
+                      onClick={() => onGroupMove(g, batch, table.number)}
+                      className="bg-white border border-indigo-300 text-indigo-700 font-bold py-2.5 min-h-[44px] rounded-xl"
+                    >換桌</button>
+                  )}
+                  {onGroupAdd && (
+                    <button
+                      onClick={() => onGroupAdd(g, batch, table.number)}
+                      className="bg-white border border-indigo-300 text-indigo-700 font-bold py-2.5 min-h-[44px] rounded-xl"
+                    >加桌</button>
+                  )}
+                </div>
+              )}
+              <button onClick={handleCheckout} className="bg-white border border-orange-300 text-orange-700 font-bold py-2.5 min-h-[44px] rounded-xl w-full">
+                整梯離席（{batchDiningCount} 桌）
               </button>
               {perms.group && (
                 <button
@@ -215,8 +279,12 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
                   只清此桌
                 </button>
               </>
-            ) : (
+            ) : perms.group ? (
               <button onClick={handleClearOnly} className="btn-primary w-full">清桌完成</button>
+            ) : (
+              // 團體單桌清桌會寫團單（清完本梯最後一桌落 releasedAt／自動結團）→ 需 group.update；
+              // 只有 table.update 的角色按下去，本機看似成功、雲端團單卻被拒（部分推送）→ 不給按、講清楚找誰
+              <p className="text-xs text-chicken-brown/60 font-bold px-1 py-2">團體桌清桌會更新團單，請由店長或外場處理</p>
             )
           )}
         </div>

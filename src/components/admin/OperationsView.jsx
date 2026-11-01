@@ -203,7 +203,7 @@ export function saveQuickReserve(payload, { date, kind, table, needsCombo, creat
 }
 
 // 「現場營運」主畫面
-// 模式：normal | assign-booking | seat-waitlist | move-table | group-reseat
+// 模式：normal | assign-booking | seat-waitlist | move-table | group-reseat | group-move | group-add
 // ★ 現場帶位（walk-in）v3 不再是「模式」：帶位籤常駐左欄，點桌／選人數順序不拘，
 //   兩者到齊由面板滑動入座（walkin / walkin-multi 兩個舊 mode 已移除）。
 // 每個模式有對應的 banner、桌位 highlight、確認 toast
@@ -211,7 +211,7 @@ export function saveQuickReserve(payload, { date, kind, table, needsCombo, creat
 export default function OperationsView({ pendingAssign, onAssignDone, pendingMove, onMoveDone, onMoveConsumed, onAddBooking }) {
   const {
     tables, bookings, waitlist, settings, groupReservations, fixtures, zones,
-    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, undoWaitlistSeat, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, reseatGroupBatchTable,
+    assignBookingToTable, assignBookingTablesMulti, seatWaitlist, seatWaitlistMulti, undoWaitlistSeat, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, reseatGroupBatchTable, moveGroupTable, addGroupBatchTable,
     cancelBooking, seatBooking, seatBookingAllTables, assignAndSeatBooking, undoSeatBooking,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
@@ -416,7 +416,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       locateSuggestion(r.tables[0])
       return
     }
-    if (['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode.type) && mode.suggestion) {
+    if (['assign', 'seat-waitlist', 'move', 'group-reseat', 'group-move', 'group-add'].includes(mode.type) && mode.suggestion) {
       const r = resolveSuggestedTables([mode.suggestion], mode.suitable)
       if (!r.ok) return toast.error(r.error)
       setPendingConfirm(mode.suggestion)
@@ -448,6 +448,33 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { bookingId: booking.id, date: todayStr(), mode: 'now' })
     startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
   }
+
+  // 團體已入座「換桌」／臨時「加桌」（S6/S7）：從團體桌抽屜進選桌模式 → 點空桌 → 橫幅「確認換桌／確認加桌」。
+  // 可選桌＝改派候選（啟用中空桌、未被其他團 hold）再扣掉「任何團（含本團其他梯）未跑完梯次圈的桌」與「現在有預配的桌」——
+  // 與 service（seatingService.groupTargetError）同口徑，service 仍會重驗（UI 防線可能過期）。
+  const groupPickSuitable = (group, batch, fromTable) => {
+    const nowWindow = assignmentWindow({ mode: 'now' }, settings)
+    return reseatCandidateTables({ tables, holds: groupHoldTables, group, batch, fromTable })
+      .map(t => t.number)
+      .filter(n => !todayActiveGroups(groupReservations, todayStr()).some(g => (g.batches || []).some(b =>
+        b.id !== batch.id && !b.releasedAt && (b.tableNumbers || []).map(String).includes(String(n)))))
+      .filter(n => !preassignConflicts(bookings, n, { date: todayStr(), window: nowWindow }, settings).some(c => c.overlaps))
+  }
+  const startGroupTablePick = (type, group, batch, fromNumber) => {
+    if (blockedByReserve()) return
+    if (!group || !batch) return
+    const fromTable = tables.find(t => t.number === fromNumber)
+    const suitable = groupPickSuitable(group, batch, fromTable)
+    if (!suitable.length) return toast.error(type === 'group-move' ? '目前沒有可換過去的空桌' : '目前沒有可加的空桌')
+    rememberModeSource()
+    setMode({ type, group, batch, from: fromNumber, suitable, suggestion: suitable[0] })
+    setSelectedTable(null)
+    setPendingConfirm(null)
+    const sug = tables.find(t => t.number === suitable[0])
+    if (sug) setFloor(sug.floor)
+  }
+  const startGroupMove = (group, batch, fromNumber) => startGroupTablePick('group-move', group, batch, fromNumber)
+  const startGroupAdd = (group, batch, fromNumber) => startGroupTablePick('group-add', group, batch, fromNumber)
 
   // 改派桌位模式：團體梯次入座被佔桌卡住 → 逐桌挑替代空桌（queue 依序處理）
   const startGroupReseat = (group, batch, blocked) => {
@@ -733,12 +760,13 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     }
     // 指派 / 候位入座 / 換桌 / 團體改派：二步確認
     // 第一次點合適桌 → 進入「待確認」預覽；第二次點同一桌（或按確認鈕）才真正執行
-    if (['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode.type)) {
+    if (['assign', 'seat-waitlist', 'move', 'group-reseat', 'group-move', 'group-add'].includes(mode.type)) {
       if (mode.type === 'move' && number === mode.booking?.assignedTableId) {
         return toast.info(`${number} 是 ${mode.booking.name} 目前的桌，請點要換過去的桌`)
       }
       if (!mode.suitable.includes(number)) {
         return toast.error(mode.type === 'group-reseat' ? '此桌非空桌或已被其他團體保留'
+          : ['group-move', 'group-add'].includes(mode.type) ? '此桌非空桌、已被團體圈住，或現在有預配'
           : mode.lockKind === 'preassign' ? '此桌容量不足、停用，或到那個時段仍有客'
           : '此桌不符合容量或非空桌')
       }
@@ -800,6 +828,20 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       flashAssigned(number)
       returnToModeSource()
       onMoveDone?.()
+      return
+    }
+    if (mode.type === 'group-move' || mode.type === 'group-add') {
+      const { group, batch, from } = mode
+      const isMove = mode.type === 'group-move'
+      const r = isMove ? moveGroupTable(from, number, { groupId: group.id, batchId: batch.id }) : addGroupBatchTable(group.id, batch.id, number)
+      if (!r.ok) { setPendingConfirm(null); return toast.error((isMove ? '換桌失敗：' : '加桌失敗：') + r.error) }
+      toast.success(isMove
+        ? `${group.agencyName || '團體'} ${batch.label || ''} 已從 ${from} 換到 ${number}（用餐時間照舊）`
+        : `${group.agencyName || '團體'} ${batch.label || ''} 已加桌 ${number}`)
+      flashAssigned(number)
+      cancelMode()
+      modeSource.current = null
+      setSelectedTable(number)
       return
     }
     if (mode.type === 'group-reseat') {
@@ -1264,7 +1306,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         <div className={`h-full min-h-0 ${selectedTableObj ? 'overflow-y-auto space-y-3' : 'flex flex-col'}`}>
           {mode ? (
             <div role="region" aria-label="目前選桌任務" className="bg-white rounded-xl border border-chicken-brown/15 p-4 space-y-3">
-              <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.kind === 'arrive' ? '選桌入座' : mode.type === 'group-reseat' ? '團體改派' : '指派桌位'}</h2>
+              <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.kind === 'arrive' ? '選桌入座' : mode.type === 'group-reseat' ? '團體改派' : mode.type === 'group-move' ? '團體換桌' : mode.type === 'group-add' ? '團體加桌' : '指派桌位'}</h2>
               <p className="font-bold">{mode.booking?.name || mode.wait?.name || mode.group?.agencyName} · {mode.need || mode.booking?.guests || mode.wait?.partySize || mode.batch?.guests} 位</p>
               {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
               <p>目標桌：{(mode.selected?.length ? mode.selected.join(' + ') : pendingConfirm) || '尚未選桌'}</p>
@@ -1280,6 +1322,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               onClose={() => setSelectedTable(null)}
               onStartMove={() => startMove(selectedBooking)}
               onReseatBatch={startGroupReseat}
+              onGroupMove={startGroupMove}
+              onGroupAdd={startGroupAdd}
               onWaitlistSeated={finishWaitlistSeat}
               mode={{ assigning: mode?.type === 'assign' }}
             />
@@ -1398,12 +1442,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 selectedTableNumbers={reserveOpen ? (reserveTable ? [reserveTable.number] : []) : mode?.type === 'assign-multi' ? mode.selected : walkinTableNumbers}
                 onSelectTable={handleTableClick}
                 // 內嵌新增面板：選好時段後，候選高亮、其餘淡化（大組／無權限時不進選桌呈現）
-                assignMode={['assign', 'seat-waitlist', 'move', 'group-reseat', 'assign-multi'].includes(mode?.type)
+                assignMode={['assign', 'seat-waitlist', 'move', 'group-reseat', 'group-move', 'group-add', 'assign-multi'].includes(mode?.type)
                   || (reserveOpen && !!reserveSlot && canReserveAssign && !reserveNeedsCombo)}
                 highlightTables={
                   reserveOpen ? reserveCandidateNums
                     : mode?.type === 'assign-multi' ? mode.suitable   // 所有可選桌高亮，已選桌另加外框
-                    : ['assign', 'seat-waitlist', 'move', 'group-reseat'].includes(mode?.type) ? mode.suitable
+                    : ['assign', 'seat-waitlist', 'move', 'group-reseat', 'group-move', 'group-add'].includes(mode?.type) ? mode.suitable
                     : []
                 }
                 suggestionTable={mode?.suggestion || null}

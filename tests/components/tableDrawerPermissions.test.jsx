@@ -40,6 +40,10 @@ function setCtx({ bookings = [], waitlist = [], tables = [tbl()], groupReservati
     undoCancelBooking: vi.fn(), setTableOutage: vi.fn(), clearTableOutage: vi.fn(),
     seatGroupBatch: vi.fn(() => ({ ok: true })), checkoutGroupBatch: vi.fn(() => ({ ok: true })),
     releaseGroupBatch: vi.fn(() => ({ ok: true })), finalizeGroup: vi.fn(() => ({ ok: true })), seatNextBatchOnTable: vi.fn(() => ({ ok: true })),
+    checkoutGroupTable: vi.fn((n) => ({ ok: true, tableNumber: n, snapshot: { groupId: 'G1', batchId: 'BT1', tables: [{ tableNumber: n, seatedAt: null }] } })),
+    undoGroupCheckout: vi.fn(() => ({ ok: true, restored: ['105'], failed: [] })),
+    clearGroupTable: vi.fn((n) => ({ ok: true, tableNumber: n, batchReleased: false, groupCompleted: false, snapshot: { tableNumber: n } })),
+    undoClearGroupTable: vi.fn(() => ({ ok: true })),
   })
 }
 
@@ -49,7 +53,7 @@ describe('TableDrawer 動作鈕權限（依實際寫入集合）', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     root = createRoot(container)
-    act(() => { root.render(<TableDrawer table={props.table} booking={props.booking ?? null} preassign={props.preassign ?? null} groupHold={props.groupHold ?? null} onClose={() => {}} onStartMove={() => {}} mode={{}} />) })
+    act(() => { root.render(<TableDrawer table={props.table} booking={props.booking ?? null} preassign={props.preassign ?? null} groupHold={props.groupHold ?? null} onClose={() => {}} onStartMove={() => {}} onGroupMove={props.onGroupMove ?? (() => {})} onGroupAdd={props.onGroupAdd ?? (() => {})} mode={{}} />) })
   }
   const has = (text) => [...document.querySelectorAll('button')].some(b => b.textContent.includes(text))
 
@@ -214,21 +218,91 @@ describe('TableDrawer 動作鈕權限（依實際寫入集合）', () => {
       expect(has('覆蓋團體預留')).toBe(false)
     })
 
-    it('團體 dining：只有 table.update 可「此梯離席」（只寫 tables），不給「整團完成」（寫團單）', () => {
-      currentCan = canOnly('table.update')
-      const t = tbl({ status: 'dining', currentRef: { type: 'group', groupId: 'G1', batchId: 'BT1' } })
+    // 2026-11 單桌操作：「這桌離席」「整梯離席」只寫 tables；「換桌」「加桌」「整團完成」寫團單（group.update）
+    const diningGroupTable = () => tbl({ status: 'dining', currentRef: { type: 'group', groupId: 'G1', batchId: 'BT1' } })
+    const mountDining = (can, extra = {}) => {
+      currentCan = can
+      const t = diningGroupTable()
       setCtx({ tables: [t], groupReservations: [{ ...group, batches: [batch] }] })
-      mount({ table: t })
-      expect(has('此梯離席')).toBe(true)
+      mount({ table: t, ...extra })
+    }
+    it('團體 dining：只有 table.update 可「這桌離席」「整梯離席」（只寫 tables），看不到換桌／加桌／整團完成（寫團單）', () => {
+      mountDining(canOnly('table.update'))
+      expect(has('這桌離席')).toBe(true)
+      expect(has('整梯離席（1 桌）')).toBe(true)
+      expect(has('換桌')).toBe(false)
+      expect(has('加桌')).toBe(false)
       expect(has('整團完成')).toBe(false)
     })
-    it('團體 dining：floor 兩顆都在', () => {
-      currentCan = roleCan('floor')
-      const t = tbl({ status: 'dining', currentRef: { type: 'group', groupId: 'G1', batchId: 'BT1' } })
+    it.each(['manager', 'floor', 'host'])('團體 dining：%s 五顆都在，單桌「這桌離席」排第一', (role) => {
+      mountDining(roleCan(role))
+      for (const label of ['這桌離席', '整梯離席（1 桌）', '換桌', '加桌', '整團完成']) expect(has(label)).toBe(true)
+      const labels = [...document.querySelectorAll('button')].map(b => b.textContent.trim())
+      const first = labels.findIndex(l => ['這桌離席', '整梯離席（1 桌）', '換桌', '加桌'].includes(l) || l.startsWith('整團完成'))
+      expect(labels[first]).toBe('這桌離席')
+    })
+    it('團體 dining：kitchen 一顆都沒有', () => {
+      mountDining(roleCan('kitchen'))
+      for (const label of ['這桌離席', '整梯離席', '換桌', '加桌', '整團完成']) expect(has(label)).toBe(false)
+    })
+    it('團體 dining：舊文案「此梯離席（整梯）」已移除', () => {
+      mountDining(roleCan('floor'))
+      expect(has('此梯離席')).toBe(false)
+    })
+    const click = (text) => act(() => { [...document.querySelectorAll('button')].find(b => b.textContent.trim() === text).click() })
+    it('「這桌離席」不跳 confirm、只動這一桌，toast 帶「↩ 復原」→ 走 undoGroupCheckout', () => {
+      mountDining(roleCan('floor'))
+      click('這桌離席')
+      expect(ctx.checkoutGroupTable).toHaveBeenCalledWith('105')
+      expect(ctx.checkoutGroupBatch).not.toHaveBeenCalled()
+      expect(toast.action).toHaveBeenCalledTimes(1)
+      const [msg, action, opts] = toast.action.mock.calls[0]
+      expect(msg).toContain('105 已離席')
+      expect(action.label).toBe('↩ 復原')
+      expect(opts.duration).toBe(8000)
+      action.onClick()
+      expect(ctx.undoGroupCheckout).toHaveBeenCalledWith({ groupId: 'G1', batchId: 'BT1', tables: [{ tableNumber: '105', seatedAt: null }] })
+    })
+    it('「整梯離席」後 toast 也帶「↩ 復原」', async () => {
+      mountDining(roleCan('floor'))
+      ctx.checkoutGroupBatch.mockReturnValue({ ok: true, tableNumbers: ['105'], snapshot: { groupId: 'G1', batchId: 'BT1', tables: [] } })
+      await act(async () => { [...document.querySelectorAll('button')].find(b => b.textContent.trim() === '整梯離席（1 桌）').click() })
+      expect(ctx.checkoutGroupBatch).toHaveBeenCalledWith('G1', 'BT1')
+      expect(toast.action.mock.calls[0][1].label).toBe('↩ 復原')
+    })
+    it('「換桌」「加桌」交給選桌模式（帶團、梯、本桌號）', () => {
+      const onGroupMove = vi.fn()
+      const onGroupAdd = vi.fn()
+      mountDining(roleCan('floor'), { onGroupMove, onGroupAdd })
+      click('換桌')
+      click('加桌')
+      expect(onGroupMove.mock.calls[0][0].id).toBe('G1')
+      expect(onGroupMove.mock.calls[0][1].id).toBe('BT1')
+      expect(onGroupMove.mock.calls[0][2]).toBe('105')
+      expect(onGroupAdd.mock.calls[0][2]).toBe('105')
+    })
+    it('團體待清桌：只有 table.update（無 group.update）→ 不給單桌清桌（會寫團單），改顯示找誰處理', () => {
+      currentCan = canOnly('table.update')
+      const t = tbl({ status: 'cleaning', currentRef: { type: 'group', groupId: 'G1', batchId: 'BT1' } })
       setCtx({ tables: [t], groupReservations: [{ ...group, batches: [batch] }] })
       mount({ table: t })
-      expect(has('此梯離席')).toBe(true)
-      expect(has('整團完成')).toBe(true)
+      expect(has('清桌完成')).toBe(false)
+      expect(has('只清此桌')).toBe(false)
+      expect(has('整梯清桌釋出')).toBe(false)
+      expect(document.body.textContent).toContain('請由店長或外場處理')
+    })
+    it('團體待清桌：「清桌完成」走 clearGroupTable，toast 帶「↩ 復原」→ undoClearGroupTable', () => {
+      currentCan = roleCan('floor')
+      const t = tbl({ status: 'cleaning', currentRef: { type: 'group', groupId: 'G1', batchId: 'BT1' } })
+      setCtx({ tables: [t], groupReservations: [{ ...group, batches: [batch] }] })
+      mount({ table: t })
+      click('清桌完成')
+      expect(ctx.clearGroupTable).toHaveBeenCalledWith('105')
+      expect(ctx.clearTable).not.toHaveBeenCalled()
+      const [, action] = toast.action.mock.calls[0]
+      expect(action.label).toBe('↩ 復原')
+      action.onClick()
+      expect(ctx.undoClearGroupTable).toHaveBeenCalledWith({ tableNumber: '105' })
     })
   })
 })

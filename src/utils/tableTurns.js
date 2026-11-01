@@ -7,7 +7,7 @@
 //   2) 旅行社團體：batch.tableNumbers 含此桌（團體不建 booking，靠桌的 currentRef 對應入座）
 //
 // 狀態口徑與現場圖一致：done(已離席) / seated(用餐中) / upcoming(待到店或保留)
-import { sortedBatches } from './groupLive'
+import { sortedBatches, batchInProgress } from './groupLive'
 
 // 散客 turn 不顯示的狀態：取消、未到（noshow）——避免排程圖被作廢的訂位灌爆
 const SOLO_EXCLUDE = ['cancelled', 'noshow']
@@ -22,12 +22,25 @@ function soloTurnStatus(booking, table) {
 }
 
 // 團體梯次 → 這張桌上的 turn 狀態
-function groupTurnStatus(group, batch, table) {
+function groupTurnStatus(group, batch, table, byNumber) {
   if (batch.releasedAt) return 'done' // 整梯清桌釋出：桌位痕跡已清空，靠 releasedAt 判定消化完
   const refMatch = table?.currentRef?.groupId === group.id && table?.currentRef?.batchId === batch.id
   if (refMatch && table.status === 'dining') return 'seated'
   if (refMatch && table.status === 'cleaning') return 'done' // 此梯已離席、待清（currentRef 保留供接下梯）
   if (group.status === 'completed') return 'done'
+  // 梯次進行中（別桌仍 dining/cleaning 指向它）但這桌已不指向它 → 視為本梯在這桌已結束（done）。
+  // 例外：這桌此刻還坐著「同團較早的一梯」（例：第二梯已在 102 開吃、101 第一梯還沒走）→ 本梯在這桌仍是 upcoming；
+  // 坐著的是較晚的梯（本梯在這桌吃完、已被下一梯接走）→ done。
+  // ⚠️ 已知限制：沒有「這桌曾被本梯坐過」的歷史欄位（刻意不新增，雲端白名單會剝），所以
+  //   「本梯逐桌接上別桌、但這桌前梯走後選了『只清桌（不接下一梯）』」這種從沒坐過的圈桌也會顯示 done。
+  //   這與 buildGroupHolds 同口徑（梯次進行中就不再替它保留空出來的圈桌，這桌已讓給散客），排程上不會出現
+  //   「說好要來、桌卻已被帶走」的假 upcoming；要接回請走「清桌完成＋接下一梯」或改派。
+  if (batchInProgress(group, batch, byNumber)) {
+    const order = sortedBatches(group).map(b => b.id)
+    const sib = table?.currentRef?.groupId === group.id && ['dining', 'cleaning'].includes(table?.status)
+      ? order.indexOf(table.currentRef.batchId) : -1
+    return sib >= 0 && sib < order.indexOf(batch.id) ? 'upcoming' : 'done'
+  }
   return 'upcoming' // 已圈桌、尚未入座（團保）
 }
 
@@ -79,7 +92,7 @@ export function buildTableTurns(tables, bookings, groupReservations, today) {
       ;(batch.tableNumbers || []).forEach(n => {
         push(n, {
           kind: 'group',
-          status: groupTurnStatus(g, batch, byNumber[n]),
+          status: groupTurnStatus(g, batch, byNumber[n], byNumber),
           time: batch.timeSlot || '',
           guests: Number(batch.guests) || 0, // 整梯人數（跨多桌），非單桌
           label: g.agencyName || '團體',

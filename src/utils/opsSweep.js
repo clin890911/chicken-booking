@@ -2,7 +2,7 @@
 // 執行層在 seatingService.executeSweepActions（每個 action 執行前重驗前置條件 → 冪等）。
 //
 // 規則 1（超時釋桌）：dining 且 seatedAt 逾 autoReleaseAfterMin（預設 300 分 = 5 小時）
-//   → 高概率是忘記按清桌。散客桌等同「直接釋出」；團體桌只做「此梯離席」
+//   → 高概率是忘記按清桌。散客桌等同「直接釋出」；團體桌只做該桌「離席」（checkoutTable 轉待清）
 //     （dining→cleaning、currentRef 保留），不破壞第二梯接續邏輯。
 // 規則 2（換日掃除）：昨日殘留的 dining/cleaning/reserved 桌清為空桌；
 //   昨日已到店（arrived）團體自動結案；planned/confirmed 的過期團不動（留給人判斷）。

@@ -184,6 +184,29 @@ export function markBatchReleased(id, batchId, releasedAt = new Date().toISOStri
   return update(id, { batches })
 }
 
+// 撤銷梯次釋出標記（只給「逐桌清桌」的復原用）：清完最後一桌時自動落的 releasedAt，按「↩ 復原」要倒回。
+// 寫 null（不是刪鍵）：normalizeBatch 白名單以 `b.releasedAt || null` 收斂，null 會被保留、雲端同步也是顯式值。
+export function clearBatchReleased(id, batchId) {
+  const group = getById(id)
+  if (!group) return null
+  const batches = (group.batches || []).map(b =>
+    b.id === batchId ? { ...b, releasedAt: null } : b
+  )
+  return update(id, { batches })
+}
+
+// 梯次追加一張圈桌（現場「臨時加桌」用）：已在圈桌內則不重複加
+export function addBatchTable(id, batchId, tableNumber) {
+  const group = getById(id)
+  if (!group) return null
+  const num = String(tableNumber)
+  const batches = (group.batches || []).map(b =>
+    b.id !== batchId || (b.tableNumbers || []).map(String).includes(num) ? b
+      : { ...b, tableNumbers: [...(b.tableNumbers || []).map(String), num] }
+  )
+  return update(id, { batches })
+}
+
 // 換掉某梯次圈桌中的一張桌（現場「改派桌位」用）：fromTable → toTable，只動指定梯
 export function swapBatchTable(id, batchId, fromTable, toTable) {
   const group = getById(id)
