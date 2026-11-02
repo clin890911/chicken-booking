@@ -1874,14 +1874,21 @@ function SettingsSection({ title, description, children, defaultOpen = false, da
   // 依目前分類自我隱藏：不屬當前分類則不渲染（隱藏時 unmount，但 form 在父層 → 編輯不遺失）。
   const { sections: activeSections = [], wide = false, selected = null, linked = null } = useContext(CategoryContext) || {}
   const readOnlyRole = useContext(ReadOnlyContext)
-  if (sectionKey && !activeSections.includes(sectionKey)) return null
+  const visitedRef = useRef(false)
+  if (sectionKey && !activeSections.includes(sectionKey)) {
+    visitedRef.current = false
+    return null
+  }
   const locked = readOnlyRole && !READONLY_EXEMPT_SECTIONS.includes(sectionKey)
   const body = locked ? <fieldset disabled className="m-0 min-w-0 border-0 p-0">{children}</fieldset> : children
-  // 主從式版面：只畫選中的那一個區塊，直接展開（不用 <details>，免得還要再點一下）
+  // 主從式版面：畫面上只看選中的那一個區塊，直接展開（不用 <details>，免得還要再點一下）。
+  // 同分類內選過的區塊只藏起來不卸載：否則切走再切回來，區塊自己的暫態（如資料匯出勾的欄位）會被重設；換分類才釋放。
   if (wide && sectionKey) {
-    if (sectionKey !== selected) return null
+    const isSelected = sectionKey === selected
+    if (isSelected) visitedRef.current = true
+    if (!visitedRef.current) return null
     return (
-      <section data-settings-section={sectionKey} aria-labelledby={`settings-h-${sectionKey}`} className={`card ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`}>
+      <section hidden={!isSelected} data-settings-section={sectionKey} aria-labelledby={`settings-h-${sectionKey}`} className={`card ${danger ? 'border-red-200 !border-2 bg-red-50/30' : ''}`}>
         <div className="flex flex-wrap items-center gap-2">
           <h2 id={`settings-h-${sectionKey}`} className={`font-bold ${danger ? 'text-red-700' : 'text-chicken-brown'}`}>{title}</h2>
           {badge && <span className="badge bg-chicken-brown/10 text-chicken-brown/70">{badge}</span>}
