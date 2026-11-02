@@ -1882,7 +1882,7 @@ function SettingsSection({ title, description, children, defaultOpen = false, da
   const locked = readOnlyRole && !READONLY_EXEMPT_SECTIONS.includes(sectionKey)
   const body = locked ? <fieldset disabled className="m-0 min-w-0 border-0 p-0">{children}</fieldset> : children
   // 主從式版面：畫面上只看選中的那一個區塊，直接展開（不用 <details>，免得還要再點一下）。
-  // 同分類內選過的區塊只藏起來不卸載：否則切走再切回來，區塊自己的暫態（如資料匯出勾的欄位）會被重設；換分類才釋放。
+  // 同分類內選過的區塊只藏起來不卸載：否則切走再切回來，區塊自己的暫態（如資料匯出設好的條件）會被重設；換分類才釋放。
   if (wide && sectionKey) {
     const isSelected = sectionKey === selected
     if (isSelected) visitedRef.current = true

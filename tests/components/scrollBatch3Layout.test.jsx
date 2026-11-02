@@ -207,7 +207,7 @@ describe('設定頁：md 以上主從式（一次一個區塊）', () => {
     expect(container.textContent).toContain('TgStub')
   })
 
-  it('寬螢幕：同分類切走再切回來，區塊內的暫態不重設（資料匯出勾選不被清掉）；換分類才釋放', () => {
+  it('寬螢幕：同分類切走再切回來，區塊內的暫態不重設（資料匯出設好的條件不被清掉）；換分類才釋放', () => {
     window.matchMedia = () => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} })
     settingsSection = 'line'
     mount(<SettingsView />)
