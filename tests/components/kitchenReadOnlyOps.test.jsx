@@ -101,7 +101,7 @@ describe('現場頁 × 角色：kitchen 無任何寫入入口、其他三角色�
     render()
     expect(tab('帶位')).toBeTruthy()
     expect(container.querySelector('[data-testid="walkin-seat"]')).toBeTruthy()
-    click(tab('今日訂位'))
+    click(tab('今日'))
     expect(has('＋ 新增今日訂位')).toBe(true)
     // 有可一鍵的建議桌時卡片是「指派 ○○○」＋「選桌」，否則是「指派桌位」——兩者擇一都算有指派入口
     expect(has('指派桌位') || has('選桌')).toBe(true)

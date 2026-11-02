@@ -118,7 +118,7 @@ function arrivePreassigned(table, booking, deps) {
   })
   const lines = !taken && preassignConflictLines ? preassignConflictLines(booking) : []
   if (lines.length) {
-    if (!confirm) { deps.toast.error(`${lines.join('；')}。請從今日訂位卡確認後入座`); return { ok: false, code: 'needs-confirm' } }
+    if (!confirm) { deps.toast.error(`${lines.join('；')}。請從「今日」清單的卡片確認後入座`); return { ok: false, code: 'needs-confirm' } }
     return Promise.resolve(confirm(`${lines.join('；')}。\n仍要讓 ${booking.name} 入座 ${label}？`,
       { title: '桌位有預留', confirmLabel: '仍要入座', danger: true }))
       .then(ok => (ok ? seatPreassignedNow(table, booking, label, deps) : { ok: false, cancelled: true }))
@@ -135,7 +135,7 @@ function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAll
       // 大組一句講完、不自相矛盾：哪張桌怎麼了＋去今日訂位卡處理（併桌不支援單桌改桌，不給改桌鈕）
       const detail = String(r?.error || '未知錯誤').replace(/，請先.*$/, '')
       const what = r?.code === 'table-occupied' ? '有桌被佔' : '有桌不能用'
-      toast.error(`入座失敗：${label.split(' + ').join('+')} ${what}（${detail}），請到今日訂位卡處理`)
+      toast.error(`入座失敗：${label.split(' + ').join('+')} ${what}（${detail}），請到「今日」清單的卡片處理`)
     } else if (onMove) {
       toast.action(msg, { label: '改桌', onClick: () => onMove(booking) }, { type: 'error', duration: 8000 })
     } else {
@@ -198,7 +198,7 @@ export function saveQuickReserve(payload, { date, kind, table, needsCombo, creat
     }
   }
   toast.success(`已新增 ${b.name} ${b.timeSlot}${tail}`)
-  if (needsCombo) toast.info('大組請接近時段再到今日訂位指派併桌', { duration: 8000 })
+  if (needsCombo) toast.info('大組請接近時段再到「今日」指派併桌', { duration: 8000 })
   return { ok: true, booking: b, tableNumber: assigned }
 }
 
@@ -682,7 +682,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const handleReserveTableClick = (number) => {
     if (!canReserveAssign) return toast.info('這個帳號不能指派桌位，存檔後由店長指派')
     if (!reserveSlot) return toast.info('請先選時段，再點桌況圖選桌')
-    if (reserveNeedsCombo) return toast.info('大組請接近時段再到今日訂位指派併桌')
+    if (reserveNeedsCombo) return toast.info('大組請接近時段再到「今日」指派併桌')
     if (!reserveCandidateNums.includes(number)) return toast.error(reserveBlockReason(number))
     // 一律「選這張」（不做點第二下取消）：iPad 觸控同一 tick 可能送兩次 click，toggle 會自己抵銷
     setReserveTablePick(number)
@@ -1301,7 +1301,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       {/* 主區：左＝操作/帶位欄（常駐、內部捲動）｜右＝桌況（地圖/摘要/排程，填滿）。
           一面式機制不變：外層 flex-1 min-h-0；左欄自身 overflow-y-auto；右欄 flex-1 min-h-0、SVG 自動縮放 */}
       <div className="flex-1 min-h-0 mt-2 grid grid-cols-1 md:grid-cols-[400px_1fr] lg:grid-cols-[420px_1fr] gap-3">
-        {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/今日訂位/候位/團體）
+        {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/今日/候位；團體梯次併在「今日」時間清單）
             TableDrawer 是長內容 → 外層捲動；OpsRail 自己管內部捲動與釘底動作列 → 外層只給 flex 容器 */}
         <div className={`h-full min-h-0 ${selectedTableObj ? 'overflow-y-auto space-y-3' : 'flex flex-col'}`}>
           {mode ? (
@@ -1492,7 +1492,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       {/* 底部操作說明列已移除（Barry 2026-10-17：讓地圖更大）；新增今日訂位時的選桌提示仍保留 */}
       {reserveOpen && (
         <div className="flex-shrink-0 hidden sm:block text-center text-[11px] text-chicken-brown/45 mt-2">
-          新增今日訂位中：點桌況圖為這筆選桌（綠框＝可用）· ESC 返回今日訂位
+          新增今日訂位中：點桌況圖為這筆選桌（綠框＝可用）· ESC 返回今日
         </div>
       )}
 

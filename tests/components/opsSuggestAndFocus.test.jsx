@@ -115,7 +115,7 @@ describe('訂位詳情「在地圖標示」（OperationsView 有傳 onFocusTable
     const b = bookingService.create({ name: '余先生', phone: '0911000002', guests: 2, date: '2026-09-19', timeSlot: '13:30', source: 'phone', status: 'confirmed' })
     seating.assignBookingToTable(b.id, '201')
     render()
-    click(byStart('今日訂位'))
+    click(byStart('今日'))
     expect(mapNums()).toContain('105')
     expect(mapNums()).not.toContain('201')
     click(btns().find(x => x.textContent.includes('詳情')))

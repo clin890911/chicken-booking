@@ -1285,7 +1285,7 @@ function DeviceDisplaySection() {
         <span className="min-w-0">
           <span className="block font-bold text-chicken-brown">現場地圖下方「等報到」列</span>
           <span className="block text-xs text-chicken-brown/70 mt-0.5 leading-5">
-            關掉後桌況圖更大；客人到店改從「今日訂位」卡片按「客人到了」。
+            關掉後桌況圖更大；客人到店改從「今日」清單的卡片按「客人到了」。
           </span>
         </span>
         <span aria-hidden="true" className={`relative flex-none w-[52px] h-8 rounded-full transition-colors ${!hideStrip ? 'bg-emerald-700' : 'bg-chicken-brown/25'}`}>

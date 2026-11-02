@@ -1,11 +1,14 @@
 // 今日訂位「脈動」：過時未到（最優先處理）/ 90 分內將到 / 之後（收合）。
 // 之前只看未來 90 分窗：晚上時早上的 no-show 完全消失、無人處理 → 改為全日三段。
+// 方案 A（2026-11 demo）：團體每一梯也是一列，跟散客排在同一條時間清單（utils/todayTimeline.buildTodayTimeline）；
+//   進行中的梯併入「已入座」，已釋出的梯／已完成的團移到底部「已完成」摺疊區（可印回傳單）。點團體列原地展開動作（GroupBatchRow）。
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { todayStr } from '../../../utils/timeSlots'
-import { classifyTodayPulse, overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
+import { overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
+import { buildTodayTimeline, matchesTimelineQuery } from '../../../utils/todayTimeline'
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
 import { seatAfterArriveConfirm, toastSeatedWithUndo } from '../../../utils/arriveSeat'
 import { assignmentKind } from '../../../utils/tableStatus'
@@ -17,21 +20,13 @@ import { formatPhone } from '../../../utils/phoneFormat'
 import { splitSuffix } from '../../../utils/partySplit'
 import { cancelWithUndo } from '../../../utils/bookingActions'
 import EditBookingModal from '../../booking/EditBookingModal'
+import GroupBatchRow from '../ops/GroupBatchRow'
+import GroupTodayCard from '../ops/GroupTodayCard'
+import GroupSheet from '../group/GroupSheet'
 import { ArrowLeftRight, Phone, X } from 'lucide-react'
 
 
-// 搜尋：姓名／電話（含末碼，忽略符號）／桌號（主桌＋副桌）
-function matchesQuery(b, q) {
-  const raw = q.trim().toLowerCase()
-  if (!raw) return true
-  const digits = raw.replace(/\D/g, '')
-  return (
-    (b.name || '').toLowerCase().includes(raw) ||
-    (b.phone || '').toLowerCase().includes(raw) ||
-    (digits.length > 0 && String(b.phone || '').replace(/\D/g, '').includes(digits)) ||
-    bookingTableNumbers(b).some(n => String(n).toLowerCase().includes(raw))
-  )
-}
+// 搜尋口徑（姓名／電話／桌號；團體：旅行社／導遊／桌號）見 utils/todayTimeline.matchesTimelineQuery
 
 // 有可一鍵指派的建議桌：「指派 103」一下完成；旁邊「選桌」進原本的選桌模式（換別桌／併桌）
 // withPick＝false：卡片上已有「到了 · 選桌入座」時不再多放「選桌」，改到地圖選別桌收進「⋯ 更多」
@@ -205,18 +200,49 @@ function SeatedRow({ b, now, onOpenTable, onMoveTable, onEdit, perms }) {
   )
 }
 
-export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onAssignTable, quickAssignFor = null, onQuickAssign = null, onArriveSeat = null, onMoveTable, flashBookingId = null }) {
-  const { bookings, tables, groupReservations, settings, markBookingNoshow, undoMarkBookingNoshow, seatBooking, undoSeatBooking, completeWithoutSeating, undoCompleteWithoutSeating, cancelBooking, undoCancelBooking } = useBooking()
+// 已完成區的一列：團還在進行、這一梯已釋出（整團完成的團走 GroupTodayCard 唯讀卡）。沒有動作，只留回傳單。
+function ReleasedBatchRow({ entry, onOpenSheet }) {
+  const { group: g, batch: b, tableNumbers } = entry
+  return (
+    <div data-released-batch={entry.key} className="flex items-center gap-2 p-2.5 rounded-lg border border-chicken-brown/10 bg-gray-50">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-1.5 min-w-0">
+          <span className="text-sm font-bold text-chicken-brown/60 tabular-nums">{b.timeSlot || '—'}</span>
+          <span className="text-sm font-bold text-chicken-brown/60 truncate min-w-0">{g.agencyName || '（未填旅行社）'}</span>
+          <span className="ml-auto shrink-0 text-[11px] font-bold text-chicken-green">此梯完成</span>
+        </div>
+        <div className="mt-0.5 text-xs text-chicken-brown/55 truncate">
+          {b.isEscort ? '司領桌' : b.label} · {b.guests} 人{tableNumbers.length > 0 ? ` · ${tableNumbers.join('、')}` : ''}
+        </div>
+      </div>
+      <button type="button" onClick={() => onOpenSheet?.(g)} title="回傳單" aria-label="回傳單"
+        className="shrink-0 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg bg-white border border-chicken-brown/15 text-chicken-brown"><Icon name="print" size={16} /></button>
+    </div>
+  )
+}
+
+export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onAssignTable, quickAssignFor = null, onQuickAssign = null, onArriveSeat = null, onMoveTable, flashBookingId = null, onFocusTable = null, onReseatBatch = null }) {
+  const { bookings, tables, groupReservations, settings, store, markBookingNoshow, undoMarkBookingNoshow, seatBooking, undoSeatBooking, completeWithoutSeating, undoCompleteWithoutSeating, cancelBooking, undoCancelBooking } = useBooking()
   const { can } = useAuth() || {}
   const toast = useToast()
   const confirm = useConfirm()
   const today = todayStr()
   const [showLater, setShowLater] = useState(false)
   const [showSeated, setShowSeated] = useState(false)
+  const [showDone, setShowDone] = useState(false)
+  // 已完成區在左欄最底：展開後捲到可見，不然店員按了只看到標題變「收合」
+  const doneRef = useRef(null)
+  useEffect(() => {
+    if (showDone) doneRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [showDone])
   const [query, setQuery] = useState('')
   // 現場直接改單：以 id 追 live booking（存檔後卡片即時反映；被別台取消／刪除就自動關掉）
   const [editingId, setEditingId] = useState(null)
   const editingBooking = editingId ? (bookings || []).find(x => x.id === editingId) || null : null
+  // 團體梯次列：同時只展開一列（key＝groupId:batchId；入座後列移到「已入座」仍保持展開，接著就能離席）
+  const [expandedKey, setExpandedKey] = useState(null)
+  const toggleExpanded = (key) => setExpandedKey(k => (k === key ? null : key))
+  const [sheetGroup, setSheetGroup] = useState(null)
 
   // 卡片上四顆動作鈕的權限底料（誰要哪個組合由 BookingCard 決定）。
   // 後端 functions/lib/staffAccess.js 對 bookings/tables 集合各自把關，前端這道門是為了
@@ -246,18 +272,20 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
     return () => clearInterval(id)
   }, [])
 
-  const pulse = useMemo(
-    () => classifyTodayPulse(bookings, today, now),
-    [bookings, today, now],
+  const timeline = useMemo(
+    () => buildTodayTimeline(bookings, groupReservations, tables, now, today),
+    [bookings, groupReservations, tables, now, today],
   )
   const searching = query.trim().length > 0
-  const { overdue, soon, later } = useMemo(() => searching
-    ? { overdue: pulse.overdue.filter(b => matchesQuery(b, query)), soon: pulse.soon.filter(b => matchesQuery(b, query)), later: pulse.later.filter(b => matchesQuery(b, query)) }
-    : pulse, [pulse, query, searching])
+  const { overdue, soon, later, seated, done } = useMemo(() => {
+    if (!searching) return timeline
+    const f = (list) => list.filter(e => matchesTimelineQuery(e, query))
+    return { overdue: f(timeline.overdue), soon: f(timeline.soon), later: f(timeline.later), seated: f(timeline.seated), done: f(timeline.done) }
+  }, [timeline, query, searching])
 
   // 剛新增的那筆落在收合的「之後」段 → 自動展開，才看得到它閃
   useEffect(() => {
-    if (flashBookingId && later.some(b => b.id === flashBookingId)) setShowLater(true)
+    if (flashBookingId && later.some(e => e.key === flashBookingId)) setShowLater(true)
   }, [flashBookingId, later])
 
   // No-show 會計入該電話的爽約次數：先確認已聯絡、說明後果，
@@ -329,15 +357,11 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
     toastSeatedWithUndo(r, { message: `${b.name} 已入座 ${tableNo}`, name: b.name, undoSeatBooking, toast })
   })
 
-  // 今日已入座（訂位、現場、候位入座都是 status＝arrived 的 booking；結帳後轉 completed 就離開清單）。
-  // 最近入座的排最前——剛帶進去的最可能要改桌／改人數。
-  const seatedAll = useMemo(() => (bookings || [])
-    .filter(b => b.date === today && b.status === 'arrived')
-    .sort((a, b) => String(b.actualArrivalTime || '').localeCompare(String(a.actualArrivalTime || ''))),
-  [bookings, today])
-  const seated = searching ? seatedAll.filter(b => matchesQuery(b, query)) : seatedAll
+  // 今日已入座（訂位、現場、候位入座都是 status＝arrived 的 booking；結帳後轉 completed 就離開清單）＋進行中的團體梯次。
+  // 最近入座的排最前——剛帶進去的最可能要改桌／改人數。排序在 buildTodayTimeline。
+  const seatedAll = timeline.seated
 
-  if (pulse.overdue.length + pulse.soon.length + pulse.later.length + seatedAll.length === 0) {
+  if (timeline.overdue.length + timeline.soon.length + timeline.later.length + seatedAll.length + timeline.done.length === 0) {
     return (
       <div className="text-center py-6 text-xs text-chicken-brown/40">
         今日已無待到訂位
@@ -345,7 +369,26 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
     )
   }
 
-  const matchCount = overdue.length + soon.length + later.length + seated.length
+  // 一列＝散客卡片或團體梯次列（同一條時間清單）
+  const renderEntry = (e) => e.kind === 'batch' ? (
+    <GroupBatchRow key={e.key} entry={e} now={now} expanded={expandedKey === e.key} onToggle={toggleExpanded}
+      onFocusTable={onFocusTable} onReseatBatch={onReseatBatch} onOpenSheet={setSheetGroup} />
+  ) : (
+    <BookingCard key={e.key} b={e.booking} now={now} kind={kindOf(e.booking)} quick={quickOf(e.booking)} onQuickAssign={onQuickAssign}
+      onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onEdit={b => setEditingId(b.id)} onCancel={handleCancel} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
+      onComplete={handleComplete} perms={perms} flash={e.key === flashBookingId} />
+  )
+  // 展開中的團體梯次剛入座 → 已入座段自動打開，列不會「消失」在收合區裡
+  const seatedOpen = showSeated || (searching && seated.length > 0) || (expandedKey != null && seated.some(e => e.key === expandedKey))
+  const laterOpen = showLater || searching || (expandedKey != null && later.some(e => e.key === expandedKey))
+  // 收合時一併收起段內展開中的團體列，否則「展開中」會把段撐開、按了收合沒反應
+  const toggleSection = (open, setOpen, list) => {
+    if (open) { setOpen(false); if (list.some(e => e.key === expandedKey)) setExpandedKey(null) } else setOpen(true)
+  }
+
+  const doneOpen = showDone || (searching && done.length > 0)
+
+  const matchCount = overdue.length + soon.length + later.length + seated.length + done.length
   return (
     <div className="space-y-3">
       {editingBooking && <EditBookingModal booking={editingBooking} onClose={() => setEditingId(null)} />}
@@ -354,7 +397,7 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
           type="text"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="搜尋姓名／電話／桌號"
+          placeholder="搜尋姓名／電話／桌號／旅行社"
           aria-label="搜尋今日訂位"
           enterKeyHint="search"
           autoComplete="off"
@@ -365,17 +408,20 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
             className="absolute right-0 top-0 h-full min-w-[44px] inline-flex items-center justify-center text-chicken-brown/60"><X size={18} strokeWidth={2.4} aria-hidden="true" /></button>
         )}
       </div>
+      {sheetGroup && (
+        <GroupSheet group={sheetGroup} tables={tables} store={store || settings} onClose={() => setSheetGroup(null)} />
+      )}
       {seatedAll.length > 0 && (
-        <div>
-          <button type="button" onClick={() => setShowSeated(v => !v)} aria-expanded={showSeated || (searching && seated.length > 0)}
+        <div data-section="seated">
+          <button type="button" onClick={() => toggleSection(seatedOpen, setShowSeated, seated)} aria-expanded={seatedOpen}
             className="w-full min-h-[44px] flex items-center justify-between px-3 rounded-lg bg-chicken-brown/5 text-xs font-bold text-chicken-brown/65 hover:bg-chicken-brown/10">
             <span>已入座（{searching ? `${seated.length}／` : ''}{seatedAll.length} 組）· 可改桌／改人數</span>
-            <span className="text-[10px]">{showSeated || (searching && seated.length > 0) ? '收合 ▲' : '展開 ▼'}</span>
+            <span className="text-[10px]">{seatedOpen ? '收合 ▲' : '展開 ▼'}</span>
           </button>
-          {(showSeated || (searching && seated.length > 0)) && (
+          {seatedOpen && (
             <div className="mt-2 space-y-2">
-              {seated.map(b => (
-                <SeatedRow key={b.id} b={b} now={now} perms={perms} onOpenTable={onClickBooking} onMoveTable={onMoveTable}
+              {seated.map(e => e.kind === 'batch' ? renderEntry(e) : (
+                <SeatedRow key={e.key} b={e.booking} now={now} perms={perms} onOpenTable={onClickBooking} onMoveTable={onMoveTable}
                   onEdit={b => setEditingId(b.id)} />
               ))}
             </div>
@@ -389,42 +435,51 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
         <div role="status" className="text-center py-6 text-xs text-chicken-brown/60">找不到符合「{query.trim()}」的今日訂位</div>
       )}
       {overdue.length > 0 && (
-        <div className="space-y-2">
+        <div data-section="overdue" className="space-y-2">
           <div className="text-[11px] font-bold text-chicken-red">過時未到（{overdue.length} 組）— 請聯絡或標記</div>
-          {overdue.map(b => (
-            <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)} quick={quickOf(b)} onQuickAssign={onQuickAssign}
-              onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onEdit={b => setEditingId(b.id)} onCancel={handleCancel} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
-              onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
-          ))}
+          {overdue.map(renderEntry)}
         </div>
       )}
 
       {soon.length > 0 && (
-        <div className="space-y-2">
+        <div data-section="soon" className="space-y-2">
           <div className="text-[11px] font-bold text-chicken-brown/65">90 分內將到（{soon.length} 組）</div>
-          {soon.map(b => (
-            <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)} quick={quickOf(b)} onQuickAssign={onQuickAssign}
-              onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onEdit={b => setEditingId(b.id)} onCancel={handleCancel} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
-              onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
-          ))}
+          {soon.map(renderEntry)}
         </div>
       )}
 
       {later.length > 0 && (
-        <div>
+        <div data-section="later">
           <button
-            onClick={() => setShowLater(v => !v)}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-chicken-brown/5 text-xs font-bold text-chicken-brown/65 hover:bg-chicken-brown/10"
+            type="button"
+            onClick={() => toggleSection(laterOpen, setShowLater, later)}
+            aria-expanded={laterOpen}
+            className="w-full min-h-[44px] flex items-center justify-between px-3 py-2 rounded-lg bg-chicken-brown/5 text-xs font-bold text-chicken-brown/65 hover:bg-chicken-brown/10"
           >
             <span>之後（{later.length} 組）</span>
-            <span className="text-[10px]">{showLater || searching ? '收合 ▲' : '展開 ▼'}</span>
+            <span className="text-[10px]">{laterOpen ? '收合 ▲' : '展開 ▼'}</span>
           </button>
-          {(showLater || searching) && (
+          {laterOpen && (
             <div className="mt-2 space-y-2">
-              {later.map(b => (
-                <BookingCard key={b.id} b={b} now={now} kind={kindOf(b)} quick={quickOf(b)} onQuickAssign={onQuickAssign}
-                  onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onEdit={b => setEditingId(b.id)} onCancel={handleCancel} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
-                  onComplete={handleComplete} perms={perms} flash={b.id === flashBookingId} />
+              {later.map(renderEntry)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {timeline.done.length > 0 && (
+        <div ref={doneRef} data-section="done">
+          <button type="button" onClick={() => setShowDone(!doneOpen)} aria-expanded={doneOpen}
+            className="w-full min-h-[44px] flex items-center justify-between px-3 rounded-lg bg-chicken-brown/5 text-xs font-bold text-chicken-brown/65 hover:bg-chicken-brown/10">
+            <span>已完成（{searching ? `${done.length}／` : ''}{timeline.done.length}）· 可印回傳單</span>
+            <span className="text-[10px]">{doneOpen ? '收合 ▲' : '展開 ▼'}</span>
+          </button>
+          {doneOpen && (
+            <div className="mt-2 space-y-2">
+              {done.map(e => e.kind === 'group' ? (
+                <GroupTodayCard key={e.key} group={e.group} onOpenSheet={setSheetGroup} onFocusTable={onFocusTable} />
+              ) : (
+                <ReleasedBatchRow key={e.key} entry={e} onOpenSheet={setSheetGroup} />
               ))}
             </div>
           )}

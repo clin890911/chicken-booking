@@ -21,14 +21,14 @@ const sumGuests = (list, key = 'guests') => list.reduce((s, x) => s + (Number(x?
 
 // 需要處理的項目，依急迫度排序；數字 0 的不列。
 // 每項：label（小字）＋count（大字）＋unit（小字）＋people（選填，「· N 人」）；text＝一句話版本（無障礙／測試用）。
-// action：open-upcoming（今日訂位籤）｜open-table（打開那桌抽屜）｜open-waitlist（候位籤）
+// action：open-upcoming（「今日」籤）｜open-table（打開那桌抽屜）｜open-waitlist（候位籤）
 export function pickOpsAlerts({ pulse, tables, settings, waitlist, now }) {
   const alerts = []
   const p = pulse || { overdue: [], soon: [] }
   if (p.overdue?.length) {
     alerts.push({ key: 'overdue', level: 'danger', label: '過時未到', count: p.overdue.length, unit: '組', people: sumGuests(p.overdue),
       text: `過時未到 ${p.overdue.length} 組`, action: 'open-upcoming',
-      title: '已過預約時間仍未到：點開今日訂位，聯絡或標記' })
+      title: '已過預約時間仍未到：點開「今日」，聯絡或標記' })
   }
   // 刻意不過濾 isActive/outage：停用或維修中但仍佔用的桌（不一致狀態）更需要被提示處理。
   const overtime = (tables || []).filter(t => t.status === 'dining' && t.seatedAt
@@ -44,7 +44,7 @@ export function pickOpsAlerts({ pulse, tables, settings, waitlist, now }) {
   if (p.soon?.length) {
     alerts.push({ key: 'soon', level: 'info', label: '將到', count: p.soon.length, unit: '組', people: sumGuests(p.soon),
       text: `將到 ${p.soon.length} 組（90 分內）`, action: 'open-upcoming',
-      title: '點開今日訂位（地圖下方報到列也看得到）' })
+      title: '點開「今日」（地圖下方報到列也看得到）' })
   }
   const cleaning = (tables || []).filter(t => t.status === 'cleaning')
   if (cleaning.length) {
@@ -60,7 +60,7 @@ export function pickOpsAlerts({ pulse, tables, settings, waitlist, now }) {
   }
   // 無障礙名稱（螢幕閱讀器／語音控制）：「超時 1 桌，點擊開啟 107」——先講是什麼、幾件，再講點了會去哪
   const dest = (a) => a.action === 'open-table' ? `點擊開啟 ${a.tableNumber}`
-    : a.action === 'open-waitlist' ? '點擊開啟候位' : '點擊開啟今日訂位'
+    : a.action === 'open-waitlist' ? '點擊開啟候位' : '點擊開啟「今日」'
   return alerts.map(a => ({ ...a, ariaLabel: `${a.text}，${dest(a)}` }))
 }
 

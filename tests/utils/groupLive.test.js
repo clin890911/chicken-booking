@@ -67,8 +67,8 @@ describe('todayGroupsByState（側欄渲染口徑）', () => {
     expect(r.active.map(g => g.id)).toEqual(['B', 'A'])
     expect(r.completed.map(g => g.id)).toEqual(['F', 'E'])
   })
-  it('空清單回兩個空陣列', () => {
-    expect(todayGroupsByState([], '2026-06-10')).toEqual({ active: [], completed: [] })
+  it('空清單回空陣列', () => {
+    expect(todayGroupsByState([], '2026-06-10')).toEqual({ all: [], active: [], completed: [] })
   })
 })
 

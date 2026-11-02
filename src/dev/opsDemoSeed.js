@@ -1,14 +1,17 @@
 // 開發專用：「現場頁需要處理提示」demo 假資料。
-//   ?demo=ops       → 今天「有事」：3 組 90 分內將到、2 桌待清、3 桌用餐中、1 桌超時、候位 2 組
+//   ?demo=ops       → 今天「有事」：3 組 90 分內將到、2 桌待清、3 桌用餐中、1 桌超時、候位 2 組，
+//                      外加兩個今日團體（「今日」時間清單方案 A demo，2026-11）：
+//                      甲團「尖峰旅行社」第一梯 3 桌＋司領桌已用餐中、第二梯約 1 小時後到；乙團「山城旅遊」單梯約 40 分後到
 //   ?demo=ops-calm  → 今天「沒事」：同樣 3 桌用餐中（都還沒超時）、晚一點才有訂位，無待清／候位
 // 注意：只在 dev 生效：main.jsx 以 import.meta.env.DEV 守住動態 import，正式 build 不會打包本檔。
-// 寫入本機 localStorage（沙盒＝後端黑洞化），只動 OPSDEMO- 開頭的訂位、WDEMO- 開頭的候位；
+// 寫入本機 localStorage（沙盒＝後端黑洞化），只動 OPSDEMO- 開頭的訂位、WDEMO- 開頭的候位、GOPSDEMO- 開頭的團單；
 // 桌況整份重設為空桌後再擺上 demo 狀態（沙盒專用，別在有真資料的瀏覽器帶這個參數）。
 import { INITIAL_TABLES } from '../data/tables'
 
 const BOOKINGS_KEY = 'chicken_bookings_v1'
 const TABLES_KEY = 'chicken_tables_v3'
 const WAITLIST_KEY = 'chicken_waitlist_v1'
+const GROUPS_KEY = 'chicken_group_reservations_v1'
 
 function ymd(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -54,6 +57,7 @@ export function buildOpsDemo({ calm = false, now = Date.now() } = {}) {
   bookings.push(bk(slotAt(now, 200), '趙小姐', 2, '0912000402'))
 
   const waitlist = []
+  const groups = []
   if (!calm) {
     // 超時：坐了 130 分（用餐 90＋緩衝 10 都過了）
     const over = bk(slotAt(now, -130), '周先生', 4, '0912000301', {
@@ -76,12 +80,48 @@ export function buildOpsDemo({ calm = false, now = Date.now() } = {}) {
     })
     waitlist.push(w(1, '何先生', 4, 15, { status: 'called', calledAt: isoAgo(now, 3) }))
     waitlist.push(w(2, '郭小姐', 2, 6))
+
+    // 今日團體（桌號挑預設桌集合裡存在、且不跟上面散客衝突的桌：散客用 103／107／202／110／112／205／105）
+    const createdAt = new Date(now - 6 * 3600000).toISOString()
+    const grp = (id, extra) => ({
+      id, schemaVersion: 1, date: today,
+      agencyId: null, guideId: null, allergyText: '', tableSideNeeds: '', busInfo: '', notes: '', spend: 0,
+      createdBy: 'staff', createdAt, updatedAt: createdAt, ...extra,
+    })
+    const bt = (id, label, timeSlot, tableNumbers, guests, extra = {}) => ({
+      id, label, timeSlot, tableNumbers, guests, note: '', isEscort: false, releasedAt: null, ...extra,
+    })
+    // 甲團：第一梯 3 桌（2F 6 人桌）40 分前入座、司領桌 1 桌 2 人同時段入座、第二梯 2 桌約 1 小時後到
+    const A = 'GOPSDEMO-A'
+    const aFirst = bt('BTOPSDEMO-A1', '第一梯', slotAt(now, -40), ['201', '203', '206'], 18)
+    const aEscort = bt('BTOPSDEMO-AE', '司領桌', slotAt(now, -40), ['207'], 2, { isEscort: true })
+    const aSecond = bt('BTOPSDEMO-A2', '第二梯', slotAt(now, 60), ['210', '211'], 10, { note: '有兩位長輩，靠走道' })
+    groups.push(grp(A, {
+      agencyName: '尖峰旅行社', guideName: '林導', guidePhone: '0911000111',
+      batches: [aFirst, aEscort, aSecond],
+      counts: { total: 28, vegetarian: 3, child: 2, mobility: 1, wheelchair: 0 },
+      allergyText: '花生',
+      status: 'arrived', // 已有梯入座
+    }))
+    ;[aFirst, aEscort].forEach(b => b.tableNumbers.forEach(n => {
+      tableState[n] = {
+        status: 'dining', currentBookingId: null, currentRef: { type: 'group', groupId: A, batchId: b.id },
+        seatedAt: isoAgo(now, 40), updatedAt: isoAgo(now, 40),
+      }
+    }))
+    // 乙團：單梯 2 桌（1F 6 人桌）約 40 分後到
+    groups.push(grp('GOPSDEMO-B', {
+      agencyName: '山城旅遊', guideName: '陳導', guidePhone: '0922000222',
+      batches: [bt('BTOPSDEMO-B1', '第一梯', slotAt(now, 40), ['101', '102'], 11)],
+      counts: { total: 11, vegetarian: 0, child: 0, mobility: 0, wheelchair: 1 },
+      status: 'confirmed',
+    }))
   }
-  return { today, bookings, tableState, waitlist }
+  return { today, bookings, tableState, waitlist, groups }
 }
 
 export function seedOpsDemo({ calm = false } = {}) {
-  const { bookings, tableState, waitlist } = buildOpsDemo({ calm })
+  const { bookings, tableState, waitlist, groups } = buildOpsDemo({ calm })
   const keepB = readJSON(BOOKINGS_KEY, []).filter(b => !String(b?.id || '').startsWith('OPSDEMO-'))
   localStorage.setItem(BOOKINGS_KEY, JSON.stringify([...keepB, ...bookings]))
   const tables = readJSON(TABLES_KEY, null) || INITIAL_TABLES.slice()
@@ -91,6 +131,9 @@ export function seedOpsDemo({ calm = false } = {}) {
   }))))
   const keepW = readJSON(WAITLIST_KEY, []).filter(x => !String(x?.id || '').startsWith('WDEMO-'))
   localStorage.setItem(WAITLIST_KEY, JSON.stringify([...keepW, ...waitlist]))
+  // 團單：每次都先清掉上一輪的 GOPSDEMO-（ops-calm 也清，避免桌況重設成空桌後留下孤兒團）
+  const keepG = readJSON(GROUPS_KEY, []).filter(g => !String(g?.id || '').startsWith('GOPSDEMO-'))
+  localStorage.setItem(GROUPS_KEY, JSON.stringify([...keepG, ...groups]))
   localStorage.setItem('chicken_group_blank_purge_v1', '1')
-  return { bookings: bookings.length, waitlist: waitlist.length }
+  return { bookings: bookings.length, waitlist: waitlist.length, groups: groups.length }
 }

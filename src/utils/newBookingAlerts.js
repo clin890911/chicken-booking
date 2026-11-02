@@ -65,7 +65,7 @@ export function buildNewBookingAlerts(added, today, { detailLimit = DETAIL_LIMIT
   if (todays.length) {
     alerts.push(todays.length <= detailLimit
       ? { key: 'today', message: `新訂位：${label(todays[0])} · ${todays[0].timeSlot}`, duration: 6000 }
-      : { key: 'today-many', message: `${todays.length} 筆新訂位 · ${todays[0].timeSlot} 起（見「今日訂位」）`, duration: 6000 })
+      : { key: 'today-many', message: `${todays.length} 筆新訂位 · ${todays[0].timeSlot} 起（見「今日」）`, duration: 6000 })
   }
   // 未來日：不緊迫，標註日期、停留短
   if (future.length) {

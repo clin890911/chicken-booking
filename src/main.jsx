@@ -37,7 +37,7 @@ if (import.meta.env.DEV && (DEMO === 'ops' || DEMO === 'ops-calm')) {
   import('./dev/opsDemoSeed.js')
     .then(m => {
       const r = m.seedOpsDemo({ calm: DEMO === 'ops-calm' })
-      console.info(`[demo] 已灌入現場頁假資料（${DEMO}）：${r.bookings} 筆訂位、${r.waitlist} 組候位`)
+      console.info(`[demo] 已灌入現場頁假資料（${DEMO}）：${r.bookings} 筆訂位、${r.waitlist} 組候位、${r.groups} 個團`)
       dropDemoParam()
     })
     .catch(e => console.error('[demo] 假資料灌入失敗', e))

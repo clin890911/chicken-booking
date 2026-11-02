@@ -1,7 +1,7 @@
 // 今日團體「現場帶位」純函式：拿 groupReservations 與桌況 (tables) 對照，
 // 判斷梯次入座狀態、桌位的下一梯、今日 hold 桌對應。
 // 只依賴傳入參數、不碰 service 狀態，方便單測與跨元件共用
-// （OperationsView 地圖標記、OpsRail 今日團體籤、TableDrawer 團體操作區共用同一口徑）。
+// （OperationsView 地圖標記、OpsRail「今日」時間清單的團體梯次列、TableDrawer 團體操作區共用同一口徑）。
 import { isTableUsableOnDate } from './tableAvailability'
 import { todayStr } from './timeSlots'
 
@@ -28,6 +28,7 @@ export function todayGroupsByState(groupReservations, today) {
     .filter(g => g.date === today && g.status !== 'cancelled')
     .sort(byFirstSlot)
   return {
+    all,
     active: all.filter(g => g.status !== 'completed'),
     completed: all.filter(g => g.status === 'completed'),
   }
@@ -40,6 +41,21 @@ export function batchSeated(group, batch, tableByNumber) {
     return !!t && t.status === 'dining'
       && t.currentRef?.groupId === group.id && t.currentRef?.batchId === batch.id
   })
+}
+
+// 某梯次現在該給哪一顆動作鈕（GroupTodayCard 與「今日」時間清單的團體梯次列共用同一口徑）：
+//   'released'＝已清桌釋出（releasedAt 是唯一判定來源，不再給任何操作，防整輪流程重跑）
+//   'seated'  ＝本梯仍有用餐中桌 → 梯次離席
+//   'cleaning'＝已離席、仍有待清桌指向本梯 → 整梯清桌釋出
+//   'waiting' ＝尚未入座 → 梯次入座
+export function batchLiveState(group, batch, tableByNumber) {
+  if (batch?.releasedAt) return 'released'
+  if (batchSeated(group, batch, tableByNumber)) return 'seated'
+  const cleaning = (batch?.tableNumbers || []).some(n => {
+    const t = tableByNumber?.[n]
+    return t && t.status === 'cleaning' && t.currentRef?.groupId === group?.id && t.currentRef?.batchId === batch?.id
+  })
+  return cleaning ? 'cleaning' : 'waiting'
 }
 
 // 某梯次是否「進行中」：任一桌（dining 或 cleaning）的 currentRef 指向此梯次。

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { todayTab, openGroupRow } from './helpers/opsToday'
 
 // 前台（現場頁）尖峰 15 情境實測。
 //   S1–S7  團體「單桌離席／單桌清桌／復原／換桌／加桌」——寫成「修改後應有的行為」（UI 合約），修改前預期失敗。
@@ -157,9 +158,9 @@ test('S3 單梯團 2 桌都待清 → 逐桌單桌清桌 → 兩桌空桌、梯 
   expect.soft(g.batches.find(b => b.id === BID).releasedAt, '該梯 releasedAt').toBeTruthy()
   expect.soft(g.status, '單梯團自動整團完成').toBe('completed')
 
-  // 左欄團體籤（若還在）不可再出現梯次入座
-  const tab = page.getByRole('button', { name: /^團體/ })
-  if (await tab.count()) await tab.click()
+  // 左欄「今日」清單（團體籤已併進來）不可再出現該梯／梯次入座
+  await todayTab(page).click()
+  await expect.soft(page.locator('[data-group-batch]'), '已消化的梯不列').toHaveCount(0)
   await expect.soft(page.getByRole('button', { name: /梯次入座/ }), '梯次入座不可復活').toHaveCount(0)
 })
 
@@ -242,8 +243,8 @@ test('S8 團體圈 101/102、101 被散客佔走 → 梯次入座被擋 → 改�
   await seed(page, { tables, groups: [mkGroup(['101', '102'], { status: 'confirmed' })] })
   await loginToOps(page)
 
-  // 散客先佔走 101（從團體籤的桌號鈕開抽屜 → 覆蓋團體預留 → 入座）
-  await page.getByRole('button', { name: /^團體/ }).click()
+  // 散客先佔走 101（從「今日」清單的團體梯次列展開 → 桌號鈕開抽屜 → 覆蓋團體預留 → 入座）
+  await openGroupRow(page, '尖峰旅行社')
   await page.getByRole('button', { name: '101', exact: true }).click()
   await page.getByRole('button', { name: /散客入座（覆蓋團體預留）/ }).click()
   await page.getByRole('button', { name: '改散客入座', exact: true }).click()
@@ -251,7 +252,8 @@ test('S8 團體圈 101/102、101 被散客佔走 → 梯次入座被擋 → 改�
   await expect(page.getByText(/已入座 101/)).toBeVisible()
 
   // 團體梯次入座 → 101 被佔 → 自動進改派模式
-  await page.getByRole('button', { name: /^團體/ }).click()
+  await page.keyboard.press('Escape') // 關掉 101 抽屜回左欄
+  await openGroupRow(page, '尖峰旅行社')
   await page.getByRole('button', { name: /梯次入座/ }).first().click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
   await expect(page.getByText(/101（用餐中）被佔用/)).toBeVisible()
@@ -417,7 +419,7 @@ test('S15 訂位時段早 40 分鐘未報到 → 過時未到找得到 → 客�
   await seed(page, { tables: mkTables(['105', '106']), bookings: [LATE] })
   await loginToOps(page)
 
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   await expect(page.getByText('過時未到（1 組）— 請聯絡或標記')).toBeVisible()
   await expect(page.getByText('遲到客').first()).toBeVisible()
   await page.getByRole('button', { name: /客人到了/ }).first().click()

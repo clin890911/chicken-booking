@@ -78,7 +78,7 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
   const mapTable = (n) => [...container.querySelectorAll('svg text')].find(t => t.textContent === n)?.closest('g[style]')
   const openPanel = () => {
     render()
-    click(byStart('今日訂位'))
+    click(byStart('今日'))
     click(byText('＋ 新增今日訂位'))
   }
 

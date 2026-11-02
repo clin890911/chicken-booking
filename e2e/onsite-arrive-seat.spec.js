@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { todayTab } from './helpers/opsToday'
 
 // 未配桌的訂位到店「到了 · 選桌入座」（2026-10 前台尖峰 A1）：
 //   過去要 7 下（今日訂位 → 指派桌位 → 點桌 → 確認指派 → 再按客人到了），現在選好桌確認即「指派＋入座」。
@@ -90,7 +91,7 @@ test('今日訂位卡：未配桌訂位「到了 · 選桌入座」→ 點桌 �
   await seed(page, { tables: [mkTable('105'), mkTable('106', { y: 462 })], bookings: [LIN] })
   await loginToOps(page)
 
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   const card = page.locator(`[data-booking-id="${LIN.id}"]`)
   // 有可一鍵的建議桌時是「指派 ○○○」，否則「指派桌位」——兩者擇一都算有指派入口
   await expect(card.getByRole('button', { name: /指派/ }).first()).toBeVisible()

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { todayTab } from './helpers/opsToday'
 
 // 現場直接改單＋建議桌一鍵套用（2026-10 前台尖峰 A2／A3／A4）：
 //   1) 今日訂位卡「⋯ 更多 → 改人數／時段／備註」：4 人變 6 人、同桌坐得下 → 桌位保留（過去 19 下、換 3 次頁）
@@ -70,7 +71,7 @@ test('現場改人數：4 人變 6 人、同桌坐得下 → 不換頁、≤6 �
     bookings: [WANG],
   })
   await loginToOps(page)
-  await page.getByRole('button', { name: /^今日訂位/ }).click()   // 進入今日訂位籤（前置，不計入改單步數）
+  await todayTab(page).click()   // 進入今日訂位籤（前置，不計入改單步數）
 
   const card = page.locator(`[data-booking-id="${WANG.id}"]`)
   let taps = 0
@@ -97,7 +98,7 @@ test('現場改人數：坐不下 → 解除桌位並提示重新指派', async 
     bookings: [WANG],
   })
   await loginToOps(page)
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   const card = page.locator(`[data-booking-id="${WANG.id}"]`)
   await card.getByLabel('王先生 更多操作').click()
   await card.getByRole('button', { name: '改人數／時段／備註' }).click()
@@ -145,7 +146,7 @@ test('今日訂位卡取消：有確認框；復原把訂位與桌一起倒回',
     bookings: [WANG],
   })
   await loginToOps(page)
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   const card = page.locator(`[data-booking-id="${WANG.id}"]`)
   await card.getByLabel('王先生 更多操作').click()
   await card.getByRole('button', { name: '取消訂位' }).click()
@@ -170,7 +171,7 @@ test('未配桌訂位「⋯ 更多 → 查看詳情」開訂位詳情（不換�
   const LIN = mkBooking({ id: 'E2E-ED-LIN', name: '林先生', guests: 3 })
   await seed(page, { tables: [mkTable('105'), mkTable('106', { y: 462 })], bookings: [LIN] })
   await loginToOps(page)
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   // 2026-10-17 卡片減量：「詳情」收進「⋯ 更多」
   const card = page.locator(`[data-booking-id="${LIN.id}"]`)
   await card.getByLabel('林先生 更多操作').click()
@@ -215,7 +216,7 @@ test('到了 · 選桌入座：「用建議桌」選好併桌組合（含切樓�
     bookings: [BIG],
   })
   await loginToOps(page)
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   await page.locator(`[data-booking-id="${BIG.id}"]`).getByRole('button', { name: '大組 到了，選桌入座' }).click()
   // 進模式不自動勾（PR #137）
   await expect(page.getByText(/已選 0\/8 席/)).toBeVisible()
@@ -287,7 +288,7 @@ test('選桌入座「用建議桌」後其中一張被別筆預配（時段重�
     bookings: [BIG, CHEN],
   })
   await loginToOps(page)
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   await page.locator(`[data-booking-id="${BIG.id}"]`).getByRole('button', { name: '大組 到了，選桌入座' }).click()
   await page.getByTestId('mode-apply-suggestion').click()
   await expect(page.getByText(/已選 8\/8 席 · 2 桌/)).toBeVisible()

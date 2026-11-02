@@ -71,7 +71,7 @@ export function pastSlotFix(slot, now = new Date(), { settings = {}, tables = []
 //   needsCombo                    沒有任何單桌坐得下（大組）→ 不選桌，存檔後再指派併桌
 //   canAssign                     有沒有指派桌位的權限（沒有就不顯示桌位列）
 //   onSave(payload)               回傳 false＝失敗（留在面板、不丟資料）
-//   onBack()                      返回今日訂位（面板已處理「放棄這筆新增？」確認）
+//   onBack()                      返回今日（面板已處理「放棄這筆新增？」確認）
 //   slotNotice                    所選時段已過、已自動改選目前時段的說明（父層 pastSlotFix 算）
 //   onOpenFullForm({ name, phone, source })（可選）其他日期 → 完整新增表單（只帶完整表單 prefill 支援的欄位）
 //   now                           （可選）目前時間，測試注入
@@ -196,7 +196,7 @@ export default function QuickReservePanel({
     if (needsCombo) {
       return (
         <p className="text-xs font-bold text-amber-700">
-          店裡沒有單桌坐得下 {guests} 位：先存檔，接近時段再到今日訂位按「指派桌位」併桌
+          店裡沒有單桌坐得下 {guests} 位：先存檔，接近時段再到「今日」按「指派桌位」併桌
         </p>
       )
     }
@@ -247,7 +247,7 @@ export default function QuickReservePanel({
       <div className="flex-none flex items-center gap-2 border-b border-chicken-brown/10 px-2 py-1">
         <button type="button" onClick={back}
           className="min-h-[44px] px-2.5 rounded-lg text-sm font-bold text-chicken-brown/70 hover:bg-chicken-brown/5 inline-flex items-center gap-1">
-          <Icon name="chevronLeft" size={16} />返回今日訂位
+          <Icon name="chevronLeft" size={16} />返回今日
         </button>
         <div className="flex-1 text-right text-sm font-bold text-chicken-red">新增今日訂位</div>
         {onOpenFullForm && (
