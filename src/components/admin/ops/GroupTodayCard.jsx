@@ -4,7 +4,7 @@ import { useAuth } from '../../../contexts/AuthContext'
 import { seatingPerms } from '../../../utils/seatingPerms'
 import { useToast, useConfirm } from '../../ui/Toast'
 import { Badge } from '../../ui'
-import { batchSeated, sortedBatches } from '../../../utils/groupLive'
+import { batchLiveState, sortedBatches } from '../../../utils/groupLive'
 import Icon from '../../ui/Icon'
 import PhoneLink from './PhoneLink'
 import GlyphText from '../../ui/GlyphText'
@@ -17,21 +17,20 @@ const STATUS_LABEL = {
   cancelled: { label: '已取消', color: 'red' },
 }
 
-// 今日團體單張卡（現場右側欄窄版）：梯次入座 / 離席、整團完成、回傳單。
+// 團體梯次的現場動作（入座／離席＋復原／整梯清桌釋出／整團完成）：GroupTodayCard 與
+// 「今日」時間清單的團體梯次列（GroupBatchRow）共用同一套 handler，不各寫一份。
 // 入座/離席/完成一次翻動多桌，誤觸成本高 → 一律 confirm（不走地圖二步確認，桌已預圈無選桌步驟）。
-// 已完成（status=completed）的卡片轉唯讀：灰階、無操作按鈕，僅保留回傳單列印。
-export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, onReseatBatch }) {
+export function useGroupBatchActions(g, { onReseatBatch } = {}) {
   const { tables, seatGroupBatch, checkoutGroupBatch, undoGroupCheckout, releaseGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
   // 權限門（見 utils/seatingPerms.js）：梯次入座／整梯釋出／整團完成／標記已確認會寫 groupReservations（group.update），
   // 梯次離席只寫 tables。過去整張卡完全沒有權限檢查，唯讀角色（kitchen）也按得下去。
   const perms = seatingPerms(useAuth()?.can)
-  const isDone = g.status === 'completed'
 
   const tableByNumber = useMemo(() => {
     const m = {}
-    tables.forEach(t => { m[t.number] = t })
+    ;(tables || []).forEach(t => { m[t.number] = t })
     return m
   }, [tables])
 
@@ -94,8 +93,50 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
     toast.success(`${g.agencyName} 整團已完成、桌位釋出`)
   }
 
-  const st = STATUS_LABEL[g.status] || STATUS_LABEL.planned
+  return { perms, tableByNumber, onSeat, onCheckout, onRelease, onFinalize, setGroupStatus }
+}
+
+// 梯次動作鈕：依 batchLiveState 給「梯次離席／整梯清桌釋出／梯次入座」其中一顆（權限不足不渲染）。
+// sizeClass：卡片窄版 36px；時間清單列用 44px 觸控高度。
+export function BatchActionButton({ batch: b, state, actions, sizeClass = 'px-2.5 py-1.5 min-h-[36px] text-[11px]' }) {
+  const { perms, onSeat, onCheckout, onRelease } = actions
+  if (state === 'seated') {
+    return perms.table ? <button type="button" onClick={() => onCheckout(b)} className={`${sizeClass} rounded-lg font-bold bg-amber-500 text-white`}>梯次離席</button> : null
+  }
+  if (state === 'cleaning') {
+    return perms.group ? <button type="button" onClick={() => onRelease(b)} className={`${sizeClass} rounded-lg font-bold bg-sky-700 text-white`}>整梯清桌釋出</button> : null
+  }
+  if (state === 'waiting') {
+    return perms.group ? <button type="button" onClick={() => onSeat(b)} disabled={!(b.tableNumbers || []).length}
+      className={`${sizeClass} rounded-lg font-bold bg-chicken-green text-white disabled:opacity-40`}>梯次入座</button> : null
+  }
+  return null
+}
+
+// 團體需求摘要 chips（總人數／素／兒童／行動／輪椅／過敏）
+export function GroupNeedsChips({ group: g, showTotal = true }) {
   const c = g.counts || {}
+  return (
+    <div className="flex flex-wrap gap-1 text-[10px] font-bold">
+      {showTotal && <span className="px-1.5 py-0.5 rounded-full bg-chicken-red/10 text-chicken-red">總 {c.total || 0}</span>}
+      {c.vegetarian > 0 && <span className="px-1.5 py-0.5 rounded-full bg-chicken-green/15 text-chicken-green">素 {c.vegetarian}</span>}
+      {c.child > 0 && <span className="px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700">兒童 {c.child}</span>}
+      {c.mobility > 0 && <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">行動 {c.mobility}</span>}
+      {c.wheelchair > 0 && <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">輪椅 {c.wheelchair}</span>}
+      {g.allergyText && <span className="px-1.5 py-0.5 rounded-full bg-chicken-red text-white">過敏：{g.allergyText}</span>}
+    </div>
+  )
+}
+
+// 今日團體單張卡（窄版）：梯次入座 / 離席、整團完成、回傳單。
+// 現場左欄進行中的團改用「今日」時間清單的梯次列（GroupBatchRow），動作 handler 兩邊共用；本卡目前用在底部「已完成」區。
+// 已完成（status=completed）的卡片轉唯讀：灰階、無操作按鈕，僅保留回傳單列印。
+export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, onReseatBatch }) {
+  const actions = useGroupBatchActions(g, { onReseatBatch })
+  const { perms, tableByNumber, onFinalize, setGroupStatus } = actions
+  const isDone = g.status === 'completed'
+
+  const st = STATUS_LABEL[g.status] || STATUS_LABEL.planned
 
   return (
     <div className={`rounded-xl border p-3 ${isDone ? 'bg-gray-50 border-chicken-brown/10 opacity-80' : 'bg-white border-chicken-brown/10'}`}>
@@ -111,29 +152,16 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
             <PhoneLink phone={g.guidePhone} className="text-sm" testId="guide-phone" />
           </div>
         </div>
-        <button onClick={() => onOpenSheet?.(g)} className="flex-shrink-0 px-2 py-1 rounded-lg text-[11px] font-bold bg-white border border-chicken-brown/15 text-chicken-brown" title="回傳單" aria-label="回傳單"><Icon name="print" size={14} /></button>
+        <button onClick={() => onOpenSheet?.(g)} className="flex-shrink-0 min-w-[44px] min-h-[44px] inline-flex items-center justify-center rounded-lg text-[11px] font-bold bg-white border border-chicken-brown/15 text-chicken-brown" title="回傳單" aria-label="回傳單"><Icon name="print" size={14} /></button>
       </div>
 
-      <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] font-bold">
-        <span className="px-1.5 py-0.5 rounded-full bg-chicken-red/10 text-chicken-red">總 {c.total || 0}</span>
-        {c.vegetarian > 0 && <span className="px-1.5 py-0.5 rounded-full bg-chicken-green/15 text-chicken-green">素 {c.vegetarian}</span>}
-        {c.child > 0 && <span className="px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700">兒童 {c.child}</span>}
-        {c.mobility > 0 && <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">行動 {c.mobility}</span>}
-        {c.wheelchair > 0 && <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">輪椅 {c.wheelchair}</span>}
-        {g.allergyText && <span className="px-1.5 py-0.5 rounded-full bg-chicken-red text-white">過敏：{g.allergyText}</span>}
-      </div>
+      <div className="mt-1.5"><GroupNeedsChips group={g} /></div>
 
       <div className="mt-2 space-y-1.5">
         {sortedBatches(g).map(b => {
           // 已清桌釋出的梯：桌位痕跡已清空，releasedAt 是唯一判定來源——
-          // 顯示「此梯完成」，不再提供任何操作（防止整輪流程重跑）。
-          const released = !!b.releasedAt
-          const seated = !released && batchSeated(g, b, tableByNumber)
-          // 已離席待清：本梯仍有 cleaning 桌（currentRef 指向本梯）→ 提供「整梯清桌釋出」
-          const cleaning = !released && !seated && (b.tableNumbers || []).some(n => {
-            const t = tableByNumber[n]
-            return t && t.status === 'cleaning' && t.currentRef?.groupId === g.id && t.currentRef?.batchId === b.id
-          })
+          // 顯示「此梯完成」，不再提供任何操作（防止整輪流程重跑）。見 groupLive.batchLiveState。
+          const state = batchLiveState(g, b, tableByNumber)
           return (
             <div key={b.id} className={`rounded-lg px-2.5 py-2 ${b.isEscort ? 'bg-indigo-50 border border-indigo-200' : 'bg-chicken-cream/60'}`}>
               <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
@@ -158,15 +186,10 @@ export default function GroupTodayCard({ group: g, onOpenSheet, onFocusTable, on
                 </div>
                 {isDone ? (
                   <span className="text-[10px] font-bold text-chicken-brown/45">已完成</span>
-                ) : released ? (
+                ) : state === 'released' ? (
                   <span className="text-[10px] font-bold text-chicken-green"><GlyphText size={11} className="!gap-0.5">✓ 此梯完成</GlyphText></span>
-                ) : seated ? (
-                  perms.table && <button onClick={() => onCheckout(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-amber-500 text-white">梯次離席</button>
-                ) : cleaning ? (
-                  perms.group && <button onClick={() => onRelease(b)} className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-sky-700 text-white">整梯清桌釋出</button>
                 ) : (
-                  perms.group && <button onClick={() => onSeat(b)} disabled={!(b.tableNumbers || []).length}
-                    className="px-2.5 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold bg-chicken-green text-white disabled:opacity-40">梯次入座</button>
+                  <BatchActionButton batch={b} state={state} actions={actions} />
                 )}
               </div>
             </div>

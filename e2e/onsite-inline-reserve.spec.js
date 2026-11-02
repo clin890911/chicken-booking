@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { todayTab } from './helpers/opsToday'
 
 // 2026-09 店主：「在現場按了：今日訂位 > 新增今日訂位，還可以新增已經過了的時間段，而且整個 UX 流程也沒有很順」。
 // 改成「留在現場頁新增」：左欄原地換成新增面板（姓氏／人數／電話跟帶位一樣是大按鈕），
@@ -32,7 +33,7 @@ async function openPanel(page) {
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   await page.getByRole('button', { name: '＋ 新增今日訂位' }).click()
   await expect(page.getByTestId('quick-reserve-panel')).toBeVisible()
 }
@@ -130,7 +131,7 @@ test('離用餐 30 分內新增 → 存檔即鎖桌（桌 105）；點非候選�
   // 預設 13:30（離現在 20 分）→ 鎖桌型
   await expect(panel(page).getByTestId('reserve-table')).toContainText('桌 105')
   await expect(panel(page).getByText(/存檔後立刻鎖桌/)).toBeVisible()
-  // 大組（6 人桌擠一擠也坐不下 8 位）→ 不選桌，存檔後再到今日訂位指派併桌
+  // 大組（6 人桌擠一擠也坐不下 8 位）→ 不選桌，存檔後再到「今日」指派併桌
   await panel(page).getByRole('button', { name: '8 位' }).click()
   await expect(panel(page).getByText(/店裡沒有單桌坐得下 8 位/)).toBeVisible()
   // 非候選桌：6 位時 105（4 人桌，擠一擠最多 5 位）坐不下 → 點了只 toast 說明，不選取（仍是建議的 6 人桌）
@@ -155,7 +156,7 @@ test('返回：有填姓名時先確認「放棄這筆新增？」；繼續填�
   await openPanel(page)
 
   await panel(page).getByRole('button', { name: '張', exact: true }).click()
-  await panel(page).getByRole('button', { name: /返回今日訂位/ }).click()
+  await panel(page).getByRole('button', { name: /返回今日/ }).click()
   await expect(page.getByText('放棄這筆新增？')).toBeVisible()
   await page.getByRole('button', { name: '繼續填' }).click()
   await expect(panel(page)).toBeVisible()

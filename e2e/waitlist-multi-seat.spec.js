@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { todayTab } from './helpers/opsToday'
 import { startWaitlistBackend, FIREBASE_STUB } from './helpers/waitlistSharedBackend.js'
 import { INITIAL_TABLES } from '../src/data/tables.js'
 
@@ -106,7 +107,7 @@ test('今日訂位籤的「＋ 新增今日訂位」→ 留在現場開內嵌面
   await page.goto('/admin')
   await page.locator('aside').getByRole('button', { name: /現場/ }).click()
 
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   await page.getByRole('button', { name: '＋ 新增今日訂位' }).click()
 
   // 不跳頁：左欄換成內嵌面板，桌況圖仍在
@@ -123,7 +124,7 @@ test('今日訂位籤的「＋ 新增今日訂位」→ 留在現場開內嵌面
 test('內嵌面板填了姓名、來源＝現場 →「其他日期」→ 完整表單帶入姓名與來源（電話變選填）', async ({ page }) => {
   await page.goto('/admin')
   await page.locator('aside').getByRole('button', { name: /現場/ }).click()
-  await page.getByRole('button', { name: /^今日訂位/ }).click()
+  await todayTab(page).click()
   await page.getByRole('button', { name: '＋ 新增今日訂位' }).click()
   const panel = page.getByTestId('quick-reserve-panel')
   await panel.getByRole('button', { name: '來源：現場' }).click()

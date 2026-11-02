@@ -98,7 +98,7 @@ describe('pickOpsAlerts：無障礙名稱', () => {
     const list = pickOpsAlerts({ pulse: { overdue: [], soon: [{ guests: 2 }], later: [] }, tables, settings, waitlist: [{ status: 'waiting', partySize: 2 }], now: NOW })
     expect(list.map(a => a.ariaLabel)).toEqual([
       '超時 1 桌，點擊開啟 107',
-      '將到 1 組（90 分內），點擊開啟今日訂位',
+      '將到 1 組（90 分內），點擊開啟「今日」',
       '待清 1 桌，點擊開啟 203',
       '候位 1 組，點擊開啟候位',
     ])

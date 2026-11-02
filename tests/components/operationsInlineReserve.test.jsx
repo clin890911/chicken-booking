@@ -77,7 +77,7 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
   const mapTable = (n) => [...container.querySelectorAll('svg text')].find(t => t.textContent === n)?.closest('g[style]')
   const openPanel = () => {
     render()
-    click(byStart('今日訂位'))
+    click(byStart('今日'))
     click(byText('＋ 新增今日訂位'))
   }
 
@@ -206,7 +206,7 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
     const [msg, action] = toast.action.mock.calls.at(-1)
     expect(msg).toContain('入座失敗：105 目前由 別組 使用')
     expect(action.label).toBe('改桌')
-    click(byStart('今日訂位'))
+    click(byStart('今日'))
     click(byText('＋ 新增今日訂位'))
     act(() => { action.onClick() })
     expect(toast.info).toHaveBeenCalledWith('新增訂位中，請先完成或返回')
@@ -216,7 +216,7 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
 
   it('返回：沒填東西直接回今日訂位籤', () => {
     openPanel()
-    click(byText('返回今日訂位'))
+    click(byText('返回今日'))
     expect(panel()).toBeNull()
     expect(byText('＋ 新增今日訂位')).toBeTruthy()
   })
@@ -281,7 +281,7 @@ describe('saveQuickReserve（存檔語意）', () => {
     saveQuickReserve(payload, d)
     expect(d.preassignBookingTable).not.toHaveBeenCalled()
     expect(d.assignBookingToTable).not.toHaveBeenCalled()
-    expect(d.toast.info).toHaveBeenCalledWith('大組請接近時段再到今日訂位指派併桌', { duration: 8000 })
+    expect(d.toast.info).toHaveBeenCalledWith('大組請接近時段再到「今日」指派併桌', { duration: 8000 })
   })
 })
 

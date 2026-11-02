@@ -68,7 +68,7 @@ describe('buildNewBookingAlerts', () => {
     const alerts = buildNewBookingAlerts(
       [b('a', { timeSlot: '12:30' }), b('b2', { timeSlot: '11:30' }), b('c', { timeSlot: '12:00' })], TODAY)
     expect(alerts).toHaveLength(1)
-    expect(alerts[0].message).toBe('3 筆新訂位 · 11:30 起（見「今日訂位」）')
+    expect(alerts[0].message).toBe('3 筆新訂位 · 11:30 起（見「今日」）')
   })
 
   it('未來日多筆 → 一則摘要', () => {

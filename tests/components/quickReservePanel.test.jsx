@@ -128,7 +128,7 @@ describe('QuickReservePanel', () => {
 
   it('渲染：返回鈕＋標題；預設人數 2、時段（父層預設）選中、建議桌「預配 105 · 建議」；已過時段不列', () => {
     render()
-    expect(container.textContent).toContain('返回今日訂位')
+    expect(container.textContent).toContain('返回今日')
     expect(container.textContent).toContain('新增今日訂位')
     expect(byLabel('2 位').getAttribute('aria-pressed')).toBe('true')
     expect(byLabel('14:00').getAttribute('aria-pressed')).toBe('true')
@@ -241,17 +241,17 @@ describe('QuickReservePanel', () => {
 
   it('返回：沒填姓名／電話 → 直接返回；有填 → 先確認「放棄這筆新增？」，按繼續填不返回、按放棄才返回', async () => {
     render()
-    click(byText('返回今日訂位'))
+    click(byText('返回今日'))
     expect(confirmMock).not.toHaveBeenCalled()
     expect(onBack).toHaveBeenCalledTimes(1)
 
     click(byLabel('張'))
     confirmMock.mockResolvedValueOnce(false)
-    await act(async () => { byText('返回今日訂位').click() })
+    await act(async () => { byText('返回今日').click() })
     expect(confirmMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ title: '放棄這筆新增？' }))
     expect(onBack).toHaveBeenCalledTimes(1)
 
-    await act(async () => { byText('返回今日訂位').click() })
+    await act(async () => { byText('返回今日').click() })
     expect(onBack).toHaveBeenCalledTimes(2)
   })
 

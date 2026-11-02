@@ -1,20 +1,21 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { todayStr } from '../../../utils/timeSlots'
-import { todayGroupsByState } from '../../../utils/groupLive'
 import { classifyTodayPulse } from '../../../utils/bookingPulse'
+import { groupBatchEntries } from '../../../utils/todayTimeline'
 import UpcomingPanel from '../floormap/UpcomingPanel'
 import WaitlistPanel from './WaitlistPanel'
-import GroupTodayPanel from './GroupTodayPanel'
 import FastWalkInPanel from './FastWalkInPanel'
 import QuickReservePanel from './QuickReservePanel'
 
-// 現場右側欄：籤切換（即將到達 / 候位 / 今日團體），每籤獨佔全高、badge 顯示待辦數。
-// 今日沒有團體時不渲染「今日團體」籤（一天 0~5 團的稀疏性，無團體日不佔空間）。
+// 現場左側欄：籤切換（帶位 / 今日 / 候位），每籤獨佔全高、badge 顯示待辦數。
+// 方案 A（2026-11 demo）：原「今日訂位」「團體」兩籤併成「今日」一條時間清單——團體每一梯是一列，
+//   跟散客排在一起（UpcomingPanel＋GroupBatchRow）。「團體」籤移除；舊的 'groups' 籤 key（例如
+//   選桌模式記下的來源籤）一律導到「今日」。
 // 選中桌時整欄被 TableDrawer 取代（由 OperationsView 控制），籤狀態保留在外層不重設。
 // reserve（非 null）＝「新增今日訂位」內嵌面板開著：整欄（含籤列）換成 QuickReservePanel，
 //   props 原樣轉發；籤列不顯示，填到一半不會被誤切籤丟資料（返回鈕在面板頂端）。
-// flashBookingId：剛新增的那筆，今日訂位籤捲到可見並閃一下。
+// flashBookingId：剛新增的那筆，今日籤捲到可見並閃一下。
 export default function OpsRail({
   suspended = false,
   activeTab, onTabChange, onClickBooking, onOpenDetail, onAssignTable, quickAssignFor = null, onQuickAssign = null, onArriveSeat, onMoveTable, onSeatWaitlist, onFocusTable, onReseatBatch,
@@ -25,7 +26,7 @@ export default function OpsRail({
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
   walkinWarning, onWalkinSeat, lastParty, onLocateSuggestion, onApplySuggestion, showNextWaitlist, onNextWaitlist,
 }) {
-  const { bookings, waitlist, groupReservations } = useBooking()
+  const { bookings, waitlist, groupReservations, tables } = useBooking()
   const today = todayStr()
 
   // 30 秒 tick：badge 跟著時間推移更新（將到 → 過時未到）
@@ -35,29 +36,24 @@ export default function OpsRail({
     return () => clearInterval(id)
   }, [])
 
-  // badge＝過時未到全部（就算已指派也要人處理）+ 90 分內將到且未指派（與 UpcomingPanel 同口徑）
+  // badge＝散客待到：過時未到全部（就算已指派也要人處理）+ 90 分內將到且未指派（與 UpcomingPanel 同口徑）
+  //       ＋團體未入座梯次（未釋出、沒有任何桌指向它；原「團體」籤的待辦併進來）
   const upcomingCount = useMemo(() => {
     const { overdue, soon } = classifyTodayPulse(bookings, today, now)
-    return overdue.length + soon.filter(b => !b.assignedTableId).length
-  }, [bookings, today, now])
+    const pendingBatches = groupBatchEntries(groupReservations, tables, today).filter(e => !e.inProgress).length
+    return overdue.length + soon.filter(b => !b.assignedTableId).length + pendingBatches
+  }, [bookings, groupReservations, tables, today, now])
   const waitingCount = useMemo(
     () => waitlist.filter(w => w.status === 'waiting' || w.status === 'called').length,
     [waitlist],
   )
-  const { active: activeGroups, completed: completedGroups } = useMemo(
-    () => todayGroupsByState(groupReservations, today),
-    [groupReservations, today],
-  )
-
   const tabs = [
     ...(canWalkIn ? [{ key: 'walkin', label: '帶位', badge: 0 }] : []),
-    { key: 'upcoming', label: '今日訂位', badge: upcomingCount },
+    { key: 'upcoming', label: '今日', badge: upcomingCount },
     { key: 'waitlist', label: '候位', badge: waitingCount },
-    // 全完成的日子籤仍在（badge 0），才能回去印回傳單
-    ...(activeGroups.length + completedGroups.length > 0
-      ? [{ key: 'groups', label: '團體', badge: activeGroups.length }] : []),
   ]
-  const effective = tabs.some(t => t.key === activeTab) ? activeTab : tabs[0].key
+  const requested = activeTab === 'groups' ? 'upcoming' : activeTab // 舊「團體」籤 → 今日
+  const effective = tabs.some(t => t.key === requested) ? requested : tabs[0].key
 
   if (reserve) {
     return (
@@ -127,14 +123,11 @@ export default function OpsRail({
                 </button>
               )}
               <UpcomingPanel onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onAssignTable={onAssignTable} quickAssignFor={quickAssignFor} onQuickAssign={onQuickAssign} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable}
-                flashBookingId={flashBookingId} />
+                flashBookingId={flashBookingId} onFocusTable={onFocusTable} onReseatBatch={onReseatBatch} />
             </>
           )}
           {effective === 'waitlist' && (
             <WaitlistPanel onSeatWaitlist={onSeatWaitlist} />
-          )}
-          {effective === 'groups' && (
-            <GroupTodayPanel onFocusTable={onFocusTable} onReseatBatch={onReseatBatch} />
           )}
         </div>
       )}
