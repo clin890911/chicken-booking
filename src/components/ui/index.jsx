@@ -99,7 +99,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }) {
           <motion.div
             initial={{ y: 40, scale: 0.98 }} animate={{ y: 0, scale: 1 }} exit={{ y: 40 }}
             transition={SPRING_SHEET}
-            className={`lg-float lg-sheet w-full ${width} rounded-t-[28px] sm:rounded-[28px] max-h-[90vh] flex flex-col overflow-hidden safe-bottom`}
+            className={`lg-float lg-sheet w-full ${width} rounded-t-[28px] sm:rounded-[28px] max-h-[90vh] phone:max-h-[90dvh] flex flex-col overflow-hidden safe-bottom`}
             onClick={e => e.stopPropagation()}
           >
             <div className="min-h-0 overflow-y-auto overscroll-contain">

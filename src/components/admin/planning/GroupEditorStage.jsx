@@ -1005,7 +1005,7 @@ export default function GroupEditorStage({
       </div>
 
       {/* md 以下：底部 sticky 條（席位 + 儲存）。檢查清單在上方摘要卡裡已完整呈現。 */}
-      <div className="sticky bottom-0 z-10 -mx-3 flex items-center gap-3 border-t border-chicken-brown/10 bg-chicken-cream/95 px-3 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 md:hidden">
+      <div className="sticky bottom-0 z-10 flex items-center gap-3 border-t border-chicken-brown/10 bg-chicken-cream/95 px-3 py-2.5 backdrop-blur md:hidden">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold text-chicken-brown/55">席位（總人數 / 已圈席位）</div>
           <div className={`text-sm font-bold tabular-nums ${total > 0 && heldSeats < total ? 'text-amber-700' : 'text-chicken-brown'}`}>{total} / {heldSeats}</div>

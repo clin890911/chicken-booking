@@ -98,6 +98,7 @@ export default function QuickReservePanel({
   const matched = useMatchedCustomer(phone)
   const rootRef = useRef(null)
   const phoneRef = useRef(null)
+  const keypadRef = useRef(null)
   const confirmingRef = useRef(false)
 
   // 電話帶到顧客 → 自動帶姓名（不覆蓋店員已點的姓氏或已手打的）
@@ -113,7 +114,9 @@ export default function QuickReservePanel({
     if (!f || !r) return
     const width = Math.min(KEYPAD_WIDTH, window.innerWidth - KEYPAD_GAP * 2)
     const left = Math.max(KEYPAD_GAP, Math.min(f.right + KEYPAD_GAP, window.innerWidth - width - KEYPAD_GAP))
-    const bottom = Math.max(KEYPAD_GAP, window.innerHeight - r.bottom)
+    // 矮螢幕／整頁捲到面板底在畫面上方時，貼底對齊會把鍵盤頂到畫面外 → 夾回視窗內
+    const maxBottom = Math.max(KEYPAD_GAP, window.innerHeight - (keypadRef.current?.offsetHeight || 0) - KEYPAD_GAP)
+    const bottom = Math.min(maxBottom, Math.max(KEYPAD_GAP, window.innerHeight - r.bottom))
     setKeypadPos({ left, bottom, width })
   }
   useLayoutEffect(() => {
@@ -242,7 +245,7 @@ export default function QuickReservePanel({
   })()
 
   return (
-    <div ref={rootRef} className="flex-1 min-h-0 flex flex-col" data-testid="quick-reserve-panel">
+    <div ref={rootRef} className="flex-1 min-h-0 phone:flex-none flex flex-col" data-testid="quick-reserve-panel">
       {/* 頂端：返回＋標題（取代分頁籤列，避免填到一半誤切籤丟資料） */}
       <div className="flex-none flex items-center gap-2 border-b border-chicken-brown/10 px-2 py-1">
         <button type="button" onClick={back}
@@ -261,7 +264,7 @@ export default function QuickReservePanel({
         )}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto phone:flex-none phone:overflow-visible p-3 space-y-2">
         {/* 來源：電話（預設、電話必填）｜現場（電話選填） */}
         <div className="flex items-center gap-1.5">
           <span className="label !text-xs !mb-0 mr-1">來源</span>
@@ -359,7 +362,7 @@ export default function QuickReservePanel({
       </div>
 
       {/* 釘底：桌位列＋主按鈕。欄位不齊時按鈕停用並直接寫「還差：…」 */}
-      <div className="flex-none border-t border-chicken-brown/10 bg-white p-3 space-y-2">
+      <div data-rail-footer className="flex-none border-t border-chicken-brown/10 bg-white p-3 space-y-2">
         {tableRow}
         <button
           type="button"
@@ -376,9 +379,10 @@ export default function QuickReservePanel({
         <>
           <div className="fixed inset-0 z-[70] bg-black/20" onClick={() => setKeypadOpen(false)} aria-hidden="true" />
           <div
+            ref={keypadRef}
             role="dialog"
             aria-label="電話數字鍵盤"
-            className="lg-float lg-keypad fixed z-[71] rounded-[28px] p-3"
+            className="lg-float lg-keypad fixed z-[71] rounded-[28px] p-3 phone:max-h-[calc(100dvh-24px)] phone:overflow-y-auto"
             style={keypadPos
               ? { left: keypadPos.left, bottom: keypadPos.bottom, width: keypadPos.width }
               : { left: KEYPAD_GAP, bottom: KEYPAD_GAP, width: KEYPAD_WIDTH, visibility: 'hidden' }}

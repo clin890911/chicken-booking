@@ -1,4 +1,5 @@
 /** @type {import('tailwindcss').Config} */
+import plugin from 'tailwindcss/plugin'
 
 // 文字對比 WCAG AA（2026-10）：品牌色當「字色」時的專用色階，只影響 text-*，不動底色／邊框／placeholder。
 // 現場頁實測約半數小字不到 4.5:1——次要字 text-chicken-brown/40–70 在白底只有 2.3–4.8:1、
@@ -47,5 +48,18 @@ export default {
       }
     }
   },
-  plugins: []
+  plugins: [
+    // 手機版面條件（店主選「方向 A：手機上整頁捲」，2026-11）。iPad 橫向 1180×820 兩個條件都不成立，所有 phone:／short: 覆寫對它完全不存在。
+    // 為什麼不用 max-md:：手機橫向 844×390 寬度 ≥768，只看寬度蓋不到。
+    // 為什麼不放 theme.screens：物件形式的 screens 會讓 Tailwind 關掉 max-md:／min-* 這類變體（repo 有在用）。
+    // ⚠️ 外掛變體排序在 md:／lg: 之前：同一屬性同時有 md: 時要寫 phone:!xxx。
+    // 同一條件另見 src/utils/phoneLayout.js（JS）與 src/index.css（CSS），改要三處一起改。
+    plugin(({ addVariant }) => {
+      addVariant('phone', '@media (max-width: 767px), (max-height: 500px)')
+      // short＝手機橫向（左右分欄）。要有寬度下限：窄又矮（小手機、鍵盤縮視窗）左右分欄會把桌況圖擠成 0，走直向版面。
+      addVariant('short', '@media (max-height: 500px) and (min-width: 520px)')
+      // 一面式子頁（訂位今日／新增）成立的條件：md 以上且不矮。手機橫向走整頁捲。
+      addVariant('fillpage', '@media (min-width: 768px) and (min-height: 501px)')
+    }),
+  ]
 }

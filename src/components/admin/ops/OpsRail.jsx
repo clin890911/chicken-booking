@@ -57,7 +57,7 @@ export default function OpsRail({
 
   if (reserve) {
     return (
-      <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 flex flex-col">
+      <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 phone:h-auto flex flex-col">
         <QuickReservePanel {...reserve} />
       </div>
     )
@@ -65,7 +65,8 @@ export default function OpsRail({
 
   return (
     // h-full min-h-0 flex-col：帶位面板要能把「滑動帶位」釘在欄位底部（捲動發生在面板內部）
-    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 flex flex-col">
+    // 手機條件（phone:）：整頁捲，高度跟內容走，面板裡不再有自己的捲動區
+    <div className="bg-white rounded-xl border border-chicken-brown/10 overflow-hidden h-full min-h-0 phone:h-auto flex flex-col">
       {/* 籤列＝膠囊分段（Liquid Glass 控制樣式）：選中鏡片畫在按鈕 ::after（styles/glass.css .lg-tabs），
           按鈕本身維持 44px 觸控高度、0 垂直外距——左欄常態要一面式不捲，裝飾不能吃高度 */}
       <div className="lg-tabs flex-none flex gap-0.5 px-1 bg-chicken-brown/[0.045]">
@@ -109,7 +110,7 @@ export default function OpsRail({
           onOpenTable={onFocusTable}
         />
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto p-4">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 phone:flex-none phone:overflow-visible">
           {effective === 'upcoming' && (
             <>
               {/* 現場接到電話要加今天的訂位：左欄原地換成內嵌新增面板（不跳頁、桌況圖一直看得到）。

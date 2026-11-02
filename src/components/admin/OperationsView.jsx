@@ -1,6 +1,7 @@
 import { toastWaitlistSeat } from '../../utils/waitlistSeatToast'
 import HandoffPanel from './ops/HandoffPanel'
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import FloorMap from './floormap/FloorMap'
 import ArrivalStrip from './floormap/ArrivalStrip'
 import TableDrawer from './floormap/TableDrawer'
@@ -34,6 +35,7 @@ import { formatBookingTables, bookingTableNumbers } from '../../utils/bookingTab
 import { preassignArriveConflictLines, toastSeatedWithUndo } from '../../utils/arriveSeat'
 import { resolveSuggestedTables } from '../../utils/suggestionApply'
 import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
+import { isPhoneLayout, scrollContentTo, usePhoneLayout } from '../../utils/phoneLayout'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
 // （之前圖例跟地圖實際填色對不上——例如「已預訂」圖例是 slate-100，跟桌況圖實際的淡藍不是同一色）。
@@ -41,10 +43,10 @@ import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
 // 否則兩格同樣的藍會被讀成圖例畫錯。
 // 地圖卡片頂端的樓層大分頁（取代頂列的小分段控制）。目前樓層深色實心；另一層白底粗框。
 // nudge＝本層分頁數字是 0、另一層 >0 → 紅點＋輕微脈動提示切換（motion-safe 才動）；口徑同分頁上的數字。
-function FloorTabs({ floor, onChange, counts }) {
+function FloorTabs({ floor, onChange, counts, className = '' }) {
   // 一顆膠囊切兩半（Barry 2026-10-17）：外框一圈、中間無縫；選中那半實心深色「滑塊」，另一半透明。
   return (
-    <div role="tablist" aria-label="樓層" className="mb-2 flex-shrink-0 grid grid-cols-2 p-1 rounded-xl border-2 border-chicken-brown/20 bg-chicken-brown/[0.04]">
+    <div role="tablist" aria-label="樓層" className={`mb-2 flex-shrink-0 grid grid-cols-2 p-1 rounded-xl border-2 border-chicken-brown/20 bg-chicken-brown/[0.04] ${className}`}>
       {counts.map(c => {
         const active = c.key === floor
         return (
@@ -227,7 +229,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const [view, setView] = useState('map') // map=SVG 桌況圖 ｜ schedule=當日排程（每桌 turns）
   const [selectedTable, setSelectedTable] = useState(null)
   const [hideArrivalStrip] = useDeviceFlag(HIDE_ARRIVAL_STRIP_KEY) // 設定頁「這台裝置的顯示」可關掉等報到列
-  const [railTab, setRailTab] = useState('walkin') // 左側操作欄籤（預設帶位）；ESC/關閉抽屜不重設
+  // 左側操作欄籤（預設帶位）；ESC/關閉抽屜不重設。手機條件預設「今日」（手機是偶爾查看、改一兩筆；只決定開場那一籤，之後切籤行為不變）
+  const [railTab, setRailTab] = useState(() => isPhoneLayout() ? 'upcoming' : 'walkin')
+  const isPhone = usePhoneLayout()
+  const opsRootRef = useRef(null)
+  const leftColRef = useRef(null)
+  const mapCardRef = useRef(null)
+  const [legendOpen, setLegendOpen] = useState(false) // 手機條件：圖例預設收合
+  const [mapInView, setMapInView] = useState(false)   // 手機條件：跳轉鈕要往下（桌況圖）還是往上（清單）
   const [mode, setMode] = useState(null)
   const modeSource = useRef(null)
   const waitlistSeatBusy = useRef(false)
@@ -294,7 +303,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (mode || reserveOpenRef.current) return locateSuggestion(t.number)
     setFloor(t.floor); setView('map'); setSelectedTable(t.number)
   }
-  const locateSuggestion = (number) => { const t = tables.find(t => String(t.number) === String(number)); if (t) { setFloor(t.floor); setView('map'); setLocateTableRequest(prev => ({ number: String(t.number), seq: (prev?.seq || 0) + 1 })) } }
+  const locateSuggestion = (number) => { const t = tables.find(t => String(t.number) === String(number)); if (t) { setFloor(t.floor); setView('map'); setLocateTableRequest(prev => ({ number: String(t.number), seq: (prev?.seq || 0) + 1 })); if (isPhone && !mode) scrollContentTo(mapCardRef.current) } }
 
   // 今日預配標記：被今日訂位「預先配走」的桌號 → { timeSlot }。
   // 預配只記在 booking 上、不動桌況（桌仍 vacant）——地圖上需給視覺線索（📌 時段 預配），
@@ -1231,13 +1240,60 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     }
   })() : null
 
+  // === 手機條件（方向 A：整頁捲）的捲動銜接；iPad 不走這裡 ===
+  // 點桌＝抽屜換掉左欄，而左欄在桌況圖上方、可能已捲走（試驗時 y=-440）→ 把抽屜捲到可視範圍；
+  // 關掉抽屜／結束選桌 → 回到開之前的位置（地圖上點的就回地圖、清單上點的就回清單）。
+  // 舊位置在 render 當下記：layout effect 時左欄已換內容，scrollTop 可能已被瀏覽器夾掉。
+  const phoneTask = !!mode || !!selectedTableObj
+  const phoneTaskWas = useRef(false)
+  const phoneScrollBefore = useRef(null)
+  if (isPhone && phoneTask && !phoneTaskWas.current && phoneScrollBefore.current == null) {
+    phoneScrollBefore.current = opsRootRef.current?.closest('[data-testid="admin-content"]')?.scrollTop ?? null
+  }
+  useLayoutEffect(() => {
+    const was = phoneTaskWas.current
+    phoneTaskWas.current = phoneTask
+    if (!isPhone) return
+    if (selectedTableObj && !mode) scrollContentTo(leftColRef.current)
+    else if (!phoneTask && was && phoneScrollBefore.current != null) {
+      const c = opsRootRef.current?.closest('[data-testid="admin-content"]')
+      if (c) c.scrollTop = phoneScrollBefore.current
+    }
+    if (!phoneTask) phoneScrollBefore.current = null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPhone, phoneTask, !!mode, selectedTable])
+  useEffect(() => {
+    if (!isPhone || typeof IntersectionObserver === 'undefined' || !mapCardRef.current) return undefined
+    // 桌況圖上緣進到畫面上半才算「看到了」，跳轉鈕才改成回清單
+    const io = new IntersectionObserver(([e]) => setMapInView(e.isIntersecting), {
+      root: opsRootRef.current?.closest('[data-testid="admin-content"]') || null,
+      rootMargin: '0px 0px -50% 0px',
+    })
+    io.observe(mapCardRef.current)
+    return () => io.disconnect()
+  }, [isPhone])
+  const jumpLabel = mapInView
+    ? (selectedTableObj ? '回桌位' : reserveOpen ? '回新增' : ({ walkin: '回帶位', upcoming: '回今日', waitlist: '回候位' }[railTab] || '回清單'))
+    : (showSummary ? '看摘要' : showSchedule ? '看排程' : '桌況圖')
+  const handleJump = () => {
+    if (!mapInView) return scrollContentTo(mapCardRef.current, { smooth: true })
+    // 帶位／新增已選好桌 → 直接回到確認鈕；其餘回清單頂
+    const footer = !selectedTableObj && (reserveOpen ? reserveTable : (railTab === 'walkin' && walkinTableNumbers.length > 0))
+      ? leftColRef.current?.querySelector('[data-rail-footer]') : null
+    if (footer) scrollContentTo(footer, { block: 'end', smooth: true, clear: 64 })
+    else scrollContentTo(leftColRef.current, { smooth: true })
+  }
+
   return (
-    <div className="flex flex-col h-full min-h-0">
+    // 手機條件（phone:）：平常整頁捲（內容區是捲動容器，這層走自然高度）；選桌模式時改回一面式——
+    // 橫幅釘在上方、下面的桌況圖自己捲，這樣看得到地圖就按得到確認（不靠 sticky：iPad/iOS Safari 在 overflow 容器內的 sticky 熱區會錯位）
+    // 手機橫向（short）選桌模式：高度不夠上下疊，橫幅放左欄、桌況圖放右邊
+    <div ref={opsRootRef} className={`flex flex-col h-full min-h-0 ${mode ? 'short:flex-row short:gap-2' : 'phone:h-auto phone:block phone:pb-16'}`}>
       {/* 上部チップ群：高さ固定（捲動しない）。地図＋右側欄に最大高さを譲る。
           ⚠️ 用 flex gap 而不是 space-y-*：`space-y` 的 `> * + *` 會替 display:none 的
           兄弟照樣算一份 margin，白吃 8px 高度，
           左欄就會從「剛好不捲」變成捲。flex gap 不會替 display:none 的子項留空隙。 */}
-      <div className="flex-shrink-0 flex flex-col gap-2">
+      <div className={`flex-shrink-0 flex flex-col gap-2 ${mode ? 'short:w-[280px] short:overflow-y-auto' : ''}`}>
       {/* 頂列＝一條（Barry 2026-10-30）：左＝常駐「可入座 N 桌 · 可坐 M 位｜用餐中 N 桌 · M 人」＋有事才接在後面的
           「需要處理」（過時未到／超時／將到／待清／候位，0 不顯示、點了帶到那件事）；右＝地圖／摘要／排程。
           取代原本「全店」六格統計列（lg 以下）／三格 pill（lg 以上）＋另一列的提示列：同一件事不再顯示兩次，
@@ -1245,7 +1301,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           lg 以下可換行（窄螢幕不能把項目擠出可視範圍）；lg 以上單列。
           Liquid Glass：.lg-toolbar＝玻璃膠囊（只加水平內距、不加高度；不帶 transform/filter，見 styles/glass.css）；
           提示鈕本身是實心淡底（不在玻璃上疊玻璃、字色維持 AA）。 */}
-      <div className="lg-toolbar flex items-center gap-2 flex-wrap lg:flex-nowrap">
+      <div className={`lg-toolbar flex items-center gap-2 flex-wrap lg:flex-nowrap ${mode ? 'phone:hidden' : ''}`}>
         {/* flex-1：佔掉 地圖／摘要／排程 左邊的全部空間（分段控制自然靠右）；擠不下才在條內換行，不會被裁掉。
             手機（< md，#194 收尾）：提示區 basis-full 佔滿一整行、分段鈕換到下一行自己一行並撐滿；
             否則 flex-1 的 basis 0 會讓提示區只剩分段鈕左邊那一小塊，提示鈕被擠成一顆一列（375 寬實測頂列 238px）。
@@ -1300,10 +1356,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
       {/* 主區：左＝操作/帶位欄（常駐、內部捲動）｜右＝桌況（地圖/摘要/排程，填滿）。
           一面式機制不變：外層 flex-1 min-h-0；左欄自身 overflow-y-auto；右欄 flex-1 min-h-0、SVG 自動縮放 */}
-      <div className="flex-1 min-h-0 mt-2 grid grid-cols-1 md:grid-cols-[400px_1fr] lg:grid-cols-[420px_1fr] gap-3">
+      <div className={`flex-1 min-h-0 mt-2 grid grid-cols-1 md:grid-cols-[400px_1fr] lg:grid-cols-[420px_1fr] gap-3 phone:!grid-cols-1 ${mode ? 'phone:overflow-y-auto phone:overscroll-y-contain phone:auto-rows-max phone:content-start short:mt-0 short:min-w-0' : 'phone:flex-none'}`}>
         {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/今日/候位；團體梯次併在「今日」時間清單）
             TableDrawer 是長內容 → 外層捲動；OpsRail 自己管內部捲動與釘底動作列 → 外層只給 flex 容器 */}
-        <div className={`h-full min-h-0 ${selectedTableObj ? 'overflow-y-auto space-y-3' : 'flex flex-col'}`}>
+        <div ref={leftColRef} className={`h-full min-h-0 phone:h-auto ${selectedTableObj ? 'overflow-y-auto phone:overflow-visible space-y-3' : 'flex flex-col'} ${mode ? 'phone:order-last' : ''}`}>
           {mode ? (
             <div role="region" aria-label="目前選桌任務" className="bg-white rounded-xl border border-chicken-brown/15 p-4 space-y-3">
               <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.kind === 'arrive' ? '選桌入座' : mode.type === 'group-reseat' ? '團體改派' : mode.type === 'group-move' ? '團體換桌' : mode.type === 'group-add' ? '團體加桌' : '指派桌位'}</h2>
@@ -1328,7 +1384,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               mode={{ assigning: mode?.type === 'assign' }}
             />
           ) : null}
-          <div hidden={!!mode || !!selectedTableObj} aria-hidden={!!mode || !!selectedTableObj} inert={mode || selectedTableObj ? '' : undefined} style={mode || selectedTableObj ? { display: 'none' } : undefined} className="flex-1 min-h-0 flex flex-col">
+          <div hidden={!!mode || !!selectedTableObj} aria-hidden={!!mode || !!selectedTableObj} inert={mode || selectedTableObj ? '' : undefined} style={mode || selectedTableObj ? { display: 'none' } : undefined} className="flex-1 min-h-0 phone:flex-none flex flex-col">
             <HandoffPanel onLocate={n=>{const t=tables.find(t=>String(t.number)===String(n));if(t)setFloor(t.floor);setSelectedTable(n)}}/>
             <OpsRail
               suspended={!!mode || !!selectedTableObj}
@@ -1391,11 +1447,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         </div>
 
         {/* 右欄：桌況（地圖 SVG／摘要／排程）。高度填滿剩餘空間，SVG 自動縮放 */}
-        <div className="bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 h-full min-h-[260px] overflow-hidden flex flex-col">
-          <FloorTabs floor={floor} onChange={setFloor} counts={floorCounts} />
+        {/* 手機橫向（short）地圖視圖：樓層鈕放左、地圖放右，整張卡片塞得進一個畫面（上下疊會比視窗高） */}
+        <div ref={mapCardRef} data-testid="ops-map-card" className={`bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 h-full min-h-[260px] phone:h-auto phone:min-h-0 overflow-hidden flex flex-col ${!showSchedule && !showSummary ? 'short:grid short:grid-cols-[140px_minmax(0,1fr)] short:gap-x-2 short:items-start' : ''}`}>
+          <FloorTabs floor={floor} onChange={setFloor} counts={floorCounts} className="short:grid-cols-1 short:gap-1" />
           {showSchedule ? (
             // 排程視圖＝縱向堆疊卡片，會長 → 內部捲動避免裁切
-            <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto phone:flex-none phone:overflow-visible">
               <TableScheduleView
                 tables={tables.filter(t => t.floor === floor)}
                 turnsByTable={turnsByTable}
@@ -1406,7 +1463,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
             </div>
           ) : showSummary ? (
             // 摘要視圖＝可坐存量 + 依狀態分組（不估時間）
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 phone:flex-none">
               <TableSummaryView
                 store={storeSummary}
                 onOpenLog={() => setShowOpsLog(true)}
@@ -1419,7 +1476,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
             </div>
           ) : (
             <>
-              <div className="mb-2 flex-shrink-0 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55">
+              <div className={`mb-2 flex-shrink-0 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55 ${legendOpen ? 'short:col-start-1' : 'phone:hidden'}`}>
                 <LegendSwatch fill={STATUS_COLOR.vacant.fill} stroke={STATUS_COLOR.vacant.stroke} label="可入座" />
                 <LegendSwatch fill={STATUS_COLOR.reserved.fill} stroke={STATUS_COLOR.reserved.stroke} label="已預訂" />
                 <LegendSwatch fill={PREASSIGN_COLOR.fill} stroke={PREASSIGN_COLOR.stroke} dashed label="預配（桌仍可坐）" />
@@ -1429,8 +1486,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 <LegendSwatch fill={GROUP_HOLD_COLOR.fill} stroke={GROUP_HOLD_COLOR.stroke} label="團體保留" />
                 <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white ring-2 ring-chicken-red ring-inset" />選中</span>
               </div>
-              <div className="flex-1 min-h-0">
+              <div className="flex-1 min-h-0 phone:flex-none short:col-start-2 short:row-start-1 short:row-span-3">
               <FloorMap
+                phoneFit
+                onFloorChange={setFloor}
+                toolbarExtra={(
+                  <button type="button" aria-expanded={legendOpen} onClick={() => setLegendOpen(v => !v)}
+                    className="hidden phone:inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2 rounded-lg border text-xs font-bold">圖例</button>
+                )}
                 locateTableNumber={locateTableRequest?.number}
                 locateRequestId={locateTableRequest?.seq || 0}
                 tablePresentation={tablePresentation}
@@ -1496,6 +1559,16 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         </div>
       )}
 
+
+      {/* 手機條件：帶位表單到桌況圖相隔約 700px → 浮動跳轉鈕（清單 ⇄ 桌況圖）。固定在底部導覽上方、不佔版面；
+          放左下：卡片的動作鈕都在右側，不擋。選桌模式桌況圖已在最上面，不需要。 */}
+      {!mode && (
+        <button type="button" data-testid="ops-phone-jump" onClick={handleJump}
+          className="hidden phone:inline-flex fixed left-3 z-20 items-center gap-1 min-h-[44px] px-4 rounded-full bg-chicken-brown text-white text-sm font-bold shadow-lg bottom-[calc(env(safe-area-inset-bottom)+76px)] short:bottom-[calc(env(safe-area-inset-bottom)+60px)]">
+          {mapInView ? <ArrowUp size={16} strokeWidth={2.4} aria-hidden="true" /> : <ArrowDown size={16} strokeWidth={2.4} aria-hidden="true" />}
+          {jumpLabel}
+        </button>
+      )}
 
       {/* 系統自動處理紀錄（自動清檯留痕） */}
       <OpsLogModal open={showOpsLog} onClose={() => setShowOpsLog(false)} />

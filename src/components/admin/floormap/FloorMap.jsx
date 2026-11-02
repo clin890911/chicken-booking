@@ -244,6 +244,9 @@ export default function FloorMap({
   locateRequestId = 0,
   tablePresentation = {}, // 以桌號索引的共同狀態／可用時間說明
   zones = [],               // 分區定義 [{id,name,color}]：解析 zoneId→色，桌角畫小圓點
+  phoneFit = false,         // 現場頁：手機條件下走自然高度＋限高（規則在 index.css），iPad／其他頁不受影響
+  onFloorChange = null,     // 放大視圖裡的樓層切換（只在手機條件顯示）；未傳就不顯示
+  toolbarExtra = null,      // 地圖工具列尾端的額外控制項
 }) {
   // 用餐計時（分鐘）只在「今日即時圖」需要；規劃／統一佔用視圖沒有計時，不必跑 tick。
   // 以前不分模式每 5 秒 setState 一次、52 張桌全部重繪——規劃頁排位地圖白白每 5 秒重畫一次。
@@ -281,7 +284,8 @@ export default function FloorMap({
     return () => {
       document.removeEventListener('keydown', handleKey, true)
       siblings.forEach(([node, inert]) => { node.inert = inert })
-      if (previousFocus?.isConnected) previousFocus.focus()
+      // preventScroll：點桌關放大視圖時，現場頁（手機）剛捲到抽屜，還焦點不可再把頁面捲回放大鈕
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
     }
   }, [expanded])
   const liveMode = !scopedMode && !planningMode
@@ -369,19 +373,30 @@ export default function FloorMap({
   // 舊版以「最短桌邊 ≥44px」為下限強制撐大地圖、一進來就要捲動——尖峰時看不到全貌，店主要求改回全貌優先。
   const ZOOM_MIN = 0.5, ZOOM_MAX = 3, ZOOM_STEP = 0.25
   const fitPct = `${zoom * 100}%`
+  const phoneFitActive = phoneFit && !expanded // 放大視圖是 fixed 全屏、高度明確，照原本的 % 縮放
   return (
-    <div ref={mapRef} aria-modal={expanded ? true : undefined} className={expanded ? 'fixed inset-3 z-[80] bg-white rounded-xl shadow-xl flex flex-col p-3' : 'h-full min-h-0 flex flex-col'} role={expanded ? 'dialog' : undefined} aria-label={expanded ? `${floor} 放大桌況圖` : undefined}>
-      <div className="flex items-center gap-2 flex-wrap mb-2 shrink-0">
+    <div ref={mapRef} aria-modal={expanded ? true : undefined} className={expanded ? 'fixed inset-3 z-[80] bg-white rounded-xl shadow-xl flex flex-col p-3' : `h-full min-h-0 flex flex-col${phoneFit ? ' phone:h-auto' : ''}`} role={expanded ? 'dialog' : undefined} aria-label={expanded ? `${floor} 放大桌況圖` : undefined}>
+      <div className="flex items-center gap-2 phone:gap-1 flex-wrap mb-2 shrink-0">
+        {expanded && onFloorChange && (
+          <div role="group" aria-label="切換樓層" className="hidden phone:inline-flex gap-1 mr-1">
+            {['1F', '2F'].map(f => (
+              <button key={f} type="button" aria-pressed={f === floor} onClick={() => onFloorChange(f)}
+                className={`min-h-[44px] min-w-[44px] rounded-lg border text-sm font-bold ${f === floor ? 'bg-chicken-brown text-white' : ''}`}>{f}</button>
+            ))}
+          </div>
+        )}
         <button type="button" aria-label="縮小地圖" disabled={zoom <= ZOOM_MIN} onClick={() => setZoom(v => Math.max(ZOOM_MIN, v - ZOOM_STEP))} className="min-h-[44px] min-w-[44px] rounded-lg border">−</button>
         <span className="text-xs tabular-nums min-w-[2.5rem] text-center">{zoom === 1 ? '全貌' : `${Math.round(zoom * 100)}%`}</span>
         <button type="button" aria-label="放大地圖" disabled={zoom >= ZOOM_MAX} onClick={() => setZoom(v => Math.min(ZOOM_MAX, v + ZOOM_STEP))} className="min-h-[44px] min-w-[44px] rounded-lg border">＋</button>
         {zoom !== 1 && <button type="button" onClick={() => setZoom(1)} className="min-h-[44px] px-3 rounded-lg border text-xs font-bold">看全貌</button>}
         <button type="button" aria-pressed={rotated} onClick={() => setRotated(!rotated)} title="整層地圖轉 180°（只影響這台裝置的顯示）"
-          className={`min-h-[44px] px-3 rounded-lg border text-xs font-bold ${rotated ? 'bg-chicken-brown/10' : ''}`}>⟲ 轉向</button>
-        <button type="button" onClick={() => { setZoom(1); setExpanded(v => !v) }} className="min-h-[44px] px-3 rounded-lg border text-xs font-bold">{expanded ? '關閉放大視圖' : '放大視圖'}</button>
-        <span className="text-[11px] text-chicken-brown/60">{zoom > 1 ? "可捲動地圖 · " : ""}Tab 選桌，Enter／空白鍵開啟</span>
+          className={`min-h-[44px] px-3 phone:px-2 rounded-lg border text-xs font-bold ${rotated ? 'bg-chicken-brown/10' : ''}`}>⟲ 轉向</button>
+        <button type="button" onClick={() => { setZoom(1); setExpanded(v => !v) }} className="min-h-[44px] px-3 phone:px-2 rounded-lg border text-xs font-bold">{expanded ? '關閉放大視圖' : '放大視圖'}</button>
+        {!expanded && toolbarExtra}
+        <span className="text-[11px] text-chicken-brown/60">{zoom > 1 ? "可捲動地圖" : ""}<span className="phone:hidden">{zoom > 1 ? " · " : ""}Tab 選桌，Enter／空白鍵開啟</span></span>
       </div>
-      <div ref={viewportRef} className="overflow-auto min-h-0 flex-1" style={{ overscrollBehavior: 'contain' }}>
+      {/* 只有放大（真的能在地圖裡捲）時才 contain：全貌時 viewport 沒東西可捲，contain 會把手指吃掉、外層整頁捲到一半卡住（規劃頁、團單圈桌、手機現場頁） */}
+      <div ref={viewportRef} data-map-phone-viewport={phoneFitActive ? '' : undefined} className="overflow-auto min-h-0 flex-1" style={{ overscrollBehavior: zoom > 1 ? 'contain' : 'auto', ...(phoneFitActive ? { '--map-zoom': zoom, '--map-ar': viewBox.width / viewBox.height } : null) }}>
     <svg
       viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.width} ${viewBox.height}`}
       preserveAspectRatio="xMidYMid meet"

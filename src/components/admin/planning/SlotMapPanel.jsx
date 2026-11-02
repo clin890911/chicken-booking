@@ -207,7 +207,8 @@ export default function SlotMapPanel({
       {/* 場次選擇（分段控制；已關閉場次淡化劃線仍可點進去看） */}
       <div className="flex items-center gap-3 flex-wrap px-1">
         <span className="text-xs font-semibold text-chicken-brown/55 tracking-wide">場次（批次）</span>
-        <SegmentedControl ariaLabel="場次" value={seatingId} onChange={switchSeating}
+        {/* 手機條件：場次多時換行（間距 12px＝上下外擴熱區剛好不重疊），否則第三場次掉到畫面外、整頁左右晃 */}
+        <SegmentedControl ariaLabel="場次" value={seatingId} onChange={switchSeating} className="phone:flex-wrap phone:gap-y-3 phone:rounded-[18px] max-w-full"
           options={seatings.map(s => ({ key: s.id, label: s.name, sub: `${s.start}–${s.end}`, muted: isSeatingClosed(settings, date, s) }))} />
       </div>
 
