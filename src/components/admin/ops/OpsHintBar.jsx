@@ -27,9 +27,9 @@ const LEVEL_CLS = {
 function Figure({ label, value, unit, people, seats, small = 'text-chicken-brown/60' }) {
   return (
     <span className="inline-flex items-baseline gap-0.5 whitespace-nowrap">
-      <span className={`text-sm font-semibold ${small}`}>{label}</span>
-      <span className="text-xl font-bold tabular-nums leading-none">{value}</span>
-      <span className={`text-sm font-semibold ${small}`}>{unit}{people != null ? ` · ${people} 人` : ''}{seats != null ? ` · 可坐 ${seats} 位` : ''}</span>
+      <span className={`text-sm phone:text-xs font-semibold ${small}`}>{label}</span>
+      <span className="text-xl phone:text-base font-bold tabular-nums leading-none">{value}</span>
+      <span className={`text-sm phone:text-xs font-semibold ${small}`}>{unit}{people != null ? ` · ${people} 人` : ''}{seats != null ? ` · 可坐 ${seats} 位` : ''}</span>
     </span>
   )
 }
@@ -60,14 +60,15 @@ export default function OpsHintBar({ tablePresentation = null, onOpenUpcoming, o
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 min-w-0 text-chicken-brown">
       {/* 常駐：看一眼就知道「還能坐多少、場內多少人」（口徑同樓層鈕「可坐」＝現在就能坐的桌） */}
-      <div role="group" aria-label="全店概況" className="flex items-center gap-2.5 min-h-[44px] flex-none">
+      <div role="group" aria-label="全店概況" className="flex items-center gap-2.5 min-h-[44px] phone:min-h-[32px] flex-none">
         <span data-stat="vacant" className="text-emerald-800"><Figure label="可入座" value={stats.vacant} unit="桌" seats={stats.vacantSeats} /></span>
         <span aria-hidden className="h-5 w-px bg-chicken-brown/15" />
         <span data-stat="dining"><Figure label="用餐中" value={stats.dining} unit="桌" people={stats.occSeats} /></span>
       </div>
       {/* 有事才出現：數字 0 的不列；全部是 0 → 這一段不渲染（不留空白） */}
       {alerts.length > 0 && (
-        <div role="group" aria-label="需要處理" className="flex flex-wrap items-center gap-1 min-w-0">
+        // 手機條件：快捷收成單列、自己左右滑（內容不少、鈕仍 44px），不佔一大塊
+        <div role="group" aria-label="需要處理" className="flex flex-wrap items-center gap-1 min-w-0 phone:flex-nowrap phone:overflow-x-auto no-scrollbar">
           {alerts.map(a => {
             const Icon = ALERT_ICON[a.key]
             return (

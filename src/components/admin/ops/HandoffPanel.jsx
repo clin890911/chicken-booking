@@ -50,14 +50,14 @@ export default function HandoffPanel({onLocate}){
    <span className="font-normal text-chicken-brown/55">·</span><span className="font-normal underline underline-offset-2">展開</span>
   </button>
  </section>
- return <section aria-label="現場交班待辦" className="rounded-xl border bg-white p-3 flex flex-col gap-2 max-h-[260px] overflow-hidden flex-none">
+ return <section aria-label="現場交班待辦" className="rounded-xl border bg-white p-3 flex flex-col gap-2 max-h-[260px] overflow-hidden phone:max-h-none phone:overflow-visible flex-none">
   <div className="grid items-center gap-2 flex-none grid-cols-[minmax(0,1fr)_120px_36px]">
    <button aria-expanded onClick={toggle} className="font-bold text-sm text-left min-h-[44px]">交班待辦 {pendingCount} <span className="text-xs font-normal">收合</span></button>
    <input aria-label="交班日期" type="date" value={date} onChange={e=>setDate(e.target.value)} className="min-h-[44px] w-full text-xs"/><button onClick={refresh} className="min-h-[44px] underline text-xs">重整</button>
   </div>
    <div className="flex gap-2 flex-none">{[['pending','待辦'],['completed','已完成']].map(([value,label])=><button key={value} aria-pressed={tab===value} onClick={()=>setTab(value)} className="min-h-[44px] px-3 border rounded-lg text-xs">{label} {tasks.filter(t=>t.date===date&&t.status===value).length}</button>)}</div>
    {(error||failure)&&<p role="alert" className="text-chicken-red text-xs flex-none">{failure||error}</p>}
-   <div data-testid="handoff-task-list" className="overflow-y-auto min-h-0 space-y-1.5 overscroll-contain">
+   <div data-testid="handoff-task-list" className="overflow-y-auto min-h-0 space-y-1.5 overscroll-contain phone:overflow-visible">
    {!loaded?<p>讀取交班資料中…</p>:!items.length?<p className="text-xs text-chicken-brown/60">{tab==='pending'?'這天沒有待辦事項':'這天尚無已完成事項'}</p>:items.map(task=>{
     const target=resolveTaskTarget(task,bookings,tables)
     const time=new Date(task.completedAt||task.createdAt).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})

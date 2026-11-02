@@ -17,7 +17,7 @@ export default function BottomNav({ tabs, active, onChange, badges = {} }) {
               key={t.key}
               onClick={() => onChange(t.key)}
               aria-current={isActive ? 'page' : undefined}
-              className={`tap relative flex min-h-[56px] flex-col items-center justify-center gap-0.5 rounded-xl transition-colors ${
+              className={`tap relative flex min-h-[56px] short:min-h-[44px] flex-col short:flex-row items-center justify-center gap-0.5 short:gap-3 rounded-xl transition-colors ${
                 isActive ? 'text-chicken-red' : 'text-chicken-brown/50 hover:text-chicken-brown'
               }`}
             >

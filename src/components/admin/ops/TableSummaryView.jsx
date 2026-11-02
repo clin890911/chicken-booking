@@ -88,7 +88,7 @@ export default function TableSummaryView({ store = null, onOpenLog, tables = [],
   const stockCards = [['2', '2 人桌'], ['4', '4 人桌'], ['6', '6 人桌'], ['大', '大桌']]
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto pr-1 space-y-3">
+    <div className="h-full min-h-0 overflow-y-auto phone:h-auto phone:overflow-visible pr-1 space-y-3">
       {store && <StoreCard store={store} onOpenLog={onOpenLog} />}
       {/* 可坐存量 */}
       <div className="grid grid-cols-4 gap-2">

@@ -152,9 +152,9 @@ describe('訂位・今日：頁首固定、清單自己捲、lg 兩欄', () => {
     expect(header.querySelector('input[type="search"]')).not.toBeNull()
     expect(header.querySelector('details[data-popover] summary')).not.toBeNull() // 篩選鈕（來源多選＋隱藏已離，2026-10-31 併成一顆）
     expect(header.textContent).toContain('LINE')
-    expect(cls(header)).toContain('md:flex-shrink-0')
-    expect(cls(list)).toEqual(expect.arrayContaining(['md:flex-1', 'md:min-h-0', 'md:overflow-y-auto']))
-    expect(cls(list.parentElement)).toEqual(expect.arrayContaining(['md:flex', 'md:flex-col', 'md:flex-1', 'md:min-h-0']))
+    expect(cls(header)).toContain('fillpage:flex-shrink-0')
+    expect(cls(list)).toEqual(expect.arrayContaining(['fillpage:flex-1', 'fillpage:min-h-0', 'fillpage:overflow-y-auto']))
+    expect(cls(list.parentElement)).toEqual(expect.arrayContaining(['fillpage:flex', 'fillpage:flex-col', 'fillpage:flex-1', 'fillpage:min-h-0']))
     expect(list.querySelectorAll('[data-testid="card"]')).toHaveLength(3)
     expect(cls(list.querySelector('[data-testid="card"]').parentElement)).toContain('lg:grid-cols-2')
     // 一面式規則：不加固定高（min-h-[44px] 觸控下限不算固定高）
@@ -163,7 +163,7 @@ describe('訂位・今日：頁首固定、清單自己捲、lg 兩欄', () => {
 })
 
 describe('訂位・新增：日期單列、時段 6 欄、表單區自己捲', () => {
-  it('日期快選 sm 以上 8 格單列（7 天＋選月曆）、時段 6 欄、表單區 md 以上自己捲、確認列 md:static', () => {
+  it('日期快選 sm 以上 8 格單列（7 天＋選月曆）、時段 6 欄、表單區 md 以上自己捲、確認列 fillpage:static（md 以上且不矮）', () => {
     mount(<AddBookingView continuous />)
     const row = container.querySelector('[data-testid="quick-date-row"]')
     expect(cls(row)).toEqual(expect.arrayContaining(['grid', 'grid-cols-4', 'sm:grid-cols-8']))
@@ -171,10 +171,10 @@ describe('訂位・新增：日期單列、時段 6 欄、表單區自己捲', (
     for (const b of row.querySelectorAll('button')) expect(cls(b)).toContain('min-h-[44px]')
     expect(cls(container.querySelector('[data-testid="slot-grid"]'))).toContain('sm:grid-cols-6')
     const scroll = container.querySelector('[data-testid="add-form-scroll"]')
-    expect(cls(scroll)).toEqual(expect.arrayContaining(['md:flex-1', 'md:min-h-0', 'md:overflow-y-auto']))
+    expect(cls(scroll)).toEqual(expect.arrayContaining(['fillpage:flex-1', 'fillpage:min-h-0', 'fillpage:overflow-y-auto']))
     const bar = scroll.nextElementSibling
     expect(bar.textContent).toContain('還差')
-    expect(cls(bar)).toEqual(expect.arrayContaining(['sticky', 'md:static', 'md:flex-shrink-0']))
+    expect(cls(bar)).toEqual(expect.arrayContaining(['sticky', 'fillpage:static', 'fillpage:flex-shrink-0']))
   })
 
   it('選月曆格：選了 7 天以外的日期顯示「已選 M/D」', () => {
@@ -190,20 +190,20 @@ describe('BookingsView：今日／新增標 data-fill-page，日曆／查詢不�
     mount(<BookingsView />)
     const rootEl = () => container.firstElementChild
     expect(rootEl().hasAttribute('data-fill-page')).toBe(true) // 今日
-    expect(cls(rootEl())).toEqual(expect.arrayContaining(['md:flex', 'md:flex-col', 'md:flex-1', 'md:min-h-0']))
+    expect(cls(rootEl())).toEqual(expect.arrayContaining(['fillpage:flex', 'fillpage:flex-col', 'fillpage:flex-1', 'fillpage:min-h-0']))
     tab('日曆')
     expect(rootEl().hasAttribute('data-fill-page')).toBe(false)
-    expect(cls(rootEl())).not.toContain('md:flex-1')
+    expect(cls(rootEl())).not.toContain('fillpage:flex-1')
     tab('查詢')
     expect(rootEl().hasAttribute('data-fill-page')).toBe(false)
     tab('新增')
     expect(rootEl().hasAttribute('data-fill-page')).toBe(true)
   })
 
-  it('index.css 把 admin-content 到子頁的高度鏈接起來（md 以上、只認沒被 hidden 的那層）', () => {
+  it('index.css 把 admin-content 到子頁的高度鏈接起來（md 以上且不矮、只認沒被 hidden 的那層）', () => {
     const css = fs.readFileSync(path.resolve(__dirname, '../../src/index.css'), 'utf8')
     expect(css).toContain('[data-testid="admin-content"]:has(> div:not([hidden]) > [data-fill-page])')
     expect(css).toContain('[data-testid="admin-content"] > div:not([hidden]):has(> [data-fill-page])')
-    expect(css).toMatch(/@media \(min-width: 768px\)\s*{\s*\[data-testid="admin-content"\]:has/)
+    expect(css).toMatch(/@media \(min-width: 768px\) and \(min-height: 501px\)\s*{\s*\[data-testid="admin-content"\]:has/)
   })
 })

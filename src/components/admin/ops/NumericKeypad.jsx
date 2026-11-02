@@ -28,7 +28,7 @@ export default function NumericKeypad({ value = '', onChange, maxLen = 10, tone 
           onClick={() => press(k)}
           aria-label={k === '⌫' ? '退格' : k}
           className={dark
-            ? `h-[66px] rounded-[18px] font-bold active:scale-95 transition-transform ${
+            ? `h-[66px] short:h-[50px] rounded-[18px] font-bold active:scale-95 transition-transform ${
               k === 'OK'
                 ? 'bg-chicken-yellow text-white text-xl'
                 : k === '⌫'

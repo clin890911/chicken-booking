@@ -316,7 +316,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   return (
     // Liquid Glass：抽屜是靜態玻璃（.lg-drawer＝半透明填色＋邊緣光，不模糊、不建立堆疊脈絡）——
     // 抽屜裡的 Modal 沒有 portal，宿主若加 isolation/transform/backdrop-filter 會困住它的 z-index 或定位。
-    <div className="lg-drawer rounded-[28px] overflow-hidden flex flex-col h-full">
+    // 手機條件（phone:）：整頁捲，內容全展開、動作鈕跟著頁面捲到就點得到（點桌後 OperationsView 把抽屜捲到可視範圍）
+    <div className="lg-drawer rounded-[28px] overflow-hidden flex flex-col h-full phone:h-auto">
       {/* Header */}
       <div className="px-5 pt-5 pb-3 border-b border-chicken-brown/10">
         <div className="flex items-start justify-between gap-2">
@@ -343,7 +344,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 text-sm">
+      <div className="flex-1 overflow-y-auto phone:flex-none phone:overflow-visible px-5 py-4 space-y-3 text-sm">
         {/* 訂位資訊 */}
         {booking && (table.status === 'reserved' || table.status === 'dining') && (
           <div className="space-y-1.5">

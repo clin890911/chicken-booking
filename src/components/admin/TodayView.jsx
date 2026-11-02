@@ -100,8 +100,8 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable, onO
   // 高度鏈由 BookingsView／index.css 的 [data-fill-page] 串起來，這裡只接 flex-1＋min-h-0，不加固定高。
   // 手機（< md）維持原本整頁捲動。
   return (
-    <div className="space-y-4 md:flex md:flex-col md:flex-1 md:min-h-0">
-      <div data-testid="today-header" className="space-y-3 md:flex-shrink-0">
+    <div className="space-y-4 fillpage:flex fillpage:flex-col fillpage:flex-1 fillpage:min-h-0">
+      <div data-testid="today-header" className="space-y-3 fillpage:flex-shrink-0">
       {/* 統計（散客口徑；用餐中＝現場口徑）：每格都可以點（Barry 2026-10-31）。
           漏斗＝在本頁篩選（今日訂位→重設篩選、已到/離→只看已到）；箭頭＝跳去別頁（未指派→當日排位、用餐中→現場）。 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -244,7 +244,7 @@ export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable, onO
       </div>
 
       {/* 列表（散客卡 + 團體梯次卡同時段同框）：iPad 上自己捲動；lg 以上卡片 2 欄 */}
-      <div ref={listRef} data-testid="today-list" className="space-y-4 md:flex-1 md:min-h-0 md:overflow-y-auto md:overscroll-y-contain md:-mx-1 md:px-1 md:pb-2">
+      <div ref={listRef} data-testid="today-list" className="space-y-4 fillpage:flex-1 fillpage:min-h-0 fillpage:overflow-y-auto fillpage:overscroll-y-contain fillpage:-mx-1 fillpage:px-1 fillpage:pb-2">
       {entries.length === 0 ? (
         filtered.length === 0 && (query || !allSources || filter.arrivedOnly) ? (
           <EmptyState icon="search" title="找不到符合的訂位" hint="試試其他關鍵字或清除過濾條件" />

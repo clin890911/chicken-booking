@@ -315,13 +315,13 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   }
 
   return (
-    <div className="w-full max-w-3xl lg:max-w-6xl mx-auto md:flex md:flex-col md:flex-1 md:min-h-0">
+    <div className="w-full max-w-3xl lg:max-w-6xl mx-auto fillpage:flex fillpage:flex-col fillpage:flex-1 fillpage:min-h-0">
       {/* 版面：手機／直向單欄（客人 → 人數 → 日期時段 → 備註，與過去同順序）；
           lg 以上兩欄——左＝客人＋人數＋備註、右＝日期＋時段＋桌位，
           讓整天的時段在 iPad 橫向 1180×820 一進來就看得到、不必往下捲（接電話時最常改的就是日期時段）。
           頁面捲動第 2 批・A：iPad（md 以上）不整頁捲動——表單區（data-testid=add-form-scroll）自己捲，
           底部確認列固定在下方（高度鏈見 BookingsView／index.css [data-fill-page]，不加固定高）。 */}
-      <div data-testid="add-form-scroll" className="md:flex-1 md:min-h-0 md:overflow-y-auto md:overscroll-y-contain md:-mx-1 md:px-1 md:py-1">
+      <div data-testid="add-form-scroll" className="fillpage:flex-1 fillpage:min-h-0 fillpage:overflow-y-auto fillpage:overscroll-y-contain fillpage:-mx-1 fillpage:px-1 fillpage:py-1">
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:grid-rows-[auto_auto_1fr] lg:items-start">
       {/* === ① 客人 === */}
       <Card className="lg:col-start-1 lg:row-start-1">
@@ -529,10 +529,11 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
       {/* === 底部黏性操作列：缺欄時收成一列「還差」pills（點捲到該欄），
              填齊才展開確認鈕——避免手機上整塊蓋住日期/時段。
              確認鈕帶出所選桌號（今天），存檔前就看得到會指派哪張桌 === */}
-      {/* md 以上表單區自己捲、這列本來就固定在下方 → md:static（sticky 的 bottom 位移會把它往上推、蓋到表單）。
+      {/* md 以上（且不矮）表單區自己捲、這列本來就固定在下方 → fillpage:static（sticky 的 bottom 位移會把它往上推、蓋到表單）。
+          手機：BottomNav 是 in-flow、在捲動區外，貼捲動區底 bottom-0 就好（舊的 bottom-20 會懸空 80px 蓋到備註框）。
           不支援 :has() 的瀏覽器（高度鏈接不起來、退回整頁捲）→ index.css 以 @supports not selector(:has(*))
           把 [data-add-confirm-bar] 改回 sticky，確認列仍黏在底部（#196 收尾）。 */}
-      <div data-add-confirm-bar className="sticky bottom-20 lg:bottom-3 z-20 pt-2 md:static md:flex-shrink-0">
+      <div data-add-confirm-bar className="sticky bottom-0 z-20 pt-2 fillpage:static fillpage:flex-shrink-0">
         <div className="rounded-xl border border-chicken-brown/10 bg-white/95 p-2.5 shadow-lg backdrop-blur">
           {valid ? (
             <Button onClick={handleSubmit} disabled={busy} className="w-full min-h-[44px]">

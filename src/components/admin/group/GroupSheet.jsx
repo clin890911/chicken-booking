@@ -202,7 +202,7 @@ export default function GroupSheet({ group, tables = [], store = {}, fixtureSour
           @page { size: A4 portrait; margin: 0; }
         }
       `}</style>
-      <div className="min-h-full flex flex-col items-center py-6 px-3" onClick={e => e.stopPropagation()}>
+      <div className="min-h-full flex flex-col items-center phone:items-start py-6 px-3" onClick={e => e.stopPropagation()}>
         <div id="group-sheet-actions" className="mb-3 flex gap-2">
           <button onClick={() => window.print()} className="px-4 py-2 rounded-xl bg-chicken-red text-white font-bold text-sm shadow">列印 / 存 PDF</button>
           <button onClick={exportPng} className="px-4 py-2 rounded-xl bg-chicken-brown text-white font-bold text-sm shadow">存成圖片（傳 LINE）</button>

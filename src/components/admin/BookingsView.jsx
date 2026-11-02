@@ -62,16 +62,16 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   // 子分頁切換捲回頂端（今日清單捲到很下面再切「新增」，表單不該停在半路）
   const rootRef = useScrollToTopOn(seatDate ? `seat:${sub}` : sub)
 
-  // 一面式子頁（頁面捲動第 2 批・A）：今日／新增在 iPad（md 以上）不整頁捲動——頁首固定、清單／表單自己捲。
+  // 一面式子頁（頁面捲動第 2 批・A）：今日／新增在 iPad（md 以上且不矮，手機橫向不算；見 tailwind 的 fillpage:）不整頁捲動——頁首固定、清單／表單自己捲。
   // 高度鏈：AdminPage 內容區（index.css 的 [data-fill-page] 規則）→ 這層 → 子頁根元素，一路 flex column＋min-h-0，不加固定高。
   // 日曆／查詢維持整頁捲動（日曆收合區、查詢結果長度不定，另案處理）。
   const fill = sub === 'today' || (sub === 'add' && canCreate)
-  const fillCls = fill ? ' md:flex md:flex-col md:flex-1 md:min-h-0' : ''
+  const fillCls = fill ? ' fillpage:flex fillpage:flex-col fillpage:flex-1 fillpage:min-h-0' : ''
 
   return (
     <div ref={rootRef} data-fill-page={fill ? '' : undefined} className={`space-y-3${fillCls}`}>
       {/* 頁名與子分頁籤同一列（桌機不再有獨立標題列，見 layout/PageTitle） */}
-      <div className="sticky top-0 z-20 py-1 bg-chicken-cream flex items-center gap-3 md:flex-shrink-0">
+      <div className="sticky top-0 z-20 py-1 bg-chicken-cream flex items-center gap-3 fillpage:flex-shrink-0">
       <PageTitle className="pl-1">訂位</PageTitle>
       <SegmentedControl options={canCreate ? SUB_TABS : SUB_TABS.filter(t => t.key !== 'add')} value={sub} onChange={setSub} ariaLabel="訂位子分頁" />
       </div>

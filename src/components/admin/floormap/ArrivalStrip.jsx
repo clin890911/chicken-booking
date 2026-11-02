@@ -133,7 +133,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
   if (!targets.length) return null
 
   return (
-    <div className="flex-shrink-0 mt-2 pt-2 border-t border-chicken-brown/10">
+    <div className="flex-shrink-0 mt-2 pt-2 border-t border-chicken-brown/10 short:col-span-2 short:min-w-0">
       <div className="flex items-center px-0.5 mb-1">
         {/* 總筆數：永遠是真實總數，不管畫面上看得到幾顆——店員看到「等報到 6」但只數到
             3 顆，就知道要往右滑，不會被「看起來已經滿版」的錯覺騙走。 */}

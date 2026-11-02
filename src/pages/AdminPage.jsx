@@ -15,6 +15,7 @@ import { todayStr } from '../utils/timeSlots'
 import { useNewVersion } from '../hooks/useNewVersion'
 import { useAdminAppManifest } from '../hooks/useAppManifest'
 import { resolveAdminTab } from '../utils/landingTab'
+import { isPhoneLayout } from '../utils/phoneLayout'
 import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
 
 const TABS = [
@@ -55,7 +56,12 @@ export default function AdminPage() {
     setSearchParams(new URLSearchParams(taskSource.search))
     setTaskSource(null)
   }, [taskSource, setSearchParams])
-  useLayoutEffect(() => { if (tab !== 'ops' && returnScroll.current != null && contentRef.current) { contentRef.current.scrollTop = returnScroll.current; returnScroll.current = null } }, [tab])
+  useLayoutEffect(() => {
+    if (!contentRef.current) return
+    if (tab !== 'ops' && returnScroll.current != null) { contentRef.current.scrollTop = returnScroll.current; returnScroll.current = null }
+    // 手機：現場頁也跟其他分頁共用這個捲動容器，切頁要回頂端（iPad 現場頁不捲，行為不動）
+    else if (isPhoneLayout()) contentRef.current.scrollTop = 0
+  }, [tab])
   const [pendingAssign, setPendingAssign] = useState(null)
   // pendingMove：訂位卡／詳情／新增後 toast 的「改桌」→ 現場頁 move 模式（比照 pendingAssign 的跨頁機制）。
   // 帶 seq：同一筆訂位連按兩次改桌（中間取消過）也要能再觸發。
@@ -177,7 +183,8 @@ export default function AdminPage() {
       {/* 主區 */}
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* 手機版頂部 Header */}
-        <div className="lg:hidden flex-shrink-0">
+        {/* 手機橫向（short）把標題列收掉：只有頁名與登入者、沒有操作，高度全留給內容（頁名看底部導覽） */}
+        <div className="lg:hidden short:hidden flex-shrink-0">
           <Header
             title="雞王管理後台"
             subtitle={tabInfo.label}
@@ -196,7 +203,7 @@ export default function AdminPage() {
             現場頁早已不渲染這條（登入者接在現場頂列最右端），這次不動。 */}
 
         {/* 上下留白：現場頁維持 py-4（一面式版面已依此調好，不可動）；其他頁少了標題列後縮成 py-3，仍不貼邊 */}
-        <main className={`flex-1 min-h-0 flex flex-col px-3 sm:px-6 ${tab === 'ops' ? 'py-4' : 'py-3'} overflow-x-hidden max-w-[1600px] w-full mx-auto`}>
+        <main className={`flex-1 min-h-0 flex flex-col px-3 sm:px-6 ${tab === 'ops' ? 'py-4 phone:py-2' : 'py-3 short:py-1'} overflow-x-hidden max-w-[1600px] w-full mx-auto`}>
           {updateAvailable && (
             <div role="status" className="mb-3 flex flex-shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border-2 border-blue-300 bg-blue-50 px-4 py-2.5">
               <p className="text-sm font-bold text-blue-800">
@@ -217,8 +224,9 @@ export default function AdminPage() {
             </div>
           )}
           {/* 分頁切換不用 AnimatePresence mode="wait"（v11 exit 回呼遺失 bug，詳見 BookingPage） */}
-          {/* 現場分頁＝一面式（不整頁捲動，捲動只發生在右側欄內）；其他分頁＝內容內部捲動、側邊欄固定 */}
-          <div ref={contentRef} data-testid="admin-content" className={`animate-soft-enter flex-1 min-h-0 ${tab === 'ops' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto overscroll-y-contain'}`}>
+          {/* 現場分頁＝一面式（不整頁捲動，捲動只發生在右側欄內）；其他分頁＝內容內部捲動、側邊欄固定。
+              手機條件（phone:）現場頁改成內容區整頁捲（方向 A）；iPad 橫向不受影響。 */}
+          <div ref={contentRef} data-testid="admin-content" className={`animate-soft-enter flex-1 min-h-0 ${tab === 'ops' ? 'flex flex-col overflow-hidden phone:block phone:overflow-y-auto phone:overscroll-y-contain' : 'overflow-y-auto overscroll-y-contain'}`}>
               {tab === 'ops' && (
                 <OperationsView
                   pendingAssign={pendingAssign}

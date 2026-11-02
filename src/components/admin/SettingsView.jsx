@@ -85,8 +85,8 @@ const SECTION_TITLES = {
   firestore: 'Firestore 資料同步', noshow: 'No-show 查詢', export: '資料匯出', staff: '管理員帳號', account: '帳號',
 }
 // 主從式版面（頁面捲動第 3 批）的斷點：md（768）以上＝一次只顯示一個區塊、內容欄自己捲；
-// 手機（< md）維持原本的可收合清單。jsdom 沒有 matchMedia → 一律走清單版（既有單元測試不受影響）。
-const WIDE_QUERY = '(min-width: 768px)'
+// 手機（< md）與手機橫向（高度 ≤500，兩欄各自捲會只剩幾 px）維持原本的可收合清單。jsdom 沒有 matchMedia → 一律走清單版（既有單元測試不受影響）。
+const WIDE_QUERY = '(min-width: 768px) and (min-height: 501px)'
 function useWideSettings() {
   const get = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(WIDE_QUERY).matches
   const [wide, setWide] = useState(get)
@@ -547,7 +547,7 @@ export default function SettingsView({ onOpenCustomer }) {
       {/* 內容欄（主從式版面：頂端狀態列固定、下方區塊內容自己捲） */}
       <div className={`min-w-0 flex-1 ${wide ? 'flex min-h-0 flex-col gap-3' : 'space-y-4'}`}>
       {/* 手機：頂部橫向分類 pills */}
-      <div className="lg:hidden -mx-1 flex gap-2 overflow-x-auto pb-1" aria-label="設定分類">
+      <div className="lg:hidden -mx-1 phone:mx-0 flex gap-2 overflow-x-auto pb-1" aria-label="設定分類">
         {SETTINGS_CATEGORIES.map(c => (
           <button
             key={c.key}

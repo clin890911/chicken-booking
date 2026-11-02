@@ -620,6 +620,13 @@ export default function LayoutEditor({ open, onClose }) {
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 bg-chicken-cream flex flex-col"
         >
+          {/* 窄螢幕（< 768）不做手機編輯：拖桌需要整層地圖＋雙手操作，蓋在編輯器上給提示，轉橫向夠寬就自動能編 */}
+          <div data-testid="layout-editor-narrow" className="md:hidden absolute inset-0 z-10 bg-chicken-cream flex flex-col items-center justify-center gap-4 p-6 text-center">
+            <Icon name="wrench" size={32} />
+            <p className="text-lg font-bold text-chicken-brown">請到 iPad 或電腦編輯版面</p>
+            <p className="text-sm text-chicken-brown/60">桌位佈局要看整層地圖、拖曳桌子，手機螢幕太窄。</p>
+            <button type="button" onClick={handleCancel} className="btn-secondary px-6">返回</button>
+          </div>
           {/* === Header === */}
           <header className="bg-chicken-brown text-white px-4 py-3 flex items-center gap-3 flex-shrink-0">
             <Icon name="wrench" size={22} />

@@ -1,4 +1,4 @@
-import { useState, useLayoutEffect } from 'react'
+import { useState, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import NumericKeypad from './NumericKeypad'
@@ -22,6 +22,7 @@ const KEYPAD_MIN_WIDTH = 300
 // status：號碼下方的一行說明（常客比對結果等）；不給就不顯示。
 export default function FloatingPhoneKeypad({ open, onClose, value, onChange, anchorRef, boundsRef, status = null }) {
   const [pos, setPos] = useState(null)
+  const panelRef = useRef(null)
 
   useLayoutEffect(() => {
     if (!open) return
@@ -36,7 +37,9 @@ export default function FloatingPhoneKeypad({ open, onClose, value, onChange, an
         ? Math.min(KEYPAD_WIDTH, roomRight)
         : Math.min(KEYPAD_WIDTH, window.innerWidth - KEYPAD_GAP * 2)
       const left = Math.max(KEYPAD_GAP, Math.min(f.right + KEYPAD_GAP, window.innerWidth - width - KEYPAD_GAP))
-      const bottom = Math.max(KEYPAD_GAP, window.innerHeight - r.bottom)
+      // 矮螢幕／整頁捲到面板底在畫面上方時，貼底對齊會把鍵盤頂到畫面外（360×640 實測 y=-37）→ 夾回視窗內
+      const maxBottom = Math.max(KEYPAD_GAP, window.innerHeight - (panelRef.current?.offsetHeight || 0) - KEYPAD_GAP)
+      const bottom = Math.min(maxBottom, Math.max(KEYPAD_GAP, window.innerHeight - r.bottom))
       setPos({ left, bottom, width })
     }
     place()
@@ -53,9 +56,10 @@ export default function FloatingPhoneKeypad({ open, onClose, value, onChange, an
         aria-hidden="true"
       />
       <div
+        ref={panelRef}
         role="dialog"
         aria-label="電話數字鍵盤"
-        className="lg-float lg-keypad fixed z-[71] rounded-[28px] p-3"
+        className="lg-float lg-keypad fixed z-[71] rounded-[28px] p-3 phone:max-h-[calc(100dvh-24px)] phone:overflow-y-auto"
         style={pos
           ? { left: pos.left, bottom: pos.bottom, width: pos.width }
           : { left: KEYPAD_GAP, bottom: KEYPAD_GAP, width: KEYPAD_WIDTH, visibility: 'hidden' }}

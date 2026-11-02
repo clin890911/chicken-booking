@@ -135,12 +135,12 @@ export default function FastWalkInPanel({
   }
 
   return (
-    <div ref={rootRef} className="flex-1 min-h-0 flex flex-col">
+    <div ref={rootRef} className="flex-1 min-h-0 phone:flex-none flex flex-col">
       {/* 可捲區：欄位再多也不會把底部動作推走 */}
       {/* p-3 space-y-1.5（原 p-4 space-y-3）：常態情境（一桌＋姓氏＋人數）要能一面式不捲。
           省的是留白，不是按鈕——姓氏 h-16 / 人數・電話 60px / 滑桿 66px 一格都不縮。
           「🪑 帶位」標題刻意不放：上方分頁籤已經寫著「帶位」。 */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
+      <div className="flex-1 min-h-0 overflow-y-auto phone:flex-none phone:overflow-visible p-3 space-y-1.5">
         {/* 桌位：已選→卡片（可多桌）；未選→提示點桌況圖 */}
         {tables.length > 0 ? (
           <div className="space-y-1.5">
@@ -240,7 +240,7 @@ export default function FastWalkInPanel({
       </div>
 
       {/* 釘底：警示 + 可坐判定 + 確認入座。永遠可見，不隨上方欄位捲走 */}
-      <div className="flex-none border-t border-chicken-brown/10 bg-white p-3 space-y-2">
+      <div data-rail-footer className="flex-none border-t border-chicken-brown/10 bg-white p-3 space-y-2">
         {warning && (
           <div className="rounded-xl border border-chicken-red/40 bg-chicken-red/10 px-3 py-2">
             {/* 併桌時可能不只一張桌有問題 → 逐條列，勾同意前看得到全部 */}

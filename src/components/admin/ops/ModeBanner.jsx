@@ -9,6 +9,10 @@ import { formatBookingTables } from '../../../utils/bookingTables'
 // 2026-10 Liquid Glass：.lg-mode＝有色材質（實心模式色＋鏡面高光邊＋陰影，styles/glass.css）。
 // 模式色刻意不透明：實測 94% 不透明度時，白字疊在 bg-white/15–20 的確認列上會掉到 4.3–4.4:1（不過 AA）。
 // 按鈕標籤的 ✓ 經 GlyphText 換成線條圖示，無障礙名稱＝純文字（例「確認入座」）。
+// 手機條件（phone:）：橫幅釘在桌況圖上方（OperationsView 選桌模式），只留任務＋確認／取消，
+// 說明小字與次要鈕收掉（原桌、目標桌在地圖下方的任務卡；點已選的桌＝移除）；警示一定留著，內容過高在橫幅內捲。
+// 手機橫向（short）橫幅改放地圖左邊一欄（OperationsView），不限高。
+const PHONE_BANNER = 'phone:px-3 phone:py-2 phone:space-y-1 phone:max-h-[45dvh] phone:overflow-y-auto short:max-h-none'
 const BANNER_STYLE = {
   assign:         { bg: 'bg-sky-800',    btn: 'text-sky-700',     icon: 'bookings' },
   'seat-waitlist':{ bg: 'bg-emerald-800',btn: 'text-emerald-700', icon: 'traffic' },
@@ -52,7 +56,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
     const bg = seatsNow ? 'bg-emerald-800' : 'bg-sky-800'
     const cancelBtn = seatsNow ? 'text-emerald-700' : 'text-sky-700'
     return (
-      <div className={`lg-mode ${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
+      <div data-testid="mode-banner" className={`lg-mode ${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2 ${PHONE_BANNER}`}>
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
             <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
@@ -61,34 +65,35 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
             {squeezed && <span data-testid="squeeze-badge" className="text-xs font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded">擠一擠 · 超坐 {need - multiSeats} 位</span>}
-            <span className="text-xs opacity-90">點桌加 / 減 · 可選單桌或多桌</span>
-            {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</span>}
-            {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded">建議 {comboLabel}{comboNums && mode.suggestionSqueezed ? '（擠一擠）' : ''}（自行選桌）</span>}
-            {!seatsNow && <span className="text-xs opacity-90">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
-            {isArrive && <span className="text-xs opacity-90">確認即入座 · 只能選此刻空桌</span>}
+            <span className="text-xs opacity-90 phone:hidden">點桌加 / 減 · 可選單桌或多桌</span>
+            {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded phone:hidden">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</span>}
+            {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded phone:hidden">建議 {comboLabel}{comboNums && mode.suggestionSqueezed ? '（擠一擠）' : ''}（自行選桌）</span>}
+            {!seatsNow && <span className="text-xs opacity-90 phone:hidden">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
+            {isArrive && <span className="text-xs opacity-90 phone:hidden">確認即入座 · 只能選此刻空桌</span>}
           </div>
-          <button onClick={onCancel} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${cancelBtn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
+          <button onClick={onCancel} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${cancelBtn} rounded-lg font-bold whitespace-nowrap phone:hidden`}>取消</button>
         </div>
-        <div className="bg-white/15 rounded-lg px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
-          <div className="text-sm font-bold">
+        <div className="bg-white/15 rounded-lg px-3 py-2 phone:px-2 phone:py-1 flex items-center justify-between gap-2 flex-wrap phone:flex-nowrap">
+          <div className="text-sm phone:text-xs font-bold phone:min-w-0 phone:flex-1">
             {selected.length ? `已選：${selected.join(' + ')}` : '尚未選桌（點空桌加入）'}
             {!enough && need > maxSeats && <span className="ml-2 opacity-90">— 擠一擠也還差 {need - maxSeats} 位</span>}
           </div>
+          <button onClick={onCancel} className={`hidden phone:inline-flex items-center flex-none text-xs px-3 min-h-[44px] bg-white ${cancelBtn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
           <button
             onClick={onConfirmMulti}
             disabled={!ready}
-            className={`text-xs px-4 py-2 min-h-[44px] rounded-lg font-bold whitespace-nowrap shadow-sm ${
+            className={`text-xs px-4 phone:px-3 py-2 min-h-[44px] flex-none rounded-lg font-bold whitespace-nowrap shadow-sm ${
               ready ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
           ><GlyphText>{`✓ ${mode.replacing ? '確認改桌' : seatsNow ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}`}</GlyphText></button>
         </div>
         {mode.suggestion && onApplySuggestion && (
           <button type="button" data-testid="mode-apply-suggestion" onClick={onApplySuggestion}
-            className="mr-3 min-h-[44px] px-3 rounded-lg bg-white text-emerald-700 text-xs font-bold shadow-sm">
+            className={`mr-3 min-h-[44px] px-3 rounded-lg bg-white text-emerald-700 text-xs font-bold shadow-sm ${selected.length ? 'phone:hidden' : ''}`}>
             用建議桌 {comboLabel}
           </button>
         )}
-        {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs">定位建議桌 {suggestionLabel}</button>}
-        {!!selected.length && <button onClick={onClearSelection} className="text-xs underline min-h-[44px]">清空已選桌</button>}
+        {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs phone:hidden">定位建議桌 {suggestionLabel}</button>}
+        {!!selected.length && <button onClick={onClearSelection} className="text-xs underline min-h-[44px] phone:hidden">清空已選桌</button>}
         {/* 紅＝會解除別組排位或佔團體桌；黃＝只是提醒（時間不衝突、對方保留）。都要勾一下才放行（防呆不變） */}
         {!!multiWarnings.length && <div className={`rounded-lg px-3 py-2 text-sm space-y-1 ${multiWarningSevere ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-900'}`}>
           {multiWarnings.map(line => <div key={line} className="font-bold">{line}</div>)}
@@ -143,25 +148,25 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
         : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
 
   return (
-    <div className={`lg-mode ${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2`}>
+    <div data-testid="mode-banner" className={`lg-mode ${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2 ${PHONE_BANNER}`}>
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
           <Icon name={style.icon} size={18} />
           <span>{bannerText}</span>
           {/* 單桌指派：講清楚這次是「鎖桌」還是「預配」（離用餐 30 分內才鎖） */}
           {mode.type === 'assign' && (
-            <span className="inline-flex items-center bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold">
+            <span className="inline-flex items-center bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold phone:hidden">
               {assignPreassign ? `${mode.booking?.timeSlot || ''} 預配 · 桌子先不鎖`.trim() : '指派即鎖桌'}
             </span>
           )}
           {/* C5：建議桌以白色底色塊突出 */}
           {CONFIRMABLE.includes(mode.type) && (
             mode.suggestion ? (
-              <span className="inline-flex items-center gap-1 bg-white/95 text-chicken-brown px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm">
+              <span className="inline-flex phone:hidden items-center gap-1 bg-white/95 text-chicken-brown px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm">
                 建議 {suggestionLabel}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold">
+              <span className="inline-flex phone:hidden items-center gap-1 bg-white/20 px-2 py-0.5 rounded-lg text-xs font-bold">
                 無建議桌
               </span>
             )
@@ -172,14 +177,14 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
 
       {mode.suggestion && CONFIRMABLE.includes(mode.type) && onApplySuggestion && (
         <button type="button" data-testid="mode-apply-suggestion" onClick={onApplySuggestion}
-          className={`mr-3 min-h-[44px] px-3 rounded-lg bg-white ${style.btn} text-xs font-bold shadow-sm`}>
+          className={`mr-3 min-h-[44px] px-3 rounded-lg bg-white ${style.btn} text-xs font-bold shadow-sm ${pendingConfirm ? 'phone:hidden' : ''}`}>
           用建議桌 {suggestionLabel}
         </button>
       )}
-      {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs">定位建議桌 {suggestionLabel}</button>}
+      {mode.suggestion && <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-xs phone:hidden">定位建議桌 {suggestionLabel}</button>}
       {/* A6：二步確認 — 待確認列 */}
       {pendingConfirm && CONFIRMABLE.includes(mode.type) && (
-        <div className="bg-white/15 rounded-lg px-3 py-2 space-y-2">
+        <div className="bg-white/15 rounded-lg px-3 py-2 phone:px-2 phone:py-1 space-y-2 phone:space-y-1">
           {/* 防呆：此桌已被別筆 booking 預先配走 → 紅底示警（逐筆寫明預配將解除或會保留） */}
           {pendingConflicts?.length > 0 && (
             <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
@@ -203,11 +208,11 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
               </span>
             </div>
           )}
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="text-sm font-bold">
+          <div className="flex items-center justify-between gap-2 phone:gap-1 flex-wrap">
+            <div className="text-sm phone:text-xs font-bold">
               {confirmText}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 phone:ml-auto">
               <button
                 onClick={onClearPending}
                 className={`text-xs px-3 py-2 min-h-[44px] bg-white/90 ${style.btn} rounded-lg font-bold whitespace-nowrap`}
