@@ -46,7 +46,13 @@ vi.mock('../../src/components/admin/floormap/FloorMap', () => ({ default: () => 
 vi.mock('../../src/components/admin/group/GroupSheet', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/TableGrid', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/LayoutEditor', () => ({ default: () => null }))
-vi.mock('../../src/components/admin/TelegramSettings', () => ({ default: () => <div>TgStub</div> }))
+vi.mock('../../src/components/admin/TelegramSettings', async () => {
+  const { useState } = await import('react')
+  return { default: function TgStub() {
+    const [n, setN] = useState(0)
+    return <div>TgStub<button type="button" data-testid="tg-count" onClick={() => setN(v => v + 1)}>{n}</button></div>
+  } }
+})
 vi.mock('../../src/components/admin/StaffAdminSection', () => ({ default: () => null }))
 vi.mock('../../src/components/admin/ExportCenter', () => ({ default: () => null }))
 
@@ -188,7 +194,7 @@ describe('設定頁：md 以上主從式（一次一個區塊）', () => {
     origMM = window.matchMedia
   })
   afterEach(() => { window.matchMedia = origMM })
-  const shown = () => [...container.querySelectorAll('[data-settings-section]')].map(e => e.dataset.settingsSection)
+  const shown = () => [...container.querySelectorAll('[data-settings-section]:not([hidden])')].map(e => e.dataset.settingsSection)
 
   it('寬螢幕：只畫選中的區塊、直接展開；點區塊清單切換；分類仍讀 ?section=', () => {
     window.matchMedia = () => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} })
@@ -199,6 +205,24 @@ describe('設定頁：md 以上主從式（一次一個區塊）', () => {
     click(btn(b => b.textContent.trim() === '通知與備份'))
     expect(shown()).toEqual(['telegram'])
     expect(container.textContent).toContain('TgStub')
+  })
+
+  it('寬螢幕：同分類切走再切回來，區塊內的暫態不重設（資料匯出設好的條件不被清掉）；換分類才釋放', () => {
+    window.matchMedia = () => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} })
+    settingsSection = 'line'
+    mount(<SettingsView />)
+    expect(q('[data-testid="tg-count"]')).toBeNull() // 沒選過的區塊不先掛載
+    click(btn(b => b.textContent.trim() === '通知與備份'))
+    click(q('[data-testid="tg-count"]'))
+    expect(q('[data-testid="tg-count"]').textContent).toBe('1')
+    click(btn(b => b.textContent.trim() === 'LINE 官方帳號'))
+    expect(shown()).toEqual(['line'])
+    expect(q('[data-settings-section="telegram"]').hidden).toBe(true) // 藏起來、看不到，但沒卸載
+    click(btn(b => b.textContent.trim() === '通知與備份'))
+    expect(shown()).toEqual(['telegram'])
+    expect(q('[data-testid="tg-count"]').textContent).toBe('1')
+    click(btn(b => b.textContent.includes('營運規則')))
+    expect(q('[data-testid="tg-count"]')).toBeNull()
   })
 
   it('手機（無 matchMedia）：維持原本的可收合清單', () => {
@@ -223,7 +247,7 @@ describe('設定頁：區塊寫進網址 ?section=<分類>&block=<區塊>', () =
     window.matchMedia = () => ({ matches: true, addEventListener: () => {}, removeEventListener: () => {} })
   })
   afterEach(() => { window.matchMedia = origMM })
-  const shown = () => [...container.querySelectorAll('[data-settings-section]')].map(e => e.dataset.settingsSection)
+  const shown = () => [...container.querySelectorAll('[data-settings-section]:not([hidden])')].map(e => e.dataset.settingsSection)
   const last = () => urlLog[urlLog.length - 1]
   const lastParams = () => new URLSearchParams(last().query)
 
