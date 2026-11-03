@@ -71,10 +71,11 @@ test('現場→今日訂位→＋新增：姓氏/稱謂→人數→時段→電�
   await panel(page).getByRole('button', { name: '14:00' }).click()
   await typePhone(page, '0912345678')
 
-  // 建議桌預選（預配 105）；點地圖 106 改選
-  await expect(panel(page).getByTestId('reserve-table')).toContainText('預配 105')
-  await expect(panel(page).getByText(/預配：桌子先不鎖、現在仍可帶位/)).toBeVisible()
+  // 建議桌不預選：桌位列＝先不指派、主鈕寫先不指派；點地圖 106 才選（預配 106）
+  await expect(panel(page).getByTestId('reserve-table')).toHaveText('先不指派')
+  await expect(panel(page).getByRole('button', { name: '確認新增 · 14:00 · 3 位 · 先不指派' })).toBeVisible()
   await mapTable(page, '106').click()
+  await expect(panel(page).getByText(/預配：桌子先不鎖、現在仍可帶位/)).toBeVisible()
   await expect(panel(page).getByTestId('reserve-table')).toContainText('預配 106')
 
   const confirm = panel(page).getByRole('button', { name: '確認新增 · 14:00 · 3 位 · 預配 106' })
@@ -106,6 +107,8 @@ test('09:00 新增 18:00 → 只預配：地圖該桌仍可入座（帶位籤點
   await panel(page).getByRole('button', { name: '來源：現場' }).click()
   await panel(page).getByRole('button', { name: '陳', exact: true }).click()
   await panel(page).getByRole('button', { name: '18:00' }).click()
+  await expect(panel(page).getByTestId('reserve-table')).toHaveText('先不指派')
+  await panel(page).getByRole('button', { name: '用建議桌 105' }).click()      // 建議桌要按「用建議桌」才採用
   await expect(panel(page).getByTestId('reserve-table')).toContainText('預配 105')
   await panel(page).getByRole('button', { name: '確認新增 · 18:00 · 2 位 · 預配 105' }).click()
   await expect(page.getByText('已新增 陳先生 18:00 · 預配 105')).toBeVisible()
@@ -128,18 +131,21 @@ test('離用餐 30 分內新增 → 存檔即鎖桌（桌 105）；點非候選�
 
   await panel(page).getByRole('button', { name: '來源：現場' }).click()
   await panel(page).getByRole('button', { name: '林', exact: true }).click()
-  // 預設 13:30（離現在 20 分）→ 鎖桌型
+  // 預設 13:30（離現在 20 分）→ 鎖桌型；建議桌 105 不預選，按「用建議桌」才選
+  await expect(panel(page).getByTestId('reserve-table')).toHaveText('先不指派')
+  await panel(page).getByRole('button', { name: '用建議桌 105' }).click()
   await expect(panel(page).getByTestId('reserve-table')).toContainText('桌 105')
   await expect(panel(page).getByText(/存檔後立刻鎖桌/)).toBeVisible()
   // 大組（6 人桌擠一擠也坐不下 8 位）→ 不選桌，存檔後再到「今日」指派併桌
   await panel(page).getByRole('button', { name: '8 位' }).click()
   await expect(panel(page).getByText(/店裡沒有單桌坐得下 8 位/)).toBeVisible()
-  // 非候選桌：6 位時 105（4 人桌，擠一擠最多 5 位）坐不下 → 點了只 toast 說明，不選取（仍是建議的 6 人桌）
+  // 非候選桌：6 位時 105（4 人桌，擠一擠最多 5 位）坐不下 → 點了只 toast 說明，不選取（仍是先不指派，不會被換成別張建議桌）
   await panel(page).getByRole('button', { name: '6 位' }).click()
   await mapTable(page, '105').click()
   await expect(page.getByText('105 只有 4 席，擠一擠也坐不下 6 位')).toBeVisible()
   await expect(panel(page).getByTestId('reserve-table')).not.toContainText('105')
   await panel(page).getByRole('button', { name: '2 位' }).click()
+  await panel(page).getByRole('button', { name: '用建議桌 105' }).click()      // 大組時選的桌已被清掉，改回 2 位要再選
 
   await panel(page).getByRole('button', { name: '確認新增 · 13:30 · 2 位 · 桌 105' }).click()
   await expect(page.getByText('已新增 林先生 13:30 · 桌 105')).toBeVisible()
@@ -149,6 +155,65 @@ test('離用餐 30 分內新增 → 存檔即鎖桌（桌 105）；點非候選�
   const t = tables.find(x => x.number === '105')
   expect(t.status).toBe('reserved')
   expect(t.currentBookingId).toBe(b.id)
+})
+
+test('沒點桌就存檔 → 未配桌訂位（不鎖不預配）；今日清單卡片仍可一鍵指派', async ({ page }) => {
+  await page.clock.setFixedTime(at('13:10'))
+  await openPanel(page)
+
+  await panel(page).getByRole('button', { name: '來源：現場' }).click()
+  await panel(page).getByRole('button', { name: '林', exact: true }).click()
+  await expect(panel(page).getByTestId('reserve-table')).toHaveText('先不指派')
+  await panel(page).getByRole('button', { name: '確認新增 · 13:30 · 2 位 · 先不指派' }).click()
+  await expect(page.getByText('已新增 林先生 13:30', { exact: true })).toBeVisible()   // 不帶「· 桌／預配」
+
+  const { bookings, tables } = await readState(page)
+  const b = bookings.find(x => x.name === '林先生')
+  expect(b.assignedTableId ?? null).toBeNull()
+  expect(tables.find(t => t.number === '105').status).toBe('vacant')
+
+  // 今日清單的新卡：一鍵「指派 ○○○」（或「指派桌位」）仍在
+  const card = page.locator(`[data-booking-id="${b.id}"]`)
+  await expect(card.getByRole('button', { name: /指派/ }).first()).toBeVisible()
+})
+
+test('點了桌之後人數改變使它失效 → 改回先不指派並提示，不自動換成另一張建議桌', async ({ page }) => {
+  await page.clock.setFixedTime(at('13:10'))
+  await openPanel(page)
+
+  await mapTable(page, '106').click()
+  await expect(panel(page).getByTestId('reserve-table')).toContainText('桌 106')
+  await panel(page).getByRole('button', { name: '6 位' }).click()      // 4 人桌擠一擠最多 5 位 → 106 失效
+  await expect(panel(page).getByText('106 不適用目前的人數／時段，已改為先不指派')).toBeVisible()
+  await expect(panel(page).getByTestId('reserve-table')).toHaveText('先不指派')
+})
+
+test('樓層：未選桌時改人數或時段地圖不動；按「用建議桌」才跟到建議桌那層', async ({ page }) => {
+  await page.clock.setFixedTime(at('13:10'))
+  await openPanel(page)
+  const map = (f) => page.locator(`svg[aria-label="${f} 桌況圖"]`)
+
+  await page.locator('[role=tablist][aria-label=樓層] button', { hasText: '2F' }).click()
+  await expect(map('2F')).toBeVisible()
+  await panel(page).getByRole('button', { name: '6 位' }).click()   // 建議桌會換：未選桌時地圖也不可跟過去
+  await panel(page).getByRole('button', { name: '14:00' }).click()
+  await expect(map('2F')).toBeVisible()
+  await expect(panel(page).getByTestId('reserve-table')).toHaveText('先不指派')
+
+  await panel(page).getByRole('button', { name: /用建議桌/ }).click()
+  await expect(panel(page).getByTestId('reserve-table')).toContainText(/\d{3}/)
+  await expect(map('1F')).toBeVisible()
+})
+
+test('點了桌沒存就返回，再開面板要回到未選桌', async ({ page }) => {
+  await page.clock.setFixedTime(at('13:10'))
+  await openPanel(page)
+
+  await mapTable(page, '106').click()
+  await expect(panel(page).getByTestId('reserve-table')).toContainText('桌 106')
+  await panel(page).getByRole('button', { name: /返回今日/ }).click()
+  await page.getByRole('button', { name: '＋ 新增今日訂位' }).click()
+  await expect(panel(page).getByTestId('reserve-table')).toHaveText('先不指派')
 })
 
 test('返回：有填姓名時先確認「放棄這筆新增？」；繼續填留在面板、ESC＋放棄回今日訂位', async ({ page }) => {

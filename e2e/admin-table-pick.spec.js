@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 // 2026-09 店主回報：「余先生早上來現場訂位，輸入完他的資料後，沒辦法選桌」。
-// 1) 新增表單時段下方有「桌位」區：預選建議桌、可改選；來源＝現場時電話選填。
+// 1) 新增表單時段下方有「桌位」區：建議桌只標「建議」不預選（店主 2026-11 拍板）、店員點選才採用；來源＝現場時電話選填。
 // 2) 存檔後訂位卡有「改桌」→ 跨頁到現場 move 模式 → 地圖點新桌 → 確認改桌。
 // 3) 建議桌看佔用區間：11:00 已預配 105 時，11:30 的訂位不再被建議 105；
 //    鎖桌時機（2026-09 店主拍板「接近時段才鎖」）：09:00 新增 13:30 只預配、不鎖桌 →
@@ -79,8 +79,10 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
   await expect(page.getByText('選好時段後')).toHaveCount(0)
   await page.getByRole('button', { name: /^11:00/ }).click()
 
-  // 桌位區：預選建議桌（2 位 → 1F 四人桌 105），改選 106，確認列帶出桌號
-  await expect(page.getByRole('button', { name: /^105 · 4人/ })).toHaveAttribute('aria-pressed', 'true')
+  // 桌位區：建議桌（2 位 → 1F 四人桌 105）標「建議」但不預選，確認列＝先不指派；店員點 106 才帶出桌號
+  await expect(page.getByRole('button', { name: /^105 · 4人/ })).toHaveAttribute('aria-pressed', 'false')
+  await expect(page.getByRole('button', { name: /^105 · 4人.*建議/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /確認新增 · .*11:00 · 2 位 · 先不指派/ })).toBeVisible()
   await page.getByRole('button', { name: /^106 · 4人/ }).click()
   const confirmBtn = page.getByRole('button', { name: /確認新增 · .*11:00 · 2 位 · 桌 106/ })
   await expect(confirmBtn).toBeVisible()
@@ -146,6 +148,8 @@ test('09:00 新增 13:30 → 只預配 105（桌況仍空），不撞 11:00 已�
   await page.getByPlaceholder('王小姐').fill('陳小姐')
   await page.getByRole('button', { name: /^13:30/ }).click()
 
+  await expect(page.getByRole('button', { name: /^105 · 4人/ })).toHaveAttribute('aria-pressed', 'false')
+  await page.getByRole('button', { name: /^105 · 4人/ }).click()
   await expect(page.getByRole('button', { name: /^105 · 4人/ })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByText(/先預配 105：桌子先不鎖/)).toBeVisible()
   await page.getByRole('button', { name: /確認新增 · .*13:30 · 2 位 · 預配 105/ }).click()

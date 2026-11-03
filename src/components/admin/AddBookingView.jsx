@@ -63,10 +63,11 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
   // 店員是否真的點過時段。「今天自動預選」不算：沒點過 → 換到非今天要清空（缺時段提示才會回來，
   // 否則接電話時預選的今天時段會被默默沿用到別天，訂錯時間）；點過 → 才走「新日期同時段仍可訂就保留」。
   const slotTouched = useRef(false)
-  const pickSlot = (t) => { slotTouched.current = true; setTimeSlot(t) }
+  const pickSlot = (t) => { slotTouched.current = true; setTimeSlot(t); setTableNotice('') }
   const [notes, setNotes] = useState({ pet: false, child: false, mobility: false, text: '' })
-  // 桌位選擇：'auto'＝跟著建議（第一張候選）｜桌號＝店員點選的桌｜'map'＝到桌況圖選｜'none'＝先不指派
-  const [tablePick, setTablePick] = useState('auto')
+  // 桌位選擇：'unset'＝店員還沒點過（不預選任何桌；店主 2026-11 拍板：建議桌只列出、不自動選）｜
+  // 桌號＝店員明確點選的桌｜'map'＝到桌況圖選｜'none'＝店員點了「先不指派」
+  const [tablePick, setTablePick] = useState('unset')
   const [tableNotice, setTableNotice] = useState('')
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false) // 按過提交才顯示欄位級紅框
@@ -171,36 +172,25 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
     [tables, date, guests],
   )
   const emptyDefault = anySingleFits ? 'none' : 'map'
-  // 實際會用的選擇（智慧預設：沒選過就用第一張候選；沒有候選時依上面的原因給預設）
+  // 實際會用的選擇：只採用店員明確點選的桌，不預選候選第一張（建議桌只在晶片上標「建議」）。
+  // 沒點過（'unset'）→ 有單桌坐得下＝先不指派；沒有任何單桌坐得下（大組）＝導引到桌況圖併桌（不是預選桌）。
   const tableChoice = useMemo(() => {
     if (!isToday || !timeSlot) return null
     if (tablePick === 'none') return { kind: 'none' }
     if (tablePick === 'map') return { kind: 'map' }
-    const explicit = tablePick !== 'auto' ? tableCandidates.find(t => t.number === tablePick) : null
-    const t = explicit || tableCandidates[0]
+    if (tablePick === 'unset') return { kind: emptyDefault }
+    const t = tableCandidates.find(x => x.number === tablePick)
     return t ? { kind: 'table', table: t } : { kind: emptyDefault }
   }, [isToday, timeSlot, tablePick, tableCandidates, emptyDefault])
 
-  // 人數/時段改變後，店員點選的桌不再合格 → 回到新的建議，並明講換了（不讓桌號悄悄變掉）
+  // 人數/時段改變後，店員點選的桌不再合格 → 改回「未選桌」並明講（不自動換成別張建議桌）
   useEffect(() => {
     if (!isToday || !timeSlot) return
-    if (['auto', 'map', 'none'].includes(tablePick)) return
+    if (['unset', 'map', 'none'].includes(tablePick)) return
     if (tableCandidates.some(t => t.number === tablePick)) return
-    const next = tableCandidates[0]
-    setTablePick('auto')
-    setTableNotice(next
-      ? `${tablePick} 不適用目前的人數／時段，已改回建議桌 ${next.number}`
-      : `${tablePick} 不適用目前的人數／時段，且沒有其他空桌可鎖，已改為「${emptyDefault === 'none' ? '先不指派' : '到桌況圖選'}」`)
+    setTablePick('unset')
+    setTableNotice(`${tablePick} 不適用目前的人數／時段，已改為${emptyDefault === 'none' ? '先不指派' : '「到桌況圖選」'}`)
   }, [isToday, timeSlot, tablePick, tableCandidates, emptyDefault])
-
-  // 跟著建議走時，建議桌因人數／時段／桌況變動而換了 → 同樣提示
-  const lastAutoTableRef = useRef(null)
-  useEffect(() => {
-    const n = tablePick === 'auto' && tableChoice?.kind === 'table' ? tableChoice.table.number : null
-    const prev = lastAutoTableRef.current
-    lastAutoTableRef.current = n
-    if (prev && n && prev !== n) setTableNotice(`建議桌已改為 ${n}（人數、時段或桌況有變動）`)
-  }, [tablePick, tableChoice])
 
   const pickTable = (v) => { setTablePick(v); setTableNotice('') }
   const tableEmptyReason = !anySingleFits
@@ -300,7 +290,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
       setPhone(''); setCustomName(''); setSurname(null); setTitle(DEFAULT_TITLE); setGuests(2); setKids(0)
       if (!continuous) { setTimeSlot(''); slotTouched.current = false }
       setNotes({ pet: false, child: false, mobility: false, text: '' })
-      setTablePick('auto'); setTableNotice('')
+      setTablePick('unset'); setTableNotice('')
       setAttempted(false); setShowCalendar(false)
       onCreated?.(b)
       if (continuous) {
@@ -408,7 +398,7 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
           <PartySizeField
             total={guests}
             kids={kids}
-            onChange={(t, c) => { setKids(c); setGuests(t) }}
+            onChange={(t, c) => { setKids(c); setGuests(t); setTableNotice('') }}
             hint={`已選：${guests} 位${splitSuffix({ guests, children: kids })}${guests >= 9 ? '（大桌建議改走規劃分頁的團體預排）' : ''}`}
           />
         </div>

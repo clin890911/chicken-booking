@@ -85,18 +85,18 @@ describe('pastSlotFix（面板開著跨過時段）', () => {
 describe('QuickReservePanel', () => {
   let container, root, onSave, onBack, onPick
   // harness：模擬 OperationsView 持有人數／時段／選桌，並依 kind 給出 table
-  function Harness({ kind = 'preassign', needsCombo = false, initialSlot = '14:00', saveResult = true, onOpenFullForm }) {
+  function Harness({ kind = 'preassign', needsCombo = false, initialSlot = '14:00', saveResult = true, suggestedNumber = '105', onOpenFullForm }) {
     const [guests, setGuests] = useState(2)
     const [slot, setSlot] = useState(initialSlot)
-    const [pick, setPick] = useState('auto')
+    const [pick, setPick] = useState('none')   // 不預選建議桌：預設先不指派
     const table = pick === 'none' || !slot || needsCombo ? null : ctx.tables[0]
     return (
       <QuickReservePanel
         guests={guests} onGuestsChange={setGuests}
         timeSlot={slot} onTimeSlotChange={setSlot}
         lockKind={slot ? kind : null} table={table}
-        tablePick={pick} onTablePickChange={(v) => { onPick(v); setPick(v) }}
-        suggestedNumber="105" needsCombo={needsCombo}
+        onTablePickChange={(v) => { onPick(v); setPick(v) }}
+        suggestedNumber={suggestedNumber} needsCombo={needsCombo}
         onSave={(p) => { onSave(p); return saveResult }} onBack={onBack}
         onOpenFullForm={onOpenFullForm}
         now={NOW}
@@ -126,7 +126,14 @@ describe('QuickReservePanel', () => {
     vi.useRealTimers()
   })
 
-  it('渲染：返回鈕＋標題；預設人數 2、時段（父層預設）選中、建議桌「預配 105 · 建議」；已過時段不列', () => {
+  it('沒有候選桌：據實講沒有桌可選，不叫店員去點桌況圖', () => {
+    render({ suggestedNumber: null })
+    expect(container.textContent).toContain('這個時段沒有不撞桌的桌')
+    expect(container.textContent).not.toContain('可選桌')
+    expect(container.textContent).not.toContain('用建議桌')
+  })
+
+  it('渲染：返回鈕＋標題；預設人數 2、時段（父層預設）選中、桌位預設「先不指派」（不預選建議桌）；已過時段不列', () => {
     render()
     expect(container.textContent).toContain('返回今日')
     expect(container.textContent).toContain('新增今日訂位')
@@ -134,8 +141,16 @@ describe('QuickReservePanel', () => {
     expect(byLabel('14:00').getAttribute('aria-pressed')).toBe('true')
     expect(byLabel('12:30')).toBeNull()                 // 13:10 時 12:30 已過
     const t = container.querySelector('[data-testid="reserve-table"]')
-    expect(t.textContent).toContain('預配 105')
-    expect(t.textContent).toContain('建議')
+    expect(t.textContent).toBe('先不指派')
+    expect(t.textContent).not.toContain('105')
+    expect(container.textContent).toContain('存檔後先不指派')
+    expect(container.textContent).not.toContain('預配：桌子先不鎖')
+    // 建議桌只用按鈕提示；按下才選，選了才有「預配 105 · 建議」與鎖桌說明
+    click(byText('用建議桌 105'))
+    expect(onPick).toHaveBeenCalledWith('105')
+    const picked = container.querySelector('[data-testid="reserve-table"]')
+    expect(picked.textContent).toContain('預配 105')
+    expect(picked.textContent).toContain('建議')
     expect(container.textContent).toContain('預配：桌子先不鎖、現在仍可帶位')
   })
 
@@ -160,6 +175,7 @@ describe('QuickReservePanel', () => {
 
   it('鎖桌型（離用餐 30 分內）→「桌 105」＋「存檔後立刻鎖桌」', () => {
     render({ kind: 'hold', initialSlot: '13:30' })
+    click(byText('用建議桌 105'))
     expect(container.querySelector('[data-testid="reserve-table"]').textContent).toContain('桌 105')
     expect(container.textContent).toContain('存檔後立刻鎖桌')
   })
@@ -172,6 +188,8 @@ describe('QuickReservePanel', () => {
     expect(mainBtn().textContent).toBe('還差：電話')
     click(byLabel('來源：現場'))
     expect(mainBtn().disabled).toBe(false)
+    expect(mainBtn().textContent).toBe('確認新增 · 14:00 · 2 位 · 先不指派')   // 沒點桌＝不預選
+    click(byText('用建議桌 105'))
     expect(mainBtn().textContent).toBe('確認新增 · 14:00 · 2 位 · 預配 105')
   })
 
@@ -182,10 +200,12 @@ describe('QuickReservePanel', () => {
     click(byLabel('來源：現場'))
     click(byLabel('3 位'))
     click(byText('兒童'))
-    expect(byText('先不指派').className).toContain('min-h-[44px]')     // 觸控尺寸 ≥44px
+    expect(byText('用建議桌 105').className).toContain('min-h-[44px]')   // 觸控尺寸 ≥44px
+    click(byText('用建議桌 105'))
+    expect(onPick).toHaveBeenCalledWith('105')
+    expect(byText('先不指派').className).toContain('min-h-[44px]')
     click(byText('先不指派'))
     expect(onPick).toHaveBeenCalledWith('none')
-    expect(byText('用建議桌 105').className).toContain('min-h-[44px]')
     expect(mainBtn().textContent).toBe('確認新增 · 14:00 · 3 位 · 先不指派')
     click(mainBtn())
     expect(onSave).toHaveBeenCalledWith({
