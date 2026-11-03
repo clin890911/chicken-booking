@@ -5,7 +5,7 @@ import { statusZh } from '../../utils/tableStatus'
 // 店主回報：余先生早上來現場訂位，輸入完資料後「沒辦法選桌」——舊表單只有底部一顆預設打勾、
 // 欄位填齊才出現的「建立後立刻自動指派最佳桌」，看不到會挑哪張、也不能換。
 // 這裡改成時段下方看得見的晶片：候選＝今日可用、容量夠、且依所選時段不撞別筆預配/團保的單桌
-// （鎖桌型還要此刻是空桌；排序沿用 findSuitableTables：浪費小 → 1F 優先 → 桌號）。第一張預選並標「建議」（多數店員不用改），
+// （鎖桌型還要此刻是空桌；排序沿用 findSuitableTables：浪費小 → 1F 優先 → 桌號）。第一張標「建議」但不預選（店主 2026-11 拍板：桌號只由店員點選才採用），
 // 另有「到桌況圖選（可併桌）」與「先不指派」。純呈現：選擇狀態與存檔語意都在 AddBookingView。
 //
 // 存檔語意依鎖桌時機（capacity.lockKindFor，2026-09 店主拍板「接近時段才鎖」）：
@@ -18,9 +18,9 @@ import { statusZh } from '../../utils/tableStatus'
 //   leadMin     鎖桌門檻分鐘（文案用，與 capacity.HOLD_LEAD_MIN 同一份）
 //   candidates  候選桌（已排序）
 //   guests      人數（候選桌容量比人數小＝要擠一擠，晶片標「擠一擠」）
-//   choice      AddBookingView 算好的「實際會用的選擇」：{ kind:'table', table } | { kind:'map' } | { kind:'none' }
+//   choice      AddBookingView 算好的「實際會用的選擇」（沒點過＝none，或大組需併桌時＝map）：{ kind:'table', table } | { kind:'map' } | { kind:'none' }
 //   onPick(v)   v＝桌號 | 'map' | 'none'
-//   notice      已選桌因人數/時段變動而改回建議時的提示（讓店員看得出桌號換了）
+//   notice      已選桌因人數/時段變動而改為先不指派時的提示（讓店員看得出桌號不見了）
 //   emptyReason 沒有候選桌時的說明
 
 const COLLAPSE_AT = 8
@@ -73,7 +73,7 @@ export default function TablePickField({ hasSlot, lockKind = 'hold', leadMin = 3
       : `存檔後立刻鎖桌 ${choice.table.number}（桌況「已預訂」）；之後要換可按訂位卡的「改桌」。`)
     : choice?.kind === 'map'
       ? '存檔後直接跳到現場桌況圖選桌（大組可點多張同層空桌併桌）。'
-      : '存檔後先不指派，之後可在訂位卡按「指派桌位」。'
+      : `目前未選桌：存檔後先不指派，之後可在訂位卡按「指派桌位」${candidates.length ? '；要先留桌請點上面的桌號' : ''}。`
 
   const optionCls = (active) => `min-h-[44px] px-3.5 rounded-xl border-2 text-sm font-bold transition-all ${
     active

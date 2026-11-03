@@ -65,9 +65,9 @@ export function pastSlotFix(slot, now = new Date(), { settings = {}, tables = []
 //   timeSlot / onTimeSlotChange   時段（父層持有，開面板時已預設下一個時段）
 //   lockKind                      'hold' | 'preassign' | null（所選時段的鎖桌時機，capacity.lockKindFor）
 //   table                         目前會用的桌（物件）或 null
-//   tablePick / onTablePickChange 'auto' | 'none' | 桌號
-//   suggestedNumber               建議桌號（候選第一張）
-//   notice                        已選桌因人數／時段變動而改回建議時的說明
+//   onTablePickChange             'none'（預設，不預選）| 桌號；「用建議桌」才把建議桌號傳給 onTablePickChange
+//   suggestedNumber               建議桌號（候選第一張；只提示，不自動選）
+//   notice                        已選桌因人數／時段變動而改為先不指派時的說明
 //   needsCombo                    沒有任何單桌坐得下（大組）→ 不選桌，存檔後再指派併桌
 //   canAssign                     有沒有指派桌位的權限（沒有就不顯示桌位列）
 //   onSave(payload)               回傳 false＝失敗（留在面板、不丟資料）
@@ -77,7 +77,7 @@ export function pastSlotFix(slot, now = new Date(), { settings = {}, tables = []
 //   now                           （可選）目前時間，測試注入
 export default function QuickReservePanel({
   guests, onGuestsChange, timeSlot, onTimeSlotChange, slotNotice,
-  lockKind, table, tablePick, onTablePickChange, suggestedNumber, notice, needsCombo, canAssign = true,
+  lockKind, table, onTablePickChange, suggestedNumber, notice, needsCombo, canAssign = true,
   onSave, onBack, onOpenFullForm, now,
 }) {
   const { settings, tables, bookings, groupReservations } = useBooking()
@@ -194,7 +194,7 @@ export default function QuickReservePanel({
   const tableRow = (() => {
     if (!canAssign) return null
     if (!timeSlot) {
-      return <p className="text-xs font-bold text-chicken-brown/55">選好時段後，右邊桌況圖會標出可用的桌</p>
+      return <p className="text-xs font-bold text-chicken-brown/55">選好時段後，桌況圖會標出可用的桌</p>
     }
     if (needsCombo) {
       return (
@@ -217,12 +217,12 @@ export default function QuickReservePanel({
             </span>
           ) : (
             <span data-testid="reserve-table" className="text-sm font-bold text-chicken-brown/60">
-              {tablePick === 'none' ? '先不指派' : '這個時段沒有不撞桌的桌 · 先不指派'}
+              {suggestedNumber ? '先不指派' : '這個時段沒有不撞桌的桌 · 先不指派'}
             </span>
           )}
           <div className="flex-1" />
-          {tablePick === 'none' && suggestedNumber ? (
-            <button type="button" onClick={() => onTablePickChange?.('auto')}
+          {!table && suggestedNumber ? (
+            <button type="button" onClick={() => onTablePickChange?.(suggestedNumber)}
               className="min-h-[44px] px-3 rounded-lg border border-chicken-brown/15 bg-white text-xs font-bold text-chicken-brown/70">
               用建議桌 {suggestedNumber}
             </button>
@@ -238,7 +238,7 @@ export default function QuickReservePanel({
         )}
         <p className="text-[11px] font-bold text-chicken-brown/50"
           title={`離用餐 ${HOLD_LEAD_MIN} 分內新增才會直接鎖桌；更早只預配，現場帶位用到這張桌會提醒`}>
-          {table ? `${kindHint} · 點右邊桌況圖可換桌` : '點右邊桌況圖可選桌'}
+          {table ? `${kindHint} · 點桌況圖可換桌` : suggestedNumber ? '存檔後先不指派 · 點桌況圖可選桌' : '存檔後先不指派'}
         </p>
       </div>
     )

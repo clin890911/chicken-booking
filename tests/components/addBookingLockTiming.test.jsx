@@ -59,6 +59,7 @@ describe('AddBookingView × 鎖桌時機（真 service）', () => {
     typeInto(container.querySelector('input[placeholder="王小姐"]'), '余先生')
     click(btn(b => b.textContent.trim().startsWith(slot)))
   }
+  const chip = (num) => btn(b => b.textContent.trim().startsWith(`${num} · `))
   const confirmBtn = () => btn(b => b.textContent.includes('確認新增'))
 
   beforeEach(() => {
@@ -76,6 +77,7 @@ describe('AddBookingView × 鎖桌時機（真 service）', () => {
     vi.setSystemTime(new Date(2026, 8, 19, 9, 0))
     render()
     fill('18:00')
+    click(chip('105'))
     expect(confirmBtn().textContent).toContain('預配 105')
     click(confirmBtn())
     const b = bookingService.listAll().find(x => x.name === '余先生')
@@ -93,6 +95,7 @@ describe('AddBookingView × 鎖桌時機（真 service）', () => {
     ])
     render()
     fill('18:00')
+    click(chip('105'))
     expect(confirmBtn().textContent).toContain('預配 105')
     click(confirmBtn())
     expect(bookingService.listAll().find(x => x.name === '余先生').assignedTableId).toBe('105')
@@ -103,6 +106,7 @@ describe('AddBookingView × 鎖桌時機（真 service）', () => {
     vi.setSystemTime(new Date(2026, 8, 19, 10, 40))
     render()
     fill('11:00')
+    click(chip('105'))
     expect(confirmBtn().textContent).toContain('桌 105')
     click(confirmBtn())
     const b = bookingService.listAll().find(x => x.name === '余先生')

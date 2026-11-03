@@ -9,7 +9,7 @@ import * as waitlistService from '../../src/services/waitlistService'
 import { getSettings } from '../../src/services/settingsService'
 
 // 現場「今日訂位 → ＋新增今日訂位」× OperationsView（掛載整個現場頁，Context 換成直通真 service 的薄包裝）：
-//   ＋新增 → 左欄原地換成面板（不切 AdminPage 分頁）→ 預設（人數 2、下一個時段、建議桌）
+//   ＋新增 → 左欄原地換成面板（不切 AdminPage 分頁）→ 預設（人數 2、下一個時段、先不指派；建議桌只提示不預選）
 //   → 點地圖選桌（非候選 toast 說明、不選取）→ 存檔：addBooking ＋ 依鎖桌時機預配／鎖桌
 //   → 回「今日訂位」籤、新卡閃一下。
 // 另測 saveQuickReserve 純函式（存檔語意、失敗留在面板、鎖桌失敗仍算已建單）。
@@ -119,15 +119,46 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
     expect(byText('林').getAttribute('aria-pressed')).toBe('true')
   })
 
-  it('＋新增 → 左欄原地換成面板（不呼叫 AdminPage 的跳頁入口），預設人數 2、下一個時段 13:30、建議桌', () => {
+  it('＋新增 → 左欄原地換成面板（不呼叫 AdminPage 的跳頁入口），預設人數 2、下一個時段 13:30、桌位預設先不指派（不預選建議桌）', () => {
     openPanel()
     expect(panel()).toBeTruthy()
     expect(onAddBooking).not.toHaveBeenCalled()
     expect(byLabel('2 位').getAttribute('aria-pressed')).toBe('true')
     expect(byLabel('13:30').getAttribute('aria-pressed')).toBe('true')
-    // 13:30 離現在 20 分 → 鎖桌型：建議此刻空桌 105
-    expect(panel().querySelector('[data-testid="reserve-table"]').textContent).toContain('桌 105')
+    // 13:30 離現在 20 分 → 鎖桌型：建議此刻空桌 105，但不預選
+    expect(panel().querySelector('[data-testid="reserve-table"]').textContent).toBe('先不指派')
     expect(container.querySelector('svg')).toBeTruthy()                 // 桌況圖仍在
+    // 「用建議桌」才選：按下後才是鎖桌 105
+    click(byText('用建議桌 105'))
+    expect(panel().querySelector('[data-testid="reserve-table"]').textContent).toContain('桌 105')
+  })
+
+  it('點桌後人數改變使它失效 → 改成先不指派並提示，不自動換成另一張建議桌', () => {
+    tableService.bulkWrite([...tableService.listAll(), mkTable('108', 6)])
+    openPanel()
+    click(mapTable('106'))
+    expect(panel().querySelector('[data-testid="reserve-table"]').textContent).toContain('桌 106')
+    click(byLabel('6 位'))                       // 只剩 108 坐得下；舊行為會自動換成建議桌 108
+    expect(panel().textContent).toContain('106 不適用目前的人數／時段，已改為先不指派')
+    expect(panel().querySelector('[data-testid="reserve-table"]').textContent).toBe('先不指派')
+    expect(panel().textContent).not.toContain('已改回建議桌')
+    expect(byText('用建議桌 108')).toBeTruthy()  // 建議仍列出，要店員按才選
+  })
+
+  it('沒點桌就存檔 → 建單但不指派、不預配（也不提示已指派）；店員仍可從今日清單一鍵指派', () => {
+    openPanel()
+    click(byLabel('林'))
+    click(byLabel('來源：現場'))
+    click(byStart('確認新增'))
+    const b = bookingService.listAll().find(x => x.name === '林先生')
+    expect(b).toBeTruthy()
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+    expect(ctx.preassignBookingTable).not.toHaveBeenCalled()
+    expect(b.assignedTableId || null).toBeNull()
+    expect(tableService.getByNumber('105').status).toBe('vacant')
+    expect(toast.success).toHaveBeenCalledWith('已新增 林先生 13:30')
+    // 今日清單的卡片有一鍵指派（quickAssignFor）：未配桌的新單可直接指派
+    expect(container.querySelector(`[data-booking-id="${b.id}"]`)?.textContent).toMatch(/指派/)
   })
 
   it('點地圖選桌：候選 → 選取；非候選（此刻用餐、鎖桌型只能選空桌）→ toast 說明、不選取', () => {
@@ -172,6 +203,7 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
     openPanel()
     click(byLabel('林'))
     click(byLabel('來源：現場'))
+    click(byText('用建議桌 105'))
     click(byStart('確認新增'))
     const b = bookingService.listAll().find(x => x.name === '林先生')
     expect(ctx.assignBookingToTable).toHaveBeenCalledWith(b.id, '105')

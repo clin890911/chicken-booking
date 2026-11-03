@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
 // AddBookingView × 選桌（2026-09 店主回報：余先生現場訂位，輸入完資料後沒辦法選桌）。
+// 2026-11 店主拍板：不預選建議桌——建議只標在晶片上，桌號只由店員點選才採用。
 // S5：今日訂位的指派一律走 BookingContext.assignBookingToTable（含 refresh／同步／Telegram），
 //     不可直接呼叫 seatingService（存檔後卡片會有幾秒停在「建議桌 106／指派桌位」的舊畫面）。
 
@@ -74,9 +75,10 @@ describe('AddBookingView：今日訂位選桌', () => {
     vi.useRealTimers()
   })
 
-  it('S5：存檔後的指派走 Context 的 assignBookingToTable（帶建議桌），不直接戳 service', () => {
+  it('S5：店員點選桌後，存檔的指派走 Context 的 assignBookingToTable，不直接戳 service', () => {
     render()
     fillBasics()
+    click(chip('105'))
     click(confirmBtn())
     expect(ctx.addBooking).toHaveBeenCalledTimes(1)
     expect(ctx.assignBookingToTable).toHaveBeenCalledWith('BNEW', '105')
@@ -86,18 +88,24 @@ describe('AddBookingView：今日訂位選桌', () => {
   const chip = (num) => btn(b => b.textContent.trim().startsWith(`${num} · `))
   const pickArea = () => container.querySelector('[data-testid="table-pick"]')
 
-  it('U1：選完時段出現「桌位」區，第一張預選並標「建議」，確認列帶出桌號；舊 checkbox 已移除', () => {
+  it('U1：選完時段出現「桌位」區，第一張標「建議」但不預選（確認列＝先不指派），點了才帶出桌號；舊 checkbox 已移除', () => {
     render()
     // 今天：預選下一個可訂時段（10:40 → 11:00），一進來就看得到桌位區、不必先點時段
     expect(container.textContent).not.toContain('選好時段後')
     expect(pickArea()).toBeTruthy()
     fillBasics()
     expect(pickArea()).toBeTruthy()
-    expect(chip('105').getAttribute('aria-pressed')).toBe('true')
     expect(chip('105').textContent).toContain('建議')
+    expect(chip('105').getAttribute('aria-pressed')).toBe('false')
     expect(chip('106').getAttribute('aria-pressed')).toBe('false')
+    expect(btn(b => b.textContent.trim() === '先不指派').getAttribute('aria-pressed')).toBe('true')
+    expect(pickArea().textContent).toContain('目前未選桌')
+    expect(pickArea().textContent).not.toContain('存檔後立刻鎖桌')
     expect(pickArea().textContent).toContain('1F')
     expect(pickArea().textContent).toContain('2F')
+    expect(confirmBtn().textContent).toMatch(/確認新增 · .* 11:00 · 2 位 · 先不指派/)
+    click(chip('105'))
+    expect(chip('105').getAttribute('aria-pressed')).toBe('true')
     expect(confirmBtn().textContent).toMatch(/確認新增 · .* 11:00 · 2 位 · 桌 105/)
     // 候選與鎖桌時機一起由 findReserveCandidates 算（帶所選時段、注入 now；鎖桌型走 'hold' 佔用區間，驗收問題 1）
     expect(ctx.findReserveCandidates).toHaveBeenCalledWith(2, expect.objectContaining({ timeSlot: '11:00', now: expect.any(Date) }))
@@ -141,15 +149,57 @@ describe('AddBookingView：今日訂位選桌', () => {
     expect(onAssignTable).toHaveBeenCalledWith(expect.objectContaining({ id: 'BNEW' }))
   })
 
-  it('U1：人數改了、已選的 106 不再合格 → 回到新的建議並提示', () => {
+  it('U1：沒點桌就存檔 → 建單但不指派，toast 據實講「未指派桌」並帶「指派桌」出口', () => {
+    render()
+    fillBasics()
+    click(confirmBtn())
+    expect(ctx.addBooking).toHaveBeenCalledTimes(1)
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+    expect(ctx.preassignBookingTable).not.toHaveBeenCalled()
+    const [msg, action] = toast.action.mock.calls.at(-1)
+    expect(msg).toContain('未指派桌')
+    expect(msg).not.toMatch(/已指派|已預配/)
+    expect(action.label).toBe('指派桌')
+  })
+
+  it('U1：人數改了、已選的 106 不再合格 → 改成先不指派並提示，不自動換成另一張建議桌', () => {
     ctx.findReserveCandidates = vi.fn((g) => ({ kind: 'hold', tables: g <= 4 ? [T105, T106, T201] : [T201] }))
     render()
     fillBasics()
     click(chip('106'))
     click(container.querySelector('button[aria-label="6 位"]'))
-    expect(container.textContent).toContain('106 不適用目前的人數／時段，已改回建議桌 201')
-    expect(chip('201').getAttribute('aria-pressed')).toBe('true')
-    expect(confirmBtn().textContent).toContain('6 位 · 桌 201')
+    expect(container.textContent).toContain('106 不適用目前的人數／時段，已改為先不指派')
+    expect(container.textContent).not.toContain('已改回建議桌')
+    expect(chip('201').getAttribute('aria-pressed')).toBe('false')
+    expect(chip('201').textContent).toContain('建議')
+    expect(confirmBtn().textContent).toContain('6 位 · 先不指派')
+    // 改回去 106 又合格：舊提示要消失，不留過期的「已改為…」，也不自動選回 106
+    click(container.querySelector('button[aria-label="2 位"]'))
+    expect(container.textContent).not.toContain('不適用目前的人數／時段')
+    expect(chip('106').getAttribute('aria-pressed')).toBe('false')
+    click(confirmBtn())
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+  })
+
+  it('U1：時段改了、已選的 106 不再合格 → 提示；改回原時段提示消失，也不自動選回', () => {
+    ctx.findReserveCandidates = vi.fn((g, { timeSlot }) => ({ kind: 'hold', tables: timeSlot === '11:00' ? [T105, T106, T201] : [T105, T201] }))
+    render()
+    fillBasics()
+    click(chip('106'))
+    click(btn(b => b.textContent.trim().startsWith('11:30')))
+    expect(container.textContent).toContain('106 不適用目前的人數／時段，已改為先不指派')
+    click(btn(b => b.textContent.trim().startsWith('11:00')))
+    expect(container.textContent).not.toContain('不適用目前的人數／時段')
+    expect(chip('106').getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('U1：連續新增存檔後回到未選桌，下一筆不沿用上一筆的桌', () => {
+    render({ continuous: true })
+    fillBasics()
+    click(chip('105'))
+    click(confirmBtn())
+    expect(ctx.assignBookingToTable).toHaveBeenCalledTimes(1)
+    expect(chip('105').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('U1：有單桌坐得下、只是此刻沒空桌可鎖 → 預設「先不指派」並說明，存檔不跳頁', () => {
@@ -196,6 +246,8 @@ describe('AddBookingView：今日訂位選桌', () => {
     preassignKind()
     render()
     fillBasics()
+    expect(confirmBtn().textContent).toContain('先不指派')   // 沒點桌＝不預配
+    click(chip('105'))
     expect(confirmBtn().textContent).toMatch(/確認新增 · .* 11:00 · 2 位 · 預配 105/)
     expect(pickArea().textContent).toContain('先預配 105：桌子先不鎖、現在仍可帶位')
     expect(pickArea().textContent).toContain('現場帶位用到這張桌會提醒')

@@ -256,11 +256,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
   // === 現場內嵌「新增今日訂位」面板 ===
   // 人數／時段／選的桌放這裡（不放面板內）：桌況圖點桌與面板共用同一份，與帶位面板同一套做法。
-  // tablePick：'auto'＝跟著建議（候選第一張）｜'none'＝先不指派｜桌號＝在桌況圖點選的桌。
+  // tablePick：'none'＝先不指派（預設；不預選建議桌，店主 2026-11 拍板）｜桌號＝店員在桌況圖點選或按「用建議桌」選的桌。
   const [reserveOpen, setReserveOpen] = useState(false)
   const [reserveGuests, setReserveGuests] = useState(2)
   const [reserveSlot, setReserveSlot] = useState('')
-  const [reserveTablePick, setReserveTablePick] = useState('auto')
+  const [reserveTablePick, setReserveTablePick] = useState('none')
   const [reserveNotice, setReserveNotice] = useState('')
   const [reserveNow, setReserveNow] = useState(() => Date.now()) // 30 秒 tick：跨過「前 30 分」門檻時語意跟著換
   const [reserveSlotNotice, setReserveSlotNotice] = useState('') // 所選時段已過、自動改選目前時段時的說明
@@ -602,7 +602,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     setReserveNow(now.getTime())
     setReserveGuests(2)
     setReserveSlot(nextBookableSlot({ settings, tables, bookings, groupReservations, date: todayStr(), guests: 2, now }))
-    setReserveTablePick('auto')
+    setReserveTablePick('none')
     setReserveNotice('')
     setReserveSlotNotice('')
     setSelectedTable(null)
@@ -643,24 +643,20 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     && !tables.some(t => isTableUsableOnDate(t, todayStr()) && squeezeSeats([t]) >= reserveGuests)
   const reserveTable = useMemo(() => {
     if (!reserveOpen || !reserveSlot || !canReserveAssign || reserveTablePick === 'none') return null
-    if (reserveTablePick !== 'auto') return reserveCalc.tables.find(t => t.number === reserveTablePick) || null
-    return reserveCalc.tables[0] || null
+    return reserveCalc.tables.find(t => t.number === reserveTablePick) || null
   }, [reserveOpen, reserveSlot, canReserveAssign, reserveTablePick, reserveCalc])
 
-  // 人數／時段／桌況變了、點選的桌不再是候選 → 改回建議並明講（不讓桌號悄悄變掉）
+  // 人數／時段／桌況變了、店員點選的桌不再是候選 → 改回先不指派並明講（不自動換成別張建議桌）
   useEffect(() => {
-    if (!reserveOpen || !reserveSlot || ['auto', 'none'].includes(reserveTablePick)) return
+    if (!reserveOpen || !reserveSlot || reserveTablePick === 'none') return
     if (reserveCandidateNums.includes(reserveTablePick)) return
-    const next = reserveCalc.tables[0]
-    setReserveNotice(next
-      ? `${reserveTablePick} 不適用目前的人數／時段，已改回建議桌 ${next.number}`
-      : `${reserveTablePick} 不適用目前的人數／時段，已改為先不指派`)
-    setReserveTablePick(next ? 'auto' : 'none')
-  }, [reserveOpen, reserveSlot, reserveTablePick, reserveCandidateNums, reserveCalc])
+    setReserveNotice(`${reserveTablePick} 不適用目前的人數／時段，已改為先不指派`)
+    setReserveTablePick('none')
+  }, [reserveOpen, reserveSlot, reserveTablePick, reserveCandidateNums])
 
-  // 跟著建議走時，建議桌換到另一層 → 地圖跟過去（店員才看得到選的是哪張）
+  // 店員明確選了桌（點桌況圖、或按「用建議桌」）在另一層 → 地圖跟過去；沒選桌時建議桌變動不動地圖
   useEffect(() => {
-    if (reserveOpen && reserveTablePick === 'auto' && reserveTable?.floor) setFloor(reserveTable.floor)
+    if (reserveOpen && reserveTablePick !== 'none' && reserveTable?.floor) setFloor(reserveTable.floor)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reserveOpen, reserveTable?.number])
 
@@ -1426,7 +1422,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 slotNotice: reserveSlotNotice,
                 lockKind: reserveCalc.kind,
                 table: reserveTable,
-                tablePick: reserveTablePick,
                 onTablePickChange: (v) => { setReserveTablePick(v); setReserveNotice('') },
                 suggestedNumber: reserveCalc.tables[0]?.number || null,
                 notice: reserveNotice,
