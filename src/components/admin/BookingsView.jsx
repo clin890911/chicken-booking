@@ -35,7 +35,7 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   const [calFocus, setCalFocus] = useState(null) // 從排位返回時，日曆停在排位最後看的那天
   const setSub = (k) => { setSeatDate(null); setSubRaw(k === 'add' && !canCreate ? 'today' : k) }
   const closeSeating = () => { setCalFocus({ date: seatDate, seq: Date.now() }); setSeatDate(null) }
-  // 今日統計卡「未指派」→ 直接進該日的當日排位（＝日曆點那天，同一個 DaySeatingPanel；它自己會預設選最早一筆未配桌）
+  // 今日統計卡「未指派」→ 直接進該日的當日排位（＝日曆點那天，同一個 DaySeatingPanel；只進畫面看未指派清單、不帶特定一筆，也不會自動選人，店員自己點）
   const openSeating = (date) => { setSubRaw('calendar'); setSeatDate(date) }
   // 新增表單的預填：可能來自名冊（openAdd prop）或日曆選日期後按「＋ 新增訂位」（本地觸發）。
   // 兩條路共用同一個 state，誰後觸發就以誰為準（都帶 seq，AddBookingView 依 seq 變更才重灌欄位）。
@@ -71,7 +71,7 @@ export default function BookingsView({ onAssignTable, onMoveTable, onOpenGroup, 
   return (
     <div ref={rootRef} data-fill-page={fill ? '' : undefined} className={`space-y-3${fillCls}`}>
       {/* 頁名與子分頁籤同一列（桌機不再有獨立標題列，見 layout/PageTitle） */}
-      <div className="sticky top-0 z-20 py-1 bg-chicken-cream flex items-center gap-3 fillpage:flex-shrink-0">
+      <div data-sticky-bar className="sticky top-0 z-20 py-1 bg-chicken-cream flex items-center gap-3 fillpage:flex-shrink-0">
       <PageTitle className="pl-1">訂位</PageTitle>
       <SegmentedControl options={canCreate ? SUB_TABS : SUB_TABS.filter(t => t.key !== 'add')} value={sub} onChange={setSub} ariaLabel="訂位子分頁" />
       </div>

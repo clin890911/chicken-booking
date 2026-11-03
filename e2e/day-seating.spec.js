@@ -45,20 +45,33 @@ async function openPlanningDay(page, dayNum) {
 
 const storedBooking = (page, name) => page.evaluate(n => JSON.parse(localStorage.getItem('chicken_bookings_v1')).find(b => b.name === n), name)
 
-test('月曆點日期 → 直接進當日排位；11 人選 4＋6 擠一擠 → 確認 → 自動跳下一筆', async ({ page }) => {
+test('月曆點日期 → 直接進當日排位（不自動帶客人、不給建議桌）；點客人 → 選 4＋6 擠一擠 → 確認 → 回到未選取', async ({ page }) => {
   await loginWithDemo(page)
   await openPlanningDay(page, 3)
 
-  // 當天全部訂位（散客＋團體；取消的何先生不列），預設最早未配桌＝林老師（11:30 同時段先排大組）
+  // 當天全部訂位（散客＋團體；取消的何先生不列）
   const panel = page.getByTestId('day-seating')
   await expect(page.getByTestId('day-seating-summary')).toContainText('午餐第一批 7 組・未配桌 3')
   await expect(panel.getByText('山水旅行社')).toBeVisible()
   await expect(panel.getByText('團保 201、202、203')).toBeVisible()
   await expect(panel.getByText('桌 105')).toBeVisible()
   await expect(panel.getByText('何先生')).toHaveCount(0)
-  await expect(banner(page)).toContainText('排位：林老師（11 位 · 11:30）')
-  await expect(banner(page)).toContainText('建議')
+  // 不自動帶客人：沒有排位橫幅、沒有選中的列、沒有建議桌；只有一句引導，地圖留在 1F 且不框桌
+  await expect(banner(page)).toHaveCount(0)
+  await expect(page.getByTestId('seat-hint')).toContainText('點清單上的客人開始排位')
+  await expect(panel.locator('[data-key][aria-pressed="true"]')).toHaveCount(0)
+  await expect(panel.getByText('建議')).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: '套用建議' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '1F', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await shot(page, '02-day-landscape')
+
+  // 點客人才進排位：橫幅「排位：林老師」＋「點地圖上框起來的空桌」，沒有建議桌文字與套用建議，地圖不切樓層
+  await row(page, '林老師').click()
+  await expect(banner(page)).toContainText('排位：林老師（11 位 · 11:30）')
+  await expect(banner(page)).toContainText('點地圖上框起來的空桌')
+  await expect(banner(page)).not.toContainText('建議')
+  await expect(page.getByRole('button', { name: '套用建議' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '1F', exact: true })).toHaveAttribute('aria-pressed', 'true')
 
   // 點 4 人桌 112 ＋ 6 人桌 110 → 10 席、擠一擠 12 → 黃字超坐 1 位
   await table(page, '112').click()
@@ -70,20 +83,30 @@ test('月曆點日期 → 直接進當日排位；11 人選 4＋6 擠一擠 → 
   await page.getByRole('button', { name: '確認併桌' }).click()
   await expect(page.getByText('林老師（11 位）已併桌配到 112 + 110（擠一擠超坐 1 位）')).toBeVisible()
   expect(await storedBooking(page, '林老師')).toMatchObject({ assignedTableId: '112', extraTableIds: ['110'] })
-  // 自動跳下一筆未配桌（同場次 11:30 陳先生）
-  await expect(banner(page)).toContainText('排位：陳先生（2 位 · 11:30）')
-  await expect(page.getByTestId('day-seating-summary')).toContainText('未配桌 2')
+  // 排完不跳下一筆：回到未選取（沒有橫幅、沒有選中列），仍在午餐場次
+  await expect(banner(page)).toHaveCount(0)
+  await expect(panel.locator('[data-key][aria-pressed="true"]')).toHaveCount(0)
+  await expect(page.getByTestId('day-seating-summary')).toContainText('午餐第一批 7 組・未配桌 2')
+  await expect(page.getByTestId('seat-hint')).toBeVisible()
   await shot(page, '04-after-confirm')
+
+  // 換場次也不自動選人
+  await page.getByLabel('場次').getByRole('button', { name: /晚餐/ }).click()
+  await expect(banner(page)).toHaveCount(0)
+  await expect(panel.locator('[data-key][aria-pressed="true"]')).toHaveCount(0)
+  await page.getByLabel('場次').getByRole('button', { name: /午餐第一批/ }).click()
 
   // 直向也能用
   await page.setViewportSize({ width: 820, height: 1180 })
-  await expect(banner(page)).toBeVisible()
+  await row(page, '陳先生').click()
+  await expect(banner(page)).toContainText('排位：陳先生')
   await shot(page, '05-day-portrait')
 })
 
 test('防呆沿用：撞桌、停用、時間重疊、跨樓層都點不進去', async ({ page }) => {
   await loginWithDemo(page)
   await openPlanningDay(page, 3)
+  await row(page, '林老師').click()
   await expect(banner(page)).toContainText('排位：林老師')
 
   await table(page, '105').click() // 王小姐 11:00 已配
@@ -139,6 +162,7 @@ test('公休日：清單照看，配桌入口與點桌全擋', async ({ page }) 
   await expect(page.getByTestId('day-seating-date')).toContainText('公休')
   await expect(page.getByText(/本日公休：只能看，不能配桌/)).toBeVisible()
   await expect(banner(page)).toHaveCount(0)
+  await expect(page.getByTestId('seat-hint')).toHaveCount(0)
   await row(page, '郭先生').click()
   await expect(page.getByText('本日公休，無法配桌。')).toBeVisible()
   await expect(page.getByRole('button', { name: '配桌', exact: true })).toHaveCount(0)
@@ -158,11 +182,13 @@ test('訂位頁日曆點日期 → 直接進同一個當日排位；排好後「
   await expect(page.getByTestId('day-seating')).toBeVisible()
   await expect(page).toHaveURL(/tab=bookings/)
   await expect(page.getByTestId('day-seating-date')).toContainText('11/3')
+  await expect(banner(page)).toHaveCount(0) // 不自動帶客人
+  await row(page, '林老師').click()
   await expect(banner(page)).toContainText('排位：林老師')
   await table(page, '112').click()
   await table(page, '110').click()
   await page.getByRole('button', { name: '確認併桌' }).click()
-  await expect(banner(page)).toContainText('排位：陳先生')
+  await expect(banner(page)).toHaveCount(0) // 排完回到未選取，不跳下一筆
   await shot(page, '08-bookings-day-seating')
 
   // 返回：回到訂位頁日曆（停在 11/3 當日清單），不是規劃頁
@@ -256,6 +282,8 @@ test('今天：開桌前 30 分內配桌＝現場指派（鎖桌、非空桌不�
   await page.locator('aside').getByRole('button', { name: '規劃' }).click()
   await page.getByRole('button', { name: /^11月2日/ }).click()
   await expect(page.getByTestId('day-seating')).toBeVisible()
+  await expect(banner(page)).toHaveCount(0)
+  await row(page, '近客').click()
   await expect(banner(page)).toContainText('排位：近客')
   await expect(page.getByTestId('hold-badge')).toBeVisible()
 
@@ -276,4 +304,64 @@ test('今天：開桌前 30 分內配桌＝現場指派（鎖桌、非空桌不�
   await detail.getByRole('button', { name: '到現場頁改桌' }).click()
   await expect(page).toHaveURL(/tab=ops/)
   await expect(page.getByText(/重新選桌：鎖桌客/)).toBeVisible()
+})
+
+test.describe('手機直向', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+
+  test('點客人捲到橫幅與地圖；取消回清單原位；引導不寫方位', async ({ page }) => {
+    await loginWithDemo(page)
+    await page.locator('nav.lg-bottomnav button', { hasText: '規劃' }).tap()
+    await page.getByRole('button', { name: new RegExp(`^11月3日`) }).tap()
+    await expect(page.getByTestId('seat-hint')).toHaveText('點清單上的客人開始排位')
+
+    const content = page.locator('[data-testid=admin-content]')
+    const scrollTop = () => content.evaluate(el => el.scrollTop)
+    await content.evaluate(el => { el.scrollTop = 60 })
+    await page.getByTestId('day-seating').getByRole('button', { name: /未配桌/ }).first().tap()
+    await expect(banner(page)).toBeInViewport()
+    await expect.poll(scrollTop).toBeGreaterThan(60)
+    // 橫幅沒被其他東西蓋住，確認鈕點得到；橫幅下面露出地圖（手機上控制列不黏頂，不然會蓋住橫幅）
+    const covered = await banner(page).evaluate(el => {
+      const r = el.getBoundingClientRect()
+      return !el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + 12))
+    })
+    expect(covered, '橫幅被蓋住').toBe(false)
+    const map = await page.locator('[data-testid=admin-content] svg[aria-label$="桌況圖"]').first().boundingBox()
+    expect(844 - 64 - map.y, '地圖至少露出 150px').toBeGreaterThan(150)
+
+    // 排位中換一位客人：要還原的仍是第一次點之前的清單位置
+    await page.getByTestId('day-seating').getByRole('button', { name: /未配桌/ }).nth(1).tap()
+    await expect(banner(page)).toBeInViewport()
+    await banner(page).getByRole('button', { name: '取消排位' }).tap()
+    await expect(banner(page)).toHaveCount(0)
+    await expect.poll(scrollTop).toBe(60)
+  })
+
+  test('訂位頁日曆入口：子分頁列不蓋住橫幅第一行', async ({ page }) => {
+    await loginWithDemo(page)
+    await page.locator('nav.lg-bottomnav button', { hasText: '訂位' }).tap()
+    await page.getByRole('button', { name: /日曆/ }).tap()
+    await page.getByRole('button').filter({ has: page.getByText('3', { exact: true }) }).filter({ hasText: '組' }).first().tap()
+    await page.getByTestId('day-seating').getByRole('button', { name: /未配桌/ }).first().tap()
+    await expect(banner(page)).toBeInViewport()
+    const bar = await page.locator('[data-sticky-bar]').boundingBox()
+    const b = await banner(page).boundingBox()
+    expect(b.y, '橫幅在黏頂列下面').toBeGreaterThanOrEqual(bar.y + bar.height)
+  })
+})
+
+test.describe('手機橫向', () => {
+  test.use({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true })
+
+  test('點客人不捲動內容區（地圖在旁邊）', async ({ page }) => {
+    await loginWithDemo(page)
+    await page.locator('nav.lg-bottomnav button', { hasText: '規劃' }).tap()
+    await page.getByRole('button', { name: /^11月3日/ }).tap()
+    const content = page.locator('[data-testid=admin-content]')
+    await content.evaluate(el => { el.scrollTop = 40 })
+    await page.getByTestId('day-seating').getByRole('button', { name: /未配桌/ }).first().evaluate(el => el.click())
+    await expect(banner(page)).toHaveCount(1)
+    expect(await content.evaluate(el => el.scrollTop)).toBe(40)
+  })
 })
