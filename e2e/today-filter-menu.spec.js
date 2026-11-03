@@ -141,17 +141,18 @@ test('統計卡：已到/離原地篩選（再點還原）、今日訂位重設�
   await shot(page, 'after-click-total')
 })
 
-test('統計卡：未指派 → 今天的當日排位（選中最早一筆未配桌）；用餐中 → 現場頁', async ({ page }) => {
+test('統計卡：未指派 → 今天的當日排位（只進畫面看未指派清單，不自動選人）；用餐中 → 現場頁', async ({ page }) => {
   const un = page.getByTestId('stat-unassigned')
   const unassigned = BOOKINGS.filter(b => b.status === 'confirmed' && !b.assignedTableId)
   await expect(un).toHaveAccessibleName(`未指派 ${unassigned.length} 組 ${unassigned.reduce((s, b) => s + b.guests, 0)} 人，前往排位`)
   await un.click()
   await expect(page.getByTestId('day-seating')).toBeVisible()
   await expect(page.getByLabel('訂位子分頁').getByRole('button', { name: /日曆/ })).toHaveAttribute('aria-pressed', 'true')
-  const picked = page.locator('[data-testid="day-seating"] [data-key^="b:"][aria-pressed="true"]')
-  await expect(picked).toHaveCount(1)
-  const pickedId = (await picked.getAttribute('data-key')).slice(2)
-  expect(unassigned.map(b => b.id)).toContain(pickedId)
+  // 不帶特定一筆：沒有選中的列、沒有排位橫幅；清單上看得到未配桌的客人，由店員自己點
+  await expect(page.locator('[data-testid="day-seating"] [data-key][aria-pressed="true"]')).toHaveCount(0)
+  await expect(page.getByTestId('seat-banner')).toHaveCount(0)
+  await expect(page.getByTestId('seat-hint')).toBeVisible()
+  await expect(page.getByTestId('day-seating').getByText('未配桌', { exact: true }).first()).toBeVisible()
   await shot(page, 'after-click-unassigned')
 
   await page.getByLabel('訂位子分頁').getByRole('button', { name: /今日/ }).click()

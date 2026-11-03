@@ -25,12 +25,12 @@ export function usePhoneLayout() {
 }
 
 // 把元素捲到 AdminPage 內容區（admin-content）的可視範圍。不用 scrollIntoView：它也會去捲 overflow:hidden 的外層，把一面式外殼捲歪。
-// block：'start' 貼上緣、'end' 貼下緣；clear：貼下緣時多留的空間（浮動鈕）。
-export function scrollContentTo(el, { block = 'start', smooth = false, clear = 8 } = {}) {
+// block：'start' 貼上緣、'end' 貼下緣；clear：貼下緣時多留的空間（浮動鈕）；offset：貼上緣時讓開黏頂列的高度。
+export function scrollContentTo(el, { block = 'start', smooth = false, clear = 8, offset = 0 } = {}) {
   const box = el?.closest?.('[data-testid="admin-content"]')
   if (!box) return
   const r = el.getBoundingClientRect()
   const b = box.getBoundingClientRect()
-  const top = box.scrollTop + (block === 'end' ? r.bottom - b.bottom + clear : r.top - b.top - 8)
+  const top = box.scrollTop + (block === 'end' ? r.bottom - b.bottom + clear : r.top - b.top - 8 - offset)
   box.scrollTo?.({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' })
 }

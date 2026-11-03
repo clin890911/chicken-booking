@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  User, Bus, ChevronLeft, ChevronRight, CalendarDays, Check, X, ArrowLeftRight, Ban, ExternalLink, Lightbulb, Armchair,
+  User, Bus, ChevronLeft, ChevronRight, CalendarDays, Check, X, ArrowLeftRight, Ban, ExternalLink, Armchair,
   Phone, Pencil, Ellipsis, Plus, Lock, History,
 } from 'lucide-react'
 import FloorMap from '../floormap/FloorMap'
@@ -9,15 +9,15 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useHandoff } from '../../../contexts/HandoffContext'
 import { useToast } from '../../ui/Toast'
+import { scrollContentTo } from '../../../utils/phoneLayout'
 import { seatingPerms } from '../../../utils/seatingPerms'
 import { dayLabel, seatingForSlot, todayStr } from '../../../utils/timeSlots'
 import { resolveSlotOccupancy, isSeatingClosed, isDayClosedForClosures, lockKindFor } from '../../../utils/capacity'
 import { formatPhone } from '../../../utils/phoneFormat'
 import {
-  buildDaySeatingList, sectionSummaryText, firstUnassigned, nextUnassigned,
+  buildDaySeatingList, sectionSummaryText, defaultSeatingId,
   assignableTables, pickTableError, evaluatePick, heldTableNumbers, undoUnassignBlocker, EDITABLE_STATUSES,
 } from '../../../utils/daySeatingPlan'
-import { suggestComboFromPool } from '../../../services/seatingService'
 import { useBookingActions } from '../../booking/useBookingActions'
 import EditBookingModal from '../../booking/EditBookingModal'
 import BookingDetailSheet from '../../booking/BookingDetailSheet'
@@ -25,7 +25,12 @@ import BookingDetailSheet from '../../booking/BookingDetailSheet'
 // 當日排位：點日期就看到「當天全部訂位」＋同畫面排桌（Barry 2026-10-30：「按入日期後直接展開當天所有的訂位，並且可以排位子」）。
 //   左：當天訂位（散客＋團體），依場次分組、組內依時段；每筆標未配桌／已配桌（桌號）／已到。
 //   右：該場次桌況圖（散客暖色、團客冷色）。
-// Smart defaults：進來就選「最早一筆未配桌」及其場次、地圖切到建議桌的樓層；排完自動跳下一筆。
+// 配桌完全由店員決定（店主 Barry 2026-11-03：「連自動帶客人也拿掉」；預先配桌功能保留，只拿掉系統先做的動作）：
+//   進來／換日／換場次都不選任何客人、沒有排位橫幅、不給建議桌；店員先點清單上的客人，再點地圖上框起來的空桌，按確認。
+//   場次預設（defaultSeatingId）只是導覽——帶到有未配桌的場次，不選人。點未配桌客人時地圖不切樓層；
+//   已配桌／團體那筆會跳到自己桌所在樓層（那是顯示它自己的桌）。排完一筆回到未選取，不跳下一筆。
+//   本元件沒有「帶某一筆進來」的 prop：訂位卡「預先配桌」等明確入口走規劃頁的「排位地圖」（SlotMapPanel assignRequest），
+//   統計卡「未指派」只是進來看未指派清單，兩者都不經這裡選人。
 // 寫入依日期分流（專案規則：今天走現場指派語意、未來走預配），一律呼叫既有的 BookingContext 函式，不另寫一套：
 //   未來日 → 預配（preassignBookingTable(s)／clearBookingPreassign，只改 booking、不動桌況）
 //   今天   → 與現場頁指派模式同一支：鎖桌時機 capacity.lockKindFor（離用餐 ≤ 30 分＝鎖桌）
@@ -104,21 +109,20 @@ export default function DaySeatingPanel({
     const sid = seatingForSlot(settings, item.timeSlot)?.id
     if (sid && sid !== seatingId) setSeatingId(sid)
     setEditing(item.kind === 'walkin' && canEditBooking(item.booking) && item.state === 'unassigned')
-    // 地圖切到這筆的桌所在樓層（已配桌／團體）；未配桌的等建議桌算出來再切（見下方 effect）
+    // 地圖切到這筆的桌所在樓層（已配桌／團體＝顯示它自己的桌）；未配桌的不切樓層，由店員自己選
     const first = item.tables?.[0] && tables.find(t => String(t.number) === String(item.tables[0]))
     if (first?.floor && first.floor !== floor) setFloor(first.floor)
     if (scroll) requestAnimationFrame(() => listRef.current?.querySelector(`[data-key="${CSS.escape(item.key)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
   }
 
-  // Smart default：換日（含首次進來）→ 選最早一筆未配桌＋其場次；都配好了 → 第一個有訂位的場次
+  // 換日（含首次進來）→ 場次帶到有未配桌的那一場（導覽用）；不選任何客人，清掉前一天的選取
   const defaultedFor = useRef(null)
   useEffect(() => {
     if (defaultedFor.current === date) return
     defaultedFor.current = date
-    const d = firstUnassigned(list)
-    if (d.seatingId) setSeatingId(d.seatingId)
-    const item = d.bookingId ? allItems.find(i => i.key === `b:${d.bookingId}`) : null
-    selectItem(item, { scroll: true })
+    const sid = defaultSeatingId(list)
+    if (sid) setSeatingId(sid)
+    selectItem(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date])
 
@@ -149,24 +153,6 @@ export default function DaySeatingPanel({
 
   const evalPick = assignMode ? evaluatePick({ booking: activeBooking, picked, free, tables, date, settings }) : null
 
-  // 建議桌（未選任何桌時顯示，一鍵套用）：與現場「建議組合」同一個演算法，桌池換成這筆的可選桌
-  const suggestion = useMemo(() => {
-    if (!assignMode || picked.length) return null
-    const pool = tables.filter(t => free.includes(String(t.number)))
-    const s = suggestComboFromPool(pool, Number(activeBooking?.guests) || 1)
-    return s.enough && s.tableNumbers.length ? s : null
-  }, [assignMode, picked.length, tables, free, activeBooking])
-
-  // 選到未配桌的那一刻，地圖切到建議桌的樓層（只在換人時切一次，不跟使用者搶樓層）
-  const floorSyncedFor = useRef(null)
-  useEffect(() => {
-    if (!assignMode || !suggestion?.floor) return
-    if (floorSyncedFor.current === activeKey) return
-    floorSyncedFor.current = activeKey
-    if (suggestion.floor !== floor) setFloor(suggestion.floor)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignMode, activeKey, suggestion?.floor])
-
   const handleTableClick = (number) => {
     const n = String(number)
     if (assignMode) {
@@ -179,6 +165,7 @@ export default function DaySeatingPanel({
     const occ = mapByTable[n]
     if (occ?.kind === 'walkin') return selectItem(allItems.find(i => i.key === `b:${occ.booking.id}`), { scroll: true })
     if (occ?.kind === 'group') return selectItem(allItems.find(i => i.kind === 'group' && i.group.id === occ.group.id && i.batch === occ.batch) || null, { scroll: true })
+    if (showHint) toast.info('先點清單上的客人，再選桌')
   }
 
   const confirm = () => {
@@ -210,13 +197,13 @@ export default function DaySeatingPanel({
       : isToday ? `已${picked.length > 1 ? '併桌' : ''}預配 ${picked.join(' + ')}（桌子現在仍可帶位）`
         : `已${picked.length > 1 ? '併桌' : ''}配到 ${picked.join(' + ')}`
     toast.success(`${b.name}（${ev.need} 位）${how}${tail}`)
-    // 排完自動跳下一筆未配桌（改桌則留在原筆）
-    const next = wasUnassigned ? nextUnassigned(list, b.id) : null
-    if (next) {
-      selectItem(allItems.find(i => i.key === `b:${next.bookingId}`), { scroll: true })
-    } else {
-      setEditing(false); setPicked([])
-      if (wasUnassigned) toast.info('這天的散客都配好桌了')
+    // 排完一筆：不跳下一筆。新配桌回到未選取（留在原場次與捲動位置）；改桌留在原筆（顯示它的新桌）
+    setEditing(false); setPicked([])
+    if (wasUnassigned) {
+      setActiveKey(null)
+      const othersPending = allItems.some(i => i.kind === 'walkin' && i.state === 'unassigned'
+        && EDITABLE_STATUSES.includes(i.booking.status) && i.booking.id !== b.id)
+      if (!othersPending) toast.info('這天的散客都配好桌了')
     }
   }
 
@@ -270,11 +257,26 @@ export default function DaySeatingPanel({
   const switchSeating = (id) => {
     if (id === seatingId) return
     setSeatingId(id)
-    // 換場次 → 預設選該場次最早一筆未配桌（沒有就不選人）
-    const sec = list.sections.find(s => s.seating.id === id)
-    const hit = sec?.items.find(i => i.kind === 'walkin' && i.state === 'unassigned' && EDITABLE_STATUSES.includes(i.booking.status))
-    selectItem(hit || null, { scroll: true })
+    // 換場次 → 不選任何客人（清掉前一場的選取），由店員自己點
+    selectItem(null)
   }
+
+  // 手機直向清單在地圖上面：點客人後捲到橫幅（下面就是地圖），排完或取消回清單原位。寬版地圖在旁邊，不捲。
+  const bannerRef = useRef(null)
+  const listScrollBefore = useRef(null)
+  useEffect(() => {
+    if (!window.matchMedia?.('(max-width: 767px)').matches) { listScrollBefore.current = null; return }
+    const box = bannerRef.current?.closest('[data-testid="admin-content"]')
+    if (assignMode && box) {
+      if (listScrollBefore.current == null) listScrollBefore.current = box.scrollTop
+      // 訂位頁的子分頁列黏在內容區頂端，要讓開才不會蓋住橫幅第一行
+      scrollContentTo(bannerRef.current, { offset: box.querySelector('[data-sticky-bar]')?.offsetHeight || 0 })
+    } else if (!assignMode && listScrollBefore.current != null) {
+      const content = document.querySelector('[data-testid="admin-content"]')
+      if (content) content.scrollTop = listScrollBefore.current
+      listScrollBefore.current = null
+    }
+  }, [assignMode, activeKey])
 
   if (!seating) {
     return <div className="rounded-xl border border-dashed border-chicken-brown/20 bg-white p-8 text-center text-sm text-chicken-brown/70">尚未設定場次，請先到「設定 → 場次設定」新增午餐／晚餐場次。</div>
@@ -282,6 +284,8 @@ export default function DaySeatingPanel({
 
   const focusTables = assignMode ? picked : (activeItem?.tables || [])
   const totalUnassigned = list.sections.reduce((s, x) => s + x.unassigned, 0)
+  // 還沒選人時的引導（只在這個場次有未配桌、而且這裡真的能排時才給；唯讀／公休／過去日期不會出現）
+  const showHint = !activeItem && section?.unassigned > 0 && canPreassign && !dayClosed && !isPast
 
   return (
     <div className="space-y-3" data-testid="day-seating">
@@ -289,7 +293,7 @@ export default function DaySeatingPanel({
           場次摘要（N 組・未配桌 M）原本也在這列，但 1180 寬放不下、折成第二行多吃 26px（頁面捲動檢查：整頁溢出 32px 的主因之一）
           → 改當左欄清單的標題列（左欄比右欄短，有空間）。
           sticky：清單捲很長時仍可換場次／換日 */}
-      <div className="lg-chrome sticky top-0 z-20 rounded-2xl px-2.5 py-1.5 flex items-center gap-x-2 gap-y-1.5 flex-wrap">
+      <div className="lg-chrome sticky top-0 phone:static z-20 rounded-2xl px-2.5 py-1.5 flex items-center gap-x-2 gap-y-1.5 flex-wrap">
         {headerStart}
         {onBackToCalendar && (
           <button type="button" onClick={onBackToCalendar} className="tap inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-xl bg-white/80 border border-chicken-brown/15 text-[13px] font-semibold text-chicken-brown">
@@ -383,8 +387,14 @@ export default function DaySeatingPanel({
 
         {/* 右：排位橫幅＋該場次桌況圖（sticky：清單捲動時留在眼前） */}
         <div className="md:sticky md:top-[64px] space-y-2">
+          {showHint && (
+            <div data-testid="seat-hint" role="status" className="flex items-center gap-2 rounded-xl bg-orange-50 border border-orange-200 px-3 py-2 text-[13px] font-semibold text-orange-900">
+              <Armchair size={16} className="shrink-0" aria-hidden="true" />
+              <span>點清單上的客人開始排位</span>
+            </div>
+          )}
           {assignMode && (
-            <div data-testid="seat-banner" className="lg-mode bg-orange-700 text-white px-3 py-2 rounded-xl space-y-1.5">
+            <div ref={bannerRef} data-testid="seat-banner" className="lg-mode bg-orange-700 text-white px-3 py-2 rounded-xl space-y-1.5">
               <div className="flex items-center gap-2 flex-wrap">
                 <Armchair size={18} aria-hidden="true" />
                 <span className="text-sm font-bold">{activeItem.tables.length ? '改桌' : '排位'}：{activeBooking.name}（{activeBooking.guests} 位 · {activeBooking.timeSlot}）</span>
@@ -400,14 +410,8 @@ export default function DaySeatingPanel({
                 <div className="text-[13px] font-semibold flex-1 min-w-[12rem]">
                   {picked.length
                     ? <>已選：<span className="tabular-nums">{picked.join(' + ')}</span>{evalPick?.short > 0 && <span className="ml-2">— 擠一擠也還差 {evalPick.short} 位</span>}</>
-                    : suggestion
-                      ? <span className="inline-flex items-center gap-1.5"><Lightbulb size={16} aria-hidden="true" />建議 {suggestion.tableNumbers.join(' + ')}{suggestion.squeezed ? '（擠一擠）' : ''}，或點地圖上框起來的空桌</span>
-                      : free.length ? '點地圖上框起來的空桌（可點多張同層小桌併桌）' : '這個時段沒有可用的空桌了'}
+                    : free.length ? '點地圖上框起來的空桌（可點多張同層小桌併桌）' : '這個時段沒有可用的空桌了'}
                 </div>
-                {!picked.length && suggestion && (
-                  <button type="button" onClick={() => { setPicked(suggestion.tableNumbers.map(String)); if (suggestion.floor && suggestion.floor !== floor) setFloor(suggestion.floor) }}
-                    className="tap min-h-[44px] px-3 rounded-lg bg-white/95 text-orange-800 text-sm font-bold whitespace-nowrap">套用建議</button>
-                )}
                 <button type="button" onClick={confirm} disabled={!evalPick?.ok}
                   className={`tap inline-flex items-center gap-1 min-h-[44px] px-4 rounded-lg text-sm font-bold whitespace-nowrap ${evalPick?.ok ? 'bg-white text-emerald-800' : 'bg-white/30 text-white cursor-not-allowed'}`}>
                   <Check size={16} strokeWidth={2.6} aria-hidden="true" />{picked.length > 1 ? '確認併桌' : '確認'}
@@ -425,7 +429,7 @@ export default function DaySeatingPanel({
                 {assignMode && <span className="inline-flex items-center gap-1 text-emerald-800"><i className="h-2.5 w-2.5 rounded-sm border-2 border-dashed border-lime-600" />可選</span>}
               </div>
             </div>
-            <div className={`rounded-lg overflow-hidden border border-chicken-brown/5 min-h-[340px] ${assignMode ? 'h-[calc(100dvh-330px)]' : 'h-[calc(100dvh-230px)]'} max-h-[640px]`} style={{ background: '#faf8f5' }}>
+            <div className={`rounded-lg overflow-hidden border border-chicken-brown/5 min-h-[340px] ${assignMode || showHint ? 'h-[calc(100dvh-330px)]' : 'h-[calc(100dvh-230px)]'} max-h-[640px]`} style={{ background: '#faf8f5' }}>
               <FloorMap
                 floor={floor}
                 tables={tables}

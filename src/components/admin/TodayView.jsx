@@ -21,7 +21,7 @@ const STATUS_PRIORITY = {
   noshow: 4,
 }
 
-// onOpenSeating：統計卡「未指派」→ 今天的「當日排位」（BookingsView 的日曆子分頁＋DaySeatingPanel，預設選最早一筆未配桌）
+// onOpenSeating：統計卡「未指派」→ 今天的「當日排位」（BookingsView 的日曆子分頁＋DaySeatingPanel；只進畫面、不選人）
 // onGoOps：統計卡「用餐中」→ 現場頁（用餐中的桌在現場管理）
 export default function TodayView({ onAssignTable, onOpenGroup, onMoveTable, onOpenSeating, onGoOps }) {
   const { bookings, groupReservations, tables } = useBooking()

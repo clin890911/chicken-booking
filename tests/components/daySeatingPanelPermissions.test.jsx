@@ -72,6 +72,7 @@ describe('DaySeatingPanel × 角色', () => {
     expect(container.textContent).toContain('未配桌客')
     expect(container.textContent).toContain('唯讀：你的帳號只能查看')
     expect(container.querySelector('[data-testid="seat-banner"]')).toBeNull()
+    expect(container.querySelector('[data-testid="seat-hint"]')).toBeNull() // 唯讀：不引導去排位
 
     // 選中未配桌那筆：沒有「配桌」，但有聯絡與「更多 → 訂位詳情」
     act(() => { rowOf('未配桌客').click() })
@@ -91,10 +92,15 @@ describe('DaySeatingPanel × 角色', () => {
     expect(ctx.clearBookingPreassign).not.toHaveBeenCalled()
   })
 
-  it.each(['manager', 'floor', 'host'])('%s：自動進排位；已配桌可改桌／取消配桌；訂位卡動作（編輯、取消訂位）都在', (role) => {
+  it.each(['manager', 'floor', 'host'])('%s：不自動進排位、點客人才進；已配桌可改桌／取消配桌；訂位卡動作（編輯、取消訂位）都在', (role) => {
     currentRole = role
     mount()
     expect(container.textContent).not.toContain('唯讀：')
+    // 不自動帶客人：沒有橫幅、沒有選中，只有一句引導
+    expect(container.querySelector('[data-testid="seat-banner"]')).toBeNull()
+    expect(container.querySelectorAll('[data-key][aria-pressed="true"]')).toHaveLength(0)
+    expect(container.querySelector('[data-testid="seat-hint"]')).toBeTruthy()
+    act(() => { rowOf('未配桌客').click() })
     expect(container.querySelector('[data-testid="seat-banner"]')?.textContent).toContain('排位：未配桌客')
 
     act(() => { rowOf('已配桌客').click() })
@@ -126,6 +132,7 @@ describe('DaySeatingPanel × 角色', () => {
     mount({ date: past })
     expect(container.textContent).toContain('過去的日期：只能看')
     expect(container.querySelector('[data-testid="seat-banner"]')).toBeNull()
+    expect(container.querySelector('[data-testid="seat-hint"]')).toBeNull()
     act(() => { rowOf('未配桌客').click() })
     expect(btn('配桌')).toBeUndefined()
   })

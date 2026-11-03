@@ -1,5 +1,5 @@
 import {
-  buildDaySeatingList, sectionSummaryText, firstUnassigned, nextUnassigned,
+  buildDaySeatingList, sectionSummaryText, defaultSeatingId,
   assignableTables, pickTableError, evaluatePick, walkinState, heldTableNumbers, undoUnassignBlocker,
 } from '../../src/utils/daySeatingPlan'
 import { suggestComboFromPool } from '../../src/services/seatingService'
@@ -59,31 +59,27 @@ describe('buildDaySeatingList：當天全部訂位依場次分組', () => {
   })
 })
 
-describe('smart default：預設選中最早未配桌，排完自動跳下一筆', () => {
+describe('預設場次：只帶到有未配桌的場次，不選人（店主 2026-11-03）', () => {
   const bookings = [
     B('a', '11:00', 2, { assignedTableId: '105' }),
     B('b', '11:30', 2),
-    B('c', '12:00', 2),
     B('d', '13:00', 2),
     B('e', '18:00', 2),
   ]
   const list = buildDaySeatingList({ bookings, date: DATE, settings: SETTINGS })
-  it('firstUnassigned＝最早一筆未配桌與其場次', () => {
-    expect(firstUnassigned(list)).toEqual({ seatingId: 'lunch1', bookingId: 'b' })
+  it('defaultSeatingId＝第一個有未配桌散客的場次，回傳的只是場次 id 字串', () => {
+    expect(defaultSeatingId(list)).toBe('lunch1')
+    const lunch1Done = buildDaySeatingList({ bookings: bookings.map(x => x.id === 'b' ? { ...x, assignedTableId: '101' } : x), date: DATE, settings: SETTINGS })
+    expect(defaultSeatingId(lunch1Done)).toBe('lunch2')
   })
-  it('同場次往後 → 下一場次 → 全部配好回 null', () => {
-    expect(nextUnassigned(list, 'b')).toEqual({ seatingId: 'lunch1', bookingId: 'c' })
-    // 同場次後面沒有了 → 先回頭找同場次前面還沒配的（b），都配好才換下一場次
-    expect(nextUnassigned(list, 'c')).toEqual({ seatingId: 'lunch1', bookingId: 'b' })
-    const bDone = buildDaySeatingList({ bookings: bookings.map(x => x.id === 'b' ? { ...x, assignedTableId: '101' } : x), date: DATE, settings: SETTINGS })
-    expect(nextUnassigned(bDone, 'c')).toEqual({ seatingId: 'lunch2', bookingId: 'd' })
-    expect(nextUnassigned(list, 'e')).toEqual({ seatingId: 'lunch1', bookingId: 'b' }) // 繞回前面場次
-    const one = buildDaySeatingList({ bookings: [B('z', '11:00', 2)], date: DATE, settings: SETTINGS })
-    expect(nextUnassigned(one, 'z')).toBeNull()
-  })
-  it('都配好了 → 第一個有訂位的場次、不選人', () => {
+  it('都配好了 → 第一個有訂位的場次', () => {
     const done = buildDaySeatingList({ bookings: [B('x', '18:00', 2, { assignedTableId: '101' })], date: DATE, settings: SETTINGS })
-    expect(firstUnassigned(done)).toEqual({ seatingId: 'dinner1', bookingId: null })
+    expect(defaultSeatingId(done)).toBe('dinner1')
+  })
+  it('完全沒訂位 → 第一個場次；沒有清單 → 空字串', () => {
+    const empty = buildDaySeatingList({ bookings: [], date: DATE, settings: SETTINGS })
+    expect(defaultSeatingId(empty)).toBe(empty.sections[0].seating.id)
+    expect(defaultSeatingId(null)).toBe('')
   })
 })
 

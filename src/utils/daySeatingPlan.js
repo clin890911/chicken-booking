@@ -109,37 +109,13 @@ export function sectionSummaryText(section) {
 
 const isPendingWalkin = (i) => i.kind === 'walkin' && i.state === 'unassigned' && EDITABLE_STATUSES.includes(i.booking?.status)
 
-// Smart default：最早一筆「未配桌」散客與其場次。都配好了 → 第一個有訂位的場次、不選人。
-export function firstUnassigned(list) {
-  for (const sec of list?.sections || []) {
-    const hit = sec.items.find(isPendingWalkin)
-    if (hit) return { seatingId: sec.seating.id, bookingId: hit.booking.id }
-  }
-  const busy = (list?.sections || []).find(s => s.count > 0)
-  return { seatingId: busy?.seating.id || list?.sections?.[0]?.seating.id || '', bookingId: null }
-}
-
-// 排完一筆後自動跳下一筆：同場次排在它後面的未配桌 → 同場次前面的 → 後面場次 → 前面場次。
-// list 是「排桌前」的清單（currentId 那筆仍是未配桌，這裡直接略過它）。
-export function nextUnassigned(list, currentId) {
+// 預設場次（只是導覽、不是排位）：第一個有未配桌散客的場次；都配好了 → 第一個有訂位的場次；都沒有 → 第一個場次。
+// 店主 2026-11-03 拍板：進當日排位不再自動選人、不給建議桌，所以這裡只回場次 id，不回訂位。
+export function defaultSeatingId(list) {
   const sections = list?.sections || []
-  const secIdx = sections.findIndex(s => s.items.some(i => i.kind === 'walkin' && i.booking.id === currentId))
-  const candidates = (sec) => sec.items.filter(i => isPendingWalkin(i) && i.booking.id !== currentId)
-  if (secIdx >= 0) {
-    const sec = sections[secIdx]
-    const pos = sec.items.findIndex(i => i.kind === 'walkin' && i.booking.id === currentId)
-    const after = sec.items.slice(pos + 1).find(i => isPendingWalkin(i) && i.booking.id !== currentId)
-    const hit = after || candidates(sec)[0]
-    if (hit) return { seatingId: sec.seating.id, bookingId: hit.booking.id }
-  }
-  const order = secIdx >= 0
-    ? [...sections.slice(secIdx + 1), ...sections.slice(0, secIdx)]
-    : sections
-  for (const sec of order) {
-    const hit = candidates(sec)[0]
-    if (hit) return { seatingId: sec.seating.id, bookingId: hit.booking.id }
-  }
-  return null
+  const pending = sections.find(sec => sec.items.some(isPendingWalkin))
+  const busy = pending || sections.find(s => s.count > 0)
+  return busy?.seating.id || sections[0]?.seating.id || ''
 }
 
 // 團體梯次與 window 重疊的桌（跨場次也算：午餐第一批 12:00 的團，會壓到 13:00 的散客）
