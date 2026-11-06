@@ -16,7 +16,7 @@ import BatchSeatPanel from './BatchSeatPanel'
 import {
   SPECIAL_FIELDS, TOTAL_PRESETS, composeBusInfo, parseBusInfo, overSpecialCounts, specialOverMessage,
 } from './groupEditorFields'
-import { dayLabel, seatingForSlot, arrivalSlotsForSeating } from '../../../utils/timeSlots'
+import { dayLabel, seatingForSlot, arrivalSlotsForSeating, todayStr } from '../../../utils/timeSlots'
 import { guestTableNumbers, guestBatches, isEscortBatch, remainingTablesForSeating, isSlotClosed, isDayClosedForClosures } from '../../../utils/capacity'
 import { isTableUsableOnDate } from '../../../utils/tableAvailability'
 import { suggestTablesForBatch } from '../../../utils/suggestTables'
@@ -116,7 +116,7 @@ function Disclosure({ title, defaultOpen = false, children }) {
 // 不再有「翻到第二頁才知道第一頁填錯」。存檔鏈（validateGroupForSave → createAndReserveGroup /
 // reserveGroupTables → 雲端交易，409 回滾）完全沒動。
 export default function GroupEditorStage({
-  initialGroup, isNew, date, slots,
+  initialGroup, isNew, date: initialDate, slots,
   tables, settings, bookings, agencies, guides, groupReservations = [],
   onBack, onSaved, onDeleted,
   reserveExisting, createGroup, removeGroup,
@@ -130,6 +130,10 @@ export default function GroupEditorStage({
   const { can } = useAuth()
   const confirm = useConfirm()
   const { fixtures, zones } = useBooking()
+
+  // 新增團單可在編輯器內直接改日期（不必先回月曆選日）。既有團單的日期只走「改期」流程，
+  // 這裡不開放，以免繞過改期的重新圈桌提示。
+  const [date, setDate] = useState(initialDate)
 
   const [draft, setDraft] = useState(() => JSON.parse(JSON.stringify(initialGroup)))
   const [activeBatchId, setActiveBatchId] = useState(draft.batches?.[0]?.id || null)
@@ -178,6 +182,17 @@ export default function GroupEditorStage({
     return m
   }, [seatings, tables, bookings, otherGroups, date, settings])
   const dayClosed = isDayClosedForClosures(settings, date)
+
+  // 換日：已圈的桌是對舊日期圈的，一律清空重圈（同改期的規則），其餘欄位保留。
+  const changeDate = (next) => {
+    if (!isNew || !next || next === date) return
+    const hadTables = (draft.batches || []).some(b => (b.tableNumbers || []).length > 0)
+    setDate(next)
+    if (hadTables) {
+      setDraft(d => ({ ...d, batches: (d.batches || []).map(b => ({ ...b, tableNumbers: [] })) }))
+      toast.info(`已改到 ${dayLabel(next)}，原本圈的桌已清空，請重新圈桌`)
+    }
+  }
 
   const primaryBatch = draft.batches?.[0] || null
   const primarySeating = primaryBatch ? seatingForSlot(settings, primaryBatch.timeSlot) : null
@@ -539,10 +554,10 @@ export default function GroupEditorStage({
     try {
       if (isNew) {
         const saved = await createGroup({ ...draft, ...patch, date })
-        onSaved(saved?.id)
+        onSaved(saved?.id, date)
       } else {
         await reserveExisting(draft.id, patch)
-        onSaved(draft.id)
+        onSaved(draft.id, date)
       }
       toast.success('團單已儲存')
     } catch (err) {
@@ -668,9 +683,27 @@ export default function GroupEditorStage({
         </button>
         <span className="flex-1" />
         <div className="text-sm font-semibold tabular-nums text-chicken-brown">
-          {isNew ? '新增團單' : `編輯：${draft.agencyName || '（未填旅行社）'}`} <span className="text-chicken-brown/50">· {dayLabel(date)}</span>
+          {isNew ? '新增團單' : `編輯：${draft.agencyName || '（未填旅行社）'}`}
+          {!isNew && <span className="text-chicken-brown/50"> · {dayLabel(date)}</span>}
         </div>
       </div>
+
+      {/* 新增團單：日期直接在這裡改。換日會清掉已圈的桌（桌況、維修、公休都依日期不同）。 */}
+      {isNew && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-chicken-brown/10 bg-white px-4 py-3">
+          <Icon name="calendar" size={18} className="shrink-0 text-chicken-brown/60" />
+          <label htmlFor="group-editor-date" className="text-sm font-semibold text-chicken-brown">用餐日期</label>
+          <input
+            id="group-editor-date"
+            type="date"
+            value={date}
+            min={todayStr()}
+            onChange={e => changeDate(e.target.value)}
+            className="tap h-11 rounded-lg border border-chicken-brown/20 bg-white px-3 text-base font-semibold tabular-nums text-chicken-brown"
+          />
+          <span className="text-sm text-chicken-brown/60">{dayLabel(date)}{dayClosed ? ' · 公休' : ''}</span>
+        </div>
+      )}
 
       {/* 改期橫幅：由「📅 改期」進入時顯示原日期→新日期，提示須重新圈桌 */}
       {rescheduleFrom && rescheduleFrom !== date && (

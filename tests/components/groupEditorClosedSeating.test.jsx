@@ -73,7 +73,7 @@ describe('GroupEditorStage × 線上關閉場次 / 超坐', () => {
     await act(async () => { saveButtons()[0].click() })
     expect(harness.toast.error).not.toHaveBeenCalled()
     expect(reserveExisting).toHaveBeenCalledWith('G1', expect.objectContaining({ date: DATE }))
-    expect(onSaved).toHaveBeenCalledWith('G1')
+    expect(onSaved).toHaveBeenCalledWith('G1', DATE)
   })
 
   it('時段被關（closedSlots）一樣只提醒、可存', async () => {
@@ -104,5 +104,50 @@ describe('GroupEditorStage 頁名', () => {
     expect(h1.textContent).toBe('規劃')
     expect(h1.className).toMatch(/hidden lg:block/)
     expect(h1.nextElementSibling.textContent).toContain('返回當日總覽')
+  })
+})
+
+// 新增團單可在編輯器內直接改日期（2026-11 店主：不必先回月曆點日期再按新增）。
+describe('GroupEditorStage 新增團單 × 編輯器內改日期', () => {
+  const dateInput = () => container.querySelector('input[type="date"]')
+  const setDate = (v) => act(() => {
+    const el = dateInput()
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, v)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const newDraft = () => groupOf({ id: undefined, status: 'planned' })
+
+  it('新增模式有日期欄，預設帶入傳進來的日期', () => {
+    mount({ isNew: true, initialGroup: newDraft() })
+    expect(dateInput()).not.toBeNull()
+    expect(dateInput().value).toBe(DATE)
+  })
+
+  it('換日：已圈的桌清空並提示重新圈桌，標題跟著新日期', () => {
+    mount({ isNew: true, initialGroup: newDraft() })
+    expect(container.textContent).toContain('席位：已圈 6')
+    setDate('2026-10-12')
+    expect(dateInput().value).toBe('2026-10-12')
+    expect(harness.toast.info).toHaveBeenCalledWith(expect.stringContaining('請重新圈桌'))
+    expect(container.textContent).not.toContain('席位：已圈 6')
+  })
+
+  it('換日後未重圈不可存；一鍵推薦重圈後存檔，createGroup 與 onSaved 都用新日期', async () => {
+    const createGroup = vi.fn().mockResolvedValue({ id: 'GN' })
+    mount({ isNew: true, initialGroup: newDraft(), createGroup })
+    setDate('2026-10-12')
+    expect(saveButtons().every(b => b.disabled)).toBe(true)
+    const suggest = [...container.querySelectorAll('button')].find(b => b.textContent.includes('一鍵推薦桌位'))
+    act(() => suggest.click())
+    expect(saveButtons().every(b => !b.disabled)).toBe(true)
+    await act(async () => { saveButtons()[0].click() })
+    expect(harness.toast.error).not.toHaveBeenCalled()
+    expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({ date: '2026-10-12' }))
+    expect(onSaved).toHaveBeenCalledWith('GN', '2026-10-12')
+  })
+
+  it('編輯既有團單沒有日期欄（改日期走「改期」流程）', () => {
+    mount()
+    expect(dateInput()).toBeNull()
   })
 })
