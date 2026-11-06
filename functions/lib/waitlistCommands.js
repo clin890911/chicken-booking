@@ -4,6 +4,7 @@ import { roleCan } from './staffAccess.js'
 import { projectBookingForRead, projectWaitlistForRead } from './dataProjection.js'
 import { notificationIntent } from './durableNotifications.js'
 import { isTableUsableOnDate } from './tableUsable.js'
+import { buildWaitlistCallOutbox } from './smsPhone.js'
 
 const fail=(message,status=409)=>{throw Object.assign(Error(message),{status})}
 const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v
@@ -103,6 +104,8 @@ export async function executeWaitlistCommand({db,staff,command,now=new Date().to
     }
     result={ok:true,item:projectWaitlistForRead(item,staff.role),bookings:writes.filter(([r])=>r.path?.startsWith('bookings/')).map(([,b])=>publicBooking(b)),tables,deletedBookingIds:deletes.map(r=>r.id||r.path.split('/').at(-1)),undoUntil:item.undoUntil||null}
     if(['create','seat'].includes(action)){const intent=notificationIntent({channel:'telegram',event:action==='create'?'waitlist_created':'waitlist_seated',version:`${id}:${commandId}`,payload:{text:action==='create'?`候位 #${item.queueNumber} 已取號（${item.partySize} 位）`:`候位 #${item.queueNumber} 已入座：${item.tableNumbers.join(' + ')}`}},now);writes.push([db.collection('notificationIntents').doc(intent.id),intent])}
+    // 叫號簡訊：只多一筆 smsOutbox 寫入（不讀、不改驗證/狀態/版本）；送出由 smsKick／smsSweeper 處理。
+    if(action==='call'){const sms=buildWaitlistCallOutbox({item,commandId,now});if(sms)writes.push([db.collection('smsOutbox').doc(sms.id),sms.data])}
     // All transactional reads above precede every write.
     for(const [r,data] of writes)tx.set(r,data)
     for(const r of deletes)tx.delete(r)

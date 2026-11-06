@@ -18,7 +18,7 @@ describe('候位取號：電話用漂浮數字鍵盤', () => {
   let container, root
   const click = (el) => act(() => { el.click() })
   const btn = (pred) => [...document.querySelectorAll('button')].find(pred)
-  const phone = () => document.querySelector('input[aria-label="電話（選填）"]')
+  const phone = () => document.querySelector('input[aria-label="手機（叫號簡訊用，選填）"]')
   const keypad = () => document.querySelector('[role="dialog"][aria-label="電話數字鍵盤"]')
   beforeEach(() => {
     vi.clearAllMocks()

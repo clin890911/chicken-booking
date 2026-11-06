@@ -775,7 +775,16 @@ export function BookingProvider({ children }) {
     } catch (error) { return { ok: false, error: error.message } }
   }
   const addWaitlist = data => runWaitlistCommand('create', null, data)
-  const callWaitlist = id => runWaitlistCommand('call', id)
+  // 叫號成功後「不等待」踢一次簡訊送出端；任何錯誤（同步 throw、reject、端點未部署 404）一律吞掉，
+  // 叫號結果、待確認區、收據流程完全不受影響。漏踢由後端每分鐘 smsSweeper 補。
+  const kickWaitlistSms = id => {
+    try { Promise.resolve(cloudData.smsKick(id)).catch(() => {}) } catch { /* 簡訊失敗不影響叫號 */ }
+  }
+  const callWaitlist = async id => {
+    const result = await runWaitlistCommand('call', id)
+    if (result?.ok) kickWaitlistSms(id)
+    return result
+  }
   const leaveWaitlist = id => runWaitlistCommand('leave', id)
   const skipWaitlist = (id, commandId) => runWaitlistCommand('skip', id, null, commandId)
   const returnWaitlist = (id, commandId) => runWaitlistCommand('return', id, null, commandId)
@@ -786,6 +795,7 @@ export function BookingProvider({ children }) {
     const entries = waitlistCommands.listPending(waitlistOwner, waitlistStore)
     for (const envelope of entries) {
       const result = await sendWaitlistEnvelope(envelope)
+      if (result.ok && envelope.command.action === 'call') kickWaitlistSms(envelope.command.id)
       if (!result.ok) toastRef.current.error(result.error)
       else toastRef.current.success(envelope.command.action === 'create' ? `已確認取號 #${result.item.queueNumber}` : '已確認候位操作')
     }
