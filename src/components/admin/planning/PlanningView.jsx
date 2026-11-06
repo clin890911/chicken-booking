@@ -300,8 +300,10 @@ export default function PlanningView({ onGoToday, onMoveTable, pendingPreassign,
   // 編輯器返回：只清編輯器——從詳情進編輯時自然落回詳情頁；新增草稿（無詳情）回當日總覽。
   const closeEditor = () => { setEditorGroup(null); setEditorIsNew(false); setRescheduleFrom(null) }
   // 儲存後（新增與編輯一致）：進詳情頁，立即可印回傳單傳給導遊。
-  const handleSaved = (id) => {
+  // 新增團單可在編輯器內改日期：存檔後把月曆與當日總覽跟到團單實際日期。
+  const handleSaved = (id, savedDate) => {
     closeEditor()
+    if (savedDate && savedDate !== selectedDate) jumpToDate(savedDate)
     setDetailGroupId(id || null)
   }
   const handleDeleted = () => {
