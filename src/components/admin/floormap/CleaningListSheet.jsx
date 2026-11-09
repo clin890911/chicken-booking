@@ -5,7 +5,8 @@ import { Modal } from '../../ui'
 // 尖峰一次散場 5 桌：點「待清」→「全部清桌」＝2 下（原本每桌開抽屜再按清桌＝10 下）。
 // 清完的 toast 帶「復原清桌」（全部倒回待清；被下一組用掉的那張安全失敗），由呼叫端 clearTablesWithUndo 處理。
 // 團體桌：角色不能寫團單時不給清（會寫 releasedAt／結團），寫明要點桌處理。
-export default function CleaningListSheet({ open, onClose, tables = [], bookings = [], groupReservations = [], canGroup = true, onClear, onOpenTable }) {
+// canClear=false（無桌況寫入權，如 kitchen）：一顆清桌鈕都不給（呼叫端本來就不會打開，這是第二道門）。
+export default function CleaningListSheet({ open, onClose, tables = [], bookings = [], groupReservations = [], canGroup = true, canClear = true, onClear, onOpenTable }) {
   const whoOf = (t) => {
     if (t.currentRef?.type === 'group') {
       const g = groupReservations.find(x => x.id === t.currentRef.groupId)
@@ -14,12 +15,12 @@ export default function CleaningListSheet({ open, onClose, tables = [], bookings
     const b = t.currentBookingId ? bookings.find(x => String(x.id) === String(t.currentBookingId)) : null
     return b?.name ? `${b.name} 已離席` : '上一組已離席'
   }
-  const clearable = tables.filter(t => canGroup || t.currentRef?.type !== 'group')
+  const clearable = canClear ? tables.filter(t => canGroup || t.currentRef?.type !== 'group') : []
   return (
     <Modal open={open} onClose={onClose} title={`待清桌 ${tables.length} 桌`} size="sm">
       <ul aria-label="待清桌清單" className="flex flex-col gap-2">
         {tables.map(t => {
-          const blocked = !canGroup && t.currentRef?.type === 'group'
+          const blocked = !canClear || (!canGroup && t.currentRef?.type === 'group')
           return (
             <li key={t.number} className="flex items-center gap-3 rounded-2xl bg-amber-50 border border-amber-200 px-3 py-2">
               <Brush size={18} aria-hidden className="flex-none text-amber-700" />
@@ -33,7 +34,7 @@ export default function CleaningListSheet({ open, onClose, tables = [], bookings
                 <span className="block text-sm text-chicken-brown/70 truncate">{t.floor ? `${t.floor} · ` : ''}{whoOf(t)}</span>
               </button>
               {blocked ? (
-                <span className="flex-none text-xs text-chicken-brown/60">團體桌請點桌處理</span>
+                <span className="flex-none text-xs text-chicken-brown/60">{canClear ? '團體桌請點桌處理' : '無清桌權限'}</span>
               ) : (
                 <button
                   type="button"

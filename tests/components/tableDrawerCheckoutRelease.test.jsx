@@ -52,7 +52,7 @@ describe('TableDrawer：離席後「復原離席」走 service 守門', () => {
     expect(ctx.checkoutBooking).toHaveBeenCalledWith('B1')
     const [msg, action, opts] = toast.action.mock.calls[0]
     expect(msg).toContain('余先生 已離席')
-    expect(action.label).toBe('復原離席')
+    expect(action.label).toMatch(/^↩ 復原離席$/)
     expect(opts.duration).toBeGreaterThanOrEqual(8000)
     act(() => { action.onClick() })
     expect(ctx.undoCheckoutBooking).toHaveBeenCalledWith({ bookingId: 'B1', prevStatus: 'arrived', tables: [{ number: '105', seatedAt: table.seatedAt }] })

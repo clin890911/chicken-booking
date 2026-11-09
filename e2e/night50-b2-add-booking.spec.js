@@ -3,8 +3,7 @@ import { todayTab } from './helpers/opsToday'
 
 // night-50 批 2：C1–C8 新增訂位情境實走。時間固定 2026-09-19(六) 10:00 台北，明天＝9/20。
 test.use({ timezoneId: 'Asia/Taipei' })
-const SHOTS = '/private/tmp/claude-501/-Users-chingchunlin--claude-spares-spare-WtJFow/2abbcc7f-2edc-4b13-af84-1f34c069374e/scratchpad/shots-b2'
-const shot = (page, n) => page.screenshot({ path: `${SHOTS}/${n}.png` })
+const shot = (page, n) => page.screenshot({ path: test.info().outputPath(`${n}.png`) })
 const at = (hhmm, d = '2026-09-19') => new Date(`${d}T${hhmm}:00+08:00`)
 const J = (o) => JSON.stringify(o)
 

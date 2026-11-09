@@ -297,6 +297,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // D5：清待清桌（桌況圖快捷／待清清單單桌／全部清桌共用）。toast 可能幾秒後才按 → 按下當下才讀最新桌況，
   // 只清「此刻仍是待清」的桌（clearTable 是無條件覆寫，拿舊物件清會把剛入座那組抹掉）。
   const clearCleaning = (list) => {
+    if (!seatingPerms(can).table) return   // 第二道防線：唯讀角色不寫桌況（UI 已不給清單／快捷鈕）
     const latest = (list || []).map(t => tablesRef.current.find(x => String(x.number) === String(t.number))).filter(Boolean)
     const gone = (list || []).filter(t => !latest.some(x => String(x.number) === String(t.number) && x.status === 'cleaning')).map(t => t.number)
     if (gone.length && !latest.some(x => x.status === 'cleaning')) return toast.info(`${gone.join('、')} 已清好或已有下一組，無需清桌`)
@@ -320,8 +321,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const t = tables.find(x => String(x.number) === String(number))
     if (!t) return
     if (mode || reserveOpenRef.current) return locateSuggestion(t.number)
-    // D5：頂列「待清 N」打開待清清單（每桌清桌完成＋全部清桌），不再只開最早那一桌的抽屜
-    if (t.status === 'cleaning') { setSelectedTable(null); setCleaningListOpen(true); return }
+    // D5：頂列「待清 N」打開待清清單（每桌清桌完成＋全部清桌），不再只開最早那一桌的抽屜。
+    // 權限門：清單的鈕會寫 tables（clearTable）→ 沒有桌況寫入權（kitchen 唯讀）就維持原行為：開那桌的抽屜看就好。
+    if (t.status === 'cleaning' && seatingPerms(can).table) { setSelectedTable(null); setCleaningListOpen(true); return }
     setFloor(t.floor); setView('map'); setSelectedTable(t.number)
   }
   const locateSuggestion = (number) => { const t = tables.find(t => String(t.number) === String(number)); if (t) { setFloor(t.floor); setView('map'); setLocateTableRequest(prev => ({ number: String(t.number), seq: (prev?.seq || 0) + 1 })); if (isPhone && !mode) scrollContentTo(mapCardRef.current) } }
@@ -1649,12 +1651,13 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       <OpsLogModal open={showOpsLog} onClose={() => setShowOpsLog(false)} />
       {/* D5 待清桌清單：頂列「待清 N」打開；清完最後一桌自動收起 */}
       <CleaningListSheet
-        open={cleaningListOpen && tables.some(t => t.status === 'cleaning')}
+        open={cleaningListOpen && seatingPerms(can).table && tables.some(t => t.status === 'cleaning')}
         onClose={() => setCleaningListOpen(false)}
         tables={tables.filter(t => t.status === 'cleaning')}
         bookings={bookings}
         groupReservations={groupReservations}
         canGroup={seatingPerms(can).group}
+        canClear={seatingPerms(can).table}
         onClear={(list) => { clearCleaning(list); if (list.length > 1) setCleaningListOpen(false) }}
         onOpenTable={(n) => { setCleaningListOpen(false); const t = tables.find(x => String(x.number) === String(n)); if (t) { setFloor(t.floor); setView('map'); setSelectedTable(t.number) } }}
       />

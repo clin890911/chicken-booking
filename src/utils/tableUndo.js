@@ -10,9 +10,18 @@
 export const undoLabel = {
   cancel: () => '↩ 復原取消',
   walkInSeat: (tables) => `復原帶位 ${[].concat(tables).join('+')}`,
-  move: () => '復原換桌',
-  checkout: () => '復原離席',
+  move: () => '↩ 復原換桌',
+  checkout: () => '↩ 復原離席',
   clear: (tables) => (tables.length > 1 ? `↩ 復原清桌（${tables.length}）` : `↩ 復原清桌 ${tables[0]}`),
+}
+
+// 換桌復原失敗：依 service 回的 code 講實情（店員要知道是「原桌有人了」還是「這組又被換過」），沒 code 才用原文。
+export function moveUndoFailText(u, name) {
+  const who = name || '這組'
+  if (u?.code === 'table-occupied' && u.tableNumber) return `原桌 ${u.tableNumber} 已有其他客人，未復原`
+  if (u?.code === 'tables-changed') return `${who}之後又換過桌${u.currentTables?.length ? `（目前 ${u.currentTables.join(' + ')}）` : ''}，未復原`
+  if (u?.code === 'new-table-changed' && u.tableNumber) return `${u.tableNumber} 已清桌或換了別組，未復原`
+  return '復原失敗：' + (u?.error || '未知錯誤')
 }
 
 // 換桌成功後的 toast＋復原（D1）。r＝replaceSeatedBookingTables／moveTable 的結果（r.undo＝換桌前快照）。
@@ -23,7 +32,7 @@ export function toastMovedWithUndo(r, { message, name, toTables, undoSeatedMove,
     label: undoLabel.move(),
     onClick: () => {
       const u = undoSeatedMove(r.undo, toTables)
-      if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+      if (!u?.ok) return toast.error(moveUndoFailText(u, name))
       const released = r.releasedPreassigns || []
       const note = released.length && restoreOverriddenAssignment && restoreReleasedPreassigns
         ? (restoreNote?.(restoreReleasedPreassigns(released, { restoreOverriddenAssignment })) || '')

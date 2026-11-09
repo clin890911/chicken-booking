@@ -878,20 +878,21 @@ export function undoSeatedMove(snap = {}, toTableNumbers = []) {
   const fromNums = from.map(f => String(f.number))
   const toNums = [...new Set((toTableNumbers || []).map(String))]
   const nums = bookingTableNumbers(booking)
+  // code／tableNumber 只供呈現層（utils/tableUndo）講清楚是哪種情況；判斷邏輯不變
   if (!fromNums.length || !toNums.length || nums.length !== toNums.length || nums.some(n => !toNums.includes(n))) {
-    return { ok: false, error: '這組的桌位已再被更動，未復原' }
+    return { ok: false, code: 'tables-changed', currentTables: nums, error: '這組的桌位已再被更動，未復原' }
   }
   for (const n of toNums) {
     if (fromNums.includes(n)) continue
     const t = tableService.getByNumber(n)
-    if (!t || t.status !== 'dining' || !heldBy(t, bookingId) || t.currentRef) return { ok: false, error: '這組的桌位已再被更動，未復原' }
+    if (!t || t.status !== 'dining' || !heldBy(t, bookingId) || t.currentRef) return { ok: false, code: 'new-table-changed', tableNumber: n, error: '這組的桌位已再被更動，未復原' }
   }
   for (const n of fromNums) {
     if (toNums.includes(n)) continue
     const t = tableService.getByNumber(n)
     if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
     const free = ['cleaning', 'vacant'].includes(t.status) && t.currentBookingId == null && !t.currentRef
-    if (!free) return { ok: false, code: 'table-occupied', error: `${n} 已被下一組使用（${statusZh(t.status)}），未復原` }
+    if (!free) return { ok: false, code: 'table-occupied', tableNumber: n, error: `${n} 已被下一組使用（${statusZh(t.status)}），未復原` }
     if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(n) }
   }
   toNums.filter(n => !fromNums.includes(n)).forEach(n => tableService.clearTable(n))

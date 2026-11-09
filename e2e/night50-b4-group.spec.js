@@ -5,7 +5,6 @@ import { openGroupRow } from './helpers/opsToday'
 // 本機模擬登入（localStorage 當後端）；所有非 localhost 請求一律攔截（不用 '**/admin*'，免得連 /admin 頁面一起攔）。
 test.use({ timezoneId: 'Asia/Taipei' })
 
-const SHOTS = '/private/tmp/claude-501/-Users-chingchunlin--claude-spares-spare-WtJFow/2abbcc7f-2edc-4b13-af84-1f34c069374e/scratchpad/shots-b4'
 const TODAY = '2026-11-10'          // 週二
 const NEXT_WED = '2026-11-18'       // 下週三
 const at = (d, hhmm) => new Date(`${d}T${hhmm}:00+08:00`)
@@ -83,7 +82,7 @@ test('F1 旅行社電話訂下週三 40 人一梯：一頁完成、席位不足�
   // 先只圈 2 張六人桌（12 席）→ 應只黃字、可存
   step(); await planTable(page, '101').click()
   step(); await planTable(page, '102').click()
-  await page.screenshot({ path: `${SHOTS}/F1-short-warning.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F1-short-warning.png`), fullPage: true })
   const save = page.getByRole('button', { name: /儲存並保留/ }).first()
   // F1 修法：差距超過一桌容量 → 「還差 N 席，請再圈桌或拆梯」，不再叫人擠一擠；仍可存
   await expect(page.getByText(/還差 \d+ 席，請再圈桌或拆梯/).first()).toBeVisible()
@@ -94,7 +93,7 @@ test('F1 旅行社電話訂下週三 40 人一梯：一頁完成、席位不足�
   step(); await page.getByRole('button', { name: /一鍵推薦桌位/ }).click()
   const hero = page.getByLabel(/^本梯已圈 \d+ 席、\d+ 桌$/)
   console.log('F1 推薦後:', await hero.getAttribute('aria-label'))
-  await page.screenshot({ path: `${SHOTS}/F1-after-suggest.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F1-after-suggest.png`), fullPage: true })
   step(); await save.click()
   await expect(page.getByText(/團單已儲存/)).toBeVisible()
   const s = await readState(page)
@@ -117,7 +116,7 @@ test('F2 40 人拆兩梯（11:30／12:30）：每梯人數與圈桌', async ({ p
   console.log('F2 拆梯後預設人數 第一梯=', v1, '第二梯=', v2)
   // F2 修法：單梯拆兩梯 → 對半分
   expect([v1, v2]).toEqual(['20', '20'])
-  await page.screenshot({ path: `${SHOTS}/F2-split-default.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F2-split-default.png`), fullPage: true })
   // 店員分配 20/20
   step(); await g1.fill('20')
   step(); await g2.fill('20')
@@ -126,7 +125,7 @@ test('F2 40 人拆兩梯（11:30／12:30）：每梯人數與圈桌', async ({ p
   // 切回第一梯圈桌
   step(); await page.getByRole('button', { name: '圈此梯桌' }).first().click()
   for (const n of ['101', '102', '105', '106']) { step(); await planTable(page, n).click().catch(() => {}) }
-  await page.screenshot({ path: `${SHOTS}/F2-circled.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F2-circled.png`), fullPage: true })
   const save = page.getByRole('button', { name: /儲存並保留/ }).first()
   if (await save.isEnabled()) {
     step(); await save.click()
@@ -145,7 +144,7 @@ test('F3 團體到店整梯入座：一下整梯、桌況圖變用餐中', async
   step() // 今日籤
   step() // 展開團體列（openGroupRow 內含 fill 搜尋，店員實際不需要搜尋，故只算 2 步）
   const row = await openGroupRow(page, '夜走旅行社')
-  await page.screenshot({ path: `${SHOTS}/F3-row.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F3-row.png`), fullPage: true })
   step(); await row.getByRole('button', { name: /梯次入座/ }).click()
   await expect(page.getByText(/整梯 2 桌：101、102/)).toBeVisible()
   step(); await page.getByRole('button', { name: '確認入座', exact: true }).click()
@@ -153,7 +152,7 @@ test('F3 團體到店整梯入座：一下整梯、桌況圖變用餐中', async
   const s = await readState(page)
   expect(tableOf(s, '101').status).toBe('dining')
   expect(tableOf(s, '102').status).toBe('dining')
-  await page.screenshot({ path: `${SHOTS}/F3-seated.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F3-seated.png`), fullPage: true })
   console.log('F3 steps', steps, 'group status', s.groups[0].status)
 })
 
@@ -166,7 +165,7 @@ test('F4 團體這桌先走：單桌釋出、不結團', async ({ page }) => {
     groups: [mkGroup({ status: 'arrived', batches: [{ id: 'B-B4-1', label: '第一梯', timeSlot: '11:30', tableNumbers: ['101', '102', '103'], guests: 18, note: '' }] })] })
   await login(page, '現場')
   step(); await mapTable(page, '102').click()
-  await page.screenshot({ path: `${SHOTS}/F4-drawer.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F4-drawer.png`), fullPage: true })
   step(); await page.getByRole('button', { name: /這桌離席/ }).click()
   const confirmBtn = page.getByRole('button', { name: /^確認/ })
   if (await confirmBtn.first().isVisible().catch(() => false)) { step(); await confirmBtn.first().click() }
@@ -187,7 +186,7 @@ test('F5 團體臨時加 4 人要加桌：現場加桌、不回規劃頁', async
   step(); await mapTable(page, '101').click()
   step(); await page.getByRole('button', { name: /加桌/ }).click()
   step(); await mapTable(page, '105').click()
-  await page.screenshot({ path: `${SHOTS}/F5-addtable.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F5-addtable.png`), fullPage: true })
   step(); await page.getByRole('button', { name: /確認加桌/ }).click()
   await expect.poll(async () => tableOf(await readState(page), '105').status).toBe('dining')
   const s = await readState(page)
@@ -205,7 +204,7 @@ test('F6 團體改期：原日釋出、新日重圈桌', async ({ page }) => {
   step(); await page.getByRole('button', { name: NEXT_WED, exact: true }).click()
   step(); await page.getByRole('button', { name: /下一步：重新圈桌/ }).click()
   await expect(page.getByText(/改期中：/)).toBeVisible()
-  await page.screenshot({ path: `${SHOTS}/F6-reschedule-editor.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F6-reschedule-editor.png`), fullPage: true })
   step(); await planTable(page, '101').click()
   step(); await page.getByRole('button', { name: /儲存並保留/ }).first().click()
   await expect(page.getByText(/團單已儲存/)).toBeVisible()
@@ -216,7 +215,7 @@ test('F6 團體改期：原日釋出、新日重圈桌', async ({ page }) => {
   // 回當日總覽（今天）→ 原日不應再有這團
   step(); await page.getByRole('button', { name: /返回當日總覽/ }).click()
   const left = await page.getByRole('button', { name: /改期旅行社/ }).count()
-  await page.screenshot({ path: `${SHOTS}/F6-after.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F6-after.png`), fullPage: true })
   console.log('F6 steps', steps, 'today still shows group buttons:', left, 'selected date after back?')
 })
 
@@ -228,13 +227,13 @@ test('F7+F8 司領桌不計人數＋遊覽車三格合成、CSV 匯得出', asyn
   for (const n of ['101', '102', '103', '108']) { step(); await planTable(page, n).click() }
   step(); await page.getByRole('button', { name: /^司領桌/ }).first().click()
   step(); await planTable(page, '110').click()
-  await page.screenshot({ path: `${SHOTS}/F7-escort.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F7-escort.png`), fullPage: true })
   // F8 遊覽車資訊（Disclosure 預設收合）
   step(); await page.getByText('遊覽車資訊').click()
   step(); await page.getByLabel('車號').fill('KAA-1234')
   step(); await page.getByLabel('司機電話').fill('0912345678')
   step(); await page.getByLabel('預計抵達').fill('11:15')
-  await page.screenshot({ path: `${SHOTS}/F8-bus.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`F8-bus.png`), fullPage: true })
   step(); await page.getByRole('button', { name: /儲存並保留/ }).first().click()
   await expect(page.getByText(/團單已儲存/)).toBeVisible()
   const s = await readState(page)

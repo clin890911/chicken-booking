@@ -1,26 +1,20 @@
 import { test, expect } from '@playwright/test'
-import fs from 'node:fs'
 import { todayTab } from './helpers/opsToday'
 
 // night-50 批 1：A1–A8 現場散客帶位、B1–B7 訂位到店報到→入座。
-// 每題計步（click／fill／切頁／確認框各 1 步），結果寫到 scratchpad 的 b1-steps.json 供報告引用。
+// 每題計步（click／fill／切頁／確認框各 1 步），結果記在 test annotation 供報告引用。
 // 本機模擬登入（manager）＋ localStorage 種子；所有後端端點以「非 localhost 且 /admin、/guest 開頭」攔截。
 
 test.use({ timezoneId: 'Asia/Taipei' })
 
-const SCRATCH = '/private/tmp/claude-501/-Users-chingchunlin--claude-spares-spare-WtJFow/2abbcc7f-2edc-4b13-af84-1f34c069374e/scratchpad'
-const SHOTS = `${SCRATCH}/shots-b1`
-const STEPS_FILE = `${SCRATCH}/b1-steps.json`
 const TODAY = '2026-09-19'
 const at = (hhmm) => new Date(`${TODAY}T${hhmm}:00+08:00`)
 
+// 計步結果記在 test annotation（HTML／JSON reporter 看得到），不寫任何本機路徑
 function record(id, data) {
-  let all = {}
-  try { all = JSON.parse(fs.readFileSync(STEPS_FILE, 'utf8')) } catch {}
-  all[id] = { ...(all[id] || {}), ...data }
-  fs.writeFileSync(STEPS_FILE, JSON.stringify(all, null, 2))
+  test.info().annotations.push({ type: `steps:${id}`, description: JSON.stringify(data) })
 }
-const shot = (page, name) => page.screenshot({ path: `${SHOTS}/${name}.png` })
+const shot = (page, name) => page.screenshot({ path: test.info().outputPath(`${name}.png`) })
 
 // 版面：1F 兩排、2F 一排；座標拉開避免重疊
 const T = (number, capacity, floor, x, y, over = {}) => ({

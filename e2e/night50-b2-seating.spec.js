@@ -2,8 +2,7 @@ import { test, expect } from '@playwright/test'
 
 // night-50 批 2：G1–G4 當日排位／未來預配。時間固定 2026-09-19(六) 09:00 台北。
 test.use({ timezoneId: 'Asia/Taipei', viewport: { width: 1180, height: 820 } })
-const SHOTS = '/private/tmp/claude-501/-Users-chingchunlin--claude-spares-spare-WtJFow/2abbcc7f-2edc-4b13-af84-1f34c069374e/scratchpad/shots-b2'
-const shot = (page, n) => page.screenshot({ path: `${SHOTS}/${n}.png` })
+const shot = (page, n) => page.screenshot({ path: test.info().outputPath(`${n}.png`) })
 const J = (o) => JSON.stringify(o)
 const mk = (i, name, guests, date, timeSlot, extra = {}) => ({ id: `E2E-B2-${i}`, name, phone: `09110000${String(i).padStart(2, '0')}`, guests, date, timeSlot, status: 'confirmed', source: 'phone', assignedTableId: null, extraTableIds: [], notes: {}, createdBy: 'staff', manageToken: `t${i}`, ...extra })
 const table = (page, n) => page.locator(`svg g:has(:text-is("${n}"))`).first()

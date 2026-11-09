@@ -5,7 +5,6 @@ import { todayTab } from './helpers/opsToday'
 // night-50 批 4：異常 H1–H6、H8 實走（QA，不改 src）。
 test.use({ timezoneId: 'Asia/Taipei' })
 
-const SHOTS = '/private/tmp/claude-501/-Users-chingchunlin--claude-spares-spare-WtJFow/2abbcc7f-2edc-4b13-af84-1f34c069374e/scratchpad/shots-b4'
 const TODAY = '2026-11-10'
 const YDAY = '2026-11-09'
 const at = (d, hhmm) => new Date(`${d}T${hhmm}:00+08:00`)
@@ -124,7 +123,7 @@ test('H1 網路斷線時帶位：本機先成功、回線自動補推、不丟',
   // 斷線期間時間往前推 40 秒（多輪拉取／補推退避）
   for (let i = 0; i < 8; i++) { await page.clock.runFor(5000); await page.waitForTimeout(150) }
   const toastOffline = await page.getByText(/雲端同步失敗|離線|未同步/).count()
-  await page.screenshot({ path: `${SHOTS}/H1-offline.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`H1-offline.png`), fullPage: true })
   console.log('H1 offline: pushes', cs.log.pushes.length, 'fail', cs.log.pushFail, 'visible offline hints', toastOffline)
   // 回線
   offline = false
@@ -137,7 +136,7 @@ test('H1 網路斷線時帶位：本機先成功、回線自動補推、不丟',
   // 再拉一輪：本機不被雲端洗掉
   await page.clock.runFor(6000); await page.waitForTimeout(300)
   expect(tableOf(await readState(page), '105').status).toBe('dining')
-  await page.screenshot({ path: `${SHOTS}/H1-online.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`H1-online.png`), fullPage: true })
 })
 
 test('H2 推送被拒（部分）：警示是否在 5 秒拉取後仍在、現場頁有無常駐提示（真實時間）', async ({ page }) => {
@@ -155,21 +154,21 @@ test('H2 推送被拒（部分）：警示是否在 5 秒拉取後仍在、現�
   const t0 = Date.now()
   const toast = page.getByText(/部分變更未能上雲/)
   await expect(toast.first()).toBeVisible({ timeout: 5000 })
-  await page.screenshot({ path: `${SHOTS}/H2-toast.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`H2-toast.png`), fullPage: true })
   // 等 toast 自然消失，量存活秒數
   await expect(toast).toHaveCount(0, { timeout: 30_000 })
   const toastLife = Math.round((Date.now() - t0) / 1000)
   const pullsBefore = cs.log.pulls
   await page.waitForTimeout(11_000) // 至少再兩輪 5 秒拉取
   const onOps = await page.getByText(/未能上雲|未同步|同步失敗|被拒/).count()
-  await page.screenshot({ path: `${SHOTS}/H2-ops-after-toast.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`H2-ops-after-toast.png`), fullPage: true })
   console.log('H2 toast life ~s', toastLife, 'pulls during wait', cs.log.pulls - pullsBefore, 'ops page persistent hint count:', onOps, 'rejected pushes', cs.log.pushRejected)
   // 設定頁
   await page.locator('aside').getByRole('button', { name: '設定' }).click()
   const banner = page.getByText(/部分變更未能上雲：/)
   await expect(banner.first()).toBeVisible({ timeout: 5000 })
   const discard = await page.getByRole('button', { name: /放棄/ }).count()
-  await page.screenshot({ path: `${SHOTS}/H2-settings.png`, fullPage: true })
+  await page.screenshot({ path: test.info().outputPath(`H2-settings.png`), fullPage: true })
   console.log('H2 settings banner visible; discard buttons', discard)
   expect(tableOf(await readState(page), '105').status).toBe('dining')
   expect(cs.server.bookings.length).toBe(0)
@@ -194,7 +193,7 @@ test.describe('本機模式', () => {
       const s = await readState(page)
       const no = s.bookings.find(b => b.id === 'BK-Y-NO'); const ate = s.bookings.find(b => b.id === 'BK-Y-ATE')
       console.log(`H3[auto=${autoNoshow}] 105`, tableOf(s, '105').status, '106', tableOf(s, '106').status, 'yNo', no.status, no.autoFlag, 'yAte', ate.status, 'noshowStore', JSON.stringify(s.noshow))
-      await page.screenshot({ path: `${SHOTS}/H3-auto${autoNoshow}.png`, fullPage: true })
+      await page.screenshot({ path: test.info().outputPath(`H3-auto${autoNoshow}.png`), fullPage: true })
       expect(tableOf(s, '106').status).toBe('vacant')
       expect(ate.status).toBe('completed')
       expect(Object.keys(s.noshow).length).toBe(0)
@@ -216,7 +215,7 @@ test.describe('本機模式', () => {
     await overdueSeed(page)
     await localLogin(page)
     await openMore(page)
-    await page.screenshot({ path: `${SHOTS}/H4-menu.png`, fullPage: true })
+    await page.screenshot({ path: test.info().outputPath(`H4-menu.png`), fullPage: true })
     await page.getByRole('button', { name: '補登：來過、已吃完' }).click()
     await expect.poll(async () => (await readState(page)).bookings[0].status).toBe('completed')
     let s = await readState(page)
@@ -239,7 +238,7 @@ test.describe('本機模式', () => {
     await expect.poll(async () => (await readState(page)).bookings[0].status).toBe('noshow')
     let s = await readState(page)
     console.log('H5 after noshow store', JSON.stringify(s.noshow), '105', tableOf(s, '105').status)
-    await page.screenshot({ path: `${SHOTS}/H5-noshow-toast.png`, fullPage: true })
+    await page.screenshot({ path: test.info().outputPath(`H5-noshow-toast.png`), fullPage: true })
     expect(JSON.stringify(s.noshow)).toContain('0911000003')
     await page.getByRole('button', { name: /復原/ }).first().click()
     await expect.poll(async () => (await readState(page)).bookings[0].status).toBe('confirmed')
@@ -260,7 +259,7 @@ test.describe('本機模式', () => {
     await page.getByRole('button', { name: '取消訂位' }).last().click()
     await expect.poll(async () => (await readState(page)).bookings[0].status).toBe('cancelled')
     expect(tableOf(await readState(page), '105').status).toBe('vacant')
-    await page.screenshot({ path: `${SHOTS}/H6-cancel-toast.png`, fullPage: true })
+    await page.screenshot({ path: test.info().outputPath(`H6-cancel-toast.png`), fullPage: true })
     // H6：取消的復原鈕帶對象（復原取消），與入座的「復原入座 105」分得清
     await expect(page.getByTestId('toast-action').filter({ hasText: '復原取消' })).toBeVisible()
     await page.getByRole('button', { name: /復原取消/ }).click()
@@ -278,7 +277,7 @@ test.describe('本機模式', () => {
     await page.getByRole('button', { name: '取消訂位' }).first().click()
     await page.getByRole('button', { name: '取消訂位' }).last().click()
     await expect.poll(async () => (await readState(page)).bookings[0].status).toBe('cancelled')
-    await page.screenshot({ path: `${SHOTS}/H6b-cancel-toast.png`, fullPage: true })
+    await page.screenshot({ path: test.info().outputPath(`H6b-cancel-toast.png`), fullPage: true })
     // 另一台平板在這幾秒把 105 帶給散客（直接寫本機資料模擬別台同步進來）
     await page.evaluate(() => {
       const ts = JSON.parse(localStorage.getItem('chicken_tables_v3'))
@@ -293,7 +292,7 @@ test.describe('本機模式', () => {
     const s = await readState(page)
     const msg = await page.getByText(/已被占用|復原失敗|已復原 林先生/).allTextContents()
     console.log('H6b booking', s.bookings.find(b => b.id === 'BK-H').status, 'assigned', s.bookings.find(b => b.id === 'BK-H').assignedTableId, '105', tableOf(s, '105').status, tableOf(s, '105').currentBookingId, 'msg', JSON.stringify(msg))
-    await page.screenshot({ path: `${SHOTS}/H6b-after-undo.png`, fullPage: true })
+    await page.screenshot({ path: test.info().outputPath(`H6b-after-undo.png`), fullPage: true })
     expect(tableOf(s, '105').currentBookingId).not.toBe('BK-H')
     expect(tableOf(s, '105').status).toBe('dining')
   })
@@ -318,7 +317,7 @@ test.describe('H8 iPad 直向 768×1024', () => {
         content: c ? c.scrollHeight - c.clientHeight : null, contentOverflowY: c ? getComputedStyle(c).overflowY : null }
     })
     console.log('H8 overflow', JSON.stringify(m))
-    await page.screenshot({ path: `${SHOTS}/H8-ops-portrait.png` })
+    await page.screenshot({ path: test.info().outputPath(`H8-ops-portrait.png`) })
     expect(m.doc).toBeLessThanOrEqual(0)
     // B1：報到列「到了」
     const arrive = page.getByRole('button', { name: /到了/ }).first()
@@ -329,7 +328,7 @@ test.describe('H8 iPad 直向 768×1024', () => {
     await mapTable(page, '105').click()
     const seat = page.getByTestId('walkin-seat')
     await expect(seat).toBeInViewport()
-    await page.screenshot({ path: `${SHOTS}/H8-walkin-ready.png` })
+    await page.screenshot({ path: test.info().outputPath(`H8-walkin-ready.png`) })
     await seat.click()
     await expect.poll(async () => tableOf(await readState(page), '105').status).toBe('dining')
     const m2 = await page.evaluate(() => document.scrollingElement.scrollHeight - document.scrollingElement.clientHeight)
@@ -356,7 +355,9 @@ test.describe('P3 常駐同步警示小條', () => {
     await page.waitForTimeout(12_000) // 跨兩輪拉取
     expect(cs.log.pulls).toBeGreaterThan(pulls0)
     await expect(bar).toBeVisible()
-    expect((await bar.boundingBox()).height).toBeLessThanOrEqual(36)
+    expect((await bar.boundingBox()).height).toBeLessThanOrEqual(44)
+    // 「查看」撐滿條高（扣 1px 上下框＝42），不再是 28px 小鈕
+    expect((await bar.getByRole('button', { name: '查看' }).boundingBox()).height).toBeGreaterThanOrEqual(42)
     await bar.getByRole('button', { name: '查看' }).click()
     await expect(page).toHaveURL(/tab=settings/)
     await expect(page).toHaveURL(/block=firestore/)
