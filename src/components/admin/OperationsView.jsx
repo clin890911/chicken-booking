@@ -17,6 +17,7 @@ import TableScheduleView from './ops/TableScheduleView'
 import TableSummaryView from './ops/TableSummaryView'
 import BookingDetailSheet from '../booking/BookingDetailSheet'
 import { nextBookableSlot, pastSlotFix } from './ops/QuickReservePanel'
+import { convertNote, finishConvertedWaitlist } from '../../services/waitlistService'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useAuth } from '../../contexts/AuthContext'
@@ -223,7 +224,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     undoSeatedMove, undoWalkInSeat, clearTable, undoClearTable, clearGroupTable, undoClearGroupTable,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
-    preassignBookingTable, preassignBookingTables, addBooking, updateBooking, clearBookingPreassign,
+    preassignBookingTable, preassignBookingTables, addBooking, updateBooking, clearBookingPreassign, leaveWaitlist,
   } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -272,6 +273,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const [reserveNow, setReserveNow] = useState(() => Date.now()) // 30 秒 tick：跨過「前 30 分」門檻時語意跟著換
   const [reserveSlotNotice, setReserveSlotNotice] = useState('') // 所選時段已過、自動改選目前時段時的說明
   // 面板開著時，toast 上的「查看／改桌／指派桌位」等動作不可卸載面板或進模式（onClick 閉包會抓舊值 → 用 ref）
+  const [reservePrefill, setReservePrefill] = useState(null) // 候位轉訂位：{ waitlistId, name, phone, children, noteText }
   const reserveOpenRef = useRef(false)
   reserveOpenRef.current = reserveOpen
   const [flashBookingId, setFlashBookingId] = useState(null)   // 剛新增的那筆（今日訂位籤閃一下）
@@ -646,7 +648,16 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     cancelMode()
     setReserveOpen(true)
   }
+  // 候位轉訂位：開同一個原地新增面板並預填；訂位建好才結掉候位（handleReserveSave）
+  const convertWaitlist = (w) => {
+    openReserve()
+    const g = Number(w.partySize) || 2
+    setReserveGuests(g)
+    setReserveSlot(nextBookableSlot({ settings, tables, bookings, groupReservations, date: todayStr(), guests: g, now: new Date() }))
+    setReservePrefill({ waitlistId: w.id, name: w.name || '', phone: w.phone || '', children: Number(w.children) || 0, noteText: convertNote(w) })
+  }
   const closeReserve = () => {
+    setReservePrefill(null)
     setReserveOpen(false)
     setRailTab('upcoming')
   }
@@ -743,6 +754,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       now: new Date(),
     })
     if (!r.ok) return false
+    if (reservePrefill?.waitlistId) {
+      finishConvertedWaitlist(reservePrefill.waitlistId, r, leaveWaitlist).then(res => {
+        if (res && res.ok === false) toast.error('訂位已建立，但原候位沒有自動結掉，請手動棄號：' + (res.error || ''))
+      })
+    }
     closeReserve()
     setFlashBookingId(r.booking.id)
     if (r.tableNumber) flashAssigned(r.tableNumber)
@@ -1474,6 +1490,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               onSeatWaitlist={startSeatWaitlist}
               onReseatBatch={startGroupReseat}
               onAddBooking={can('booking.create') ? openReserve : null}
+              onConvertWaitlist={can('booking.create') ? convertWaitlist : null}
               flashBookingId={flashBookingId}
               reserve={reserveOpen ? {
                 guests: reserveGuests,
@@ -1492,6 +1509,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 onBack: closeReserve,
                 // 其他日期／完整表單：沿用 AdminPage 既有的「訂位 → 新增」入口（名冊開單等也走它）
                 onOpenFullForm: onAddBooking || null,
+                prefill: reservePrefill,
               } : null}
               onFocusTable={(n) => {
                 const t = tables.find(x => x.number === n)

@@ -317,3 +317,26 @@ test('E2 候位按「入座」進選桌模式（靜態，不寫入）', async ({
   note('E2confirmBtns', (await page.getByRole('button', { name: /確認|入座/ }).allInnerTexts()).join(' | ').slice(0, 300))
   note('E2steps(to confirm, excl. confirm click)', steps)
 })
+
+test('E4 候位轉訂位：開原地新增面板＋預填＋建立今日訂位', async ({ page }) => {
+  const list = [mkWait(1, { name: '王先生', phone: '0912000011', partySize: 3, estimatedMin: 120 })]
+  await openWaitlist(page, list)
+  // E1：號碼大字、預估等待 >90 顯示「等待較久」
+  const fs = await page.getByTestId('queue-number').first().evaluate(el => parseFloat(getComputedStyle(el).fontSize))
+  expect(fs).toBeGreaterThanOrEqual(24)
+  const btn = page.getByRole('button', { name: '轉訂位', exact: true })
+  expect((await btn.boundingBox()).height).toBeGreaterThanOrEqual(44)
+  await btn.click()
+  await expect(page.getByTestId('quick-reserve-panel').locator('input[type=tel]')).toHaveValue('0912000011')
+  await expect(page.getByTestId('quick-reserve-panel').locator('input[value="王先生"]')).toHaveCount(1)
+  await expect(page.getByTestId('quick-reserve-panel').locator('input[value*="候位 #1"], textarea').first()).toHaveValue(/由候位 #1 轉入/)
+  const before = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]').length)
+  await page.getByRole('button', { name: /^確認新增/ }).click()
+  await page.waitForTimeout(600)
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]'))
+  expect(after.length).toBe(before + 1)
+  const b = after.find(x => x.name === '王先生')
+  expect(b.guests).toBe(3)
+  expect(b.source).toBe('walkin')
+  expect(JSON.stringify(b.notes)).toContain('候位 #1')
+})
