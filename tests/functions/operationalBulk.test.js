@@ -33,3 +33,17 @@ describe('ordinary >450 bulk path: unversioned table steal (A7)',()=>{
   expect(f.writes).toHaveLength(0)
  })
 })
+
+describe('ordinary >450 bulk path: same push ends the previous owner (offline clear-then-seat)',()=>{
+ it('allows re-seating a dining table when the same bulk push completes its owner booking',async()=>{
+  const f=fixture(),ops=ordinary()
+  f.records.set('tables/1',{number:'1',status:'dining',currentBookingId:'B0'})
+  ops.find(op=>op.ref.path==='tables/1').data={number:'1',status:'dining',currentBookingId:'B2'}
+  ops.find(op=>op.ref.path==='bookings/B0').data={id:'B0',status:'completed',createdBy:'staff',assignedTableId:'1'}
+  const pushedBookings=new Map(ops.filter(op=>op.ref.path.startsWith('bookings/')).map(op=>[op.ref.path.split('/')[1],op.data]))
+  for(const op of ops)if(op.ref.path.startsWith('tables/'))op.syncContext={pushedBookings}
+  await commitOrdinaryBulk(f.db,ops)
+  expect(f.records.get('tables/1').currentBookingId).toBe('B2')
+  expect(f.writes).toHaveLength(451)
+ })
+})
