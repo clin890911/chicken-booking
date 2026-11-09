@@ -19,3 +19,17 @@ describe('ordinary >450 write compatibility without waitlist bypass',()=>{
   await expect(commitOrdinaryBulk(f.db,ops)).rejects.toThrow('use-queue-command');expect(f.writes).toHaveLength(0)
  })
 })
+
+describe('ordinary >450 bulk path: unversioned table steal (A7)',()=>{
+ it('preflight rejects with table-occupied-elsewhere listing every stolen table, before any write',async()=>{
+  const f=fixture(),ops=ordinary()
+  for(const n of ['1','449']){
+   f.records.set(`tables/${n}`,{number:n,status:'dining',currentBookingId:'A'+n})
+   ops.find(op=>op.ref.path===`tables/${n}`).data={number:n,status:'dining',currentBookingId:'B'+n}
+  }
+  const err=await commitOrdinaryBulk(f.db,ops).catch(e=>e)
+  expect(err).toMatchObject({message:'table-occupied-elsewhere',status:409})
+  expect(err.tables.sort()).toEqual(['1','449'])
+  expect(f.writes).toHaveLength(0)
+ })
+})

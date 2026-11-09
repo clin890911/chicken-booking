@@ -89,7 +89,7 @@ describe('下一次拉取自癒', () => {
     global.fetch = vi.fn(async () => conflict())
     await cloud.pushChangedData().catch(() => {})
     const applied = cloud.applyCloudSnapshot({ tables: [cloudA], bookings: [bookingA], waitlist: [] })
-    expect(applied.tableStealsResolved).toEqual([{ tableNumber: '102', bookingId: 'B', name: '王先生' }])
+    expect(applied.tableStealsResolved).toEqual([{ tableNumber: '102', bookingId: 'B', name: '王先生', kind: 'evict' }])
     expect(readT()[0]).toMatchObject({ status: 'dining', currentBookingId: 'A', seatedAt: 't-a', x: 99 })
     const b = readB().find(x => x.id === 'B')
     expect(b).toMatchObject({ status: 'confirmed', assignedTableId: null, extraTableIds: [], actualArrivalTime: null, name: '王先生' })
@@ -132,7 +132,7 @@ describe('下一次拉取自癒', () => {
     expect(readB().find(x => x.id === 'B').status).toBe('arrived')
   })
 
-  it('大組：102 被搶、103 本機也由 B 用餐中且雲端沒收到 → 103 改採雲端（空桌）、B 退回待到', async () => {
+  it('大組：102 被搶、103 本機也由 B 用餐中但雲端沒收到 → 103 改採雲端（空桌）、B 退回待到', async () => {
     localStorage.clear(); vi.resetModules(); cloud = await import('../../src/services/cloudDataService')
     const V103 = { ...VACANT, number: '103' }
     cloud.applyCloudSnapshot({ tables: [VACANT, V103], bookings: [], waitlist: [] })
@@ -147,11 +147,66 @@ describe('下一次拉取自癒', () => {
     expect(err.tableStealMessage).toBe('102 已被另一台帶位，王先生請重新帶位')
     expect(cloud.pendingTableStealCandidates()).toEqual([{ tableNumber: '102', bookingId: 'B' }])
     const applied = cloud.applyCloudSnapshot({ tables: [cloudA, V103], bookings: [bookingA], waitlist: [] })
-    expect(applied.tableStealsResolved.map(s => s.tableNumber)).toEqual(['102'])
+    expect(applied.tableStealsResolved).toEqual([{ tableNumber: '102', bookingId: 'B', name: '王先生', kind: 'evict' }])
     const t = Object.fromEntries(readT().map(x => [x.number, x]))
     expect(t['102']).toMatchObject({ currentBookingId: 'A' })
     expect(t['103']).toMatchObject({ status: 'vacant', currentBookingId: null })
     expect(readB().find(x => x.id === 'B')).toMatchObject({ status: 'confirmed', assignedTableId: null, extraTableIds: [] })
+    global.fetch = vi.fn(async () => okAck())
+    await cloud.pushChangedData()
+    expect(bodyOf(global.fetch.mock.calls[0]).tables).toBeUndefined()
+  })
+
+  it('大組加桌：B 已同步坐 103，加 102 時 102 被另一台帶給 A → 103 不動、B 只拿掉 102（主桌升 103）、仍用餐中', async () => {
+    localStorage.clear(); vi.resetModules(); cloud = await import('../../src/services/cloudDataService')
+    const B103 = { ...VACANT, number: '103', status: 'dining', currentBookingId: 'B', seatedAt: 't0' }
+    const bookingB = { id: 'B', name: '王先生', status: 'arrived', assignedTableId: '103', extraTableIds: [], actualArrivalTime: 't0' }
+    cloud.applyCloudSnapshot({ tables: [VACANT, B103], bookings: [bookingB], waitlist: [] })
+    // 本機加 102 並把主桌改成 102（主桌被搶的分支）
+    localStorage.setItem(TK, JSON.stringify([{ ...VACANT, status: 'dining', currentBookingId: 'B', seatedAt: 't1' }, B103]))
+    localStorage.setItem(BK, JSON.stringify([{ ...bookingB, assignedTableId: '102', extraTableIds: ['103'] }]))
+    global.fetch = vi.fn(async () => conflict())
+    const err = await cloud.pushChangedData().catch(e => e)
+    expect(err.tableStealMessage).toBe('102 已被另一台帶位，王先生這組請改用其他桌')
+    const applied = cloud.applyCloudSnapshot({ tables: [cloudA, B103], bookings: [bookingA, bookingB], waitlist: [] })
+    expect(applied.tableStealsResolved).toEqual([{ tableNumber: '102', bookingId: 'B', name: '王先生', kind: 'trim' }])
+    const t = Object.fromEntries(readT().map(x => [x.number, x]))
+    expect(t['102']).toMatchObject({ status: 'dining', currentBookingId: 'A' })
+    expect(t['103']).toMatchObject({ status: 'dining', currentBookingId: 'B' })
+    expect(readB().find(x => x.id === 'B')).toMatchObject({ status: 'arrived', assignedTableId: '103', extraTableIds: [], actualArrivalTime: 't0' })
+    global.fetch = vi.fn(async () => okAck())
+    expect((await cloud.pushChangedData()).skipped).toBe(true) // B 回到與雲端一致，102／103 都不再待推
+  })
+
+  it('預配被擋：本機把 Y 預配（reserved）到雲端正在用餐的 102 → 改採雲端、Y 只拿掉 102、狀態不變', async () => {
+    localStorage.setItem(TK, JSON.stringify([{ ...VACANT, status: 'reserved', currentBookingId: 'Y' }]))
+    localStorage.setItem(BK, JSON.stringify([{ id: 'Y', name: '林小姐', status: 'confirmed', assignedTableId: '102', extraTableIds: [] }]))
+    global.fetch = vi.fn(async () => conflict())
+    const err = await cloud.pushChangedData().catch(e => e)
+    expect(err).toMatchObject({ tableStealConflict: true })
+    expect(err.tableStealMessage).toBe('102 已被另一台帶位，林小姐的預配已取消，請改配其他桌')
+    expect(cloud.pendingTableStealCandidates()).toEqual([{ tableNumber: '102', bookingId: 'Y' }])
+    const applied = cloud.applyCloudSnapshot({ tables: [cloudA], bookings: [bookingA], waitlist: [] })
+    expect(applied.tableStealsResolved[0].kind).toBe('preassign')
+    expect(readT()[0]).toMatchObject({ status: 'dining', currentBookingId: 'A' })
+    expect(readB().find(x => x.id === 'Y')).toMatchObject({ status: 'confirmed', assignedTableId: null, extraTableIds: [] })
+    global.fetch = vi.fn(async () => okAck())
+    await cloud.pushChangedData()
+    const ds = bodyOf(global.fetch.mock.calls[0])
+    expect(ds.tables).toBeUndefined()
+    expect(ds.bookings.map(b => b.id)).toEqual(['Y'])
+  })
+
+  it('結帳後才推（cleaning 保留 currentBookingId=Y、Y 已完成）被擋 → 改採雲端桌、Y 訂位不動、不再夾帶 102', async () => {
+    localStorage.setItem(TK, JSON.stringify([{ ...VACANT, status: 'cleaning', currentBookingId: 'Y' }]))
+    localStorage.setItem(BK, JSON.stringify([{ id: 'Y', name: '林小姐', status: 'completed', assignedTableId: '102', extraTableIds: [] }]))
+    global.fetch = vi.fn(async () => conflict())
+    const err = await cloud.pushChangedData().catch(e => e)
+    expect(err.tableStealMessage).toBe('102 已被另一台帶位，已改用最新桌況')
+    const applied = cloud.applyCloudSnapshot({ tables: [cloudA], bookings: [bookingA], waitlist: [] })
+    expect(applied.tableStealsResolved[0].kind).toBe('adopt')
+    expect(readT()[0]).toMatchObject({ status: 'dining', currentBookingId: 'A' })
+    expect(readB().find(x => x.id === 'Y')).toMatchObject({ status: 'completed', assignedTableId: '102' })
     global.fetch = vi.fn(async () => okAck())
     await cloud.pushChangedData()
     expect(bodyOf(global.fetch.mock.calls[0]).tables).toBeUndefined()

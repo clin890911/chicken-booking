@@ -52,3 +52,18 @@ it('A7：被拒 → 記錄 → 拉取採用雲端 → B 退回待到 → 第二�
   expect(fake.records.get('bookings/B')).toMatchObject({ status: 'confirmed', assignedTableId: null })
   expect((await cloud.pushChangedData()).skipped).toBe(true)
 })
+
+it('預配被擋（reserved Y 蓋 dining A）：真 handler 409 → 拉取自癒 → Y 拿掉 102 → 第二次推送成功', async () => {
+  await call('manager', { partial: true, dataset: {
+    tables: [{ ...VACANT, status: 'dining', currentBookingId: 'A', seatedAt: 't-a' }],
+    bookings: [{ id: 'A', name: '陳小姐', date: '2026-11-10', status: 'arrived', assignedTableId: '102' }],
+  } })
+  localStorage.setItem('chicken_tables_v3', JSON.stringify([{ ...VACANT, status: 'reserved', currentBookingId: 'Y' }]))
+  localStorage.setItem('chicken_bookings_v1', JSON.stringify([{ id: 'Y', name: '林小姐', date: '2026-11-10', status: 'confirmed', assignedTableId: '102', extraTableIds: [] }]))
+  const err = await cloud.pushChangedData().catch(e => e)
+  expect(err).toMatchObject({ status: 409, code: 'table-occupied-elsewhere', tables: ['102'], tableStealConflict: true })
+  cloud.applyCloudSnapshot(await cloud.pullCloudData())
+  expect((await cloud.pushChangedData()).ok).toBe(true)
+  expect(fake.records.get('tables/102')).toMatchObject({ status: 'dining', currentBookingId: 'A' })
+  expect(fake.records.get('bookings/Y')).toMatchObject({ status: 'confirmed', assignedTableId: null })
+})
