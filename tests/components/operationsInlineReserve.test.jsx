@@ -227,23 +227,40 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
   })
 
   // 驗收 v4-5：面板開著時，先前 toast 上的「改桌」不可進模式／卸載面板
-  it('面板開著時按先前 toast 的「改桌」→ 不進換桌模式、面板留著，提示先完成或返回', () => {
+  // night-50 B5：預配桌被佔時報到列直接「到了 · 換桌」；入座當下才被搶走（畫面還沒更新）的競態，
+  // toast 出口改成「換桌入座」——面板開著時按它，一樣不進選桌模式、面板留著。
+  it('面板開著時按先前 toast 的「換桌入座」→ 不進選桌模式、面板留著，提示先完成或返回', () => {
+    vi.setSystemTime(new Date(2026, 8, 19, 11, 40))
+    const occ = bookingService.create({ name: '別組', phone: '', guests: 2, date: '2026-09-19', timeSlot: '11:00', source: 'walkin', status: 'arrived' })
+    tableService.bulkWrite([mkTable('105', 4), mkTable('106')])
+    const yu = bookingService.create({ name: '余先生', phone: '0911', guests: 2, date: '2026-09-19', timeSlot: '12:00', source: 'phone', status: 'confirmed' })
+    bookingService.assignTable(yu.id, '105')
+    render()
+    // 畫面上 105 仍空（報到列給一般「到了」），儲存層已被別組佔走 → 入座守門擋下
+    tableService.bulkWrite([mkTable('105', 4, { status: 'dining', currentBookingId: occ.id, seatedAt: new Date(2026, 8, 19, 11, 5).toISOString() }), mkTable('106')])
+    click(container.querySelector('button[aria-label="余先生 到了，入座 105"]'))
+    const [msg, action] = toast.action.mock.calls.at(-1)
+    expect(msg).toContain('入座失敗：105 目前由 別組 使用')
+    expect(action.label).toBe('換桌入座')
+    click(byStart('今日'))
+    click(byText('＋ 新增今日訂位'))
+    act(() => { action.onClick() })
+    expect(toast.info).toHaveBeenCalledWith('新增訂位中，請先完成或返回')
+    expect(panel()).toBeTruthy()
+    expect(container.textContent).not.toContain('換桌入座：余先生')
+  })
+
+  it('預配桌已被佔：報到列鈕直接「到了 · 換桌」進選桌入座模式，不先跳入座失敗', () => {
     vi.setSystemTime(new Date(2026, 8, 19, 11, 40))
     const occ = bookingService.create({ name: '別組', phone: '', guests: 2, date: '2026-09-19', timeSlot: '11:00', source: 'walkin', status: 'arrived' })
     tableService.bulkWrite([mkTable('105', 4, { status: 'dining', currentBookingId: occ.id, seatedAt: new Date(2026, 8, 19, 11, 5).toISOString() }), mkTable('106')])
     const yu = bookingService.create({ name: '余先生', phone: '0911', guests: 2, date: '2026-09-19', timeSlot: '12:00', source: 'phone', status: 'confirmed' })
     bookingService.assignTable(yu.id, '105')
     render()
-    click(container.querySelector('button[aria-label="余先生 到了，入座 105"]'))
-    const [msg, action] = toast.action.mock.calls.at(-1)
-    expect(msg).toContain('入座失敗：105 目前由 別組 使用')
-    expect(action.label).toBe('改桌')
-    click(byStart('今日'))
-    click(byText('＋ 新增今日訂位'))
-    act(() => { action.onClick() })
-    expect(toast.info).toHaveBeenCalledWith('新增訂位中，請先完成或返回')
-    expect(panel()).toBeTruthy()
-    expect(container.textContent).not.toContain('換桌：余先生')
+    click(container.querySelector('button[aria-label="余先生 到了，換桌入座"]'))
+    expect(toast.action).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('到了 · 換桌入座：余先生 2 位')
+    expect(container.textContent).toContain('原預配 105 被佔')
   })
 
   it('返回：沒填東西直接回今日訂位籤', () => {

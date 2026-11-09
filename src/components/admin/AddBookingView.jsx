@@ -12,7 +12,7 @@ import * as customerService from '../../services/customerService'
 import { getNoshowCount } from '../../services/bookingService'
 import { todayStr, dayLabel, formatDate, addDays } from '../../utils/timeSlots'
 import { isTableUsableOnDate } from '../../utils/tableAvailability'
-import { HOLD_LEAD_MIN, squeezeSeats } from '../../utils/capacity'
+import { HOLD_LEAD_MIN, squeezeSeats, isDayClosedForClosures } from '../../utils/capacity'
 import { nextBookableSlot, slotForDateChange } from '../../utils/staffSlots'
 import HonorificNameField, { composeName, DEFAULT_TITLE } from './ops/HonorificNameField'
 
@@ -444,6 +444,9 @@ export default function AddBookingView({ onCreated, onAssignTable, onMoveTable, 
           {/* 時段 */}
           <div ref={slotRef} className={attempted && !timeSlot ? 'rounded-xl ring-2 ring-chicken-red/40 p-2 -m-2' : ''}>
             <label className="label">時段（{dayLabel(date)}）</label>
+            {isDayClosedForClosures(settings, date) && (
+              <p data-testid="add-day-closed" role="status" className="mb-2 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm font-bold text-rose-800">本日公休：整天都不能訂位。要營業請先到「設定 → 休店」取消公休。</p>
+            )}
             {/* compact 小晶片：sm 以上 6 欄（一天 17 個時段 3 排），兩欄版面下整天的時段都在第一屏 */}
             <TimeSlotPicker
               variant="compact"

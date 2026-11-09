@@ -32,7 +32,7 @@ import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } fr
 import SegmentedControl from '../ui/SegmentedControl'
 import { seatingPerms } from '../../utils/seatingPerms'
 import { formatBookingTables, bookingTableNumbers } from '../../utils/bookingTables'
-import { preassignArriveConflictLines, toastSeatedWithUndo } from '../../utils/arriveSeat'
+import { preassignArriveConflictLines, toastSeatedWithUndo, preassignTakenByOthers, seatArriveSelection } from '../../utils/arriveSeat'
 import { resolveSuggestedTables } from '../../utils/suggestionApply'
 import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
 import { isPhoneLayout, scrollContentTo, usePhoneLayout } from '../../utils/phoneLayout'
@@ -128,7 +128,7 @@ function arrivePreassigned(table, booking, deps) {
   return seatPreassignedNow(table, booking, label, deps)
 }
 
-function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove }) {
+function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove, onArriveReseat }) {
   const isCombo = (booking.extraTableIds || []).length > 0
   const r = isCombo && seatBookingAllTables ? seatBookingAllTables(booking.id) : seatBooking(booking.id)
   if (!r?.ok) {
@@ -138,6 +138,9 @@ function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAll
       const detail = String(r?.error || '未知錯誤').replace(/，請先.*$/, '')
       const what = r?.code === 'table-occupied' ? '有桌被佔' : '有桌不能用'
       toast.error(`入座失敗：${label.split(' + ').join('+')} ${what}（${detail}），請到「今日」清單的卡片處理`)
+    } else if (onArriveReseat) {
+      // 預配桌被佔：出口直接進「換桌入座」（選桌確認＝改配＋入座），不走純改桌（改完還得再按一次到了，尖峰易漏）
+      toast.action(msg, { label: '換桌入座', onClick: () => onArriveReseat(booking) }, { type: 'error', duration: 8000 })
     } else if (onMove) {
       toast.action(msg, { label: '改桌', onClick: () => onMove(booking) }, { type: 'error', duration: 8000 })
     } else {
@@ -217,7 +220,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     cancelBooking, seatBooking, seatBookingAllTables, assignAndSeatBooking, undoSeatBooking,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
     findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
-    preassignBookingTable, preassignBookingTables, addBooking,
+    preassignBookingTable, preassignBookingTables, addBooking, updateBooking, clearBookingPreassign,
   } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -401,10 +404,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 單桌與多桌共用人工選桌；推薦只提示，不自動勾桌。
   // suggestionTables：建議的整組桌（單桌建議＝[suggestion]；無單桌可容時為併桌組合）——
   // 只給「用建議桌」一鍵套用，進模式時仍不自動勾（PR #137：要店員自己決定）。
-  const startMultiMode = ({ kind, booking = null, wait = null, need, lockKind = 'hold', suitable, suggestion, suggestionTables = [], suggestionSqueezed = false, replacing = false }) => {
+  const startMultiMode = ({ kind, booking = null, wait = null, need, lockKind = 'hold', suitable, suggestion, suggestionTables = [], suggestionSqueezed = false, replacing = false, extra = {} }) => {
     rememberModeSource()
     const sugTables = suggestion ? [String(suggestion)] : (suggestionTables || []).map(String)
-    setMode({ type: 'assign-multi', kind, booking, wait, need, lockKind,
+    setMode({ ...extra, type: 'assign-multi', kind, booking, wait, need, lockKind,
       selected: [], suitable, suggestion: suggestion || sugTables[0], suggestionTables: sugTables,
       suggestionSqueezed: !suggestion && sugTables.length > 1 && !!suggestionSqueezed, replacing, confirmedWarning: null })
     setSelectedTable(null)
@@ -446,16 +449,34 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 沿用 assign-multi 選桌模式（kind:'arrive'）：可選桌＝此刻空桌（鎖桌型，findSuitableTables），
   // 佔用區間＝現在入座（assignmentWindow 'now'）；重疊預配／團保綁在選到的桌上、勾選才解鎖；
   // 確認時重驗桌位，再走 assignAndSeatBooking 一次完成指派＋入座（單桌、併桌同一條）。
+  // 預配桌此刻被別組佔（報到列「到了 · 換桌」、入座失敗 toast 的「換桌入座」）也走這裡：reseatFrom＝原預配桌，
+  // 確認時拿掉預配再指派＋入座（arriveSeat.seatArriveSelection），原預配桌是別組的、不動它；復原倒回原預配。
+  // 鎖桌（桌 reserved 給本筆）或預配桌仍空 → 照舊請店員按「客人到了」。
   const startArriveSeat = (booking) => {
     if (blockedByReserve()) return
     if (!booking) return
-    if (booking.assignedTableId) return toast.info(`${booking.name} 已有桌，請按「客人到了」`)
+    booking = bookingsRef.current.find(b => b.id === booking.id) || booking
+    const reseatFrom = bookingTableNumbers(booking)
+    if (reseatFrom.length && !preassignTakenByOthers(booking, tables)) return toast.info(`${booking.name} 已有桌，請按「客人到了」`)
     if (!['confirmed', 'pending'].includes(booking.status)) return toast.error('這筆訂位不是待到狀態')
-    const guests = Number(booking.guests) || 0
+    startArriveMode(booking, Number(booking.guests) || 0, { reseatFrom })
+  }
+  const startArriveMode = (booking, guests, extra = {}) => {
     const suitable = findSuitableTables(1).map(t => t.number)
     const suggestion = suggestTable(guests, { bookingId: booking.id, date: todayStr(), mode: 'now' })
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { bookingId: booking.id, date: todayStr(), mode: 'now' })
-    startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
+    startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed, extra })
+  }
+  // 選桌入座橫幅改到店人數：只改模式內的人數與建議桌（已選的桌保留），確認入座時才寫回訂位
+  const changeArriveNeed = (n) => {
+    if (mode?.type !== 'assign-multi' || mode.kind !== 'arrive') return
+    const guests = Math.max(1, Math.min(200, Math.floor(Number(n) || 1)))
+    const opts = { bookingId: mode.booking.id, date: todayStr(), mode: 'now' }
+    const suggestion = suggestTable(guests, opts)
+    const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, mode.suitable, opts)
+    const sugTables = suggestion ? [String(suggestion.number)] : combo.tables
+    setMode(m => ({ ...m, need: guests, suggestion: suggestion?.number || sugTables[0], suggestionTables: sugTables,
+      suggestionSqueezed: !suggestion && sugTables.length > 1 && !!combo.squeezed }))
   }
 
   // 團體已入座「換桌」／臨時「加桌」（S6/S7）：從團體桌抽屜進選桌模式 → 點空桌 → 橫幅「確認換桌／確認加桌」。
@@ -951,17 +972,22 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     }
     // 未配桌訂位「到了 · 選桌入座」：上面已重驗（此刻空桌、同樓層、席數、警示已勾）→ 一次指派＋入座。
     // 單桌、併桌同一條（assignAndSeatBooking 內部走 assignBookingTablesMulti＋seatBooking 的既有守門）。
+    // 到店人數改了（橫幅 −／＋）、預配桌被佔換桌（reseatFrom）都在這一步一起寫（arriveSeat.seatArriveSelection）。
     if (mode.kind === 'arrive') {
-      const b = mode.booking
+      const b = bookingsRef.current.find(x => x.id === mode.booking.id) || mode.booking
       const overridden = mode.selected.flatMap(n => preassignConflictsFor(n))
-      const r = assignAndSeatBooking(b.id, mode.selected)
-      if (!r?.ok) return toast.error('入座失敗：' + (r?.error || '未知錯誤'))
+      const res = seatArriveSelection(b, mode.selected, {
+        need: mode.need, tables, updateBooking, clearBookingPreassign, preassignBookingTables, assignAndSeatBooking, undoSeatBooking,
+      })
+      if (!res.ok) return toast.error('入座失敗：' + res.error)
       // 只解除與「現在入座」重疊的他筆預配；快照帶進復原，按「復原」時一併還回去
       const releasedPreassigns = releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
-      const label = (r.tableNumbers || mode.selected).join(' + ')
-      toastSeatedWithUndo(r, {
-        message: `${b.name}（${b.guests} 位）已入座 ${label}`, name: b.name,
-        undoSeatBooking, toast, releasedPreassigns, restoreOverriddenAssignment,
+      const label = res.tableNumbers.join(' + ')
+      const guestNote = res.guestsChanged ? `，原訂 ${res.oldGuests} 位` : ''
+      const fromNote = res.reseatFrom.length ? `（原預配 ${res.reseatFrom.join(' + ')} 被佔）` : ''
+      toastSeatedWithUndo(res.r, {
+        message: `${b.name}（${res.guests} 位${guestNote}）已入座 ${label}${fromNote}`, name: b.name,
+        undoSeatBooking: () => res.undo(), toast, releasedPreassigns, restoreOverriddenAssignment,
       })
       flashAssigned(mode.selected[0])
       returnToModeSource()
@@ -1342,6 +1368,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         multiWarningSevere={multiWarningSevere}
         multiWarningConfirmed={multiWarningConfirmed}
         onConfirmWarning={(checked) => setMode(m => ({ ...m, confirmedWarning: checked ? multiWarningKey : null }))}
+        onChangeNeed={changeArriveNeed}
         onClearSelection={() => setMode(m => ({ ...m, selected: [], confirmedWarning: null }))}
         onCancel={cancelModeAndNotify}
         onConfirm={() => executeAssign(pendingConfirm)}
@@ -1531,8 +1558,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                     setSelectedTable(n)
                   }}
                   onArriveUnassigned={startArriveSeat}
+                  onArriveReseat={startArriveSeat}
                   onArrive={(table, booking) => handleArriveNow(table, booking, {
-                    seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove: startMove,
+                    seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove: startMove, onArriveReseat: startArriveSeat,
                     // 預配那條的防呆（團保／他筆預配重疊先確認）；鎖桌那條不用這些
                     confirm,
                     getTable: (n) => tables.find(t => String(t.number) === String(n)),

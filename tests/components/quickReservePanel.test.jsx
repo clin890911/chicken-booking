@@ -180,17 +180,19 @@ describe('QuickReservePanel', () => {
     expect(container.textContent).toContain('存檔後立刻鎖桌')
   })
 
-  it('欄位不齊 → 主按鈕停用並寫「還差：姓名／電話」；來源現場時電話選填 → 可按，標籤帶時段／人數／桌', () => {
+  it('來源預設「現場」（電話選填）；欄位不齊 → 主按鈕停用寫「還差：姓名」；改電話來源後電話必填', () => {
     render()
+    expect(byLabel('來源：現場').getAttribute('aria-pressed')).toBe('true')
     expect(mainBtn().disabled).toBe(true)
-    expect(mainBtn().textContent).toBe('還差：姓名／電話')
+    expect(mainBtn().textContent).toBe('還差：姓名')
     click(byLabel('王'))
-    expect(mainBtn().textContent).toBe('還差：電話')
-    click(byLabel('來源：現場'))
     expect(mainBtn().disabled).toBe(false)
     expect(mainBtn().textContent).toBe('確認新增 · 14:00 · 2 位 · 先不指派')   // 沒點桌＝不預選
     click(byText('用建議桌 105'))
     expect(mainBtn().textContent).toBe('確認新增 · 14:00 · 2 位 · 預配 105')
+    click(byLabel('來源：電話'))
+    expect(mainBtn().disabled).toBe(true)
+    expect(mainBtn().textContent).toBe('還差：電話')
   })
 
   it('存檔：payload 帶組好的稱呼、來源、人數、時段、特殊需求；「先不指派」改標籤', () => {

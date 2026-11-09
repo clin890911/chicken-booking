@@ -82,7 +82,7 @@ export default function QuickReservePanel({
 }) {
   const { settings, tables, bookings, groupReservations } = useBooking()
   const confirm = useConfirm()
-  const [source, setSource] = useState('phone')
+  const [source, setSource] = useState('walkin')
   const [title, setTitle] = useState(DEFAULT_TITLE)
   const [surname, setSurname] = useState(null)
   const [customName, setCustomName] = useState('')

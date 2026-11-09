@@ -15,6 +15,7 @@ import { todayStr } from '../utils/timeSlots'
 import { useNewVersion } from '../hooks/useNewVersion'
 import { useAdminAppManifest } from '../hooks/useAppManifest'
 import { resolveAdminTab } from '../utils/landingTab'
+import SyncAlertBar from '../components/layout/SyncAlertBar'
 import { isPhoneLayout } from '../utils/phoneLayout'
 import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
 
@@ -213,6 +214,9 @@ export default function AdminPage() {
                 立即更新
               </button>
             </div>
+          )}
+          {usingFirebase && (
+            <SyncAlertBar cloudStatus={cloudStatus} onView={() => setSearchParams({ tab: 'settings', section: 'data', block: 'firestore' })} />
           )}
           {!usingFirebase && (
             <div className="mb-4 flex-shrink-0 rounded-xl border-2 border-chicken-red bg-red-50 px-4 py-3">

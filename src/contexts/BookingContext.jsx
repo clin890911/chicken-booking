@@ -207,7 +207,7 @@ export function BookingProvider({ children }) {
           const now = Date.now()
           if (now - lastPushErrorToastRef.current > 8000) {
             lastPushErrorToastRef.current = now
-            toastRef.current?.warning?.(`部分變更未能上雲：${r.rejectedMessage || '權限不足'}。其餘已同步，詳見設定頁同步狀態`)
+            toastRef.current?.warning?.(`部分變更未能上雲：${r.rejectedMessage || '權限不足'}。其餘已同步，詳見設定頁同步狀態`, { duration: 15000 })
           }
         }
       } catch (err) {

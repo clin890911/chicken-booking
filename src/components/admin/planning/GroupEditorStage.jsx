@@ -242,6 +242,8 @@ export default function GroupEditorStage({
   // 旅客保留席（不含司領桌）— 摘要卡席位量表與總人數對比用
   const heldSeats = useMemo(() => guestTableNumbers(draft).reduce((s, n) => s + (capByNum[n] || 0), 0), [draft, capByNum])
 
+  const maxTableCap = useMemo(() => Math.max(0, ...guestTableNumbers(draft).map(n => capByNum[n] || 0)), [draft, capByNum])
+
   // 全團（含司領桌）圈到、但在此日期停用/維修中的桌：validateGroupForSave 會擋，檢查清單要先講。
   const badTables = useMemo(() => {
     const byNum = new Map((tables || []).map(t => [String(t.number), t]))
@@ -297,9 +299,17 @@ export default function GroupEditorStage({
     // 新梯人數預設 = 總人數扣掉已分配（兩段輪替常見「先坐滿、剩的進第二梯」）；司領桌不計
     const t = Number(d.counts?.total) || 0
     const assigned = gb.reduce((sum, b) => sum + (Number(b.guests) || 0), 0)
-    const nb = { id: 'BT' + Date.now().toString(36) + n, label: `第${BATCH_LABELS[n - 1] || n}梯`, timeSlot: s.start, tableNumbers: [], guests: Math.max(0, t - assigned), note: '' }
+    let newGuests = Math.max(0, t - assigned)
+    let batches = d.batches
+    // 單梯拆成兩梯：對半分（奇數多的給第一梯），不讓店員手改兩格
+    if (gb.length === 1 && t > 1) {
+      const second = Math.floor(t / 2)
+      newGuests = second
+      batches = batches.map(b => (b.id === gb[0].id ? { ...b, guests: t - second } : b))
+    }
+    const nb = { id: 'BT' + Date.now().toString(36) + n, label: `第${BATCH_LABELS[n - 1] || n}梯`, timeSlot: s.start, tableNumbers: [], guests: newGuests, note: '' }
     setActiveBatchId(nb.id)
-    return { ...d, batches: [...d.batches, nb] }
+    return { ...d, batches: [...batches, nb] }
   })
   const removeBatch = (batchId) => setDraft(d => {
     const batches = relabel(d.batches.filter(b => b.id !== batchId))
@@ -468,13 +478,14 @@ export default function GroupEditorStage({
         b => (b.tableNumbers || []).length > 0 && (b.isEscort || batchGuests(b) > 0),
       ),
       heldSeats,
+      maxTableCap,
       seatWarnings,
       onlineClosedNames,
       overbookedSeatings,
       badTables,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, total, heldSeats, badTables, specialErr, primarySeating, primaryBatch, hasSeatings, dayClosed, seatWarnings, onlineClosedNames, overbookedSeatings, gBatches.length])
+  }, [draft, total, heldSeats, badTables, specialErr, primarySeating, primaryBatch, hasSeatings, dayClosed, seatWarnings, maxTableCap, onlineClosedNames, overbookedSeatings, gBatches.length])
 
   const canSave = canSaveGroup(checks)
   const allTableNumbers = useMemo(

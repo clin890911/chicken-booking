@@ -153,12 +153,21 @@ export default function DaySeatingPanel({
 
   const evalPick = assignMode ? evaluatePick({ booking: activeBooking, picked, free, tables, date, settings }) : null
 
+  const [pickErr, setPickErr] = useState('')
+  useEffect(() => { setPickErr('') }, [activeKey, assignMode])
   const handleTableClick = (number) => {
     const n = String(number)
     if (assignMode) {
       if (picked.includes(n)) return setPicked(prev => prev.filter(x => x !== n))
       const err = pickTableError({ number: n, picked, free, tables, date, settings, byTable: mapByTable, lockKind: assignKind, bookingId: activeBooking?.id, liveAllowed })
-      if (err) return toast.error(err)
+      if (err) {
+        // 常駐紅字：撞桌時點名佔用者，直到改選別桌才清掉（toast 一閃即逝）
+        const occ = mapByTable[n]
+        const who = occ?.kind === 'walkin' ? occ.booking?.name : occ?.kind === 'group' ? (occ.group?.agencyName || occ.group?.name) : ''
+        setPickErr(who ? `這桌 ${activeBooking?.timeSlot || ''} 已有${who}，請選別桌` : '這桌現在不能選（原因見提示），請選別桌')
+        return toast.error(err)
+      }
+      setPickErr('')
       return setPicked(prev => [...prev, n])
     }
     // 非排位中：點桌＝選中坐在這桌的那筆
@@ -317,6 +326,13 @@ export default function DaySeatingPanel({
             title: `${s.seating.start}–${s.seating.end} · ${s.count} 組${s.unassigned ? `，未配桌 ${s.unassigned}` : ''}`,
           }))}
         />
+        {/* 有訂位的日子也要有新增入口（空日另有清單內那顆）；預填本日 */}
+        {onAddBooking && !isPast && !dayClosed && allItems.length > 0 && (
+          <button type="button" data-testid="day-seating-add" onClick={() => onAddBooking(date)}
+            className="tap ml-auto inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-xl bg-chicken-red text-white text-[13px] font-bold whitespace-nowrap">
+            <Plus size={16} strokeWidth={2.4} aria-hidden="true" />新增訂位
+          </button>
+        )}
       </div>
 
       {dayClosed && (
@@ -406,6 +422,9 @@ export default function DaySeatingPanel({
                 <span className="flex-1" />
                 <button type="button" onClick={() => { setEditing(false); setPicked([]) }} aria-label="取消排位" className="tap inline-flex items-center justify-center w-11 h-11 rounded-lg bg-white/15 text-white"><X size={18} aria-hidden="true" /></button>
               </div>
+              {pickErr && (
+                <div role="alert" data-testid="pick-conflict" className="rounded-lg bg-white px-2.5 py-1.5 text-[13px] font-bold text-red-600">{pickErr}</div>
+              )}
               <div className="flex items-center gap-2 flex-wrap">
                 <div className="text-[13px] font-semibold flex-1 min-w-[12rem]">
                   {picked.length
