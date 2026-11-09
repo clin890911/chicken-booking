@@ -288,6 +288,38 @@ export function checkoutBooking(bookingId) {
   return { ok: true }
 }
 
+// 離席的復原（D2：誤按「已離席」一下倒回用餐中）。
+// 快照在 checkoutBooking 之前拍：checkoutTable 會把 seatedAt 清掉，事後查不回入座時間。
+export function checkoutSnapshot(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return null
+  const tables = bookingTableNumbers(booking)
+    .map(n => tableService.getByNumber(n))
+    .filter(t => t && heldBy(t, bookingId) && t.status === 'dining')
+    .map(t => ({ number: String(t.number), seatedAt: t.seatedAt || null }))
+  return { bookingId, prevStatus: booking.status, tables }
+}
+
+// 復原鐵律：訂位仍是離席後的 completed；每張桌必須「仍是待清且仍由本筆持有」或「已清成沒人持有的空桌」
+// 才倒回用餐中（currentBookingId 回本筆、入座時間照舊）；任一張被下一組用了 → 整組不動、安全失敗。
+export function undoCheckoutBooking(snap = {}) {
+  const { bookingId, prevStatus, tables = [] } = snap || {}
+  const booking = bookingId != null ? bookingService.getById(bookingId) : null
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (booking.status !== 'completed' || prevStatus !== 'arrived') return { ok: false, error: '這筆訂位的狀態已被更動，未復原' }
+  if (!tables.length) return { ok: false, error: '這筆訂位沒有可倒回的桌' }
+  for (const s of tables) {
+    const t = tableService.getByNumber(s.number)
+    if (!t) return { ok: false, error: `桌位 ${s.number} 不存在` }
+    const stillOurs = t.status === 'cleaning' && heldBy(t, bookingId) && !t.currentRef
+    const freed = t.status === 'vacant' && t.currentBookingId == null && !t.currentRef
+    if (!stillOurs && !freed) return { ok: false, code: 'table-occupied', error: `${s.number} 已被下一組使用（${statusZh(t.status)}），未復原` }
+  }
+  tables.forEach(s => tableService.setStatus(s.number, 'dining', { currentBookingId: bookingId, currentRef: null, seatedAt: s.seatedAt || new Date().toISOString() }))
+  bookingService.update(bookingId, { status: 'arrived' })   // 不走 setStatus：保留原本的 actualArrivalTime
+  return { ok: true, tableNumbers: tables.map(s => s.number) }
+}
+
 // === 已離席 + 清桌完成（一鍵釋出，跳過待清桌）===
 // 適用：外場本人正在桌邊、桌面已清乾淨、立即可給下一組
 export function finalizeBooking(bookingId) {
@@ -805,16 +837,69 @@ export function replaceSeatedBookingTables(bookingId, tableNumbers, { now = new 
     if (!written.ok) return written
     const changed = bookingService.assignTables(bookingId, nums)
     if (!changed) throw new Error('訂位不存在')
+    // releasedPreassigns：被這次換桌解除的他筆預配（復原 undoSeatedMove 時由呼叫端交給 restoreOverriddenAssignment 還回去）
+    const releasedPreassigns = []
     for (const id of new Set(overridden.map(c => c.booking.id))) {
       const released = releaseOverriddenAssignment(id)
       if (!released.ok) throw new Error('預配解除失敗')
+      releasedPreassigns.push({ bookingId: id, name: allBookings.find(b => String(b.id) === String(id))?.name || '', tableNumbers: released.tableNumbers || [], released: released.released || [] })
     }
-    return { ok: true, booking: changed, tableNumbers: nums }
+    return { ok: true, booking: changed, tableNumbers: nums, releasedPreassigns }
   } catch {
     try { keys.forEach((key, i) => snapshots[i] == null ? localStorage.removeItem(key) : localStorage.setItem(key, snapshots[i])) }
     catch { return { ok: false, error: '裝置儲存異常，請重新整理確認桌況後再操作' } }
     return { ok: false, error: '換桌儲存失敗，原配桌已保留，請重試' }
   }
+}
+
+// === 已入座換桌的復原（D1：換錯桌一下倒回）===
+// 換桌前先拍快照（換桌會把原桌改成待清、currentBookingId 清掉，事後查不回原本的入座時間）：
+//   { bookingId, from: [{ number, status, seatedAt }] }（主桌在前）
+export function seatedMoveSnapshot(bookingId) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking || booking.status !== 'arrived') return null
+  const from = bookingTableNumbers(booking).map(n => {
+    const t = tableService.getByNumber(n)
+    return { number: String(n), status: t?.status === 'reserved' ? 'reserved' : 'dining', seatedAt: t?.seatedAt || null }
+  })
+  return from.length ? { bookingId, from } : null
+}
+
+// 復原鐵律（與 undoClearTable／undoSeatBooking 同口徑）：
+//   - 訂位仍是 arrived、桌組仍是換過去的那幾張（期間又換桌／離席就不動）
+//   - 新桌仍由本筆用餐中（沒被清掉、沒被別組接手）
+//   - 原桌必須「仍是待清或空桌、且沒有人持有」、今日可用 → 才搶回；任一張被下一組用了 → 整組不動、安全失敗
+// 成功：原桌倒回換桌前（用餐中＋原入座時間）、新桌回空桌、訂位桌號寫回原桌。
+export function undoSeatedMove(snap = {}, toTableNumbers = []) {
+  const { bookingId, from = [] } = snap || {}
+  const booking = bookingId != null ? bookingService.getById(bookingId) : null
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (booking.status !== 'arrived') return { ok: false, error: `${booking.name || '這組'} 已離席或狀態已變更，未復原` }
+  const fromNums = from.map(f => String(f.number))
+  const toNums = [...new Set((toTableNumbers || []).map(String))]
+  const nums = bookingTableNumbers(booking)
+  if (!fromNums.length || !toNums.length || nums.length !== toNums.length || nums.some(n => !toNums.includes(n))) {
+    return { ok: false, error: '這組的桌位已再被更動，未復原' }
+  }
+  for (const n of toNums) {
+    if (fromNums.includes(n)) continue
+    const t = tableService.getByNumber(n)
+    if (!t || t.status !== 'dining' || !heldBy(t, bookingId) || t.currentRef) return { ok: false, error: '這組的桌位已再被更動，未復原' }
+  }
+  for (const n of fromNums) {
+    if (toNums.includes(n)) continue
+    const t = tableService.getByNumber(n)
+    if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+    const free = ['cleaning', 'vacant'].includes(t.status) && t.currentBookingId == null && !t.currentRef
+    if (!free) return { ok: false, code: 'table-occupied', error: `${n} 已被下一組使用（${statusZh(t.status)}），未復原` }
+    if (!tableUsableToday(t)) return { ok: false, error: outOfServiceError(n) }
+  }
+  toNums.filter(n => !fromNums.includes(n)).forEach(n => tableService.clearTable(n))
+  from.forEach(f => tableService.setStatus(f.number, f.status === 'reserved' ? 'reserved' : 'dining', {
+    currentBookingId: bookingId, currentRef: null, seatedAt: f.status === 'reserved' ? null : (f.seatedAt || null),
+  }))
+  bookingService.assignTables(bookingId, fromNums)
+  return { ok: true, tableNumbers: fromNums }
 }
 
 export function moveTable(bookingId, newTableNumber) {
@@ -842,6 +927,33 @@ export function moveTable(bookingId, newTableNumber) {
   else if (wasHeld) tableService.reserveTable(newTableNumber, bookingId)
   bookingService.assignTable(bookingId, newTableNumber)
   return { ok: true }
+}
+
+// === 散客帶位的短復原（A5）===
+// 復原剛帶位的散客：這筆 booking 是入座動作自己建立的（source walkin），復原＝當作沒發生過。
+//   remove=true → 直接刪掉這筆（不在報表留一筆「散客取消」）；false（角色無刪除權）→ 退回取消，
+//   並標 autoFlag:'walkin-undo' 供統計排除。
+// 桌：只清仍由本筆用餐中的桌（復原鐵律：不清別組的桌）；任一張已被別組接手 → 整組不動、安全失敗。
+export function undoWalkInSeat(bookingId, { remove = true } = {}) {
+  const booking = bookingService.getById(bookingId)
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (booking.status !== 'arrived' || booking.source !== 'walkin') return { ok: false, error: '已無法復原（這筆訂位的狀態已被更動）' }
+  const nums = bookingTableNumbers(booking)
+  const taken = nums.filter(n => {
+    const t = tableService.getByNumber(n)
+    if (!t) return false
+    if (t.status === 'dining' && heldBy(t, bookingId) && !t.currentRef) return false
+    if (t.status === 'vacant' && t.currentBookingId == null && !t.currentRef) return false
+    return true
+  })
+  if (taken.length) return { ok: false, code: 'table-occupied', error: `${taken.join('、')} 已被別組使用，未復原` }
+  nums.forEach(n => { if (heldBy(tableService.getByNumber(n), bookingId)) tableService.clearTable(n) })
+  if (remove) {
+    bookingService.remove(bookingId)
+    return { ok: true, tableNumbers: nums, removed: true }
+  }
+  bookingService.update(bookingId, { status: 'cancelled', assignedTableId: null, extraTableIds: [], autoFlag: 'walkin-undo' })
+  return { ok: true, tableNumbers: nums, removed: false }
 }
 
 // === 依佔用區間會撞桌的桌號（建議桌／候選排除用）===
@@ -1704,6 +1816,64 @@ export function executeSweepActions(actions = []) {
     }
   }
   return done
+}
+
+// === 超時自動清檯的復原（D7）===
+// 執行 executeSweepActions 之前拍快照（finalize 會清掉 currentBookingId／seatedAt，事後查不回）：
+//   finalize-booking → { type, bookingId, name, tables:[本筆用餐中的桌] }
+//   checkout-group-table → { type, tableNumber, ref }
+//   clear-table（孤兒用餐狀態）沒有可倒回的對象 → 不拍
+export function autoReleaseSnapshots(actions = []) {
+  const snaps = []
+  for (const a of actions) {
+    if (a.type === 'finalize-booking') {
+      const b = bookingService.getById(a.bookingId)
+      if (!b) continue
+      const tables = bookingTableNumbers(b).filter(n => {
+        const t = tableService.getByNumber(n)
+        return t && t.status === 'dining' && heldBy(t, a.bookingId)
+      })
+      if (!tables.includes(String(a.tableNumber))) tables.unshift(String(a.tableNumber))
+      snaps.push({ type: a.type, bookingId: a.bookingId, name: b.name || '', tableNumber: String(a.tableNumber), tables, minutes: a.minutes })
+    } else if (a.type === 'checkout-group-table') {
+      const t = tableService.getByNumber(a.tableNumber)
+      if (!t?.currentRef) continue
+      const g = groupService.getById(t.currentRef.groupId)
+      snaps.push({ type: a.type, tableNumber: String(a.tableNumber), ref: { ...t.currentRef }, name: g?.agencyName ? `團體 ${g.agencyName}` : '團體', minutes: a.minutes })
+    }
+  }
+  return snaps
+}
+
+// 復原鐵律：桌必須仍是自動清檯後的樣子（散客：沒人持有的空桌；團體：仍是本團本梯的待清桌）才倒回用餐中；
+// 被下一組用了 → 不動、安全失敗。倒回後入座時間＝現在（重新計時，否則下一輪掃除 60 秒內又會清掉）；
+// 訂位的 actualArrivalTime 不動，用餐時長統計仍看得到原本的到店時間。
+export function undoAutoRelease(snap = {}) {
+  const now = new Date().toISOString()
+  if (snap?.type === 'finalize-booking') {
+    const b = bookingService.getById(snap.bookingId)
+    if (!b) return { ok: false, error: '訂位不存在' }
+    if (b.status !== 'completed') return { ok: false, error: `${b.name || '這組'} 的狀態已被更動，未復原` }
+    for (const n of snap.tables || []) {
+      const t = tableService.getByNumber(n)
+      if (!t) return { ok: false, error: `桌位 ${n} 不存在` }
+      if (t.status !== 'vacant' || t.currentBookingId != null || t.currentRef) {
+        return { ok: false, code: 'table-occupied', error: `${n} 已被下一組使用（${statusZh(t.status)}），未復原` }
+      }
+    }
+    ;(snap.tables || []).forEach(n => tableService.setStatus(n, 'dining', { currentBookingId: snap.bookingId, currentRef: null, seatedAt: now }))
+    bookingService.update(snap.bookingId, { status: 'arrived' })
+    return { ok: true, tableNumbers: snap.tables || [] }
+  }
+  if (snap?.type === 'checkout-group-table') {
+    const t = tableService.getByNumber(snap.tableNumber)
+    if (!t) return { ok: false, error: '桌位不存在' }
+    const same = t.status === 'cleaning' && t.currentRef?.groupId === snap.ref?.groupId && t.currentRef?.batchId === snap.ref?.batchId
+    if (!same) return { ok: false, code: 'table-occupied', error: `${snap.tableNumber} 已清桌或被下一組使用（${statusZh(t.status)}），未復原` }
+    tableService.setStatus(snap.tableNumber, 'dining', { currentBookingId: null, currentRef: { ...snap.ref }, seatedAt: now })
+    return { ok: true, tableNumbers: [snap.tableNumber] }
+  }
+  return { ok: false, error: '這筆自動處理無法復原' }
 }
 
 // 取消團體：清空所有相關桌、團 status→cancelled。

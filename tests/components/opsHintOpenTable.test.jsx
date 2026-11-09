@@ -2,7 +2,7 @@ import { it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
 
-// 現場頁接線：提示列「N 桌待清」點了 → 切到該桌樓層、打開那桌的桌況抽屜（一下就能按「清桌完成」）。
+// 現場頁接線：提示列「N 桌待清」點了 → 打開待清清單（D5：每桌清桌完成＋全部清桌）。
 const harness = vi.hoisted(() => ({ ctx: {} }))
 vi.mock('../../src/contexts/BookingContext', () => ({ useBooking: () => harness.ctx }))
 vi.mock('../../src/contexts/AuthContext', () => ({ useAuth: () => ({ can: () => true, user: { role: 'floor' } }) }))
@@ -37,13 +37,17 @@ beforeEach(() => {
 })
 afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
 
-it('點「1 桌待清」→ 切到 2F 並打開 201 的桌況抽屜', () => {
+// D5（night-50）：點「待清」改開待清清單（每桌清桌完成＋全部清桌），不再只開最早那一桌的抽屜。
+it('點「1 桌待清」→ 打開待清清單（列出 201、有「清桌完成 201」），不開抽屜', () => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
   act(() => root.render(<OperationsView />))
   expect(container.querySelector('[data-drawer]')).toBeNull()
   act(() => [...container.querySelectorAll('button')].find(b => b.textContent === '1 桌待清').click())
-  expect(container.querySelector('[data-drawer]').getAttribute('data-drawer')).toBe('201')
-  expect(container.querySelector('[data-floor]').getAttribute('data-floor')).toBe('2F')
+  expect(container.querySelector('[data-drawer]')).toBeNull()
+  const list = document.querySelector('ul[aria-label="待清桌清單"]')
+  expect(list).not.toBeNull()
+  expect(list.textContent).toContain('201')
+  expect(document.querySelector('button[aria-label="清桌完成 201"]')).not.toBeNull()
 })
 
 // OperationsView.jsx openHintTable 的分支：內嵌新增（選桌）面板開著時，點「待清／超時」只切樓層＋定位、

@@ -261,7 +261,9 @@ test.describe('本機模式', () => {
     await expect.poll(async () => (await readState(page)).bookings[0].status).toBe('cancelled')
     expect(tableOf(await readState(page), '105').status).toBe('vacant')
     await page.screenshot({ path: `${SHOTS}/H6-cancel-toast.png`, fullPage: true })
-    await page.getByRole('button', { name: /復原/ }).first().click()
+    // H6：取消的復原鈕帶對象（復原取消），與入座的「復原入座 105」分得清
+    await expect(page.getByTestId('toast-action').filter({ hasText: '復原取消' })).toBeVisible()
+    await page.getByRole('button', { name: /復原取消/ }).click()
     await expect.poll(async () => (await readState(page)).bookings[0].status).toBe('confirmed')
     const s = await readState(page)
     expect(tableOf(s, '105')).toMatchObject({ status: 'reserved', currentBookingId: 'BK-H' })

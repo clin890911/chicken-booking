@@ -193,13 +193,16 @@ test('A5 帶錯桌 → 5 秒內復原：桌回空桌', async ({ page }) => {
   const bid = before.tables.find(t => t.number === '102').currentBookingId
   let steps = 0
   await shot(page, 'A5-1-toast')
-  await page.getByRole('button', { name: '復原', exact: true }).click(); steps++
+  await page.getByRole('button', { name: '復原帶位 102', exact: true }).click(); steps++
   await expect(page.getByText(/已復原/)).toBeVisible()
   const panelAfter = await page.getByRole('button', { name: '移除桌 102' }).isVisible().catch(() => false)
   await shot(page, 'A5-2-undone')
   const { bookings, tables } = await readState(page)
   expect(tables.find(t => t.number === '102')).toMatchObject({ status: 'vacant', currentBookingId: null })
   const b = bookings.find(x => x.id === bid)
+  // A5 修正：復原剛帶位的散客＝當作沒發生，chicken_bookings_v1 不再留一筆 cancelled 的散客
+  expect(b).toBeUndefined()
+  expect(bookings.some(x => x.source === 'walkin' && x.status === 'cancelled')).toBe(false)
   record('A5', { steps, undoneBookingStatus: b?.status ?? 'deleted', tableStatus: tables.find(t => t.number === '102').status, panelKeepsTable: panelAfter, opsLog: await page.evaluate(() => localStorage.getItem('chicken_ops_log_v1')) })
 })
 

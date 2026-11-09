@@ -304,7 +304,7 @@ test('S10 散客 4 人帶位入座 → 8 秒內復原 → 桌回空桌', async (
   expect(tableOf(s, '105').status).toBe('dining')
   expect(s.bookings).toHaveLength(1)
 
-  await page.getByRole('button', { name: '復原', exact: true }).click()
+  await page.getByRole('button', { name: '復原帶位 105', exact: true }).click()   // H6：鈕文案帶對象
   await expect(page.getByText(/已復原：105 回到空桌/)).toBeVisible()
   s = await readState(page)
   expect(tableOf(s, '105')).toMatchObject({ status: 'vacant', currentBookingId: null })

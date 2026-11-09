@@ -72,9 +72,15 @@ test('D1 換桌（用餐中→另一張空桌）', async ({ page }) => {
   note('steps', steps); note('old', tb(s, '105').status); note('new', tb(s, '106').status)
   expect(tb(s, '106').status).toBe('dining')
   expect(tb(s, '105').status).not.toBe('dining')
-  // 有無復原鈕
-  const undo = await page.getByRole('button', { name: /復原/ }).count()
-  note('undoBtnAfterMove', undo)
+  // D1 修正：換桌後 toast 帶「復原換桌」，一下把客人搬回原桌（原桌仍空才搶回）
+  const undo = page.getByRole('button', { name: '復原換桌' })
+  note('undoBtnAfterMove', await undo.count())
+  await undo.click()
+  await expect(page.getByText(/已復原：王先生 回到 105/)).toBeVisible()
+  const u = await readState(page)
+  expect(tb(u, '105')).toMatchObject({ status: 'dining', currentBookingId: 'B-D1' })
+  expect(tb(u, '106')).toMatchObject({ status: 'vacant', currentBookingId: null })
+  expect(u.bookings.find(x => x.id === 'B-D1')).toMatchObject({ status: 'arrived', assignedTableId: '105' })
 })
 
 test('D2 離席 → D3 清桌 → 復原', async ({ page }) => {
@@ -90,7 +96,17 @@ test('D2 離席 → D3 清桌 → 復原', async ({ page }) => {
   let s = await readState(page)
   note('D2steps', steps); note('D2table', tb(s, '105').status)
   expect(tb(s, '105').status).toBe('cleaning')
-  note('D2undoBtn', await page.getByRole('button', { name: /復原/ }).count())
+  // D2 修正：離席 toast 帶「復原離席」→ 倒回用餐中、currentBookingId 回原筆
+  note('D2undoBtn', await page.getByRole('button', { name: '復原離席' }).count())
+  await page.getByRole('button', { name: '復原離席' }).click()
+  await expect(page.getByText(/已復原：李小姐 回到用餐中/)).toBeVisible()
+  s = await readState(page)
+  expect(tb(s, '105')).toMatchObject({ status: 'dining', currentBookingId: 'B-D2' })
+  expect(s.bookings.find(x => x.id === 'B-D2').status).toBe('arrived')
+  // 再離席一次，接 D3
+  await page.getByRole('button', { name: '客人已離席' }).click()
+  await page.getByRole('button', { name: '已離席', exact: true }).click()
+  await expect.poll(async () => tb(await readState(page), '105').status).toBe('cleaning')
   // D3：待清桌 → 清桌
   steps = 0
   const drawerOpen = await page.getByRole('button', { name: '清桌完成' }).count()
@@ -103,8 +119,8 @@ test('D2 離席 → D3 清桌 → 復原', async ({ page }) => {
   s = await readState(page)
   note('D3steps', steps)
   expect(tb(s, '105').status).toBe('vacant')
-  // 復原
-  await page.getByRole('button', { name: /復原/ }).first().click()
+  // 復原（H6：鈕寫「復原清桌 105」）
+  await page.getByRole('button', { name: /復原清桌 105/ }).click()
   await page.waitForTimeout(400)
   s = await readState(page)
   note('undoClear→', tb(s, '105').status + ' booking=' + tb(s, '105').currentBookingId)
@@ -142,20 +158,32 @@ test('D5 五張待清桌', async ({ page }) => {
   await seed(page, { tables, bookings: nums.map(n => mkBooking('X' + n, '客' + n, { status: 'completed', assignedTableId: n })) })
   await loginToOps(page)
   await shot(page, 'D5-1-map')
-  const batch = await page.getByRole('button', { name: /全部清桌|批次|一次清|全部釋出/ }).count()
-  note('batchBtn', batch)
-  const hint = page.getByRole('button', { name: /待清/ })
-  note('hintBtnCount', await hint.count())
+  // D5 修正：頂列「待清 5」展開清單 →「全部清桌（5）」＝2 下（原本每桌開抽屜＋清桌＝10 下）
   let clicks = 0
-  for (const n of nums) {
-    await mapTable(page, Number(n)).click(); clicks++
-    await page.getByRole('button', { name: '清桌完成' }).click(); clicks++
-    await page.waitForTimeout(200)
-  }
+  await page.locator('[data-alert="cleaning"]').click(); clicks++
+  await expect(page.getByRole('list', { name: '待清桌清單' })).toBeVisible()
+  await shot(page, 'D5-1b-list')
+  await page.getByRole('button', { name: '全部清桌（5）' }).click(); clicks++
+  await page.waitForTimeout(300)
   await shot(page, 'D5-2-after')
-  const s = await readState(page)
+  let s = await readState(page)
   note('clicks', clicks); note('vacant', s.tables.filter(t => t.status === 'vacant').length)
+  expect(clicks).toBeLessThanOrEqual(6)
   expect(s.tables.filter(t => t.status === 'cleaning').length).toBe(0)
+  // 批次復原：全部倒回待清（原 currentBookingId 保留）
+  await page.getByRole('button', { name: /復原清桌（5）/ }).click()
+  await page.waitForTimeout(300)
+  s = await readState(page)
+  nums.forEach(n => expect(tb(s, n)).toMatchObject({ status: 'cleaning', currentBookingId: 'X' + n }))
+})
+
+test('D5b 桌況圖點待清桌＝就地「清桌完成」（不進抽屜）', async ({ page }) => {
+  await seed(page, { tables: mkTables([['105', { status: 'cleaning', currentBookingId: 'B-X' }], '106']), bookings: [mkBooking('B-X', '客', { status: 'completed', assignedTableId: '105' })] })
+  await loginToOps(page)
+  await mapTable(page, 105).click()
+  await page.getByRole('button', { name: '清桌完成 105' }).click()
+  await expect.poll(async () => tb(await readState(page), '105').status).toBe('vacant')
+  await expect(page.getByRole('button', { name: '客人已離席' })).toHaveCount(0)
 })
 
 test('D6 維修停用到今日', async ({ page }) => {
@@ -203,6 +231,14 @@ test('D7 用餐超 5 小時自動清檯', async ({ page }) => {
   note('105', tb(s, '105').status); note('booking', s.bookings[0].status); note('logLen', s.log.length)
   note('toasts', (await page.locator('[role=status],[role=alert]').allInnerTexts()).join(' | ').slice(0, 300))
   note('undoBtn', await page.getByRole('button', { name: /復原/ }).count())
+  // D7 修正：toast 寫桌號＋姓名，帶「復原釋出 105」倒回用餐中（重新計時）
+  expect(tb(s, '105').status).toBe('vacant')
+  await expect(page.getByText('105 周先生用餐超過 5 小時，已自動釋出')).toBeVisible()
+  await page.getByRole('button', { name: '復原釋出 105' }).click()
+  await expect.poll(async () => tb(await readState(page), '105').status).toBe('dining')
+  const u = await readState(page)
+  expect(tb(u, '105').currentBookingId).toBe('B-D7')
+  expect(u.bookings.find(x => x.id === 'B-D7').status).toBe('arrived')
   // 紀錄入口
   const logBtn = page.getByRole('button', { name: /自動處理|紀錄|詳見/ })
   note('logEntryCount', await logBtn.count())
