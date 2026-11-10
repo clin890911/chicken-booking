@@ -2,6 +2,7 @@
 import { beforeAll, beforeEach, afterAll, describe, it, expect } from 'vitest'
 import { performance } from 'node:perf_hooks'
 import { createWaitlistHandler } from '../../functions/lib/waitlistCommands.js'
+import { kickWaitlistSms, sweepSmsOutbox } from '../../functions/lib/smsDispatch.js'
 import { connectWaitlistEmulator, resetEmulator, seedEmulator, invokeHandler, testCommand, HOST, PROJECT } from '../support/waitlistEmulator.js'
 
 const enabled = process.env.FIRESTORE_EMULATOR_HOST === HOST && process.env.GCLOUD_PROJECT === PROJECT
@@ -93,6 +94,81 @@ describe.runIf(enabled)('waitlist real Firestore transactions, isolated demo pro
     expect((await invokeHandler(failingNotify,create('NOTIFY_FAIL'))).code).toBe(200)
     expect((await env.db.collection('waitlist').get()).size).toBe(2)
   })
+  it('call with mobile commits smsOutbox atomically in the same transaction; replay/lost ACK never rewrites it',async()=>{
+    const created=await call(testCommand('create','SMS_CALL',0,{name:'簡訊',partySize:2,phone:'0912345678',children:0},day))
+    expect(created.code).toBe(200)
+    const callCmd=testCommand('call','SMS_CALL',created.body.item.queueVersion,{},day)
+    const first=await call(callCmd)
+    expect(first.code).toBe(200)
+    const box=await env.db.collection('smsOutbox').get()
+    expect(box.size).toBe(1)
+    expect(box.docs[0].data()).toMatchObject({kind:'waitlist-call',waitlistId:'SMS_CALL',commandId:callCmd.commandId,to:'0912345678',status:'pending',calledAt:first.body.item.calledAt})
+    expect((await env.db.collection('waitlist').doc('SMS_CALL').get()).data()).toMatchObject({status:'called',queueVersion:2})
+    await box.docs[0].ref.update({status:'sent'}) // dispatcher already delivered it
+    const replay=await call(callCmd) // first HTTP response lost; same command retried
+    expect(replay.body.replayed).toBe(true)
+    const after=await env.db.collection('smsOutbox').get()
+    expect(after.size).toBe(1)
+    expect(after.docs[0].data().status).toBe('sent')
+  })
+  it('landline call and concurrent call/leave race write no stray smsOutbox',async()=>{
+    const land=await call(testCommand('create','SMS_LAND',0,{name:'市話',partySize:2,phone:'0492753377',children:0},day))
+    expect((await call(testCommand('call','SMS_LAND',land.body.item.queueVersion,{},day))).code).toBe(200)
+    const mob=await call(testCommand('create','SMS_RACE',0,{name:'競爭',partySize:2,phone:'0912345678',children:0},day))
+    const results=await Promise.all(['call','leave'].map(action=>call(testCommand(action,'SMS_RACE',mob.body.item.queueVersion,{},day))))
+    expect(results.map(r=>r.code).sort()).toEqual([200,409])
+    const status=(await env.db.collection('waitlist').doc('SMS_RACE').get()).data().status
+    const box=(await env.db.collection('smsOutbox').get()).docs.map(d=>d.data().waitlistId)
+    expect(box).toEqual(status==='called'?['SMS_RACE']:[])
+  })
+  it('dispatcher on real Firestore: disabled→skipped, dryRun kick→dry-run without HTTP, smsStatus written without queueVersion bump, expired lease→unknown',async()=>{
+    const fetchImpl=async()=>{throw Error('network forbidden in emulator test')}
+    const deps={fetchImpl,credentials:null,alert:async()=>{},clock:()=>Date.parse(now)+2000}
+    const mk=async id=>{const c=await call(testCommand('create',id,0,{name:id,partySize:2,phone:'0912345678',children:0},day));return call(testCommand('call',id,c.body.item.queueVersion,{},day))}
+    await mk('SMS_OFF')
+    expect((await kickWaitlistSms({db:env.db,waitlistId:'SMS_OFF',...deps})).map(r=>r.status)).toEqual(['skipped-disabled'])
+    expect((await env.db.collection('waitlist').doc('SMS_OFF').get()).data()).not.toHaveProperty('smsStatus')
+    await env.db.collection('system').doc('smsConfig').set({enabled:true,dryRun:true})
+    await mk('SMS_DRY')
+    expect((await kickWaitlistSms({db:env.db,waitlistId:'SMS_DRY',...deps})).map(r=>r.status)).toEqual(['dry-run'])
+    const w=(await env.db.collection('waitlist').doc('SMS_DRY').get()).data()
+    expect(w).toMatchObject({status:'called',queueVersion:2,smsStatus:{state:'dry-run'}})
+    // smsStatus 回寫後，同一裝置用原本的 queueVersion 繼續操作不會被 waitlist-changed 擋
+    expect((await call(testCommand('leave','SMS_DRY',2,{},day))).code).toBe(200)
+    await mk('SMS_LEASE')
+    const box=(await env.db.collection('smsOutbox').where('waitlistId','==','SMS_LEASE').get()).docs[0]
+    await box.ref.update({status:'processing',claimToken:'t',leaseUntil:new Date(Date.parse(now)-1).toISOString()})
+    const swept=await sweepSmsOutbox({db:env.db,...deps})
+    expect(swept.find(r=>r.id===box.id).status).toBe('unknown')
+    expect((await box.ref.get()).data().status).toBe('unknown')
+  })
+  it('dispatcher 併發（真 Firestore）：kick／sweeper／kick 同時撿同一筆 → 每個門號只實送 1 次；kick 與離開同時 → 欄位不被蓋回',async()=>{
+    await env.db.collection('system').doc('smsConfig').set({enabled:true,dryRun:false})
+    const sends=new Map()
+    const fetchImpl=async(_url,init)=>{
+      const to=new URLSearchParams(init.body).get('DEST')
+      sends.set(to,(sends.get(to)||0)+1)
+      await new Promise(r=>setTimeout(r,100))
+      return {ok:true,status:200,text:async()=>'100,1,1,0,BATCH'}
+    }
+    const deps={fetchImpl,credentials:{uid:'u',pwd:'p'},alert:async()=>{},clock:()=>Date.parse(now)+2000}
+    const mk=async(id,phone)=>{const c=await call(testCommand('create',id,0,{name:id,partySize:2,phone,children:0},day));return call(testCommand('call',id,c.body.item.queueVersion,{},day))}
+    for(let i=0;i<6;i++){
+      const id=`SMS_RACE_${i}`
+      await mk(id,`09123456${String(10+i)}`)
+      await Promise.all([kickWaitlistSms({db:env.db,waitlistId:id,...deps}),sweepSmsOutbox({db:env.db,...deps}),kickWaitlistSms({db:env.db,waitlistId:id,...deps})])
+    }
+    expect([...sends.values()]).toEqual(Array(6).fill(1)) // 0 次重複實送
+    expect((await env.db.collection('smsOutbox').get()).docs.map(d=>d.data().status)).toEqual(Array(6).fill('sent'))
+    await env.db.collection('system').doc('smsConfig').set({enabled:true,dryRun:true})
+    for(let i=0;i<5;i++){
+      const id=`SMS_CLOB_${i}`
+      const called=await mk(id,`09987654${String(10+i)}`)
+      const [,leave]=await Promise.allSettled([kickWaitlistSms({db:env.db,waitlistId:id,...deps}),call(testCommand('leave',id,called.body.item.queueVersion,{},day))])
+      expect(leave.value.code).toBe(200)
+      expect((await env.db.collection('waitlist').doc(id).get()).data()).toMatchObject({status:'left',queueVersion:3})
+    }
+  },60000)
   it('released group batch at same table/time no longer holds a vacant table; no override consent required',async()=>{
     await env.db.collection('groupReservations').doc('RELEASED_GROUP').set({id:'RELEASED_GROUP',date:day,status:'confirmed',batches:[{id:'BATCH',tableNumbers:['101'],timeSlot:'12:00',releasedAt:now}]})
     expect((await call(create('RELEASED_SEAT'))).code).toBe(200)

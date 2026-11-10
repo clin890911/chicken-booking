@@ -22,7 +22,7 @@ export function projectBookingForRead(doc, role) {
 }
 
 // Explicit public schema: opaque undo snapshots belong only in server receipts.
-const WAITLIST_PUBLIC_FIELDS=['id','queueNumber','takenAt','name','phone','phoneDigits','partySize','children','adults','lineUserId','estimatedMin','status','calledAt','seatedAt','leftAt','skippedAt','returnedAt','assignedTableNumber','notes','queueVersion','serverManaged','createdBy','updatedAt','bookingId','tableNumbers','seatCommandId','seatActor','undoUntil']
+const WAITLIST_PUBLIC_FIELDS=['id','queueNumber','takenAt','name','phone','phoneDigits','partySize','children','adults','lineUserId','estimatedMin','status','calledAt','seatedAt','leftAt','skippedAt','returnedAt','assignedTableNumber','notes','queueVersion','serverManaged','createdBy','updatedAt','bookingId','tableNumbers','seatCommandId','seatActor','undoUntil','smsStatus']
 export function projectWaitlistForRead(doc, role) {
   const out=Object.fromEntries(WAITLIST_PUBLIC_FIELDS.filter(k=>Object.hasOwn(doc,k)).map(k=>[k,doc[k]]))
   if(typeof out.notes!=='string'&&out.notes!=null)out.notes=''
