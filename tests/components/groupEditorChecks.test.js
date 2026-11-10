@@ -55,6 +55,18 @@ describe('buildGroupEditorChecks / canSaveGroup', () => {
     expect(canSaveGroup(checks)).toBe(true)
   })
 
+  it('差距超過一桌容量 → 「還差 N 席，請再圈桌或拆梯」、仍可存；差一桌以內維持超坐', () => {
+    const w = (over) => [{ key: 'total', label: '第一梯', guests: 12 + over, seats: 12, over, message: `超坐 ${over} 人` }]
+    const far = buildGroupEditorChecks(base({ total: 40, heldSeats: 12, maxTableCap: 6, seatWarnings: w(28) }))
+    const seats = byKey(far, 'seats')
+    expect(seats.label).toBe('席位：已圈 12 / 需 40，還差 28 席，請再圈桌或拆梯')
+    expect(seats.reason).toContain('還差 28 席')
+    expect(seats).toMatchObject({ ok: true, warn: true, bad: false })
+    expect(canSaveGroup(far)).toBe(true)
+    const near = buildGroupEditorChecks(base({ total: 17, heldSeats: 12, maxTableCap: 6, seatWarnings: w(5) }))
+    expect(byKey(near, 'seats').label).toBe('席位：已圈 12 / 需 17，超坐 5 人')
+  })
+
   it('多梯某梯超坐 → reason 點名該梯、仍可存', () => {
     const checks = buildGroupEditorChecks(base({
       total: 20, heldSeats: 18,

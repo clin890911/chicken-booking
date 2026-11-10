@@ -62,7 +62,7 @@ test('現場→今日訂位→＋新增：姓氏/稱謂→人數→時段→電�
   await expect(panel(page).getByRole('button', { name: '13:30' })).toHaveAttribute('aria-pressed', 'true')
   // 人數預設 2；欄位不齊 → 主按鈕停用、寫明還差什麼
   await expect(panel(page).getByRole('button', { name: '2 位' })).toHaveAttribute('aria-pressed', 'true')
-  await expect(panel(page).getByRole('button', { name: '還差：姓名／電話' })).toBeDisabled()
+  await expect(panel(page).getByRole('button', { name: '還差：姓名' })).toBeDisabled()
 
   // 姓氏＋稱謂（點一下換小姐）→ 人數 3 → 時段 14:00（離現在 50 分 → 預配型）→ 電話
   await panel(page).getByRole('button', { name: '王', exact: true }).click()
@@ -94,7 +94,7 @@ test('現場→今日訂位→＋新增：姓氏/稱謂→人數→時段→電�
 
   const { bookings, tables } = await readState(page)
   const b = bookings.find(x => x.name === '王小姐')
-  expect(b).toMatchObject({ guests: 3, timeSlot: '14:00', phone: '0912345678', source: 'phone', status: 'confirmed', assignedTableId: '106' })
+  expect(b).toMatchObject({ guests: 3, timeSlot: '14:00', phone: '0912345678', source: 'walkin', status: 'confirmed', assignedTableId: '106' })
   expect(tables.find(t => t.number === '106').status).toBe('vacant')   // 預配：桌況不鎖
 })
 

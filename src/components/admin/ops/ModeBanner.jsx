@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import Icon from '../../ui/Icon'
 import GlyphText from '../../ui/GlyphText'
 import { conflictLine } from '../../../utils/preassignOverride'
@@ -27,7 +28,12 @@ const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat', 'group-m
 
 // pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
 //   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
-export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiMaxSeats, multiWarnings = [], multiWarningSevere = true, multiWarningConfirmed = true, onConfirmWarning, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
+export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiMaxSeats, multiWarnings = [], multiWarningSevere = true, multiWarningConfirmed = true, onConfirmWarning, onChangeNeed, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
+  // 手機（phone:）選桌入座：到店人數 stepper 預設收起（整列 44px 會把橫幅撐高、壓掉桌況圖），
+  // 點標題列的「N 位」才展開；桌面／iPad 一律常駐（phone:hidden 只在手機條件成立）。
+  const [phoneNeedOpen, setPhoneNeedOpen] = useState(false)
+  // 換一組／換模式就收回（橫幅元件常駐不卸載，否則上一組展開的狀態會帶到下一組）
+  useEffect(() => { setPhoneNeedOpen(false) }, [mode?.type, mode?.booking?.id])
   if (!mode) return null
   const suggested = tables.find(t => String(t.number) === String(mode.suggestion))
   const suggestionLabel = suggested ? `${suggested.floor}・${suggested.number}` : mode.suggestion
@@ -60,7 +66,7 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
             <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
-            <span>{isWaitlist ? '候位入座' : isArrive ? '到了 · 選桌入座' : mode.replacing ? '重新選桌' : '指派桌位'}：{name} {need} 位</span>
+            <span>{isWaitlist ? '候位入座' : isArrive ? (mode.reseatFrom?.length ? '到了 · 換桌入座' : '到了 · 選桌入座') : mode.replacing ? '重新選桌' : '指派桌位'}：{name} {need} 位</span>
             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
@@ -70,9 +76,32 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
             {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded phone:hidden">建議 {comboLabel}{comboNums && mode.suggestionSqueezed ? '（擠一擠）' : ''}（自行選桌）</span>}
             {!seatsNow && <span className="text-xs opacity-90 phone:hidden">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
             {isArrive && <span className="text-xs opacity-90 phone:hidden">確認即入座 · 只能選此刻空桌</span>}
+            {isArrive && onChangeNeed && (
+              <button type="button" data-testid="arrive-need-toggle" aria-expanded={phoneNeedOpen} aria-label={`改到店人數（${need} 位）`}
+                onClick={() => setPhoneNeedOpen(v => !v)}
+                className="hidden phone:inline-flex items-center min-h-[44px] -my-2">
+                {/* 觸控區 44px（按鈕本身），看得到的白底小鈕 28px＝跟「已選」同高、不把這一行撐高；-my-2 只吃掉行距 */}
+                <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white text-emerald-700 text-sm font-bold shadow-sm">
+                  <Icon name="users" size={14} />{need} 位
+                </span>
+              </button>
+            )}
+            {isArrive && mode.reseatFrom?.length > 0 && <span data-testid="arrive-reseat-from" className="text-xs font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded">原預配 {mode.reseatFrom.join(' + ')} 被佔 · 換一張空桌</span>}
           </div>
           <button onClick={onCancel} className={`text-xs px-3 py-2 min-h-[44px] bg-white ${cancelBtn} rounded-lg font-bold whitespace-nowrap phone:hidden`}>取消</button>
         </div>
+        {/* 選桌入座：到店人數跟訂位不同 → 這裡直接改（確認入座時才寫回訂位），不必繞今日籤改人數 */}
+        {isArrive && onChangeNeed && (
+          <div className={`flex items-center gap-2 ${phoneNeedOpen ? '' : 'phone:hidden'}`} role="group" aria-label="到店人數">
+            <span className="text-sm phone:text-xs font-bold">到店人數</span>
+            <button type="button" aria-label="人數減一" disabled={need <= 1} onClick={() => onChangeNeed(need - 1)}
+              className="min-h-[44px] min-w-[44px] rounded-lg bg-white text-emerald-700 text-lg font-bold shadow-sm disabled:opacity-40">−</button>
+            <span data-testid="arrive-need" className="min-w-[3.5rem] text-center text-base font-bold tabular-nums">{need} 位</span>
+            <button type="button" aria-label="人數加一" disabled={need >= 200} onClick={() => onChangeNeed(need + 1)}
+              className="min-h-[44px] min-w-[44px] rounded-lg bg-white text-emerald-700 text-lg font-bold shadow-sm disabled:opacity-40">＋</button>
+            {Number(mode.booking?.guests) !== need && <span className="text-xs opacity-90">訂位 {mode.booking?.guests} 位 · 入座時一併改</span>}
+          </div>
+        )}
         <div className="bg-white/15 rounded-lg px-3 py-2 phone:px-2 phone:py-1 flex items-center justify-between gap-2 flex-wrap phone:flex-nowrap">
           <div className="text-sm phone:text-xs font-bold phone:min-w-0 phone:flex-1">
             {selected.length ? `已選：${selected.join(' + ')}` : '尚未選桌（點空桌加入）'}

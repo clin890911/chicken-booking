@@ -75,21 +75,22 @@ export function pastSlotFix(slot, now = new Date(), { settings = {}, tables = []
 //   slotNotice                    所選時段已過、已自動改選目前時段的說明（父層 pastSlotFix 算）
 //   onOpenFullForm({ name, phone, source })（可選）其他日期 → 完整新增表單（只帶完整表單 prefill 支援的欄位）
 //   now                           （可選）目前時間，測試注入
+//   prefill                       （可選）{ name, phone, children, noteText }：候位轉訂位預填；只在面板掛載時讀一次
 export default function QuickReservePanel({
   guests, onGuestsChange, timeSlot, onTimeSlotChange, slotNotice,
   lockKind, table, onTablePickChange, suggestedNumber, notice, needsCombo, canAssign = true,
-  onSave, onBack, onOpenFullForm, now,
+  onSave, onBack, onOpenFullForm, now, prefill = null,
 }) {
   const { settings, tables, bookings, groupReservations } = useBooking()
   const confirm = useConfirm()
-  const [source, setSource] = useState('phone')
+  const [source, setSource] = useState('walkin')
   const [title, setTitle] = useState(DEFAULT_TITLE)
   const [surname, setSurname] = useState(null)
-  const [customName, setCustomName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [notes, setNotes] = useState({ child: false, pet: false, mobility: false, text: '' })
-  const [showNoteText, setShowNoteText] = useState(false)
-  const [kids, setKids] = useState(0) // 小孩數（大人＝guests−kids）；預設 0
+  const [customName, setCustomName] = useState(prefill?.name || '')
+  const [phone, setPhone] = useState(prefill?.phone || '')
+  const [notes, setNotes] = useState({ child: false, pet: false, mobility: false, text: prefill?.noteText || '' })
+  const [showNoteText, setShowNoteText] = useState(!!prefill?.noteText)
+  const [kids, setKids] = useState(prefill?.children || 0) // 小孩數（大人＝guests−kids）；預設 0
   // 有小孩 →「兒童」自動勾且鎖住；notes.child 只記店員自己點的（小孩改回 0 時自動勾的會消失、自己勾的保留）
   const hasKids = normalizeSplit(guests, kids).children > 0
   const [keypadOpen, setKeypadOpen] = useState(false)

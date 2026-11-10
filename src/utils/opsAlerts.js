@@ -51,7 +51,7 @@ export function pickOpsAlerts({ pulse, tables, settings, waitlist, now }) {
     const first = oldestBy(cleaning, t => t.updatedAt)
     alerts.push({ key: 'cleaning', level: 'warn', label: '待清', count: cleaning.length, unit: '桌',
       text: `待清 ${cleaning.length} 桌`, action: 'open-table',
-      tableNumber: String(first.number), title: `點開最早待清的 ${first.number}` })
+      tableNumber: String(first.number), title: `點開待清清單（最早待清 ${first.number}），可一次全部清桌` })
   }
   const w = activeWaitlist(waitlist)
   if (w.length) {
@@ -59,7 +59,9 @@ export function pickOpsAlerts({ pulse, tables, settings, waitlist, now }) {
       text: `候位 ${w.length} 組`, action: 'open-waitlist', title: '點開候位' })
   }
   // 無障礙名稱（螢幕閱讀器／語音控制）：「超時 1 桌，點擊開啟 107」——先講是什麼、幾件，再講點了會去哪
-  const dest = (a) => a.action === 'open-table' ? `點擊開啟 ${a.tableNumber}`
+  // 待清：現場頁點了開的是待清清單（每桌清桌完成＋全部清桌），不是單一桌
+  const dest = (a) => a.key === 'cleaning' ? '點擊開啟待清清單'
+    : a.action === 'open-table' ? `點擊開啟 ${a.tableNumber}`
     : a.action === 'open-waitlist' ? '點擊開啟候位' : '點擊開啟「今日」'
   return alerts.map(a => ({ ...a, ariaLabel: `${a.text}，${dest(a)}` }))
 }

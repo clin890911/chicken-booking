@@ -102,6 +102,23 @@ export function seat(id, tableNumber) {
   })
 }
 
+// 候位轉訂位：訂位建好後把候位結掉用的原因（與一般棄號區分）
+export const LEAVE_REASON_CONVERTED = 'converted'
+// 預估等待顯示：超過 90 分的精確分鐘數沒意義（組數×估時只是粗估），改顯示「等待較久」
+export const LONG_WAIT_MIN = 90
+export function formatEstWait(min, prefix = '') {
+  const n = Number(min)
+  if (!Number.isFinite(n)) return ''
+  return n > LONG_WAIT_MIN ? '等待較久' : `${prefix}${n} 分`
+}
+// 候位轉訂位的備註與收尾：訂位建立成功才結掉候位；失敗（ok:false）不動候位。
+// leaveWaitlist 為 BookingContext 的棄號 transition（目前只收 id；reason 先隨參數帶上，後端支援後即生效）。
+export function convertNote(w) { return `由候位 #${w?.queueNumber ?? ''} 轉入` }
+export async function finishConvertedWaitlist(waitlistId, saveResult, leaveWaitlist) {
+  if (!waitlistId || !saveResult?.ok) return { skipped: true }
+  return leaveWaitlist(waitlistId, undefined, LEAVE_REASON_CONVERTED)
+}
+
 // 棄號（客人離開不等了）
 export function leave(id) {
   return update(id, { status: 'left', leftAt: new Date().toISOString() })

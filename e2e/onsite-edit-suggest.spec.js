@@ -159,7 +159,7 @@ test('今日訂位卡取消：有確認框；復原把訂位與桌一起倒回',
   expect(bookings.find(b => b.id === WANG.id).status).toBe('cancelled')
   expect(tables.find(t => t.number === '105')).toMatchObject({ status: 'vacant', currentBookingId: null })
 
-  await page.getByRole('button', { name: '復原', exact: true }).click()
+  await page.getByRole('button', { name: /復原取消/ }).click()
   await expect(page.getByText(/已復原 王先生 的訂位/)).toBeVisible()
   ;({ bookings, tables } = await readState(page))
   expect(bookings.find(b => b.id === WANG.id)).toMatchObject({ status: 'confirmed', assignedTableId: '105' })

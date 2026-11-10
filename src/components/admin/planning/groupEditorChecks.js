@@ -29,7 +29,7 @@ export function buildGroupEditorChecks({
   hasSeatings, seatingPicked, dayClosed = false,
   batchesReady, heldSeats, seatWarnings = [],
   onlineClosedNames = [], overbookedSeatings = [],
-  badTables = [],
+  badTables = [], maxTableCap = 0,
 }) {
   const checks = [
     { key: 'agency', label: '已選旅行社', ok: !!hasAgency, bad: false, reason: '請選擇或新增旅行社' },
@@ -51,7 +51,9 @@ export function buildGroupEditorChecks({
   checks.push({ key: 'batches', label: '每梯都已圈桌且有人數', ok: !!batchesReady, bad: false, reason: '還有梯次沒圈桌或沒填人數' })
 
   const singleOver = seatWarnings.length === 1 && seatWarnings[0].key === 'total' ? seatWarnings[0].over : 0
-  const seatsLabel = `席位：已圈 ${heldSeats} / 需 ${total}${singleOver ? `，超坐 ${singleOver} 人` : ''}`
+  // 差距超過一桌容量＝其實是桌圈不夠（不是擠一擠能解決）：改講「還差 N 席」
+  const grossShort = singleOver > 0 && maxTableCap > 0 && singleOver > maxTableCap
+  const seatsLabel = `席位：已圈 ${heldSeats} / 需 ${total}${singleOver ? (grossShort ? `，還差 ${singleOver} 席，請再圈桌或拆梯` : `，超坐 ${singleOver} 人`) : ''}`
   const seatsFilled = total > 0 && heldSeats > 0
   checks.push({
     key: 'seats',
@@ -61,6 +63,7 @@ export function buildGroupEditorChecks({
     bad: false,
     reason: !seatsFilled
       ? '請圈桌'
+      : grossShort ? `還差 ${singleOver} 席，請再圈桌或拆梯（仍可存檔）`
       : singleOver ? '大客滿可請客人擠一擠，照樣可存'
         : seatWarnings.map(w => w.message).join('；'),
   })

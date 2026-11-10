@@ -304,7 +304,7 @@ test('S10 散客 4 人帶位入座 → 8 秒內復原 → 桌回空桌', async (
   expect(tableOf(s, '105').status).toBe('dining')
   expect(s.bookings).toHaveLength(1)
 
-  await page.getByRole('button', { name: '復原', exact: true }).click()
+  await page.getByRole('button', { name: '復原帶位 105', exact: true }).click()   // H6：鈕文案帶對象
   await expect(page.getByText(/已復原：105 回到空桌/)).toBeVisible()
   s = await readState(page)
   expect(tableOf(s, '105')).toMatchObject({ status: 'vacant', currentBookingId: null })
@@ -335,7 +335,7 @@ test('S11 散客 8 人沒有單桌容得下 → 用建議併桌 → 一次入座
   for (const n of ['106', '107']) expect(tableOf(s, n)).toMatchObject({ status: 'dining', currentBookingId: b.id })
 })
 
-test('S12 訂位預配 105、105 被別人佔走 → 報到列標桌被佔、「到了」不入座並給改桌出口', async ({ page }) => {
+test('S12 訂位預配 105、105 被別人佔走 → 報到列標桌被佔、「到了 · 換桌」選空桌即入座', async ({ page }) => {
   const OCC = {
     id: 'E2E-OCC', name: '別組', phone: '', guests: 2, date: TODAY, timeSlot: '11:00', status: 'arrived',
     source: 'walkin', assignedTableId: '105', extraTableIds: [], notes: {}, createdBy: 'staff',
@@ -352,14 +352,20 @@ test('S12 訂位預配 105、105 被別人佔走 → 報到列標桌被佔、「
 
   const strip = page.getByRole('list', { name: '可入座名單' })
   await expect(strip.getByRole('listitem')).toContainText('預配·桌被佔')
-  await strip.getByRole('button', { name: '余先生 到了，入座 105' }).click()
-  await expect(page.getByText('入座失敗：105 目前由 別組 使用，請先改桌')).toBeVisible()
-  const s = await readState(page)
-  expect(s.bookings.find(b => b.id === YU.id).status).toBe('confirmed')
+  // night-50 B5：直接進換桌入座（不先撞入座失敗）；確認前什麼都不寫
+  await strip.getByRole('button', { name: '余先生 到了，換桌入座' }).click()
+  await expect(page.getByText(/到了 · 換桌入座：余先生/)).toBeVisible()
+  let s = await readState(page)
+  expect(s.bookings.find(b => b.id === YU.id)).toMatchObject({ status: 'confirmed', assignedTableId: '105' })
   expect(tableOf(s, '105').currentBookingId).toBe(OCC.id)
 
-  await page.getByRole('button', { name: '改桌', exact: true }).click()
-  await expect(page.getByText(/重新選桌：余先生/)).toBeVisible()
+  await mapTable(page, '106').click()
+  await page.getByRole('button', { name: '確認入座', exact: true }).click()
+  await expect(page.getByText(/已入座 106（原預配 105 被佔）/)).toBeVisible()
+  s = await readState(page)
+  expect(s.bookings.find(b => b.id === YU.id)).toMatchObject({ status: 'arrived', assignedTableId: '106' })
+  expect(tableOf(s, '106')).toMatchObject({ status: 'dining', currentBookingId: YU.id })
+  expect(tableOf(s, '105').currentBookingId).toBe(OCC.id)
 })
 
 test('S13 散客用餐中在 106 → 抽屜換桌 → 點空桌 105 → 新桌用餐中、原桌釋出', async ({ page }) => {

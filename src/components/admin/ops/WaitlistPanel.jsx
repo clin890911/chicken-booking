@@ -1,7 +1,7 @@
 import { compareWaitlistOrder } from '../../../utils/waitlistOrder'
 import { useAuth } from '../../../contexts/AuthContext'
 import { seatingPerms } from '../../../utils/seatingPerms'
-import { waitlistDay } from '../../../services/waitlistService'
+import { waitlistDay, formatEstWait } from '../../../services/waitlistService'
 import { todayStr } from '../../../utils/timeSlots'
 import { commandId } from '../../../services/handoffService'
 import { useState, useMemo, useRef, useEffect } from 'react'
@@ -30,7 +30,7 @@ function diffMin(d) {
 
 // 現場右側欄「候位」籤：取號 → 叫號 → 入座全程在現場頁完成。
 // 歷史與統計屬低頻查閱，收在 WaitlistHistorySheet（Modal）不佔常駐欄位。
-export default function WaitlistPanel({ onSeatWaitlist }) {
+export default function WaitlistPanel({ onSeatWaitlist, onConvert }) {
   const { waitlist, skipWaitlist, returnWaitlist, addWaitlist, callWaitlist, leaveWaitlist, pendingWaitlistCommands = [], waitlistCommandOwner = '', retryWaitlistCommands } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
@@ -51,6 +51,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
   const {can}=useAuth()
   const canEdit=can('waitlist.update')
   const canCreate=can('waitlist.create')
+  const canConvert=!!onConvert&&can('booking.create')
   // 候位「入座」會連動建 walk-in 訂位並佔桌（寫 waitlist＋bookings＋tables），不只 waitlist.update；
   // 叫號／棄號／暫過只寫 waitlist，維持 canEdit。見 utils/seatingPerms.js。
   const canSeat=seatingPerms(can).waitlistSeat
@@ -120,7 +121,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
     if (!w || result?.ok === false) return toast.error(result?.error || '取號未確認，請保留表單後重試')
     setShowAdd(false)
     resetForm()
-    if (w?.queueNumber) toast.success(`已取號 #${w.queueNumber}，預估等待 ${w.estimatedMin} 分`)
+    if (w?.queueNumber) toast.success(`已取號 #${w.queueNumber}，預估等待 ${formatEstWait(w.estimatedMin)}`)
   }
 
   return (
@@ -155,7 +156,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
             >
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-baseline gap-1.5 min-w-0 flex-1">
-                  <span className="text-sm font-bold text-chicken-red flex-shrink-0">#{w.queueNumber}</span>
+                  <span data-testid="queue-number" className="text-2xl font-black leading-none text-chicken-red flex-shrink-0">#{w.queueNumber}</span>
                   <span className="text-sm font-bold truncate">{w.name}</span>
                   <span className="text-[10px] text-chicken-brown/60 flex-shrink-0">{w.partySize} 位{splitSuffix(w)}</span>
                   <span className="text-[10px] text-chicken-brown/45">{w.partySize > BIG_PARTY ? '大組需併桌' : `建議${w.partySize > 4 ? '六人桌' : '四人桌'}`}</span>
@@ -170,7 +171,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                   : <span className="font-bold text-chicken-green"> · 輪到了</span>}
                 {w.notes && <span className="italic"> · 「{w.notes}」</span>}
               </div>
-              {canEdit&&<div className="flex gap-1 mt-2">
+              {canEdit&&<div className="flex gap-1 mt-1">
                 {canSeat && <button
                   disabled={!!busy} onClick={() => onSeatWaitlist?.(w)}
                   className="flex-1 min-h-[44px] text-[11px] py-1 bg-chicken-green text-white rounded-md font-bold"
@@ -185,6 +186,12 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
                     叫號
                   </button>
                 )}
+                {canConvert && <button
+                  disabled={!!busy} onClick={() => onConvert(w)}
+                  className="min-h-[44px] text-[11px] px-2 py-1 bg-white border border-chicken-brown/25 text-chicken-brown rounded-md font-bold"
+                >
+                  轉訂位
+                </button>}
                 <button disabled={!!busy} onClick={()=>changeQueue(w,'skip')} className="min-h-[44px] text-xs px-2 border rounded-md">{busy===w.id?'儲存中…':'暫過號'}</button>
                 <button
                   disabled={!!busy} onClick={async () => { if (await confirm(`確定讓 ${w.name || `#${w.queueNumber}`} 棄號？此動作會將其移出候位。`, { title: '棄號', danger: true, confirmLabel: '棄號' })) await changeQueue(w,'leave') }}
@@ -222,7 +229,7 @@ export default function WaitlistPanel({ onSeatWaitlist }) {
             </p>
           )}
           <div className="rounded-xl border border-chicken-brown/10 bg-chicken-cream/60 px-3 py-2 text-sm text-chicken-brown/70">
-            預估約 <span className="font-bold text-amber-700">{estimatedWaitMin} 分</span>
+            預估 <span className="font-bold text-amber-700" data-testid="est-wait">{formatEstWait(estimatedWaitMin, '約 ')}</span>
             <span className="text-xs text-chicken-brown/50">（目前 {active.length} 組候位中）</span>
           </div>
           <HonorificNameField

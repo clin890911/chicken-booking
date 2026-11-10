@@ -18,7 +18,7 @@ import QuickReservePanel from './QuickReservePanel'
 // flashBookingId：剛新增的那筆，今日籤捲到可見並閃一下。
 export default function OpsRail({
   suspended = false,
-  activeTab, onTabChange, onClickBooking, onOpenDetail, onAssignTable, quickAssignFor = null, onQuickAssign = null, onArriveSeat, onMoveTable, onSeatWaitlist, onFocusTable, onReseatBatch,
+  activeTab, onTabChange, onClickBooking, onOpenDetail, onAssignTable, quickAssignFor = null, onQuickAssign = null, onArriveSeat, onMoveTable, onSeatWaitlist, onConvertWaitlist, onFocusTable, onReseatBatch,
   onAddBooking, reserve = null, flashBookingId = null,
   // 帶位籤（v3）：桌與人數的真相在 OperationsView，這裡純轉發給 FastWalkInPanel
   // canWalkIn：無散客入座權限（唯讀角色 kitchen）時整個帶位籤不渲染——面板底部的「確認入座」會寫 bookings＋tables
@@ -128,7 +128,7 @@ export default function OpsRail({
             </>
           )}
           {effective === 'waitlist' && (
-            <WaitlistPanel onSeatWaitlist={onSeatWaitlist} />
+            <WaitlistPanel onSeatWaitlist={onSeatWaitlist} onConvert={onConvertWaitlist} />
           )}
         </div>
       )}

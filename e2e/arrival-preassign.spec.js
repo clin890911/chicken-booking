@@ -77,7 +77,7 @@ test('預配 12:00 的訂位 11:40 出現在報到列 → 按到了入座；復�
   await expect(page.getByText('等報到 1')).toBeVisible()
 })
 
-test('預配的桌此刻被別組佔 → 報到列標「預配·桌被佔」，按到了不入座、toast 給改桌', async ({ page }) => {
+test('預配的桌此刻被別組佔 → 報到列標「預配·桌被佔」，鈕改「到了 · 換桌」→ 選空桌確認即入座，原桌不動', async ({ page }) => {
   await page.clock.setFixedTime(at('11:40'))
   const OCC = {
     id: 'E2E-OCC', name: '別組', phone: '', guests: 2, date: TODAY, timeSlot: '11:00', status: 'arrived',
@@ -94,18 +94,18 @@ test('預配的桌此刻被別組佔 → 報到列標「預配·桌被佔」，�
 
   const strip = page.getByRole('list', { name: '可入座名單' })
   await expect(strip.getByRole('listitem')).toContainText('預配·桌被佔')
-  await strip.getByRole('button', { name: '余先生 到了，入座 105' }).click()
-  await expect(page.getByText('入座失敗：105 目前由 別組 使用，請先改桌')).toBeVisible()
+  // night-50 B5：不再先撞「入座失敗」→ 改桌 → 再按到了；直接進換桌入座，選桌確認＝改配＋入座
+  await strip.getByRole('button', { name: '余先生 到了，換桌入座' }).click()
+  await expect(page.getByText(/到了 · 換桌入座：余先生/)).toBeVisible()
+  await expect(page.getByText('原預配 105 被佔 · 換一張空桌')).toBeVisible()
+  await page.getByRole('button', { name: /^106桌/ }).click()
+  await page.getByRole('button', { name: '確認入座', exact: true }).click()
+  await expect(page.getByText(/余先生（\d+ 位）已入座 106（原預配 105 被佔）/)).toBeVisible()
 
-  let { bookings, tables } = await readState(page)
-  expect(bookings.find(b => b.id === YU.id).status).toBe('confirmed')
+  const { bookings, tables } = await readState(page)
+  expect(bookings.find(b => b.id === YU.id)).toMatchObject({ status: 'arrived', assignedTableId: '106' })
+  expect(tables.find(t => t.number === '106')).toMatchObject({ status: 'dining', currentBookingId: YU.id })
   expect(tables.find(t => t.number === '105').currentBookingId).toBe(OCC.id)
-
-  // 改桌出口 → 現場換桌模式（預配維持預配語意）
-  await page.getByRole('button', { name: '改桌', exact: true }).click()
-  // PR #137：待到／預配訂位的改桌走「重新選桌」多桌模式（原配桌保留到確認成功），不再是舊的「換桌：從 X → 選新桌」橫幅。
-  await expect(page.getByText(/重新選桌：余先生/)).toBeVisible()
-  await expect(page.getByText('原配桌 105 · 確認成功前保留')).toBeVisible()
 })
 
 // 驗收 v4-1：預配的桌被今日團體圈走（12:30 梯）→ 11:50 按到了要先確認（與今日訂位卡同一道防呆）

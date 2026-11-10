@@ -155,6 +155,19 @@ describe('handleArriveNow：預配訂位遇團保／重疊預配先確認', () =
     expect(deps.toast.action.mock.calls[0][1].label).toBe('改桌')
   })
 
+  // night-50 B5：有 onArriveReseat → 失敗出口是「換桌入座」（選桌確認＝改配＋入座），不再走純改桌
+  it('桌已被別組佔 ＋ onArriveReseat → toast 出口「換桌入座」，點了交出這筆訂位', () => {
+    const onMove = vi.fn(), onArriveReseat = vi.fn()
+    const deps = makeDeps({ preassignConflictLines: lines, onMove, onArriveReseat,
+      seatBooking: vi.fn(() => ({ ok: false, error: '105 目前由 別組 使用，請先改桌' })) })
+    handleArriveNow({ number: '105', status: 'dining', currentBookingId: 'OTHER' }, pre, deps)
+    const action = deps.toast.action.mock.calls[0][1]
+    expect(action.label).toBe('換桌入座')
+    action.onClick()
+    expect(onArriveReseat).toHaveBeenCalledWith(pre)
+    expect(onMove).not.toHaveBeenCalled()
+  })
+
   it('鎖桌（held）那條不走確認（維持原樣）', () => {
     const confirm = vi.fn()
     const deps = makeDeps({ confirm, preassignConflictLines: lines })

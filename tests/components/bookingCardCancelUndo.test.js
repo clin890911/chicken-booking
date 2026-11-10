@@ -65,7 +65,7 @@ describe('cancelWithUndo（取消訂位 + 可復原 toast）', () => {
     expect(toast.action).toHaveBeenCalledTimes(1)
     const [message, action, opts] = toast.action.mock.calls[0]
     expect(message).toBe('已取消 王小明 的訂位')
-    expect(action.label).toBe('↩ 復原')
+    expect(action.label).toBe('↩ 復原取消')   // H6：鈕文案帶對象
     expect(opts).toEqual({ duration: 8000 })
   })
 
