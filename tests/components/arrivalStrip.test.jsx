@@ -374,6 +374,35 @@ describe('ArrivalStrip：預配訂位', () => {
     expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(2)
   })
 
+  // night-50 B5：桌被佔的預配 chip 鈕直接「到了 · 換桌」→ onArriveReseat（進選桌入座），不先撞入座失敗
+  it('預配·桌被佔 ＋ 有 onArriveReseat → 鈕改「到了 · 換桌」，點了交出訂位、不呼叫 onArrive', () => {
+    setup()
+    const onArrive = vi.fn(), onArriveReseat = vi.fn()
+    act(() => root.render(
+      <ArrivalStrip tables={[table({ number: '105', status: 'dining', currentBookingId: 'OTHER' })]}
+        bookings={[pre()]} onSelectTable={() => {}} onArrive={onArrive} onArriveReseat={onArriveReseat} now={NOW2} />,
+    ))
+    const btn = container.querySelector('button[aria-label="余先生 到了，換桌入座"]')
+    expect(btn.textContent).toBe('到了 · 換桌')
+    act(() => btn.dispatchEvent(new window.MouseEvent('click', { bubbles: true })))
+    expect(onArriveReseat).toHaveBeenCalledWith(expect.objectContaining({ id: 'P1' }))
+    expect(onArrive).not.toHaveBeenCalled()
+  })
+
+  // night-50 B6：預配／鎖桌 chip 也顯示人數（與未配桌 chip 同款小字）
+  it('預配與鎖桌 chip 都顯示「N 位」', () => {
+    setup()
+    const held = { id: 'H1', name: '王小明', guests: 5, status: 'confirmed', timeSlot: '12:00' }
+    act(() => root.render(
+      <ArrivalStrip
+        tables={[table({ number: '101', currentBookingId: 'H1' }), table({ number: '105', status: 'vacant', currentBookingId: null })]}
+        bookings={[held, pre({ guests: 3 })]} onSelectTable={() => {}} onArrive={() => {}} now={NOW2} />,
+    ))
+    const items = [...container.querySelectorAll('[role="listitem"]')]
+    expect(items.find(i => i.textContent.includes('王小明')).querySelector('[data-testid="arrival-guests"]').textContent).toBe('5 位')
+    expect(items.find(i => i.textContent.includes('余先生')).querySelector('[data-testid="arrival-guests"]').textContent).toBe('3 位')
+  })
+
   it('窗外（10:59 以前，前 60 分）不列', () => {
     setup()
     act(() => root.render(

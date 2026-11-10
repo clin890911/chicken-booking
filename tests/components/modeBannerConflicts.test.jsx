@@ -83,3 +83,38 @@ describe('ModeBanner：多桌警示嚴重度配色', () => {
     expect(box().className).toContain('bg-rose-600')
   })
 })
+
+// night-50 B3：選桌入座橫幅可直接改到店人數（−／＋ ≥44px），改了只回報給 onChangeNeed；B5：原預配被佔要講出來
+describe('ModeBanner：選桌入座改人數／換桌入座', () => {
+  let container, root
+  afterEach(() => { act(() => root?.unmount()); container?.remove() })
+  const arrive = (over = {}) => ({ type: 'assign-multi', kind: 'arrive', booking: { id: 'Z', name: '張先生', guests: 4 }, need: 4, selected: [], suitable: ['104'], ...over })
+  const render = (m, onChangeNeed) => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root.render(<ModeBanner mode={m} onChangeNeed={onChangeNeed} onCancel={() => {}} onConfirmMulti={() => {}} />) })
+  }
+  it('＋／− 回報新人數；按鈕 ≥44px；人數與訂位不同時提示「入座時一併改」', () => {
+    const calls = []
+    render(arrive({ need: 6 }), n => calls.push(n))
+    const plus = container.querySelector('button[aria-label="人數加一"]')
+    const minus = container.querySelector('button[aria-label="人數減一"]')
+    expect(plus.className).toContain('min-h-[44px]')
+    expect(plus.className).toContain('min-w-[44px]')
+    act(() => plus.dispatchEvent(new window.MouseEvent('click', { bubbles: true })))
+    act(() => minus.dispatchEvent(new window.MouseEvent('click', { bubbles: true })))
+    expect(calls).toEqual([7, 5])
+    expect(container.querySelector('[data-testid="arrive-need"]').textContent).toBe('6 位')
+    expect(container.textContent).toContain('訂位 4 位 · 入座時一併改')
+  })
+  it('原預配被佔 → 標題「到了 · 換桌入座」＋「原預配 102 被佔」', () => {
+    render(arrive({ reseatFrom: ['102'] }), () => {})
+    expect(container.textContent).toContain('到了 · 換桌入座：張先生 4 位')
+    expect(container.querySelector('[data-testid="arrive-reseat-from"]').textContent).toContain('原預配 102 被佔')
+  })
+  it('非選桌入座（指派）不出現人數列', () => {
+    render(arrive({ kind: 'booking' }), () => {})
+    expect(container.querySelector('button[aria-label="人數加一"]')).toBeNull()
+  })
+})

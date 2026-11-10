@@ -209,7 +209,7 @@ export function BookingProvider({ children }) {
           const now = Date.now()
           if (now - lastPushErrorToastRef.current > 8000) {
             lastPushErrorToastRef.current = now
-            toastRef.current?.warning?.(`部分變更未能上雲：${r.rejectedMessage || '權限不足'}。其餘已同步，詳見設定頁同步狀態`)
+            toastRef.current?.warning?.(`部分變更未能上雲：${r.rejectedMessage || '權限不足'}。其餘已同步，詳見設定頁同步狀態`, { duration: 15000 })
           }
         }
       } catch (err) {
@@ -343,13 +343,44 @@ export function BookingProvider({ children }) {
     // 超時釋桌（預設 5 小時：高概率忘記按清桌）
     // 同樣套權限過濾：目前超時的三種 action 都只寫 tables/bookings、濾了等於 no-op，
     // 但不留這個不對稱——日後新增會寫別的集合的 action 時才不會只有換日那邊守住。
-    const done = seatingService.executeSweepActions(filterSweepActionsByPermission(
-      computeOvertimeActions({ tables: state.tables, settings, now: nowMs }), permit))
+    const overtime = filterSweepActionsByPermission(computeOvertimeActions({ tables: state.tables, settings, now: nowMs }), permit)
+    // 復原快照要在執行前拍（自動釋出會清掉 currentBookingId／seatedAt，事後查不回是誰坐哪桌）
+    const overtimeSnaps = seatingService.autoReleaseSnapshots(overtime)
+    const done = seatingService.executeSweepActions(overtime)
     if (done.length) {
       done.forEach(a => opsLogService.append({ kind: 'auto-release', ...a, message: sweepActionMsg(a) }))
       doneCount += done.length
       const hrs = Math.round((Number(settings.autoReleaseAfterMin) || 300) / 6) / 10
-      toastRef.current?.warning?.(`${done.length} 桌用餐逾 ${hrs} 小時，已自動處理（疑似忘記清桌，詳見現場提示列）`)
+      // D7：寫清楚哪桌、誰，並給「復原」——客人其實還在（包場、聊很久）時，桌不會被默默排給下一組。
+      // 只呈現與復原掛接：判定邏輯（computeOvertimeActions／executeSweepActions）不變。
+      const doneKey = (a) => `${a.type}:${a.tableNumber}`
+      const doneSet = new Set(done.map(doneKey))
+      const snaps = overtimeSnaps.filter(sn => doneSet.has(doneKey(sn)))
+      const who = (sn) => `${sn.tableNumber}${sn.name ? ` ${sn.name}` : ''}`
+      const others = done.length - snaps.length
+      const head = snaps.length
+        ? `${snaps.map(who).join('、')}${others > 0 ? ` 等 ${done.length} 桌` : ''}用餐超過 ${hrs} 小時，已自動釋出`
+        : `${done.length} 桌用餐逾 ${hrs} 小時，已自動處理（疑似忘記清桌，詳見現場提示列）`
+      const undoAll = () => {
+        const restored = []
+        const failed = []
+        snaps.forEach(sn => {
+          const u = seatingService.undoAutoRelease(sn)
+          if (u?.ok) {
+            restored.push(sn.tableNumber)
+            opsLogService.append({ kind: 'auto-release-undo', tableNumber: sn.tableNumber, bookingId: sn.bookingId || null, message: `${who(sn)} 自動釋出已復原（重新計時）` })
+          } else failed.push(u?.error || `${sn.tableNumber} 未復原`)
+        })
+        if (restored.length) { refresh(); syncCloudSoon() }
+        if (restored.length) toastRef.current?.success?.(`已復原：${restored.join('、')} 回到用餐中（重新計時）${failed.length ? `；${failed.join('；')}` : ''}`)
+        else toastRef.current?.error?.(`復原失敗：${failed.join('；') || '未知錯誤'}`)
+      }
+      if (snaps.length && toastRef.current?.action) {
+        const label = `復原釋出 ${snaps.map(sn => sn.tableNumber).join('、')}`
+        toastRef.current.action(head, { label, onClick: undoAll }, { type: 'warning', duration: 20000 })
+      } else {
+        toastRef.current?.warning?.(head, { duration: 15000 })
+      }
     }
 
     if (doneCount) { refresh(); syncCloudSoon() }
@@ -608,10 +639,18 @@ export function BookingProvider({ children }) {
     const before = bookingService.getById(bookingId)
     const tbl = before?.assignedTableId ? tableService.getByNumber(before.assignedTableId) : null
     const min = minutesSeated(tbl)
+    // 離席復原（D2）的快照：checkout 會清掉 seatedAt，只能在動手前拍
+    const undo = seatingService.checkoutSnapshot(bookingId)
     const r = seatingService.checkoutBooking(bookingId)
     refresh()
     syncCloudSoon()
     if (r.ok && before) safeNotify(() => tg.notifyBookingCompleted(before, min))
+    return r.ok ? { ...r, undo } : r
+  }
+  // 離席的復原：桌仍是本筆的待清桌（或已清成沒人用的空桌）才倒回用餐中（見 seatingService.undoCheckoutBooking）
+  const undoCheckoutBooking = (snapshot) => {
+    const r = seatingService.undoCheckoutBooking(snapshot)
+    if (r?.ok) { refresh(); syncCloudSoon() }
     return r
   }
   const finalizeBooking = (bookingId) => {
@@ -677,6 +716,12 @@ export function BookingProvider({ children }) {
     if (r.ok) safeNotify(() => tg.notifyWalkInSeated(r.booking))
     return r
   }
+  // 散客帶位的短復原（A5）：有刪除權直接刪掉那筆、否則退回取消（見 seatingService.undoWalkInSeat）
+  const undoWalkInSeat = (bookingId, opts) => {
+    const r = seatingService.undoWalkInSeat(bookingId, opts)
+    if (r?.ok) { refresh(); syncCloudSoon() }
+    return r
+  }
   const replacePendingBookingTables = (bookingId, tableNumbers) => {
     const r = seatingService.replacePendingBookingTables(bookingId, tableNumbers)
     if (r.ok) { refresh(); syncCloudSoon() }
@@ -684,8 +729,11 @@ export function BookingProvider({ children }) {
   }
   const replaceSeatedBookingTables = (bookingId, tableNumbers, opts) => {
     const before = bookingService.getById(bookingId)
+    // 換桌復原（D1）快照：原桌的入座時間換桌後就查不回
+    const undo = seatingService.seatedMoveSnapshot(bookingId)
     const r = seatingService.replaceSeatedBookingTables(bookingId, tableNumbers, opts)
     if (r.ok) {
+      r.undo = undo
       refresh(); syncCloudSoon()
       if (before) safeNotify(() => tg.notifyTableMoved(r.booking, seatingService.bookingTableNumbers(before).join(' + '), r.tableNumbers.join(' + ')))
     }
@@ -694,13 +742,21 @@ export function BookingProvider({ children }) {
   const moveTable = (bookingId, newTableNumber) => {
     const before = bookingService.getById(bookingId)
     const fromTable = before ? formatBookingTables(before) : undefined
+    const undo = before?.status === 'arrived' ? seatingService.seatedMoveSnapshot(bookingId) : null
     const r = seatingService.moveTable(bookingId, newTableNumber)
+    if (r.ok && undo) r.undo = undo
     refresh()
     syncCloudSoon()
     if (r.ok && before) {
       const after = bookingService.getById(bookingId)
       safeNotify(() => tg.notifyTableMoved(after, fromTable, newTableNumber))
     }
+    return r
+  }
+  // 已入座換桌的復原：原桌仍空（待清／空桌且沒人持有）才搶回（見 seatingService.undoSeatedMove）
+  const undoSeatedMove = (snapshot, toTableNumbers) => {
+    const r = seatingService.undoSeatedMove(snapshot, toTableNumbers)
+    if (r?.ok) { refresh(); syncCloudSoon() }
     return r
   }
   // opts（{ bookingId, date, timeSlot }）只給「建議／候選」用：帶了就排除依時段會撞桌的桌。
@@ -955,7 +1011,7 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, undoWalkInSeat, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, undoSeatedMove, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

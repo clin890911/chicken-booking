@@ -192,9 +192,10 @@ test('帶位覆蓋重疊的預配（12:20 vs 12:30）→ 解除；按復原 → 
   await expect(page.getByText('余先生原本的預配 105 已解除，請重新指派')).toBeVisible()
   expect((await readBookings(page)).find(b => b.id === 'E2E-YU').assignedTableId).toBeNull()
 
-  await page.getByRole('button', { name: '復原', exact: true }).click()
+  await page.getByRole('button', { name: /復原帶位 105/ }).click()
   await expect(page.getByText(/已復原：105 回到空桌（余先生 的預配 105 已還原）/)).toBeVisible()
   const after = await readBookings(page)
   expect(after.find(b => b.id === 'E2E-YU').assignedTableId).toBe('105')
-  expect(after.find(b => b.id !== 'E2E-YU').status).toBe('cancelled')   // 帶位那筆已取消
+  // night-50 A5：散客帶位的復原（店長有 booking.delete）直接刪掉那筆，不在報表留一筆「散客取消」
+  expect(after.filter(b => b.id !== 'E2E-YU')).toHaveLength(0)
 })

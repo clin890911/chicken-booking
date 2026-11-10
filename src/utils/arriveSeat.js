@@ -5,6 +5,7 @@ import { restoreReleasedPreassigns, restoreNote } from './preassignOverride'
 import { buildGroupHolds, todayActiveGroups } from './groupLive'
 import { todayStr } from './timeSlots'
 import { bookingTableNumbers } from './bookingTables'
+import { splitFields } from './partySplit'
 
 // 入座前的預留警示（報到列與今日訂位卡同一個口徑）：
 // 桌（大組含副桌）被今日團體圈桌未入座、或他筆訂位預配且用餐區間與「現在入座」重疊
@@ -64,4 +65,63 @@ export function toastSeatedWithUndo(r, { message, name, undoSeatBooking, toast, 
     },
     { duration: 5000 },
   )
+}
+
+// 這筆訂位現在的桌（主桌＋副桌）有沒有被本筆持有（鎖桌 reserved／用餐中）。
+const heldByBooking = (booking, tables = []) => {
+  const nums = bookingTableNumbers(booking)
+  return (tables || []).some(t => nums.includes(String(t.number)) && t.status !== 'vacant' && String(t.currentBookingId ?? '') === String(booking.id))
+}
+
+// 預配的桌此刻有任一張被別組佔（與報到列 buildTargets 的 taken 同口徑）。
+export function preassignTakenByOthers(booking, tables = []) {
+  if (!booking) return false
+  const nums = bookingTableNumbers(booking)
+  if (!nums.length || heldByBooking(booking, tables)) return false
+  return nums.some(n => {
+    const t = (tables || []).find(x => String(x.number) === n)
+    return t && t.status !== 'vacant' && String(t.currentBookingId ?? '') !== String(booking.id)
+  })
+}
+
+// 「到了 · 選桌入座／換桌入座」確認：可同時改到店人數、把被佔的預配換成選到的空桌，一次入座。
+// 只走 context 既有動作（不另寫佔用邏輯）：
+//   1) 人數不同 → updateBooking 寫 guests（partySplit 不變量：guests＝adults＋children，有拆分就連 adults 一起寫）
+//   2) 還掛著預配（桌沒鎖給本筆）→ clearBookingPreassign 先拿掉（原預配桌是別組的，本來就不動它）
+//   3) assignAndSeatBooking：此刻空桌、同樓層、擠一擠容量全部守門後指派＋入座
+//   失敗 → 人數、預配寫回原樣（不留半套）。
+// 鎖桌型（桌 reserved 給本筆）不走這裡：那條是一鍵「到了」，換桌走改桌。
+// 回傳 r.undo 改寫成「訂位回到原本的預配桌號、選到的桌倒回空桌」，undo() 包好人數一起倒回：
+// 人數要在訂位仍是 arrived 時先寫回（待到狀態改人數，updateByStaff 會因容量判定把預配解除）。
+export function seatArriveSelection(booking, selected, { need, tables = [], updateBooking, clearBookingPreassign, preassignBookingTables, assignAndSeatBooking, undoSeatBooking } = {}) {
+  if (!booking) return { ok: false, error: '訂位不存在' }
+  if (heldByBooking(booking, tables)) return { ok: false, error: '這筆訂位的桌已鎖給他，請按「客人到了」或改桌' }
+  const fromNums = bookingTableNumbers(booking)
+  const original = { assignedTableId: booking.assignedTableId ?? null, extraTableIds: [...(booking.extraTableIds || [])].map(String) }
+  const oldGuests = Number(booking.guests) || 0
+  const guests = Math.max(1, Math.floor(Number(need) || oldGuests))
+  const guestsChanged = guests !== oldGuests
+  const force = booking.adults != null || booking.children != null
+  const guestPatch = (total) => ({ guests: total, ...splitFields(total, booking.children, { force }) })
+
+  const restoreBooking = () => {
+    if (guestsChanged) updateBooking?.(booking.id, guestPatch(oldGuests))
+    if (fromNums.length) preassignBookingTables?.(booking.id, fromNums)
+  }
+  if (guestsChanged) {
+    const b = updateBooking?.(booking.id, guestPatch(guests))
+    if (!b) return { ok: false, error: '改人數失敗：訂位不存在' }
+  }
+  if (fromNums.length) clearBookingPreassign?.(booking.id)
+  const r = assignAndSeatBooking(booking.id, selected)
+  if (!r?.ok) { restoreBooking(); return { ok: false, error: r?.error || '未知錯誤' } }
+  const nums = (r.tableNumbers || [r.tableNumber]).map(String)
+  const snap = { ...r.undo, restore: Object.fromEntries(nums.map(n => [n, 'vacant'])), assignment: original }
+  const undo = () => {
+    if (guestsChanged) updateBooking?.(booking.id, guestPatch(oldGuests))   // 仍 arrived：只改人數、不動桌
+    const u = undoSeatBooking?.(snap)
+    if (!u?.ok && guestsChanged) updateBooking?.(booking.id, guestPatch(guests))
+    return u
+  }
+  return { ok: true, r: { ...r, undo: snap }, undo, tableNumbers: nums, reseatFrom: fromNums, guests, oldGuests, guestsChanged }
 }

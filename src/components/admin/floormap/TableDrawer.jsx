@@ -5,7 +5,8 @@ import { useToast, useConfirm } from '../../ui/Toast'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import TableCandidatePanel from './TableCandidatePanel'
-import { cancelWithUndo, releaseAfterCheckout } from '../../../utils/bookingActions'
+import { cancelWithUndo } from '../../../utils/bookingActions'
+import { toastCheckoutWithUndo, clearTablesWithUndo } from '../../../utils/tableUndo'
 import GroupTableSection from './GroupTableSection'
 import { STATUS_ZH as STATUS_LABELS, diningTablePresentation } from '../../../utils/tableStatus'
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
@@ -61,7 +62,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const confirmDialog = useConfirm()
   const {
     blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking, releaseCheckedOutTables,
+    assignBookingToTable, seatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking,
     setTableOutage, clearTableOutage, releaseOverriddenAssignment,
     settings, groupReservations, bookings, tables,
   } = useBooking()
@@ -204,10 +205,12 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     const checkedOut = booking
     const r = checkoutBooking(checkedOut.id)
     if (!r.ok) return toast.error(r.error)
-    // 「一鍵釋出」只清仍是待清桌、且仍由這筆持有的桌（seatingService.releaseCheckedOutTables）：
-    // toast 按鈕可能幾秒後才按，期間桌可能已清好、甚至已帶下一組，無條件 clearTable 會把那組抹掉。
-    toast.action(`${checkedOut.name} 已離席（用餐 ${min} 分）· 桌位待清桌`,
-      { label: '一鍵釋出', onClick: () => releaseAfterCheckout(checkedOut, { releaseCheckedOutTables, toast }) })
+    // D2：離席後 toast 給「復原離席」（誤按一下倒回用餐中）。原本的「一鍵釋出」拿掉：抽屜仍開著、
+    // 下方就是「清桌完成」，併桌多張則用頂列「待清」清單的「全部清桌」。
+    // 復原走 undoCheckoutBooking：桌仍是本筆的待清桌（或已清成沒人用的空桌）才倒回，被下一組用了就安全失敗。
+    toastCheckoutWithUndo(r, {
+      message: `${checkedOut.name} 已離席（用餐 ${min} 分）· 桌位待清桌`, name: checkedOut.name, undoCheckoutBooking, toast,
+    })
   }
 
   // 一鍵釋出：已離席 + 清桌完成（跳過待清桌）
@@ -236,20 +239,11 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   }
 
   const handleClear = () => {
-    const tableNumber = table.number
-    // clearTable 會把 currentBookingId/currentRef 一起清掉 → 復原所需的快照只能在動手前先存
-    const snapshot = { bookingId: table.currentBookingId, ref: table.currentRef }
-    clearTable(tableNumber)
+    // clearTable 會把 currentBookingId/currentRef 一起清掉 → 復原快照在 clearTablesWithUndo 內動手前先存。
     // 復原窗口：把桌位還原回「等待清桌」狀態。★ 這幾秒內下一組很可能已經被帶上桌
     //（清空本來就是為了讓下一組坐），所以復原走 undoClearTable 的「仍是空桌才還原」守門，
     // 不可改回 setTableStatus 硬寫——那會把剛入座那組從桌況圖上抹掉。
-    toast.action(`${tableNumber} 已清桌完成`,
-      { label: '↩ 復原', onClick: () => {
-        const r = undoClearTable(tableNumber, snapshot)
-        if (!r?.ok) return toast.error('復原失敗：' + (r?.error || '未知錯誤'))
-        toast.success(`已復原 ${tableNumber} 為等待清桌`)
-      } },
-      { duration: 8000 })
+    clearTablesWithUndo([{ ...storedTable, status: 'cleaning' }], { clearTable, undoClearTable, toast, canGroup: false })  // 按鈕只在待清桌顯示（呈現層判定），照舊直接清
     onClose?.()
   }
 

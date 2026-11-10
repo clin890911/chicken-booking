@@ -1,3 +1,5 @@
+import { undoLabel } from './tableUndo'
+
 // 訂位卡／訂位詳情／桌位抽屜共用的「確認後動作」純函式。
 // 這裡不碰 React：確認對話框（useConfirm）留在元件內，元件確認後才呼叫這些函式。
 // 抽成純函式的理由見 tests/components/bookingCardNoshow.test.js 與 bookingCardCancelUndo.test.js
@@ -42,8 +44,9 @@ export function restoreFromNoshow(booking, { setStatus, revokeNoshow, toast }) {
 export function cancelWithUndo(booking, { cancelBooking, undoCancelBooking, toast }) {
   const r = cancelBooking(booking.id)
   if (!r?.ok) return toast.error('取消失敗：' + (r?.error || '未知錯誤'))
+  // H6：鈕寫「復原取消」——取消後馬上帶下一組時，畫面會同時有入座的「復原帶位 105」，兩顆要分得清
   toast.action(`已取消 ${booking.name} 的訂位`,
-    { label: '↩ 復原', onClick: () => {
+    { label: undoLabel.cancel(), onClick: () => {
         const u = undoCancelBooking(booking.id, {
           tableNumbers: r.releasedTables, preassignedTables: r.preassignedTables,
           originalTables: r.originalTables, status: r.previousStatus,

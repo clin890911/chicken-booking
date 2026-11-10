@@ -20,6 +20,9 @@
 // 只列出 3 組，其餘要繞去今日訂位籤「指派桌位 → 點桌 → 確認 → 客人到了」。chip 標「未配桌」，
 // 「到了 · 選桌」進選桌入座模式（OperationsView.startArriveSeat，選好桌確認即指派＋入座）。
 // 「等報到 N」是三種合計。
+// 六版（2026-11 night-50）：預配·桌被佔的 chip 鈕改成「到了 · 換桌」（onArriveReseat，進選桌入座模式，
+// 選好桌確認＝改配＋入座一次完成），不再先吃一顆「入座失敗」再走純改桌、還得再按一次到了。
+// 預配／鎖桌的 chip 也顯示「N 位」（門口最快的確認是「幾位？」），與未配桌 chip 同款小字、不增加高度。
 import { useState, useEffect, useRef } from 'react'
 import { overdueMinOf } from '../../../utils/bookingPulse'
 import { formatDate } from '../../../utils/timeSlots'
@@ -95,7 +98,7 @@ export function buildTargets(tables, bookings, now) {
   })
 }
 
-export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive, onArriveUnassigned, currentFloor = null, now = null }) {
+export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive, onArriveUnassigned, onArriveReseat, currentFloor = null, now = null }) {
   const scrollRef = useRef(null)
   const [edge, setEdge] = useState({ left: false, right: false })
   const [, setTick] = useState(0)
@@ -158,7 +161,11 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
             const overdueMin = overdueMinOf(booking.timeSlot, effectiveNow)
             const late = overdueMin > LATE_GRACE_MIN
             // 未配桌：沒有桌可看，chip 本體與「到了 · 選桌」都進選桌入座模式（不寫資料、可取消）
-            const arrive = unassigned ? () => onArriveUnassigned?.(booking) : () => onArrive(table, booking)
+            // 預配·桌被佔：有 onArriveReseat 就直接進「換桌入座」（選桌確認＝改配＋入座），不先撞一次入座失敗
+            const reseat = !unassigned && preassigned && taken && !!onArriveReseat
+            const arrive = unassigned ? () => onArriveUnassigned?.(booking)
+              : reseat ? () => onArriveReseat(booking)
+              : () => onArrive(table, booking)
             if (unassigned) {
               return (
                 <div
@@ -223,10 +230,11 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                 >
                   {crossFloor ? `${table.floor} ${label}` : label}
                 </span>
+                <span data-testid="arrival-guests" className="text-[11px] font-bold text-chicken-brown/50 tabular-nums whitespace-nowrap shrink-0">{booking.guests} 位</span>
                 {preassigned && (
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
                     taken ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}
-                    title={taken ? `${label} 此刻有別組，按到了不會入座` : '預配：桌子沒鎖，按到了直接入座'}>
+                    title={taken ? `${label} 此刻有別組：按「到了 · 換桌」選一張空桌，確認即入座` : '預配：桌子沒鎖，按到了直接入座'}>
                     {taken ? '預配·桌被佔' : '預配'}
                   </span>
                 )}
@@ -238,14 +246,14 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); arrive() }}
-                  aria-label={`${booking.name} 到了，入座 ${table.number}`}
+                  aria-label={reseat ? `${booking.name} 到了，換桌入座` : `${booking.name} 到了，入座 ${table.number}`}
                   className="rounded-full bg-chicken-green text-white text-xs font-bold shrink-0
                              hover:opacity-90 focus-visible:outline focus-visible:outline-2
                              focus-visible:outline-offset-2 focus-visible:outline-chicken-red
                              motion-safe:transition-transform motion-safe:active:scale-95"
                   style={{ height: 44, minWidth: 44, paddingLeft: 12, paddingRight: 12 }}
                 >
-                  <GlyphText size={15}>✓ 到了</GlyphText>
+                  {reseat ? '到了 · 換桌' : <GlyphText size={15}>✓ 到了</GlyphText>}
                 </button>
               </div>
             )
