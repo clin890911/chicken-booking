@@ -175,6 +175,143 @@ export function waitlistUpsertConflicts(item, previous) {
   return false
 }
 
+// === 無版本桌「搶桌」409 自癒（情境 A7：兩台同時帶同一桌）===
+// 後端 waitlistSyncGuard.stealsOccupiedTable：雲端這張桌正被訂位 X 用餐中（無 operationalVersion），
+// 這次推送卻要把它改指向另一筆訂位 Y（不論寫入的 status：dining 帶位、reserved 預配、結帳後保留 id 的 cleaning）
+// → 整包 409 table-occupied-elsewhere（body.tables＝被拒桌號）、什麼都不寫。
+// 不處理的話這台的那張桌永遠 dirty → 之後每包推送都夾帶它、整包 409，訂位／候位全部上不了雲。
+// 解法（比照候位衝突）：409 時記下後端列出、本機無版本、本機 currentBookingId 非空的桌（候選）。
+// 下一次拉取逐張核對雲端，只有「雲端確實是另一筆用餐中、雙方無版本」的那張才放棄本機變更、改採雲端：
+//   - 桌：採用雲端值、基準線設成雲端值（不再待推）；本機佈局草稿（非關鍵欄位）保留。
+//   - 本機那筆訂位 Y（只改本機、維持 dirty 待推、不發任何客人通知），依情況（stealOutcome）：
+//     · 'trim'    Y 用餐中、且雲端仍記 Y 坐在它的其他桌（大組加桌被搶）→ 只拿掉被搶的桌號（主桌被搶就升一張副桌），
+//                 狀態不變；那幾張桌不動（客人還坐著，不可釋成空桌）。
+//     · 'evict'   Y 用餐中、雲端沒有任何一張桌記 Y 用餐中 → 退回待到（confirmed、清 actualArrivalTime，
+//                 與 undoSeatBooking 同口徑），拿掉被搶的桌與「本機帶了、雲端沒收到」的其他桌，讓店員重新帶位。
+//     · 'preassign' Y 尚未到店（預配／鎖桌）→ 只拿掉被搶的桌號，狀態不變。
+//     · 'adopt'   Y 已結束（完成／取消／No-show，例如結帳後 cleaning 保留 id）→ 訂位不動，只改採雲端桌。
+//     「本機由 Y 持有、雲端沒記 Y」的其他桌一律改採雲端值（這次帶位從沒寫進雲端）。
+// 不是搶桌的候選（雲端仍空／同一筆／有版本）原樣保留 dirty，下一輪照推（有版本的桌走既有版本圍欄自癒）。
+// 「雲端已有正確答案」的衝突才放棄本機變更，不標 rejected。只存記憶體：重新整理後若再衝突，下一次推送會再 409 並重新記下。
+// 後端專用 code（functions/lib/waitlistSyncGuard.js TABLE_STEAL_CODE，HTTP 409）；
+// 版本圍欄／候位路徑的 409 operational-state-changed 不屬於搶桌，不走這條。
+export const TABLE_STEAL_CODE = 'table-occupied-elsewhere'
+const tableStealCandidates = new Map() // 桌號 → 推送當下本機持有的 bookingId
+export function isTableStealError(err) {
+  return err?.status === 409 && err.code === TABLE_STEAL_CODE
+}
+export function pendingTableStealCandidates() {
+  return [...tableStealCandidates.entries()].map(([tableNumber, bookingId]) => ({ tableNumber, bookingId }))
+}
+const hasId = v => v != null && v !== ''
+const sameId = (a, b) => hasId(a) && hasId(b) && String(a) === String(b)
+const bookingTablesOf = b => [b?.assignedTableId, ...(Array.isArray(b?.extraTableIds) ? b.extraTableIds : [])].filter(hasId).map(String)
+
+// 店員看的提示（依 stealOutcome 分句，多張桌以「、」串接）：
+//   evict     「102 已被另一台帶位，王先生請重新帶位」
+//   trim      「102 已被另一台帶位，王先生這組請改用其他桌」
+//   preassign 「102 已被另一台帶位，王先生的預配已取消，請改配其他桌」
+//   adopt     「102 已被另一台帶位，已改用最新桌況」
+export function describeTableSteals(list = []) {
+  const items = (Array.isArray(list) ? list : []).filter(s => hasId(s?.tableNumber))
+  if (!items.length) return ''
+  const groups = new Map()
+  for (const s of items) {
+    const kind = s.kind || 'evict', name = String(s.name || '').trim() || '這組客人'
+    const key = kind + '|' + (kind === 'adopt' ? '' : name)
+    const g = groups.get(key) || { kind, name, tables: [] }
+    if (!g.tables.includes(String(s.tableNumber))) g.tables.push(String(s.tableNumber))
+    groups.set(key, g)
+  }
+  return [...groups.values()].map(({ kind, name, tables }) => {
+    const head = `${tables.join('、')} 已被另一台帶位，`
+    if (kind === 'trim') return `${head}${name}這組請改用其他桌`
+    if (kind === 'preassign') return `${head}${name}的預配已取消，請改配其他桌`
+    if (kind === 'adopt') return `${head}已改用最新桌況`
+    return `${head}${name}請重新帶位`
+  }).join('；')
+}
+
+// 從訂位拿掉幾張桌號；主桌被拿掉就把第一張仍在的副桌升為主桌。
+export function removeBookingTables(booking, tableNumbers = []) {
+  const drop = new Set(tableNumbers.map(String))
+  const tables = bookingTablesOf(booking)
+  if (!tables.some(n => drop.has(n))) return booking
+  const remaining = tables.filter(n => !drop.has(n))
+  const primary = hasId(booking.assignedTableId) && !drop.has(String(booking.assignedTableId)) ? String(booking.assignedTableId) : (remaining[0] ?? null)
+  return { ...booking, assignedTableId: primary, extraTableIds: remaining.filter(n => n !== primary) }
+}
+
+// 判斷被搶後本機訂位怎麼處理（見上方 'trim'／'evict'／'preassign'／'adopt'）。
+// booking＝判斷依據的那份訂位（拉取時：本機 dirty 用本機、否則用雲端那份；推送當下用本機）。
+// cloudOf(桌號)＝雲端（或推送當下以基準線近似的雲端）桌；localTables＝本機桌（桌號→doc）。
+// cloudEnded＝雲端那份訂位已結束（完成／取消／No-show）→ 一律 adopt，不拿本機過時的版本去改它。
+// 回傳 { kind, drop: [從訂位拿掉的桌號], adopt: [其他要改採雲端值的桌號] }。
+// 🔴 evict 的結果必須是「本機所有 Y 的桌都與雲端一致、Y 為 confirmed 帶原預配桌號」：
+//    雲端仍由 Y 持有但不是用餐中（reserved 預配／鎖桌）的桌也改採雲端值（退回 reserved Y），桌號留在訂位上。
+const ENDED_BOOKING_STATUSES = ['completed', 'cancelled', 'noshow']
+function stealOutcome(booking, stolen, localTables, cloudOf, { cloudEnded = false } = {}) {
+  if (!booking || cloudEnded || ENDED_BOOKING_STATUSES.includes(booking.status)) return { kind: 'adopt', drop: [], adopt: [] }
+  const bookingId = booking.id
+  const others = bookingTablesOf(booking).filter(n => !stolen.includes(n))
+  const unversioned = n => !localTables[n]?.operationalVersion && !cloudOf(n)?.operationalVersion
+  const localHeld = n => sameId(localTables[n]?.currentBookingId, bookingId)
+  // 本機由 Y 持有、雲端沒記 Y → 這次帶位從沒寫進雲端：改採雲端值並從訂位拿掉。
+  const lost = others.filter(n => localTables[n] && cloudOf(n) && localHeld(n) && !sameId(cloudOf(n).currentBookingId, bookingId) && unversioned(n))
+  if (booking.status === 'arrived') {
+    const stillSeated = others.some(n => !lost.includes(n) && cloudOf(n)?.status === 'dining' && sameId(cloudOf(n)?.currentBookingId, bookingId))
+    if (stillSeated) return { kind: 'trim', drop: [...stolen, ...lost], adopt: lost }
+    // 退回待到：雲端仍記 Y 但不是用餐中的桌（預配／鎖桌），本機若與雲端不同就改採雲端值（桌號保留在訂位上）。
+    const restore = others.filter(n => !lost.includes(n) && localTables[n] && cloudOf(n) && localHeld(n)
+      && sameId(cloudOf(n).currentBookingId, bookingId) && cloudOf(n).status !== 'dining' && unversioned(n)
+      && stable(localTables[n]) !== stable(cloudOf(n)))
+    return { kind: 'evict', drop: [...stolen, ...lost], adopt: [...lost, ...restore] }
+  }
+  if (['confirmed', 'pending'].includes(booking.status)) return { kind: 'preassign', drop: [...stolen, ...lost], adopt: lost }
+  return { kind: 'adopt', drop: [], adopt: lost }
+}
+
+// 依 stealOutcome 改寫訂位（evict 才退回待到；其餘狀態不變）。
+export function applyStealToBooking(booking, { kind, drop }) {
+  if (!booking || kind === 'adopt') return booking
+  let next = removeBookingTables(booking, drop)
+  if (kind === 'evict' && booking.status === 'arrived') next = { ...next, status: 'confirmed', actualArrivalTime: null }
+  return next
+}
+
+// 拉取時：核對候選桌，回傳 { tables: Map(桌號→{doc,baseline}), bookings: Map(id→outcome), resolved: [...] }。
+function planTableStealResolution(cloudTables, cloudBookings) {
+  const plan = { tables: new Map(), bookings: new Map(), resolved: [] }
+  if (!tableStealCandidates.size || !Array.isArray(cloudTables) || !cloudTables.length) return plan
+  const localTables = indexDocs('tables', localArrayOf('tables'))
+  const localBookings = indexDocs('bookings', localArrayOf('bookings'))
+  const cloudTableMap = indexDocs('tables', cloudTables)
+  const cloudBookingMap = indexDocs('bookings', Array.isArray(cloudBookings) ? cloudBookings : [])
+  const stolenBy = new Map() // bookingId → [桌號]
+  for (const [tableNumber, bookingId] of tableStealCandidates) {
+    const local = localTables[tableNumber], remote = cloudTableMap[tableNumber]
+    if (!local || !remote) continue
+    if (lastSynced.tables[tableNumber] === stable(local)) continue                    // 已不 dirty（期間已同步）
+    if (!sameId(local.currentBookingId, bookingId)) continue                          // 店員已改動
+    if (local.operationalVersion || remote.operationalVersion) continue               // 有版本 → 既有圍欄路徑
+    if (remote.status !== 'dining' || !hasId(remote.currentBookingId) || sameId(remote.currentBookingId, bookingId)) continue
+    plan.tables.set(tableNumber, { doc: remote, baseline: stable(remote) })
+    stolenBy.set(bookingId, [...(stolenBy.get(bookingId) || []), tableNumber])
+  }
+  for (const [bookingId, stolen] of stolenBy) {
+    // 判斷依據＝合併後會留下的那份：本機 dirty 用本機，否則用雲端（本機可能是過時的已同步版本）。
+    const local = localBookings[bookingId], remote = cloudBookingMap[bookingId]
+    const localDirty = local && lastSynced.bookings[bookingId] !== stable(local)
+    const booking = (localDirty ? local : remote) || local
+    const cloudEnded = ENDED_BOOKING_STATUSES.includes(remote?.status)
+    const outcome = stealOutcome(booking, stolen, localTables, n => cloudTableMap[n], { cloudEnded })
+    for (const n of outcome.adopt) if (!plan.tables.has(n)) plan.tables.set(n, { doc: cloudTableMap[n], baseline: stable(cloudTableMap[n]) })
+    if (booking) plan.bookings.set(bookingId, outcome)
+    for (const tableNumber of stolen) plan.resolved.push({ tableNumber, bookingId, name: booking?.name || '', kind: outcome.kind })
+  }
+  return plan
+}
+
 // === 佈局遺失根治：把同步基準線落地到 localStorage，撐過「整頁重新整理」===
 // initialized / lastSynced / pendingDeletes 原本全是模組層級記憶體變數：整頁重新整理＝
 // JS 模組重新載入＝全部歸零。歸零後的第一次拉取會誤判成「全新裝置」，走 applyCloudSnapshot
@@ -402,6 +539,8 @@ export function applyCloudSnapshot(data = {}) {
   // 回傳 { waitlistConflictsResolved }：這次放棄掉的 409 衝突候位筆數（呼叫端據此退避歸零、立刻補推）。
   let waitlistConflictsResolved = 0
   let operationalConflictsResolved = 0
+  // 搶桌 409 的候選桌：先依本機＋雲端快照算好要採用雲端的桌與要退回待到的訂位（bookings 比 tables 先跑）。
+  const stealPlan = planTableStealResolution(data.tables, data.bookings)
   for (const col of DIFF_COLLECTIONS) {
     const cloudArr = data[col]
     if (!Array.isArray(cloudArr)) continue
@@ -434,6 +573,29 @@ export function applyCloudSnapshot(data = {}) {
       } else if (dirty) merged[id] = doc                // 保留待推送的本機變更
       else if (cloudMap[id]) lastSynced[col][id] = stable(cloudMap[id]) // 已同步 → 採雲端值
     }
+    if (col === 'bookings') {
+      // 被另一台搶走桌的本機訂位：退回待到、清桌號（只改本機；維持 dirty → 下一輪推上去，不發客人通知）。
+      for (const [id, outcome] of stealPlan.bookings) {
+        if (merged[id]) merged[id] = applyStealToBooking(merged[id], outcome)
+      }
+    }
+    if (col === 'tables') {
+      for (const [id, { doc, baseline }] of stealPlan.tables) {
+        // 採用雲端桌；本機佈局草稿（非關鍵欄位、相對基準線有改的）保留，比照上方版本圍欄的作法。
+        const local = localMap[id]
+        let prevBaseline = {}
+        try { prevBaseline = JSON.parse(lastSynced.tables[id] || '{}') } catch {}
+        const restored = { ...doc }
+        const critical = operationalCriticalFields('tables')
+        for (const key of new Set([...Object.keys(prevBaseline), ...Object.keys(local || {})])) {
+          if (critical.includes(key) || ['operationalVersion', 'waitlistId', 'waitlistCommandId', 'manageToken', 'updatedAt'].includes(key)) continue
+          if (local && stable(local[key]) !== stable(prevBaseline[key])) { if (Object.hasOwn(local, key)) restored[key] = local[key]; else delete restored[key] }
+        }
+        merged[id] = restored
+        lastSynced.tables[id] = baseline
+      }
+      tableStealCandidates.clear()
+    }
     if (col === 'waitlist') waitlistConflictIds.clear()
     // 雲端有、本機沒有的文件（其他裝置新增）一併納入並記為已同步；
     // 但本機正在刪除的文件不納入、也不記為已同步。
@@ -455,7 +617,11 @@ export function applyCloudSnapshot(data = {}) {
   }
   cloudPulled = true // 舊裝置（已 initialized、落地狀態沒有 cloudPulled）在第一次成功拉取時開閘
   persistSyncState()
-  return { waitlistConflictsResolved, ...(operationalConflictsResolved ? { operationalConflictsResolved } : {}) }
+  return {
+    waitlistConflictsResolved,
+    ...(operationalConflictsResolved ? { operationalConflictsResolved } : {}),
+    ...(stealPlan.resolved.length ? { tableStealsResolved: stealPlan.resolved } : {}),
+  }
 }
 
 // 雲端請求逾時：平板在弱網／Wi‑Fi 切換時 fetch 可能永遠不回，呼叫端（設定頁「儲存」）
@@ -494,6 +660,7 @@ async function requestJson(url, options = {}) {
     err.code = data.error || data.reason || ''
     err.bookingOutcome = data.bookingOutcome || ''
     err.reasonCode = data.reasonCode || ''
+    if (Array.isArray(data.tables)) err.tables = data.tables.map(String) // 搶桌拒絕：後端列出被拒的桌號
     throw err
   }
   return data
@@ -604,6 +771,35 @@ export async function pushChangedData() {
     if (isWaitlistConflictError(err) && changed.waitlist?.length) {
       changed.waitlist.forEach(doc => waitlistConflictIds.add(idOf('waitlist', doc)))
       err.waitlistConflict = true
+    }
+    // 搶桌（無版本桌被另一台先帶位）：記下後端列出、本機無版本、有持有訂位的被拒桌（不限 status），
+    // 下一次拉取改以雲端為準；提示只列這些桌。後端沒帶 tables（不應發生）時退回「這次夾帶的全部無版本持有桌」。
+    // 推送當下還沒拉到雲端：提示的處理方式以同步基準線（＝這台上次看到的雲端）近似，拉取時以真正的雲端為準。
+    if (isTableStealError(err) && changed.tables?.length) {
+      const bookingsById = indexDocs('bookings', ds.bookings)
+      const localTables = indexDocs('tables', ds.tables)
+      const rejectedTables = Array.isArray(err.tables) && err.tables.length ? new Set(err.tables.map(String)) : null
+      const stolenBy = new Map()
+      for (const doc of changed.tables) {
+        const tableNumber = idOf('tables', doc)
+        if (rejectedTables && !rejectedTables.has(tableNumber)) continue
+        if (doc.operationalVersion || !hasId(doc.currentBookingId)) continue
+        const bookingId = String(doc.currentBookingId)
+        tableStealCandidates.set(tableNumber, bookingId)
+        stolenBy.set(bookingId, [...(stolenBy.get(bookingId) || []), tableNumber])
+      }
+      const baselineOf = n => { try { return JSON.parse(lastSynced.tables[n] || 'null') } catch { return null } }
+      const steals = []
+      for (const [bookingId, stolen] of stolenBy) {
+        const booking = bookingsById[bookingId]
+        const { kind } = stealOutcome(booking, stolen, localTables, baselineOf)
+        for (const tableNumber of stolen) steals.push({ tableNumber, bookingId, name: booking?.name || '', kind })
+      }
+      if (steals.length) {
+        err.tableStealConflict = true
+        err.tableSteals = steals
+        err.tableStealMessage = describeTableSteals(steals)
+      }
     }
     throw err
   }

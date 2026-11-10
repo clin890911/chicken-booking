@@ -17,7 +17,7 @@ import {
   computeOvertimeActions, computeDayRolloverActions,
   canRunSweeps, filterSweepActionsByPermission, deferUntilCloudPulled, isSweepSnapshotFresh,
 } from '../utils/opsSweep'
-import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, nextPushRetryState, isPushRetryDue, pushErrorKey, shouldDeferPushErrorToast, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE } from '../utils/syncStatus'
+import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPushError, nextPushRetryState, isPushRetryDue, pushErrorKey, shouldDeferPushErrorToast, shouldAlertPersistDegraded, shouldCommitPullStatus, isPushDeferred, PUSH_DEFERRED_MESSAGE, tableStealToast } from '../utils/syncStatus'
 import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
 import { markCreatedHere } from '../utils/newBookingAlerts'
@@ -165,6 +165,8 @@ export function BookingProvider({ children }) {
       // 這次拉取解掉了候位 409 衝突：之前每個動作都帶著衝突候位吃 409、退避被推到 30–60 秒，
       // 現在其他集合推得上去了——退避歸零、立刻補推一次。
       if (applied?.waitlistConflictsResolved > 0) pushRetryRef.current = { failures: 0, nextAt: 0 }
+      // 搶桌 409 自癒：被搶的桌已改採雲端、被擠掉的訂位已退回待到（提示已在推送失敗時跳過）——同樣退避歸零、立刻補推。
+      if (applied?.tableStealsResolved?.length) pushRetryRef.current = { failures: 0, nextAt: 0 }
       // 推送進行中不觸發補推（不疊推送），等它有結果、下一次拉取再判斷。
       if (!gateWasOpen || (!pushInFlightRef.current && isPushRetryDue(pushRetryRef.current, Date.now()))) {
         syncCloudSoonRef.current?.({ auto: true })
@@ -213,6 +215,18 @@ export function BookingProvider({ children }) {
       } catch (err) {
         const shouldToast = notePushFailure(err, auto)
         setCloudStatus(s => statusAfterPushError(s, err.message, 'cloud-push-failed'))
+        // 搶桌 409：專用提示（哪一桌、哪一組要重新帶位），不跳「請檢查 Wi‑Fi」；立刻拉一次雲端讓本機改採雲端桌況。
+        const steal = tableStealToast(err)
+        if (steal) {
+          if (shouldToast) {
+            lastPushErrorToastRef.current = Date.now()
+            const t = toastRef.current
+            if (t?.show) t.show(steal.message, { type: steal.type, duration: steal.duration })
+            else t?.error?.(steal.message)
+          }
+          pullCloud()
+          return
+        }
         // F-D：把推送失敗主動回饋給觸發操作的店員，避免「以為存檔成功、實際沒上雲」。
         // 自動補推遇到同一種錯誤不重跳（退避期間同一種錯誤最多一次）。
         const now = Date.now()
@@ -224,7 +238,7 @@ export function BookingProvider({ children }) {
         }
       }
     }, 250)
-  }, [refresh])
+  }, [refresh, pullCloud])
   syncCloudSoonRef.current = syncCloudSoon
 
   // 立即把本機變更推上雲端並回報「雲端是否真的寫入成功」。供「儲存」等主動操作 await：
@@ -255,9 +269,11 @@ export function BookingProvider({ children }) {
     } catch (err) {
       notePushFailure(err, false)   // 呼叫端自己顯示失敗訊息，這裡只記退避狀態
       setCloudStatus(s => statusAfterPushError(s, err.message, 'cloud-push-failed'))
+      // 搶桌 409：回傳店員看得懂的文案（哪一桌、哪一組要重新帶位），並立刻拉雲端自癒。
+      if (err?.tableStealConflict) { pullCloud(); return { ok: false, error: err.tableStealMessage || err.message, tableSteals: err.tableSteals } }
       return { ok: false, error: err.message || 'cloud-push-failed' }
     }
-  }, [refresh])
+  }, [refresh, pullCloud])
 
   // hydrated：本機資料已灌入 state（本機模式的「資料備妥」訊號）。
   // 用途見 utils/newBookingAlerts——掛載當下 bookings 還是 []，把它當基準會讓首次

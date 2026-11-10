@@ -1,4 +1,4 @@
-import { guardOperationalSync } from './waitlistSyncGuard.js'
+import { guardOperationalSync, settleGuardResults } from './waitlistSyncGuard.js'
 import { projectForRead } from './dataProjection.js'
 const guardedKind=op=>['bookings','tables'].includes(op.ref.path.split('/')[0])
 const reject=()=>{throw Object.assign(Error('use-queue-command'),{status:409})}
@@ -8,11 +8,14 @@ export async function commitOrdinaryBulk(db,ops){
   if(ops.some(op=>op.ref.path.startsWith('waitlist/')))reject()
   await db.runTransaction(async tx=>{
     const states=await Promise.all(ops.filter(guardedKind).map(async op=>({op,snap:await tx.get(op.ref)})))
-    for(const {op,snap} of states){
-      const stored=snap.exists?snap.data():null
-      if(stored?.operationalVersion||stored?.waitlistId||op.data?.waitlistId||op.data?.waitlistCommandId||op.data?.createdBy==='waitlist'||op.ref.path.startsWith('bookings/WLB_'))reject()
-      guardOperationalSync(op,stored)
-    }
+    // 逐筆守門結果收齊再判（同 index.js）：搶桌拒絕一次列出全部被搶的桌（body.tables），其他拒絕照舊優先。
+    settleGuardResults(states.map(({op,snap})=>{
+      try{
+        const stored=snap.exists?snap.data():null
+        if(stored?.operationalVersion||stored?.waitlistId||op.data?.waitlistId||op.data?.waitlistCommandId||op.data?.createdBy==='waitlist'||op.ref.path.startsWith('bookings/WLB_'))reject()
+        return {status:'fulfilled',value:guardOperationalSync(op,stored)}
+      }catch(reason){return {status:'rejected',reason}}
+    }))
   })
   const writtenVersions={bookings:{},tables:{}}
   for(let i=0;i<ops.length;i+=450){

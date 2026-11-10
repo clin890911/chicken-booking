@@ -4,7 +4,7 @@ import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, ve
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
 import { createWaitlistHandler } from './lib/waitlistCommands.js'
-import { guardOperationalSync } from './lib/waitlistSyncGuard.js'
+import { guardOperationalSync, settleGuardResults } from './lib/waitlistSyncGuard.js'
 import { commitOrdinaryBulk, readOperationalUpdates } from './lib/operationalBulk.js'
 import crypto from 'node:crypto'
 import { initializeApp } from 'firebase-admin/app'
@@ -429,6 +429,10 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       }
       if (settingsReport?.audit) settingsReport.audit.closuresMerge = { conflicts: merged.conflicts.length }
     }
+    // 搶桌守門（waitlistSyncGuard stealsOccupiedTable）要知道同一包推送裡各訂位的新狀態，
+    // 才能分辨「這台離線時自己清桌再帶下一組」與「兩台同時帶同一桌」。交易與分批兩條提交路徑都讀 op.syncContext。
+    const pushedBookings=new Map(ops.filter(op=>op.ref.path.startsWith('bookings/')&&!op.delete).map(op=>[op.ref.path.split('/')[1],op.data]))
+    for(const op of ops)if(op.ref.path.startsWith('tables/'))op.syncContext={pushedBookings}
     // F-F：分批提交（≤450/批），避免資料量超過 Firestore 單一 batch 500 筆上限時整批失敗。
     let writtenVersions={bookings:{},tables:{}}
     if(!queueItems.length && ops.length>450){
@@ -439,11 +443,12 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
       if(ops.length+queueItems.length*2>450) throw errorWithStatus('operational-sync-too-large',413)
       const syncHash=crypto.createHash('sha256').update(JSON.stringify(writable)).digest('hex')
       writtenVersions=await db.runTransaction(async tx=>{
-        const guardedOps=await Promise.all(ops.map(async op=>{
+        // allSettled＋settleGuardResults：搶桌拒絕時一次回報全部被搶的桌（body.tables），不是只有第一張。
+        const guardedOps=settleGuardResults(await Promise.allSettled(ops.map(async op=>{
           if(!['bookings','tables'].includes(op.ref.path.split('/')[0]))return op
           const stored=await tx.get(op.ref)
           return guardOperationalSync(op,stored.exists?stored.data():null)
-        }))
+        })))
         const snapshots=await Promise.all(queueItems.map(async item=>{
           const id=String(item?.id||'').trim()
           if(!id||id.includes('/')) throw errorWithStatus('invalid-waitlist-id',400)
@@ -485,7 +490,7 @@ export const adminPushData = onRequest({ cors: PUBLIC_CORS, invoker: 'public', s
     return res.json({ ok: true, waitlistUpdates, ...operationalUpdates, writtenVersions, ...appliedPart })
   } catch (err) {
     console.error('adminPushData failed:', err)
-    return res.status(err.status || 500).json({ ok: false, error: err.message || 'admin-push-failed' })
+    return res.status(err.status || 500).json({ ok: false, error: err.message || 'admin-push-failed', ...(Array.isArray(err.tables) ? { tables: err.tables } : {}) })
   }
 })
 

@@ -111,6 +111,8 @@ export const PUSH_RETRY_SLACK_MS = 1000
 export function isRetryablePushError(err) {
   if (!err) return false
   if (err.waitlistConflict) return true
+  // 搶桌 409（code table-occupied-elsewhere，無版本桌被另一台先帶位）：下一次拉取改採雲端桌、被擠掉的訂位退回待到，之後補推就會成功。
+  if (err.tableStealConflict) return true
   const status = Number(err.status) || 0
   if (!status) return true   // fetch 斷線（TypeError）、逾時（code 'timeout'）、取不到 token 都沒有 HTTP status
   // 401：iPad 休眠喚醒時 token 過期／換發失敗（cloudDataService 已強制換新重送一次仍失敗）。
@@ -123,17 +125,18 @@ export function isRetryablePushError(err) {
 // iPad 前台最常見的「雲端同步失敗」其實是暫時性的：喚醒當下 Wi‑Fi 還沒接上、換手、雲端函式冷啟動逾時，
 // 5 秒後的自動補推通常就成功了——第一次就跳紅字只會嚇到店員（而且資料其實已補上雲）。
 // 規則：可自動補推的暫時性錯誤，第一次失敗不跳，連續第 2 次仍失敗才跳；
-//       候位 409 衝突（要店員確認候位）與不會自己好的錯誤（413、400…）照舊第一次就跳。
+//       候位 409 衝突（要店員確認候位）、搶桌 409（要店員重新帶位）與不會自己好的錯誤（413、400…）照舊第一次就跳。
 // retryState：nextPushRetryState 的結果（null＝不補推）。
 export const PUSH_TOAST_AFTER_FAILURES = 2
 export function shouldDeferPushErrorToast(err, retryState) {
-  if (!retryState || err?.waitlistConflict) return false
+  if (!retryState || err?.waitlistConflict || err?.tableStealConflict) return false
   return retryState.failures < PUSH_TOAST_AFTER_FAILURES
 }
 
 // 「同一種錯誤」的判別鍵：退避期間的自動補推遇到同一種錯誤不重跳 toast。
 export function pushErrorKey(err) {
   if (err?.waitlistConflict) return 'waitlist-conflict'
+  if (err?.tableStealConflict) return `table-steal:${(err.tableSteals || []).map(s => s.tableNumber).join(',')}`
   return `${Number(err?.status) || 'network'}:${err?.code || ''}`
 }
 
@@ -147,4 +150,12 @@ export function nextPushRetryState(prev, err, now) {
 
 export function isPushRetryDue(state, now) {
   return !!state && now + PUSH_RETRY_SLACK_MS >= state.nextAt
+}
+
+// 搶桌 409 專用提示（取代「請檢查 Wi‑Fi」）：error 等級、停留 15 秒——店員要看清楚是哪一桌、哪一組要重新帶位。
+// 回傳 null＝不是搶桌錯誤（呼叫端照舊處理）。文案由 cloudDataService.describeTableSteals 產生（err.tableStealMessage）。
+export const TABLE_STEAL_TOAST_MS = 15000
+export function tableStealToast(err) {
+  if (!err?.tableStealConflict || !err.tableStealMessage) return null
+  return { message: err.tableStealMessage, type: 'error', duration: TABLE_STEAL_TOAST_MS }
 }
