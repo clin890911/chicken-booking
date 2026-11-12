@@ -10,6 +10,7 @@ import { addDays, dayLabel, formatDate, todayStr } from '../utils/timeSlots'
 import { bookingOccupancyLabel } from '../utils/capacity'
 import { isValidTwPhone } from '../utils/validation'
 import { loadGuestDraft, saveGuestDraft, clearGuestDraft, prepareGuestDraft, isUncertainDraft } from '../utils/guestDraft'
+import { readAttribution } from '../utils/adAttribution'
 import { onlineLeadLabel } from '../utils/guestPolicy'
 import { trackEvent } from '../services/analytics'
 import { bookingParams, classifyBookingError } from '../utils/analyticsSanitize'
@@ -211,9 +212,12 @@ export default function BookingPage() {
       const draft = saveGuestDraft(prepareGuestDraft(data, draftRef.current, 'pending'))
       draftRef.current = draft
       sent = true
+      // 廣告追蹤碼另帶、不進 draft.payload（payload 會算防重複送出的雜湊）。
+      const attribution = readAttribution()
       const res = await guestCreateBooking({
         ...draft.payload,
         submissionKey: draft.submissionKey,
+        ...(attribution ? { attribution } : {}),
         // LIFF 內訂位：附帶 LINE 身分（後端驗 idToken 後訂位即綁定＋推播確認卡）
         ...(lineIdentity?.idToken ? {
           line: {

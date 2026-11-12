@@ -52,6 +52,7 @@ export const BOOKING_SERVER_OWNED_FIELDS = [
   'guestEditHistory', 'guestEditCount', 'lastGuestEditAt',
   'cancellationReason',
   'createdAt', 'createdBy',
+  'attribution', // FB 廣告追蹤碼：只由 guestCreateBooking 寫入，店員推送不可改寫
 ]
 
 // 店員可經 UI 合法寫入的欄位（僅供文件/測試參照；實際把關用下方 denylist 剝除 server-owned）。

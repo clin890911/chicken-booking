@@ -17,6 +17,7 @@ import LoginPage from './pages/LoginPage'
 import AdminPage from './pages/AdminPage'
 import SlotMapDemoPage from './pages/SlotMapDemoPage'
 import { trackPageView } from './services/analytics'
+import { captureAttribution, ATTRIBUTION_LANDING_PATHS } from './utils/adAttribution'
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
@@ -31,6 +32,10 @@ function AppRoutes() {
   // GA4 手動 page_view（網址清洗、後台不追蹤都在 services/analytics 裡處理）
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { trackPageView(location) }, [location.pathname, location.search])
+  // FB 廣告追蹤碼（utm_*／fbclid）：落地在首頁或 /book 時記進 sessionStorage，送出訂位時帶 attribution。
+  useEffect(() => {
+    if (ATTRIBUTION_LANDING_PATHS.includes(location.pathname)) captureAttribution(location.search)
+  }, [location.pathname, location.search])
   return (
     <ErrorBoundary resetKey={location.pathname + location.search}>
       <Routes>

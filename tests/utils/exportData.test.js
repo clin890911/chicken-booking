@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   filterBookings, filterGroups, groupBatchRows,
-  buildBookingsCSV, buildGroupsCSV, toCSV,
+  BOOKING_CSV_HEADERS, buildBookingsCSV, buildGroupsCSV, toCSV,
 } from '../../src/utils/exportData'
 
 // 匯出中心純邏輯。釘住三件事：
@@ -128,6 +128,17 @@ describe('buildBookingsCSV / toCSV', () => {
     expect(body).toContain('"x,y"')
     expect(body).toContain('"he said ""hi"""')
     expect(body).toContain('"line1\nline2"')
+  })
+  it('「廣告來源」緊接「來源」，內容為 campaign/content；沒有追蹤碼留空', () => {
+    const idx = BOOKING_CSV_HEADERS.indexOf('廣告來源')
+    expect(idx).toBe(BOOKING_CSV_HEADERS.indexOf('來源') + 1)
+    const csv = buildBookingsCSV([
+      B({ id: 'BA', attribution: { source: 'fb', campaign: 'shanyou', content: 'D-shanxia' } }),
+      B({ id: 'BN' }),
+    ], SETTINGS)
+    const [, withAd, without] = csv.split('\n').map(l => l.split(','))
+    expect(withAd[idx]).toBe('shanyou/D-shanxia')
+    expect(without[idx]).toBe('')
   })
   it('未知來源/狀態原樣輸出（不會變 undefined）', () => {
     const csv = buildBookingsCSV([B({ source: 'guest', status: 'weird' })], SETTINGS)
