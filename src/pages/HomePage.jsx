@@ -10,7 +10,10 @@ export default function HomePage() {
   const diningDuration = Number(settings.diningDurationMin) || 90
   const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
   const info = [
-    { icon: Clock, label: '營業時間', value: `${settings.openTime || '11:00'} - ${settings.closeTime || '19:00'}` },
+    // 顯示用固定文字（Barry 2026-11-12 拍板：每天 11:00–20:00，最後點餐 19:00，全年無公休）。
+    // 刻意不讀 settings.openTime/closeTime：closeTime 是「最後可訂時段」(19:00)，不是打烊時間，
+    // 且同時驅動時段產生邏輯，不能拿來推算顯示。
+    { icon: Clock, label: '營業時間', value: '每天 11:00–20:00（最後點餐 19:00）' },
     { icon: ShieldCheck, label: '訂位確認', value: '送出即建立紀錄' },
     { icon: Utensils, label: '用餐時間', value: `${diningDuration} 分鐘，保留 ${cleanupBuffer} 分鐘` },
   ]
