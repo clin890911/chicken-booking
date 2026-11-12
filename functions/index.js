@@ -1,6 +1,7 @@
 import { validateLineReadiness, DEFAULT_LINE_LOGIN_START_ENDPOINT } from './lib/lineReadiness.js'
 import { guardSettingsPush, settingsReplaceOptions, buildClosuresSettingsReport } from './lib/settingsGuard.js'
 import { guestPolicy, isBeforeGuestDeadline, guestLeadError, submissionProof, verifyReceipt } from './lib/guestReliability.js'
+import { sanitizeAttribution } from './lib/attribution.js'
 import { notificationIdentity, notificationIntent, outboxFromIntent, claimNotification, deliveryUpdate, aggregateNotificationHealth, healthEntry, notificationIsSuperseded } from './lib/durableNotifications.js'
 import { buildHandoffCommand, buildQueueCommand, protectQueueUpsert, checkCommand } from './lib/operationalCommands.js'
 import { createWaitlistHandler } from './lib/waitlistCommands.js'
@@ -997,6 +998,8 @@ export const guestCreateBooking = onRequest({ cors: PUBLIC_CORS, invoker: 'publi
         timeSlot: data.timeSlot,
         notes: data.notes,
         source: 'online',
+        // FB 廣告追蹤碼（utm_source/campaign/content＋fbclid）；沒有就不寫這個欄位。
+        ...(data.attribution ? { attribution: data.attribution } : {}),
         status: 'confirmed',
         assignedTableId: null,
         lineUserId: null,
@@ -2352,7 +2355,10 @@ function validateNewBooking(body = {}, settings = {}) {
     text: String(body.notes?.text || '').trim().slice(0, 500),
   }
 
-  return { ok: true, value: { name, phone: String(body.phone).trim(), phoneDigits, guests, date, timeSlot, notes } }
+  // 廣告追蹤碼：白名單四欄、清成字串並限長；非物件或全空 → null（不擋訂位）。
+  const attribution = sanitizeAttribution(body.attribution)
+
+  return { ok: true, value: { name, phone: String(body.phone).trim(), phoneDigits, guests, date, timeSlot, notes, attribution } }
 }
 
 // 容量排除的狀態：與前端 utils/capacity.js 的 CAPACITY_EXCLUDED_STATUSES 必須一致。

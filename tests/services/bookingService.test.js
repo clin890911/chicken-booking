@@ -1051,7 +1051,7 @@ describe('exportCSV', () => {
     seedBookings([])
     const csv = bookingService.exportCSV()
     const headerLine = csv.slice(1).split('\n')[0]
-    expect(headerLine).toBe('訂位編號,姓名,電話,人數,日期,時段,指派桌,寵物,兒童,行動不便,備註,來源,狀態,建立時間')
+    expect(headerLine).toBe('訂位編號,姓名,電話,人數,日期,時段,指派桌,寵物,兒童,行動不便,備註,來源,廣告來源,狀態,建立時間')
   })
 
   it('輸出資料列且 notes 布林轉 Y/空', () => {
@@ -1062,7 +1062,17 @@ describe('exportCSV', () => {
     }])
     const csv = bookingService.exportCSV()
     const row = csv.slice(1).split('\n')[1]
-    expect(row).toBe('B1,小明,0912,4,2026-06-20,18:00,A5,Y,,Y,靠窗,online,confirmed,2026-06-15T03:00:00.000Z')
+    expect(row).toBe('B1,小明,0912,4,2026-06-20,18:00,A5,Y,,Y,靠窗,online,,confirmed,2026-06-15T03:00:00.000Z')
+  })
+
+  it('廣告來源欄輸出 campaign/content', () => {
+    seedBookings([{
+      id: 'B1', name: '小明', phone: '0912', guests: 2, date: '2026-06-20', timeSlot: '18:00', notes: {},
+      source: 'online', status: 'confirmed', createdAt: 't',
+      attribution: { source: 'fb', campaign: 'shanyou', content: 'B-shanxia', fbclid: 'IwAR1' },
+    }])
+    const row = bookingService.exportCSV().slice(1).split('\n')[1]
+    expect(row).toBe('B1,小明,0912,2,2026-06-20,18:00,,,,,,online,shanyou/B-shanxia,confirmed,t')
   })
 
   it('含逗號的欄位會用雙引號包起來', () => {

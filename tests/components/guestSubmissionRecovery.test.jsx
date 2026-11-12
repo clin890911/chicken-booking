@@ -40,6 +40,25 @@ describe('mounted guest booking recovery', () => {
     expect(mocks.navigate).toHaveBeenCalledWith('/confirm/FAKE?token=FAKE_MANAGE', expect.objectContaining({ state: expect.objectContaining({ booking }) }))
     expect(JSON.stringify(mocks.navigate.mock.calls)).not.toContain(draft.submissionKey)
   })
+  it('送出時另帶 sessionStorage 的廣告追蹤碼 attribution，但不進 draft payload（不影響防重複雜湊）', async () => {
+    sessionStorage.setItem('chicken_ad_attribution_v1', JSON.stringify({ source: 'fb', campaign: 'shanyou', content: 'B-shanxia' }))
+    const draft = saveGuestDraft(prepareGuestDraft(payload, null, 'pending'))
+    mocks.create.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    await mount(BookingPage)
+    await act(async () => { buttons('確認同一筆訂位')[0].click(); await flush() })
+    const [body] = mocks.create.mock.calls[0]
+    expect(body.attribution).toEqual({ source: 'fb', campaign: 'shanyou', content: 'B-shanxia' })
+    expect(body.submissionKey).toBe(draft.submissionKey)
+    expect(loadGuestDraft().payload).not.toHaveProperty('attribution')
+    expect(loadGuestDraft().submissionKey).toBe(draft.submissionKey)
+  })
+  it('沒有追蹤碼時不送 attribution 欄位', async () => {
+    saveGuestDraft(prepareGuestDraft(payload, null, 'pending'))
+    mocks.create.mockResolvedValueOnce({ ok: true, booking, store: { lineLoginReady: false } })
+    await mount(BookingPage)
+    await act(async () => { buttons('確認同一筆訂位')[0].click(); await flush() })
+    expect(mocks.create.mock.calls[0][0]).not.toHaveProperty('attribution')
+  })
   it('two submit buttons in the same event cannot issue two POSTs or modify intent in flight', async () => {
     saveGuestDraft(prepareGuestDraft(payload, null, 'pending'))
     let finish; mocks.create.mockImplementation(() => new Promise(resolve => { finish = resolve }))

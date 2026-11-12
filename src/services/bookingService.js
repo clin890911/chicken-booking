@@ -9,6 +9,7 @@ import * as customerService from './customerService'
 import * as tableService from './tableService'
 import { splitFields, normalizeSplit, forcedChildNotes } from '../utils/partySplit'
 import { squeezeSeats } from '../utils/capacity'
+import { formatAttribution } from '../utils/adAttribution'
 
 const STORAGE_KEY = 'chicken_bookings_v1'
 const NOSHOW_KEY = 'chicken_noshow_v1'
@@ -485,11 +486,11 @@ export function listUpcoming(date, withinMinutes = 60) {
 // === 匯出 CSV ===
 export function exportCSV() {
   const list = read()
-  const headers = ['訂位編號', '姓名', '電話', '人數', '日期', '時段', '指派桌', '寵物', '兒童', '行動不便', '備註', '來源', '狀態', '建立時間']
+  const headers = ['訂位編號', '姓名', '電話', '人數', '日期', '時段', '指派桌', '寵物', '兒童', '行動不便', '備註', '來源', '廣告來源', '狀態', '建立時間']
   const rows = list.map(b => [
     b.id, b.name, b.phone, b.guests, b.date, b.timeSlot, b.assignedTableId || '',
     b.notes?.pet ? 'Y' : '', b.notes?.child ? 'Y' : '', b.notes?.mobility ? 'Y' : '',
-    b.notes?.text || '', b.source, b.status, b.createdAt
+    b.notes?.text || '', b.source, formatAttribution(b.attribution), b.status, b.createdAt
   ])
   const escape = (v) => {
     const s = String(v ?? '')

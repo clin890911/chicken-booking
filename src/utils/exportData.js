@@ -5,6 +5,7 @@
 //  - 場次（場次=餐期）由 timeSlot 經 settings.seatings 推導，永不持久化
 import { seatingForSlot } from './timeSlots'
 import { formatBookingTables } from './bookingTables'
+import { formatAttribution } from './adAttribution'
 
 export const BOOKING_SOURCE_LABELS = {
   online: '線上',
@@ -105,7 +106,7 @@ function seatingNameById(settings, id) {
 }
 
 // CSV 欄位標題（供匯出中心「欄位預覽」重用，避免與下方 build 函式重複維護）。
-export const BOOKING_CSV_HEADERS = ['訂位編號', '日期', '時段', '場次', '姓名', '電話', '人數', '來源', '狀態', '指派桌', '寵物', '兒童', '行動不便', '備註', '建立時間']
+export const BOOKING_CSV_HEADERS = ['訂位編號', '日期', '時段', '場次', '姓名', '電話', '人數', '來源', '廣告來源', '狀態', '指派桌', '寵物', '兒童', '行動不便', '備註', '建立時間']
 export const GROUP_CSV_HEADERS = [
   '團單編號', '日期', '梯次', '抵達時段', '場次', '旅行社', '導遊', '導遊電話',
   '梯次人數', '桌號', '團總人數', '素食', '兒童餐', '行動不便', '輪椅',
@@ -122,6 +123,7 @@ export function buildBookingsCSV(bookings, settings) {
     seatingNameById(settings, seatingIdForSlot(settings, b.timeSlot)),
     b.name, b.phone, b.guests,
     BOOKING_SOURCE_LABELS[b.source] || b.source || '',
+    formatAttribution(b.attribution),
     BOOKING_STATUS_LABELS[b.status] || b.status || '',
     formatBookingTables(b),
     b.notes?.pet ? 'Y' : '', b.notes?.child ? 'Y' : '', b.notes?.mobility ? 'Y' : '',
