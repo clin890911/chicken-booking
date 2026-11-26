@@ -48,6 +48,17 @@ export function confirmedIdSet(bookings) {
   return new Set((bookings || []).filter(b => b?.status === 'confirmed').map(b => b.id))
 }
 
+// 🔴 基準要「累積」，不能每輪整個換掉（2026-11 現場走查）：
+// 店員按「復原入座」時訂位會 arrived → confirmed，若基準只含「這一輪的 confirmed」，
+// 入座那一輪它不在基準裡，復原後再出現就被當成「剛進來的新訂位」，跳出「新訂位：林先生 3 位」
+// ——店員以為系統重複建了一筆（取消復原、復原換桌同理）。
+// 累積「曾經見過的已確認 id」：只有從沒出現過的 id 才算新訂位；真正新進來的仍會通報。
+export function mergeSeenIds(prevIds, bookings) {
+  const next = new Set(prevIds || [])
+  for (const b of bookings || []) if (b?.status === 'confirmed') next.add(b.id)
+  return next
+}
+
 const label = (b) => `${b.name || '訂位'} ${b.guests || 0} 位`
 
 // added → 要推的 toast 清單（最多兩則）。空陣列代表沒事發生。

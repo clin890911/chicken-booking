@@ -17,7 +17,7 @@ import { useAdminAppManifest } from '../hooks/useAppManifest'
 import { resolveAdminTab } from '../utils/landingTab'
 import SyncAlertBar from '../components/layout/SyncAlertBar'
 import { isPhoneLayout } from '../utils/phoneLayout'
-import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
+import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere, mergeSeenIds } from '../utils/newBookingAlerts'
 
 const TABS = [
   { key: 'ops',       label: '現場',  icon: 'ops', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
@@ -100,7 +100,8 @@ export default function AdminPage() {
     // 本裝置剛建立的不通報（已有「已新增」確認 toast）；線上客人與其他裝置建立的照常通報
     buildNewBookingAlerts(diffNewConfirmed(prevIdsRef.current, bookings, { exclude: wasCreatedHere }), todayStr())
       .forEach(a => toast.info(a.message, { duration: a.duration }))
-    prevIdsRef.current = ids
+    // 累積基準：復原（已入座→待到）再出現的訂位不算新訂位，見 utils/newBookingAlerts.mergeSeenIds
+    prevIdsRef.current = mergeSeenIds(prevIdsRef.current, bookings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookings, ready])
 

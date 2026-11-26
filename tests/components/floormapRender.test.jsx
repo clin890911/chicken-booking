@@ -283,4 +283,53 @@ describe('TableShape reserved 版面（時段＋姓名）', () => {
     const html = wrapSvg(<TableShape table={baseTable({ status: 'vacant', capacity: 6 })} onClick={() => {}} />)
     expect(html).toContain('6 人')
   })
+
+  // 🔴 B3：選中樣式統一（粗框＋✓徽章＋浮起陰影），色值來自 statusColors
+  it('選中桌：粗框＋✓徽章＋陰影；色值來自 SELECTION_STYLE', async () => {
+    const { SELECTION_STYLE } = await import('../../src/components/admin/floormap/statusColors')
+    const html = wrapSvg(<TableShape table={baseTable()} isSelected onClick={() => {}} />)
+    expect(html).toContain(`stroke="${SELECTION_STYLE.selected.stroke}"`)
+    expect(html).toContain(`stroke-width="${SELECTION_STYLE.selected.strokeWidth}"`)
+    expect(html).toContain('data-selected-badge="true"')
+    expect(html).toContain('drop-shadow')
+  })
+
+  it('多選：每一張選中的桌都有一樣的徽章與粗框；未選的沒有', () => {
+    const html = wrapSvg(<>
+      <TableShape table={baseTable({ number: '101' })} isSelected onClick={() => {}} />
+      <TableShape table={baseTable({ number: '102', x: 300 })} isSelected onClick={() => {}} />
+      <TableShape table={baseTable({ number: '103', x: 500 })} onClick={() => {}} />
+    </>)
+    expect(html.match(/data-selected-badge/g)).toHaveLength(2)
+    expect(html.match(/stroke-width="4"/g)).toHaveLength(2)
+  })
+
+  it('暫選／建議／剛指派：不帶 ✓ 徽章、不脈動，與選中有形狀差異', () => {
+    for (const prop of ['isPendingConfirm', 'isAssignSuggestion', 'isJustAssigned']) {
+      const html = wrapSvg(<TableShape table={baseTable()} {...{ [prop]: true }} onClick={() => {}} />)
+      expect(html).not.toContain('data-selected-badge')
+      expect(html).not.toContain('animate-pulse')
+      expect(html).not.toContain('drop-shadow')
+    }
+    const pending = wrapSvg(<TableShape table={baseTable()} isPendingConfirm onClick={() => {}} />)
+    expect(pending).toContain('stroke-dasharray="7 4"')
+  })
+
+  it('選中的旋轉桌：徽章座標依旋轉後的角點計算且在反旋群組內（保持水平）', () => {
+    const html = wrapSvg(<TableShape table={baseTable({ rotation: 90 })} isSelected onClick={() => {}} />)
+    expect(html).toContain('rotate(-90 145 137.5)')
+    expect(html).toContain('data-selected-badge')
+  })
+
+  it('焦點環是獨立 rect（opacity 0，由 :focus-visible CSS 打開），不改桌本體邊框', () => {
+    const html = wrapSvg(<TableShape table={baseTable()} isSelected onClick={() => {}} />)
+    expect(html).toContain('class="table-focus-ring"')
+    expect(html).toContain('opacity="0"')
+  })
+
+  it('FloorMap 的 focus 樣式只在 :focus-visible，且不再覆蓋桌本體 rect 的 stroke', () => {
+    const html = renderToStaticMarkup(<FloorMap floor="1F" tables={[baseTable()]} onSelectTable={() => {}} />)
+    expect(html).toContain(':focus-visible')
+    expect(html).not.toContain('g[role="button"]:focus > rect')
+  })
 })

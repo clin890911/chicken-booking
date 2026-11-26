@@ -65,3 +65,21 @@ export const DINING_STAGE_FILL = {
   overtime: '#dc2626',
   'buffer-overtime': '#b91c1c',
 }
+
+// ── 桌況圖「模式／選取」疊加樣式（2026-11 現場走查 B3：選中樣式統一）──
+// 色值原本寫死在 TableShape；收進這裡，TableShape／圖例／FloorMap focus 樣式吃同一份。
+// 設計原則（店員要一眼分辨「我已經選了」vs「系統建議／暫選」）：
+//   選中（selected）＝唯一的「實心粗框＋右上 ✓ 徽章＋浮起陰影」；多選時每一張都一樣。
+//   暫選（pending）／建議（suggest）／剛指派（justAssigned）＝虛線或細框、無 ✓、不脈動，
+//   一律與「選中」有明顯形狀差異；🔴 不再用 animate-pulse（整張桌 opacity 脈動在小桌上像「反灰」）。
+// 不影響桌況語義：可入座綠／團保紫／待清黃／用餐暖灰褐／分區色只畫角點，都不在這裡。
+export const SELECTION_STYLE = {
+  selected:     { stroke: '#e60012', strokeWidth: 4, badgeFill: '#e60012', badgeText: '#ffffff', shadow: 'drop-shadow(0 2px 3px rgba(0,0,0,0.38))' },
+  pending:      { stroke: '#d97706', strokeWidth: 3, strokeDash: '7 4', halo: '#d97706' },
+  suggest:      { stroke: '#4d7c0f', strokeWidth: 3, strokeDash: '2 4', halo: '#9eb63a' },
+  justAssigned: { stroke: '#9eb63a', strokeWidth: 3, strokeDash: null, halo: '#9eb63a' },
+  highlight:    { stroke: '#9eb63a', strokeWidth: 3, strokeDash: '4 2' },
+}
+
+// 鍵盤焦點環：只在 :focus-visible（鍵盤操作）出現，畫在桌外圈的獨立 rect 上，不蓋選中樣式的邊框。
+export const FOCUS_RING = { color: '#111827', width: 3, dash: '5 3', gap: 6 }
