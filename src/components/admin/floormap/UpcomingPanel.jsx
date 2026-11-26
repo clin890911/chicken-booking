@@ -11,6 +11,7 @@ import { overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
 import { buildTodayTimeline, matchesTimelineQuery } from '../../../utils/todayTimeline'
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
 import { seatAfterArriveConfirm, toastSeatedWithUndo, arriveActionFor } from '../../../utils/arriveSeat'
+import { seatedText, seatedTablesOf } from '../../../utils/seatFeedback'
 import { assignmentKind } from '../../../utils/tableStatus'
 import { bookingTableNumbers } from '../../../utils/bookingTables'
 import { getNoshowCount } from '../../../services/bookingService'
@@ -346,9 +347,9 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
   // 防呆與報到列同一個口徑（utils/arriveSeat.seatAfterArriveConfirm → preassignArriveConflictLines）：主桌＋副桌每張都查，
   //   今日團體保留 → 確認；他筆預配「與現在入座的用餐區間重疊」→ 確認；不重疊的預配（晚上那輪）不擋。
   //   （過去用 seatTableWarnings 不看時段，12:00 入座也會為 20:30 的預配跳確認，白多一下。）
-  // 成功 toast 帶 5 秒復原（共用 toastSeatedWithUndo：booking 與桌一起倒、被別組佔走不搶）。
+  // 成功 toast 帶 8 秒復原（共用 toastSeatedWithUndo：booking 與桌一起倒、被別組佔走不搶）。
   const handleSeat = (b) => seatAfterArriveConfirm(b, { confirm, bookings, groupHoldTables, settings, now: new Date() }, () => {
-    const tableNo = bookingTableNumbers(b).join('、')
+    const tableNo = bookingTableNumbers(b)
     const r = seatBooking(b.id)
     if (!r?.ok) {
       const msg = '入座失敗：' + (r?.error || '未知錯誤')
@@ -362,7 +363,7 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
       }
       return toast.error(msg)
     }
-    toastSeatedWithUndo(r, { message: `${b.name} 已入座 ${tableNo}`, name: b.name, undoSeatBooking, toast })
+    toastSeatedWithUndo(r, { message: seatedText({ name: b.name, guests: b.guests, tables: seatedTablesOf(r, b, tableNo[0]) }), name: b.name, undoSeatBooking, toast })
   })
 
   // 今日已入座（訂位、現場、候位入座都是 status＝arrived 的 booking；結帳後轉 completed 就離開清單）＋進行中的團體梯次。

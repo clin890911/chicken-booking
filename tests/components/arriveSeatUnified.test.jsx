@@ -115,7 +115,7 @@ describe('今日訂位卡（A1＋A6）', () => {
     expect(btn('到了 · 選桌入座')).toBeUndefined()
   })
 
-  it('他筆預配不重疊（18:00）→ 不跳確認，直接入座；toast 帶 5 秒復原，按了交 undoSeatBooking', async () => {
+  it('他筆預配不重疊（18:00）→ 不跳確認，直接入座；toast 帶 8 秒復原（B1），按了交 undoSeatBooking', async () => {
     setCtx({ bookings: [YU, other('18:00')] })
     render()
     act(() => { btn('客人到了').click() })
@@ -123,9 +123,9 @@ describe('今日訂位卡（A1＋A6）', () => {
     expect(confirm).not.toHaveBeenCalled()
     expect(ctx.seatBooking).toHaveBeenCalledWith('Y1')
     const [msg, action, opts] = toast.action.mock.calls[0]
-    expect(msg).toBe('余先生 已入座 105')
+    expect(msg).toBe('✓ 余先生 2 位 → 105 已入座')
     expect(action.label).toBe('復原')
-    expect(opts).toEqual({ duration: 5000 })
+    expect(opts).toEqual({ duration: 8000, placement: 'seat' })
     action.onClick()
     expect(ctx.undoSeatBooking).toHaveBeenCalledWith(UNDO)
   })
@@ -156,14 +156,14 @@ describe('今日訂位卡（A1＋A6）', () => {
 })
 
 describe('桌抽屜「客人到了」（A6）', () => {
-  it('入座成功 → toast 帶 5 秒復原，按了交 undoSeatBooking；復原被擋 → 說明原因', () => {
+  it('入座成功 → toast 帶 8 秒復原（B1），按了交 undoSeatBooking；復原被擋 → 說明原因', () => {
     setCtx()
     const t = mkT('105', { status: 'reserved', currentBookingId: 'Y1' })
     mount(<TableDrawer table={t} booking={YU} preassign={null} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} />)
     act(() => { btn('客人到了 — 入座').click() })
     const [msg, action, opts] = toast.action.mock.calls[0]
-    expect(msg).toBe('余先生 已入座 105')
-    expect(opts).toEqual({ duration: 5000 })
+    expect(msg).toBe('✓ 余先生 2 位 → 105 已入座')
+    expect(opts).toEqual({ duration: 8000, placement: 'seat' })
     ctx.undoSeatBooking.mockReturnValueOnce({ ok: false, error: '105 已被別組使用，無法復原' })
     action.onClick()
     expect(ctx.undoSeatBooking).toHaveBeenCalledWith(UNDO)
@@ -206,7 +206,7 @@ describe('桌抽屜「客人到了」：預配／團保衝突確認（與今日�
     await flush()
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(ctx.seatBooking).toHaveBeenCalledWith('Y1')
-    expect(toast.action.mock.calls[0][0]).toBe('余先生 已入座 105')
+    expect(toast.action.mock.calls[0][0]).toBe('✓ 余先生 2 位 → 105 已入座')
   })
 
   it('預配客人到場（桌仍空）＋今日團保 → 跳確認；取消就不指派也不入座', async () => {

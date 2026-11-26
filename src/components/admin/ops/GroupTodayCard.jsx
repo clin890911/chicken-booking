@@ -3,6 +3,7 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import { seatingPerms } from '../../../utils/seatingPerms'
 import { useToast, useConfirm } from '../../ui/Toast'
+import { toastGroupSeated } from '../../../utils/seatFeedback'
 import { Badge } from '../../ui'
 import { batchLiveState, sortedBatches } from '../../../utils/groupLive'
 import Icon from '../../ui/Icon'
@@ -21,7 +22,7 @@ const STATUS_LABEL = {
 // 「今日」時間清單的團體梯次列（GroupBatchRow）共用同一套 handler，不各寫一份。
 // 入座/離席/完成一次翻動多桌，誤觸成本高 → 一律 confirm（不走地圖二步確認，桌已預圈無選桌步驟）。
 export function useGroupBatchActions(g, { onReseatBatch } = {}) {
-  const { tables, seatGroupBatch, checkoutGroupBatch, undoGroupCheckout, releaseGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
+  const { tables, seatGroupBatch, undoSeatGroupBatch, checkoutGroupBatch, undoGroupCheckout, releaseGroupBatch, finalizeGroup, setGroupStatus } = useBooking()
   const toast = useToast()
   const confirm = useConfirm()
   // 權限門（見 utils/seatingPerms.js）：梯次入座／整梯釋出／整團完成／標記已確認會寫 groupReservations（group.update），
@@ -48,7 +49,7 @@ export function useGroupBatchActions(g, { onReseatBatch } = {}) {
       if (r.blocked?.length && onReseatBatch) onReseatBatch(g, b, r.blocked)
       return
     }
-    toast.success(`${g.agencyName} ${b.label} 已入座（${tablesTxt}）`)
+    toastGroupSeated(r, { group: g, batch: b, undoSeatGroupBatch, toast })
   }
 
   const onCheckout = async (b) => {

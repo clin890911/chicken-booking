@@ -72,7 +72,7 @@ test('報到列列出未配桌的訂位 → 到了·選桌 → 點桌 → 確認
   await page.getByRole('button', { name: '確認入座', exact: true }).click(); taps++
   expect(taps).toBeLessThanOrEqual(3)
 
-  await expect(page.getByText('林先生（3 位）已入座 105')).toBeVisible()
+  await expect(page.getByText('✓ 林先生 3 位 → 105 已入座')).toBeVisible()
   let { bookings, tables } = await readState(page)
   expect(bookings.find(b => b.id === LIN.id)).toMatchObject({ status: 'arrived', assignedTableId: '105' })
   expect(tables.find(t => t.number === '105')).toMatchObject({ status: 'dining', currentBookingId: LIN.id })
@@ -99,7 +99,7 @@ test('今日訂位卡：未配桌訂位「到了 · 選桌入座」→ 點桌 �
   await mapTable(page, '106').click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
 
-  await expect(page.getByText('林先生（3 位）已入座 106')).toBeVisible()
+  await expect(page.getByText('✓ 林先生 3 位 → 106 已入座')).toBeVisible()
   const { bookings, tables } = await readState(page)
   expect(bookings.find(b => b.id === LIN.id)).toMatchObject({ status: 'arrived', assignedTableId: '106' })
   expect(tables.find(t => t.number === '106')).toMatchObject({ status: 'dining', currentBookingId: LIN.id })
@@ -125,7 +125,7 @@ test('選到的桌有重疊預配 → 勾選才解鎖；入座解除那筆預配
   await page.getByRole('checkbox', { name: /知道了，仍用這桌/ }).check()
   await ok.click()
 
-  await expect(page.getByText('林先生（3 位）已入座 105')).toBeVisible()
+  await expect(page.getByText('✓ 林先生 3 位 → 105 已入座')).toBeVisible()
   let { bookings } = await readState(page)
   expect(bookings.find(b => b.id === CHEN.id).assignedTableId).toBeNull()
 

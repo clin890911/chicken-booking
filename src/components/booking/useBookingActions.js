@@ -9,6 +9,7 @@ import { diffMin, stageOf } from '../../utils/diningStage'
 import { formatBookingTables } from '../../utils/bookingTables'
 import { markNoshow, restoreFromNoshow, cancelWithUndo, releaseAfterCheckout } from '../../utils/bookingActions'
 import { toastSeatedWithUndo, seatAfterArriveConfirm } from '../../utils/arriveSeat'
+import { seatedText, seatedTablesOf } from '../../utils/seatFeedback'
 
 // 用餐已坐分鐘數。分鐘級顯示只需要 30 秒 tick——原本每張「用餐中」卡片各自每秒 setState
 // 一次，十張卡就是每秒十次重繪，手機上捲清單會明顯頓（後台卡頓根因之一）。
@@ -119,8 +120,8 @@ export function useBookingActions(booking, { onAssign, onMove } = {}) {
         }
         return toast.error('入座失敗：' + r.error)
       }
-      // 5 秒復原：與現場四個「客人到了」入口共用（booking 與桌一起倒、被別組佔走不搶）
-      toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${formatBookingTables(booking)}`, name: booking.name, undoSeatBooking, toast })
+      // 8 秒復原：與現場四個「客人到了」入口共用（booking 與桌一起倒、被別組佔走不搶）
+      toastSeatedWithUndo(r, { message: seatedText({ name: booking.name, guests: booking.guests, tables: seatedTablesOf(r, booking) }), name: booking.name, undoSeatBooking, toast })
     })
   }, [booking, onAssign, onMove, isCombo, seatBooking, undoSeatBooking, toast, confirm, bookings, groupReservations, tables, settings])
 

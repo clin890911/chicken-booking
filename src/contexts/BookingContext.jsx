@@ -953,6 +953,8 @@ export function BookingProvider({ children }) {
 
   // 團體梯次入座流程（含通知略過：團體現場操作頻繁，暫不發 TG）
   const seatGroupBatch = (groupId, batchId) => { const r = seatingService.seatGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
+  // 整梯入座的 8 秒復原（B1）：只倒仍是本梯用餐中的桌，任一張變了整梯不動（見 seatingService.undoSeatGroupBatch）
+  const undoSeatGroupBatch = (snapshot) => { const r = seatingService.undoSeatGroupBatch(snapshot); if (r?.ok) { refresh(); syncCloudSoon() } return r }
   const checkoutGroupBatch = (groupId, batchId) => { const r = seatingService.checkoutGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const releaseGroupBatch = (groupId, batchId) => { const r = seatingService.releaseGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const seatNextBatchOnTable = (tableNumber, groupId, batchId) => { const r = seatingService.seatNextBatchOnTable(tableNumber, groupId, batchId); refresh(); syncCloudSoon(); return r }
@@ -1013,8 +1015,12 @@ export function BookingProvider({ children }) {
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
     // 入座／換桌／復原類動作：失敗時 error 換成店員看得懂的句子（原文在 rawError；ok／code 不動），見 utils/seatErrorText。
-    ...withFriendlyErrors({ assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, undoWalkInSeat, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, undoSeatedMove }),
-    clearTable, releaseCheckedOutTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    // 2026-11 B 包留尾：團體梯次系列、清桌、離席後釋出也一起轉（同一個失敗句不該因入口不同而一個友善、一個原文）。
+    ...withFriendlyErrors({ assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, undoWalkInSeat, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, undoSeatedMove,
+      clearTable, releaseCheckedOutTables,
+      seatGroupBatch, undoSeatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
+      checkoutGroupTable, undoGroupCheckout, clearGroupTable, undoClearGroupTable, moveGroupTable, addGroupBatchTable }),
+    findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
@@ -1023,8 +1029,6 @@ export function BookingProvider({ children }) {
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
     createAndReserveGroup, purgeBlankGroups,
-    seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
-    checkoutGroupTable, undoGroupCheckout, clearGroupTable, undoClearGroupTable, moveGroupTable, addGroupBatchTable,
     updateSettings, flushCloudNow, discardRejectedChanges,
   }), [
     bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated, pendingWaitlistCommands, waitlistOwner,

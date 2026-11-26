@@ -6,6 +6,7 @@ import { buildGroupHolds, todayActiveGroups } from './groupLive'
 import { todayStr } from './timeSlots'
 import { bookingTableNumbers } from './bookingTables'
 import { splitFields } from './partySplit'
+import { SEAT_UNDO_MS, toastSeatUndo } from './seatFeedback'
 
 // 入座前的預留警示（報到列與今日訂位卡同一個口徑）：
 // 桌（大組含副桌）被今日團體圈桌未入座、或他筆訂位預配且用餐區間與「現在入座」重疊
@@ -44,13 +45,15 @@ export function seatAfterArriveConfirm(booking, { confirm, bookings = [], groupH
     .then(ok => (ok ? proceed() : false))
 }
 
-// 入座成功後的 toast＋5 秒復原（四個入口與選桌入座共用，不各寫一套）。
+// 入座成功後的 toast＋8 秒復原（四個入口與選桌入座共用，不各寫一套）。
+// 文字與秒數、位置走 utils/seatFeedback（全部入座入口同一種回饋）：message 請用 seatedText() 組。
 // r＝入座結果（seatBooking／seatBookingAllTables／assignAndSeatBooking），r.undo 是 service 入座前拍的快照。
 // 復原走 undoSeatBooking：booking 與 table 兩邊一起倒；只倒仍由本筆用餐中、或已空的桌——
 // 被別組佔走就整組不動並明講（不搶桌）。帶位時解除掉的他筆預配（releasedPreassigns）一併還回去。
 // 回傳同一支復原函式（報到列就地確認卡的「復原」也用它）：toast 與確認卡兩邊按哪一個都一樣，
 // 已成功復原過就不再倒第二次（回 { ok:true, already:true }），失敗則可再按。
-export const SEATED_UNDO_MS = 5000
+// 報到列就地確認卡（A3）與 toast 同一個時效：都是 8 秒（seatFeedback.SEAT_UNDO_MS），按哪一個都還來得及。
+export const SEATED_UNDO_MS = SEAT_UNDO_MS
 export function toastSeatedWithUndo(r, { message, name, undoSeatBooking, toast, releasedPreassigns = [], restoreOverriddenAssignment, onUndone }) {
   let undone = false
   const undo = () => {
@@ -65,7 +68,7 @@ export function toastSeatedWithUndo(r, { message, name, undoSeatBooking, toast, 
     onUndone?.(u)
     return u
   }
-  toast.action(message, { label: '復原', onClick: () => { undo() } }, { duration: SEATED_UNDO_MS })
+  toastSeatUndo(toast, message, { label: '復原', onUndo: undo })
   return undo
 }
 

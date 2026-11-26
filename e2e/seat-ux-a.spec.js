@@ -92,7 +92,7 @@ for (const vp of [{ name: 'iPad 橫', width: 1180, height: 820 }, { name: 'iPad 
     expect(cb.y + cb.height).toBeGreaterThan(pb.y + pb.height - 90)
     expect(cb.x + cb.width).toBeLessThanOrEqual(before.x)
     await confirmBtn.click()
-    await expect(page.getByText(/陳小姐（4 位）已入座 105（原預配 106 被佔）/)).toBeVisible()
+    await expect(page.getByText(/✓ 陳小姐 4 位 → 105 已入座/)).toBeVisible()
     // 模式結束也不重排地圖（105 剛入座有綠光外框，量旁邊沒被選的 103）
     const after2 = await mapTable(page, '103').boundingBox()
     expect(Math.abs(after2.width - before103.width) / before103.width).toBeLessThanOrEqual(0.05)
@@ -167,7 +167,7 @@ test('A4 今日卡片：預配桌被佔 → 「到了 · 換桌入座」進同�
   await expect(panel).toContainText('到了 · 換桌入座：陳小姐 4 位')
   await mapTable(page, '108').click()
   await panel.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/陳小姐（4 位）已入座 108（原預配 106 被佔）/)).toBeVisible()
+  await expect(page.getByText(/✓ 陳小姐 4 位 → 108 已入座/)).toBeVisible()
   const { bookings, tables } = await readState(page)
   expect(bookings.find(b => b.id === CHEN.id)).toMatchObject({ status: 'arrived', assignedTableId: '108' })
   expect(tables.find(t => t.number === '106')).toMatchObject({ status: 'dining', currentBookingId: WALK.id })

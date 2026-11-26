@@ -148,7 +148,7 @@ test('F3 團體到店整梯入座：一下整梯、桌況圖變用餐中', async
   step(); await row.getByRole('button', { name: /梯次入座/ }).click()
   await expect(page.getByText(/整梯 2 桌：101、102/)).toBeVisible()
   step(); await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/第一梯 已入座/)).toBeVisible()
+  await expect(page.getByText(/第一梯 \d+ 位 → \S+ 已入座/)).toBeVisible()
   const s = await readState(page)
   expect(tableOf(s, '101').status).toBe('dining')
   expect(tableOf(s, '102').status).toBe('dining')

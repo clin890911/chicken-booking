@@ -225,7 +225,7 @@ test('到了 · 選桌入座：「用建議桌」選好併桌組合（含切樓�
   await expect(page.getByText(/已選 8\/8 席 · 2 桌/)).toBeVisible()
   await page.getByRole('button', { name: '確認併桌入座', exact: true }).click()
 
-  await expect(page.getByText(/大組（8 位）已入座 20[12] \+ 20[12]/)).toBeVisible()
+  await expect(page.getByText(/✓ 大組 8 位 → 20[12]＋20[12] 已入座/)).toBeVisible()
   const { bookings, tables } = await readState(page)
   const b = bookings.find(x => x.id === BIG.id)
   expect(b.status).toBe('arrived')
@@ -303,7 +303,7 @@ test('選桌入座「用建議桌」後其中一張被別筆預配（時段重�
   await ack.check()
   await expect(confirmBtn).toBeEnabled()
   await confirmBtn.click()
-  await expect(page.getByText(/大組（8 位）已入座/)).toBeVisible()
+  await expect(page.getByText(/✓ 大組 8 位 → \S+ 已入座/)).toBeVisible()
   const { bookings } = await readState(page)
   expect(bookings.find(x => x.id === BIG.id).status).toBe('arrived')
 })

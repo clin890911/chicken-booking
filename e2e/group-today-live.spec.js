@@ -57,7 +57,7 @@ test('管理端：今日團體 梯次入座 → 整梯離席 → 清桌＋接下
   await row.getByRole('button', { name: /梯次入座/ }).click()
   await expect(page.getByText(/整梯 2 桌：101、102/)).toBeVisible()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/第一梯 已入座/)).toBeVisible()
+  await expect(page.getByText(/第一梯 \d+ 位 → \S+ 已入座/)).toBeVisible()
 
   // 點地圖上的團體桌 101 → 抽屜顯示團體資訊與「整梯離席（N 桌）」（2026-11 原「此梯離席（整梯）」改名，單桌另有「這桌離席」）
   await page.locator('svg g:has(:text-is("101"))').first().click()
@@ -111,7 +111,7 @@ test('管理端：單梯團 入座 → 離席 → 整梯清桌釋出 → 自動�
   // 整輪：入座 → 離席（列上）→ 整梯清桌釋出（列入座後移到「已入座」區段、維持展開）
   await page.getByRole('button', { name: /梯次入座/ }).click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/第一梯 已入座/)).toBeVisible()
+  await expect(page.getByText(/第一梯 \d+ 位 → \S+ 已入座/)).toBeVisible()
   await page.getByRole('button', { name: '梯次離席' }).click()
   await page.getByRole('button', { name: '確認離席', exact: true }).click()
   await expect(page.getByText(/已離席，桌位待清/)).toBeVisible()

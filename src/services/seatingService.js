@@ -787,6 +787,19 @@ export function replacePendingBookingTables(bookingId, tableNumbers, { now = new
 
 // 已入座整組换桌：保留訂位與原用餐起點，撤出的桌待清潔；不重走 arrival。
 // confirmedConflictTables 僅涵蓋店員已看過並勾選確認的預配／團保桌。
+// B6「點錯修正」：撤出的原桌若入座未滿 QUICK_FIX_MOVE_MS（5 分鐘，看那張桌自己的 seatedAt）→ 客人根本還沒用過，
+//   直接回空桌，不變待清（過去 0 分鐘的桌也變待清，外場被叫去清一張乾淨的桌，店員因此不敢改）；滿 5 分鐘照舊待清。
+//   只動本筆持有的原桌（own() 已要求原桌全部 currentBookingId＝本筆；別組的桌本來就不在 original 裡）。
+//   沒有 seatedAt（舊資料 reserved 鎖桌）一律照舊待清——保守，不猜。回傳 freedTables／cleaningTables 給呈現層講清楚。
+//   復原（undoSeatedMove）本來就接受「待清或空桌、且沒人持有」的原桌，空桌被別組坐走就安全失敗。
+export const QUICK_FIX_MOVE_MS = 5 * 60 * 1000
+// 原桌入座未滿 5 分鐘＝點錯修正（B6）。seatedAt 缺或無效 → false（照舊待清）；時鐘誤差造成的未來時間算 0 分鐘。
+export function isQuickFixMove(table, now = new Date()) {
+  const at = table?.status === 'dining' && table.seatedAt ? new Date(table.seatedAt).getTime() : NaN
+  if (!Number.isFinite(at)) return false
+  return (new Date(now).getTime() - at) < QUICK_FIX_MOVE_MS
+}
+
 export function replaceSeatedBookingTables(bookingId, tableNumbers, { now = new Date(), confirmedConflictTables = [], confirmedWarningSignature, originalTableNumbers } = {}) {
   const booking = bookingService.getById(bookingId)
   if (!booking || booking.status !== 'arrived') return { ok: false, error: '僅已入座訂位可調整位子' }
@@ -824,10 +837,16 @@ export function replaceSeatedBookingTables(bookingId, tableNumbers, { now = new 
     || original.map(n => tables.find(t => String(t.number) === n)?.seatedAt).find(Boolean)
     || booking.actualArrivalTime || null
   const updatedAt = now.toISOString()
+  const freedTables = []
+  const cleaningTables = []
   const next = tables.map(t => {
     const n = String(t.number)
     if (nums.includes(n)) return { ...t, status: 'dining', currentBookingId: bookingId, currentRef: null, seatedAt: original.includes(n) ? (t.seatedAt || start) : start, mergedWith: null, blockReason: null, updatedAt }
-    if (original.includes(n)) return { ...t, status: 'cleaning', currentBookingId: null, currentRef: null, seatedAt: null, mergedWith: null, blockReason: null, updatedAt }
+    if (original.includes(n) && heldBy(t, bookingId)) {
+      const quickFix = isQuickFixMove(t, now)
+      ;(quickFix ? freedTables : cleaningTables).push(n)
+      return { ...t, status: quickFix ? 'vacant' : 'cleaning', currentBookingId: null, currentRef: null, seatedAt: null, mergedWith: null, blockReason: null, updatedAt }
+    }
     return t
   })
   const keys = ['chicken_tables_v3', 'chicken_bookings_v1']
@@ -844,7 +863,7 @@ export function replaceSeatedBookingTables(bookingId, tableNumbers, { now = new 
       if (!released.ok) throw new Error('預配解除失敗')
       releasedPreassigns.push({ bookingId: id, name: allBookings.find(b => String(b.id) === String(id))?.name || '', tableNumbers: released.tableNumbers || [], released: released.released || [] })
     }
-    return { ok: true, booking: changed, tableNumbers: nums, releasedPreassigns }
+    return { ok: true, booking: changed, tableNumbers: nums, releasedPreassigns, freedTables, cleaningTables }
   } catch {
     try { keys.forEach((key, i) => snapshots[i] == null ? localStorage.removeItem(key) : localStorage.setItem(key, snapshots[i])) }
     catch { return { ok: false, error: '裝置儲存異常，請重新整理確認桌況後再操作' } }
@@ -1434,10 +1453,48 @@ export function seatGroupBatch(groupId, batchId) {
     if (ref.groupId === groupId && ref.batchId === batchId) return
     displaced.set(`${ref.groupId}|${ref.batchId}`, ref)
   })
+  // B1 復原快照：只在「整梯每張桌入座前都是無人持有的空桌」時給（最常見：團體準時到、桌是乾淨的）。
+  // 接走前梯待清桌（displaced）或本梯部分桌早已坐著（重按）時不給——倒回去要把前梯的 currentRef／releasedAt／
+  // 結團狀態一起還原，牽涉團單資料，風險高於價值（店員改用「這桌離席」等既有出口）。
+  const undoable = !displaced.size && tables.every(n => {
+    const t = tableService.getByNumber(n)
+    return t?.status === 'vacant' && t.currentBookingId == null && !t.currentRef
+  })
+  const undo = undoable ? { groupId, batchId, tableNumbers: tables.map(String), prevGroupStatus: group.status } : null
   tables.forEach(n => tableService.seatTableForGroup(n, groupId, batchId))
   if (group.status !== 'arrived') groupService.setStatus(groupId, 'arrived')
   displaced.forEach(ref => settleBatchIfDone(ref.groupId, ref.batchId))
-  return { ok: true, tableNumbers: tables }
+  return undo ? { ok: true, tableNumbers: tables, undo } : { ok: true, tableNumbers: tables }
+}
+
+// === 團體整梯入座的 8 秒復原（B1）===
+// snap＝seatGroupBatch 回傳的 undo（只有整梯原本都是空桌時才有）。復原鐵律同 undoSeatBooking：
+//   - 團仍有效（未完成／未取消）、這一梯未清桌釋出
+//   - 每張桌都「仍是本梯用餐中」（currentRef 指向本團本梯、沒有散客 booking）才倒；任一張已離席／換桌／被別組接手
+//     → 整梯不動、安全失敗（不清別人的桌）
+//   - 桌倒回空桌；團狀態只在「入座前不是 arrived、且此刻沒有任何桌還連著這團」時寫回原狀態（別梯已在用餐就維持 arrived）
+// 不新增任何欄位（團單資料形狀不變）：只用既有的 tableService.clearTable 與 groupService.setStatus。
+export function undoSeatGroupBatch(snap = {}) {
+  const { groupId, batchId, tableNumbers = [], prevGroupStatus } = snap || {}
+  const group = groupId ? groupService.getById(groupId) : null
+  if (!group) return { ok: false, error: '團單不存在' }
+  if (['completed', 'cancelled'].includes(group.status)) return { ok: false, error: '此團狀態已被更動，無法復原' }
+  const batch = (group.batches || []).find(b => b.id === batchId)
+  if (!batch || batch.releasedAt) return { ok: false, error: '此梯狀態已被更動，無法復原' }
+  const nums = [...new Set(tableNumbers.map(String))]
+  if (!nums.length) return { ok: false, error: '此梯狀態已被更動，無法復原' }
+  const changed = nums.filter(n => {
+    const t = tableService.getByNumber(n)
+    return !t || t.status !== 'dining' || t.currentBookingId != null
+      || t.currentRef?.groupId !== groupId || t.currentRef?.batchId !== batchId
+  })
+  if (changed.length) return { ok: false, code: 'table-occupied', error: `${changed.join('、')} 已離席、換桌或被別組使用，無法復原` }
+  nums.forEach(n => tableService.clearTable(n))
+  const stillSeated = tableService.listAll().some(t => t.currentRef?.groupId === groupId)
+  if (prevGroupStatus && prevGroupStatus !== 'arrived' && group.status === 'arrived' && !stillSeated) {
+    groupService.setStatus(groupId, prevGroupStatus)
+  }
+  return { ok: true, tableNumbers: nums }
 }
 
 // 改派桌位：團體梯次某張桌被佔時，把該梯圈桌中的 fromTable 換成 toTable，並立即重試整梯入座。

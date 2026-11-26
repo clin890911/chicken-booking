@@ -106,7 +106,7 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
   await page.locator('svg g:has(:text-is("107"))').first().click()
   await expect(page.getByText('已選 4/2 席 · 1 桌')).toBeVisible()
   await page.getByRole('button', { name: /確認改桌/ }).click()
-  await expect(page.getByText(/余先生 已改桌至 107（原訂位保留）/)).toBeVisible()
+  await expect(page.getByText(/✓ 余先生 改到 107/)).toBeVisible()
 
   const state = await page.evaluate(() => ({
     bookings: JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]'),
@@ -172,7 +172,7 @@ test('帶位覆蓋不重疊的預配（12:20 vs 20:30）→ 預配保留', async
   await expect(page.getByText(/105 已排給 20:30 余先生.*余先生 的排位保留/)).toBeVisible()
   await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()     // M1：警示仍要勾選解鎖
   await slide(page)
-  await expect(page.getByText(/入座 105\s*·\s*可帶下一組/)).toBeVisible()
+  await expect(page.getByText(/→ 105 已入座/)).toBeVisible()
   await expect(page.getByText(/余先生原本的預配/)).toHaveCount(0)
   const yu = (await readBookings(page)).find(b => b.id === 'E2E-YU')
   expect(yu.assignedTableId).toBe('105')

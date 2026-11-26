@@ -58,7 +58,7 @@ test('桌被佔 → 中文錯誤 + 改派模式 → 點替代桌整梯入座', a
   await page.getByRole('button', { name: /散客入座（覆蓋團體預留）/ }).click()
   await page.getByRole('button', { name: '改散客入座', exact: true }).click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/已入座 101/)).toBeVisible()
+  await expect(page.getByText(/→ 101 已入座/)).toBeVisible()
 
   // 團體梯次入座 → 失敗（101 用餐中，中文）→ 自動進入改派模式
   await page.keyboard.press('Escape') // 關掉 101 抽屜回左欄
@@ -72,7 +72,7 @@ test('桌被佔 → 中文錯誤 + 改派模式 → 點替代桌整梯入座', a
   await page.locator('svg g:has(:text-is("103"))').first().click()
   await expect(page.getByText(/把 101 改派為 103 並整梯入座/)).toBeVisible()
   await page.getByRole('button', { name: /確認改派/ }).click()
-  await expect(page.getByText(/已改派 101 → 103/)).toBeVisible()
+  await expect(page.getByText(/✓ 改派旅行社 .*→ \S*103\S* 已入座/)).toBeVisible()   // B1：改派後整梯入座同一種成功句
 
   // 成功後抽屜聚焦新桌 → ESC 關閉抽屜回側欄，團體梯次列顯示新桌號、可離席
   await page.keyboard.press('Escape')
@@ -88,7 +88,7 @@ test('整團完成 → 團體梯次列移出今日清單、不可再入座；進
   const row = await openGroupRow(page, '改派旅行社')
   await row.getByRole('button', { name: /梯次入座/ }).click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/第一梯 已入座/)).toBeVisible()
+  await expect(page.getByText(/第一梯 \d+ 位 → \S+ 已入座/)).toBeVisible()
   // 進行中（已入座段、列仍展開）：回傳單列印鈕在列上
   await expect(page.locator('[data-section="seated"] [data-group-batch]')).toHaveCount(1)
   await expect(row.locator('button[title="回傳單"]')).toBeVisible()

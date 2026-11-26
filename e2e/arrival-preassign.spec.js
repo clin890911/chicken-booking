@@ -63,7 +63,7 @@ test('預配 12:00 的訂位 11:40 出現在報到列 → 按到了入座；復�
   await expect(strip.getByRole('listitem')).toContainText('預配')
 
   await strip.getByRole('button', { name: '余先生 到了，入座 105' }).click()
-  await expect(page.getByText('余先生 已入座 105')).toBeVisible()
+  await expect(page.getByText(/✓ 余先生 \d+ 位 → 105 已入座/)).toBeVisible()
   let { bookings, tables } = await readState(page)
   expect(bookings.find(b => b.id === YU.id).status).toBe('arrived')
   expect(tables.find(t => t.number === '105')).toMatchObject({ status: 'dining', currentBookingId: YU.id })
@@ -100,7 +100,7 @@ test('預配的桌此刻被別組佔 → 報到列標「預配·桌被佔」，�
   await expect(page.getByText('原預配 105 被佔 · 換一張空桌')).toBeVisible()
   await page.getByRole('button', { name: /^106桌/ }).click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/余先生（\d+ 位）已入座 106（原預配 105 被佔）/)).toBeVisible()
+  await expect(page.getByText(/✓ 余先生 \d+ 位 → 106 已入座/)).toBeVisible()
 
   const { bookings, tables } = await readState(page)
   expect(bookings.find(b => b.id === YU.id)).toMatchObject({ status: 'arrived', assignedTableId: '106' })
@@ -134,7 +134,7 @@ test('預配桌是今日團保 → 按到了先跳「桌位有預留」確認；
 
   await strip.getByRole('button', { name: '余先生 到了，入座 105' }).click()
   await page.getByRole('button', { name: '仍要入座' }).click()
-  await expect(page.getByText('余先生 已入座 105')).toBeVisible()
+  await expect(page.getByText(/✓ 余先生 \d+ 位 → 105 已入座/)).toBeVisible()
   ;({ bookings, tables } = await readState(page))
   expect(bookings.find(b => b.id === YU.id).status).toBe('arrived')
   expect(tables.find(t => t.number === '105').status).toBe('dining')

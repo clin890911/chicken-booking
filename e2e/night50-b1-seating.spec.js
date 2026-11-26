@@ -82,7 +82,7 @@ test('A1 兩位散客 → 空 2 人桌：人數→點桌→確認入座', async 
   await mapTable(page, '101').click(); steps++
   await shot(page, 'A1-1-selected')
   await page.getByTestId('walkin-seat').click(); steps++
-  await expect(page.getByText(/入座 101\s*·\s*可帶下一組/)).toBeVisible()
+  await expect(page.getByText(/→ 101 已入座/)).toBeVisible()
   const { bookings, tables } = await readState(page)
   expect(tables.find(t => t.number === '101')).toMatchObject({ status: 'dining' })
   const b = bookings.find(x => x.id === tables.find(t => t.number === '101').currentBookingId)
@@ -109,7 +109,7 @@ test('A2 五位散客，只剩 4 人桌與 6 人桌', async ({ page }) => {
   // 正解：6 人桌
   await mapTable(page, '104').click(); steps++
   await page.getByTestId('walkin-seat').click(); steps++
-  await expect(page.getByText(/入座 104/)).toBeVisible()
+  await expect(page.getByText(/→ 104 已入座/)).toBeVisible()
   const { tables } = await readState(page)
   expect(tables.find(t => t.number === '104').status).toBe('dining')
   record('A2', { steps, hintText, warn102 })
@@ -135,7 +135,7 @@ test('A3 七位散客只剩兩張 4 人桌 → 建議併桌', async ({ page }) =
   await shot(page, 'A3-2-two-tables')
   const confirmText = await page.getByTestId('walkin-seat').textContent()
   await page.getByTestId('walkin-seat').click(); steps++
-  await expect(page.getByText(/入座 102 \+ 103/)).toBeVisible()
+  await expect(page.getByText(/→ 102＋103 已入座/)).toBeVisible()
   const { bookings, tables } = await readState(page)
   const main = tables.find(t => t.number === '102')
   expect(main.status).toBe('dining')
@@ -169,7 +169,7 @@ test('A4 散客留電話：選填、鍵盤擋不擋桌況、舊客帶檔', async
   await page.getByRole('button', { name: 'OK', exact: true }).click(); steps++
   const nameAfter = await page.getByTestId('walkin-seat').textContent()
   await page.getByTestId('walkin-seat').click(); steps++
-  await expect(page.getByText(/入座 102/)).toBeVisible()
+  await expect(page.getByText(/→ 102 已入座/)).toBeVisible()
   const { bookings, tables } = await readState(page)
   const b = bookings.find(x => x.id === tables.find(t => t.number === '102').currentBookingId)
   record('A4', { steps, enabledWithoutPhone, padBox, mapBox, overlap, confirmLabel: nameAfter, savedName: b.name, savedPhone: b.phone, savedNotes: b.notes })
@@ -182,7 +182,7 @@ test('A5 帶錯桌 → 5 秒內復原：桌回空桌', async ({ page }) => {
   await party(page, 2).click()
   await mapTable(page, '102').click()
   await page.getByTestId('walkin-seat').click()
-  await expect(page.getByText(/入座 102/)).toBeVisible()
+  await expect(page.getByText(/→ 102 已入座/)).toBeVisible()
   const before = await readState(page)
   const bid = before.tables.find(t => t.number === '102').currentBookingId
   let steps = 0
@@ -218,7 +218,7 @@ test('A6 1F 滿 → 切 2F 帶位：人數保留', async ({ page }) => {
   await mapTable(page, '201').click(); steps++
   await shot(page, 'A6-1-2F-selected')
   await page.getByTestId('walkin-seat').click(); steps++
-  await expect(page.getByText(/入座 201/)).toBeVisible()
+  await expect(page.getByText(/→ 201 已入座/)).toBeVisible()
   const { tables } = await readState(page)
   expect(tables.find(t => t.number === '201').status).toBe('dining')
   record('A6', { steps, hint, nudgeDots: nudge, partyKept: kept })
@@ -237,7 +237,7 @@ test('A7 兩台同時帶同一桌（同 localStorage 兩個分頁模擬）', asy
   await expect(pageB.getByRole('button', { name: '移除桌 102' })).toBeVisible()
   // A 先確認
   await page.getByTestId('walkin-seat').click()
-  await expect(page.getByText(/入座 102/)).toBeVisible()
+  await expect(page.getByText(/→ 102 已入座/)).toBeVisible()
   await pageB.waitForTimeout(500)
   const bStillSelected = await pageB.getByRole('button', { name: '移除桌 102' }).isVisible().catch(() => false)
   const bConfirm = await pageB.getByTestId('walkin-seat').textContent()
@@ -268,7 +268,7 @@ test('A8 沿用上一組：同一家人分兩桌', async ({ page }) => {
   await page.getByPlaceholder('例：靠窗、慶生、過敏').fill('同一家 A 桌')
   await mapTable(page, '102').click()
   await page.getByTestId('walkin-seat').click()
-  await expect(page.getByText(/入座 102/)).toBeVisible()
+  await expect(page.getByText(/→ 102 已入座/)).toBeVisible()
   // 第二桌
   let steps = 0
   const reuse = page.getByRole('button', { name: /沿用上一組/ })
@@ -279,7 +279,7 @@ test('A8 沿用上一組：同一家人分兩桌', async ({ page }) => {
   const label = await page.getByTestId('walkin-seat').textContent()
   const phoneVal = await phone.inputValue()
   await page.getByTestId('walkin-seat').click(); steps++
-  await expect(page.getByText(/入座 103/)).toBeVisible()
+  await expect(page.getByText(/→ 103 已入座/)).toBeVisible()
   const { bookings, tables } = await readState(page)
   const b1 = bookings.find(x => x.id === tables.find(t => t.number === '102').currentBookingId)
   const b2 = bookings.find(x => x.id === tables.find(t => t.number === '103').currentBookingId)
@@ -297,7 +297,7 @@ test('B1 預配桌的王先生 17:50 到 → 報到列一下入座', async ({ pa
   await expect(strip(page).getByRole('listitem')).toContainText('王先生')
   await shot(page, 'B1-1-strip')
   await strip(page).getByRole('button', { name: '王先生 到了，入座 104' }).click(); steps++
-  await expect(page.getByText(/王先生 已入座 104/)).toBeVisible()
+  await expect(page.getByText(/✓ 王先生 \d+ 位 → 104 已入座/)).toBeVisible()
   const { bookings, tables } = await readState(page)
   expect(bookings.find(b => b.id === WANG.id)).toMatchObject({ status: 'arrived', assignedTableId: '104' })
   expect(tables.find(t => t.number === '104')).toMatchObject({ status: 'dining', currentBookingId: WANG.id })
@@ -315,7 +315,7 @@ test('B2 預訂客到了但沒預配桌 → 到了直接進選桌', async ({ pag
   await shot(page, 'B2-1-pick-mode')
   await mapTable(page, '102').click(); steps++
   await page.getByRole('button', { name: '確認入座', exact: true }).click(); steps++
-  await expect(page.getByText('李小姐（3 位）已入座 102')).toBeVisible()
+  await expect(page.getByText('✓ 李小姐 3 位 → 102 已入座')).toBeVisible()
   const { bookings } = await readState(page)
   expect(bookings.find(b => b.id === LI.id)).toMatchObject({ status: 'arrived', assignedTableId: '102' })
   record('B2', { steps })
@@ -341,7 +341,7 @@ test('B3 預訂 4 人到了 6 人 → 選桌入座橫幅直接改人數 → 選�
   // 4 人桌擠一擠最多 5 位 → 確認鈕不可按；改點 6 人桌
   await mapTable(page, '104').click(); steps++; clicks++
   await page.getByRole('button', { name: '確認入座', exact: true }).click(); steps++; clicks++
-  await expect(page.getByText(/張先生（6 位，原訂 4 位）已入座 104/)).toBeVisible()
+  await expect(page.getByText(/✓ 張先生 6 位 → 104 已入座/)).toBeVisible()
   const { bookings, tables } = await readState(page)
   expect(bookings.find(b => b.id === ZHANG.id)).toMatchObject({ status: 'arrived', guests: 6, assignedTableId: '104' })
   expect(tables.find(t => t.number === '104')).toMatchObject({ status: 'dining', currentBookingId: ZHANG.id })
@@ -368,7 +368,7 @@ test('B4 預訂客早到：40 分（窗內）與 75 分（窗外）都找得到�
   await card.getByRole('button', { name: '吳小姐 到了，選桌入座' }).click(); steps++
   await mapTable(page, '103').click(); steps++
   await page.getByRole('button', { name: '確認入座', exact: true }).click(); steps++
-  await expect(page.getByText(/吳小姐（2 位）已入座 103/)).toBeVisible()
+  await expect(page.getByText(/✓ 吳小姐 2 位 → 103 已入座/)).toBeVisible()
   const { bookings } = await readState(page)
   expect(bookings.find(b => b.id === EARLY75.id)).toMatchObject({ status: 'arrived', assignedTableId: '103' })
   record('B4', { steps, inStrip40, inStrip75, cardButtons })
@@ -393,7 +393,7 @@ test('B5 客人到了但預配桌還在用餐 → 到了·換桌入座一次完�
   await shot(page, 'B5-2-reseat-mode')
   await mapTable(page, '103').click(); steps++
   await page.getByRole('button', { name: '確認入座', exact: true }).click(); steps++
-  await expect(page.getByText('王先生（4 位）已入座 103（原預配 102 被佔）')).toBeVisible()
+  await expect(page.getByText('✓ 王先生 4 位 → 103 已入座')).toBeVisible()
   await shot(page, 'B5-3-seated-toast')
   let { bookings, tables } = await readState(page)
   expect(bookings.find(b => b.id === WANG.id)).toMatchObject({ status: 'arrived', assignedTableId: '103' })
@@ -446,7 +446,7 @@ test('B7 按錯「到了」→ 復原：booking＋table 都倒回（預配與鎖
   for (const [b, n, expectTable] of [[PRE, '102', 'vacant'], [HELD, '103', 'reserved']]) {
     let steps = 0
     await strip(page).getByRole('button', { name: `${b.name} 到了，入座 ${n}` }).click()
-    await expect(page.getByText(`${b.name} 已入座 ${n}`)).toBeVisible()
+    await expect(page.getByText(new RegExp(`✓ ${b.name} \\d+ 位 → ${n} 已入座`))).toBeVisible()
     await shot(page, `B7-1-${b.id}-toast`)
     await page.getByRole('button', { name: '復原', exact: true }).click(); steps++
     await expect(page.getByText(new RegExp(`已復原：${b.name}`))).toBeVisible()

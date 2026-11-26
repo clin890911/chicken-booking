@@ -68,7 +68,7 @@ test('帶位：點到今日團體圈桌 → 警示且滑桿鎖住，勾「仍要
   await expect(slider(page)).not.toBeDisabled()
 
   await slide(page)
-  await expect(page.getByText(/入座 101\s*·\s*可帶下一組/)).toBeVisible()
+  await expect(page.getByText(/→ 101 已入座/)).toBeVisible()
 })
 
 test('併桌：多桌中任一張被預先配走也要擋，且警示指出是哪一桌', async ({ page }) => {
@@ -116,7 +116,7 @@ test('短復原：入座後 toast 按「復原」→ 訂位取消、桌回到空
 
   await page.locator('svg g:has(:text-is("113"))').first().click()
   await slide(page)
-  await expect(page.getByText(/入座 113\s*·\s*可帶下一組/)).toBeVisible()
+  await expect(page.getByText(/→ 113 已入座/)).toBeVisible()
 
   // 拿掉二次確認換來的安全網：8 秒內可反悔
   await page.getByRole('button', { name: '復原' }).click()
@@ -124,11 +124,11 @@ test('短復原：入座後 toast 按「復原」→ 訂位取消、桌回到空
 
   // 先等第一個入座 toast 收掉，否則下一段會同時看到新舊兩個同文字的 toast
   // （成功 toast 帶 8 秒 duration，這裡不等會誤判成「重複入座」）
-  await expect(page.getByText(/入座 113\s*·\s*可帶下一組/)).toHaveCount(0)
+  await expect(page.getByText(/→ 113 已入座/)).toHaveCount(0)
 
   // 桌真的釋回空桌（重新選回面板，且能再帶一次 —— walkInSeat 只接受 vacant 桌）
   await expect(page.getByRole('button', { name: '移除桌 113' })).toBeVisible()
   await slide(page)
   // 剛好一個：證明第二次滑動確實入座，且沒有重複觸發
-  await expect(page.getByText(/入座 113\s*·\s*可帶下一組/)).toHaveCount(1)
+  await expect(page.getByText(/→ 113 已入座/)).toHaveCount(1)
 })

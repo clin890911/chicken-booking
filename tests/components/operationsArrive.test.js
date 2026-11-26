@@ -30,14 +30,14 @@ describe('handleArriveNow', () => {
     expect(deps.seatBooking).toHaveBeenCalledWith('bk1')
   })
 
-  it('入座成功：toast.action 帶訊息、「復原」標籤（純文字，不用 emoji）、5 秒 duration', () => {
+  it('入座成功：toast.action 帶統一格式訊息（B1）、「復原」標籤（純文字，不用 emoji）、8 秒、落在入座回饋位置', () => {
     const deps = makeDeps()
     handleArriveNow(table, booking, deps)
     expect(deps.toast.action).toHaveBeenCalledTimes(1)
     const [message, action, opts] = deps.toast.action.mock.calls[0]
-    expect(message).toBe('王小明 已入座 A2')
+    expect(message).toBe('✓ 王小明 → A2 已入座')
     expect(action.label).toBe('復原')
-    expect(opts).toEqual({ duration: 5000 })
+    expect(opts).toEqual({ duration: 8000, placement: 'seat' })
   })
 
   it('復原：把 seatBooking 回傳的入座前快照原封交給 undoSeatBooking（booking 與 table 由 service 一起倒）', () => {
@@ -100,7 +100,7 @@ describe('handleArriveNow：預配訂位的入座與復原', () => {
     handleArriveNow(vacant, pre, deps)
     expect(deps.seatBooking).toHaveBeenCalledWith('bkP')
     const [msg, action] = deps.toast.action.mock.calls[0]
-    expect(msg).toBe('余先生 已入座 105')
+    expect(msg).toBe('✓ 余先生 → 105 已入座')
     action.onClick()
     expect(deps.undoSeatBooking).toHaveBeenCalledWith(PRE_UNDO)
   })
@@ -211,7 +211,7 @@ describe('handleArriveNow：預配大組', () => {
     expect(seatBookingAllTables).toHaveBeenCalledWith('bkC')
     expect(deps.seatBooking).not.toHaveBeenCalled()
     const [msg, action] = deps.toast.action.mock.calls[0]
-    expect(msg).toBe('大組 已入座 106 + 105')
+    expect(msg).toBe('✓ 大組 → 106＋105 已入座')
     action.onClick()
     expect(deps.undoSeatBooking).toHaveBeenCalledWith(COMBO_UNDO)
   })

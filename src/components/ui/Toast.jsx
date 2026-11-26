@@ -1,9 +1,11 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 import Icon from './Icon'
 import GlyphText from './GlyphText'
 import { SPRING_UI } from './springs'
+import { useSeatToastSlot } from './SeatToastSlot'
 
 // 輕量 Toast 系統：取代 alert/confirm，支援 Undo
 // 使用：
@@ -39,6 +41,8 @@ const MAX_VISIBLE = 3
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
+  // 入座回饋落點（placement:'seat'，見 ./SeatToastSlot 與 utils/seatFeedback）
+  const seatSlot = useSeatToastSlot()
 
   const dismiss = useCallback((id) => {
     setToasts(list => list.filter(t => t.id !== id))
@@ -48,7 +52,7 @@ export function ToastProvider({ children }) {
     const id = ++_id
     const type = opts.type || 'info'
     const duration = opts.duration ?? 4000
-    const t = { id, message, type, action: opts.action }
+    const t = { id, message, type, action: opts.action, placement: opts.placement || 'top' }
     // 擠掉最舊的：帶「復原」動作的那則例外——它是使用者唯一的反悔入口，
     // 被別的通知擠掉等於動作做不回來。真的滿了就讓新的那則排在後面自然輪替。
     setToasts(list => {
@@ -76,15 +80,28 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
+      <ToastContainer toasts={toasts} onDismiss={dismiss} seatSlot={seatSlot} />
     </ToastContext.Provider>
   )
 }
 
-function ToastContainer({ toasts, onDismiss }) {
+function ToastContainer({ toasts, onDismiss, seatSlot }) {
+  const useSlot = !!seatSlot?.isConnected
+  const top = useSlot ? toasts.filter(t => t.placement !== 'seat') : toasts
+  const seat = useSlot ? toasts.filter(t => t.placement === 'seat') : []
   return (
-    // 全尺寸統一頂部置中：iPad 現場頁右下是地圖與報到列，原本 sm 以上的右下角 toast 會蓋住「到了」鈕與桌子。
-    <div data-testid="toast-container" className="fixed top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none items-center">
+    <>
+      {/* 全尺寸統一頂部置中：iPad 現場頁右下是地圖與報到列，原本 sm 以上的右下角 toast 會蓋住「到了」鈕與桌子。 */}
+      <div data-testid="toast-container" className="fixed top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none items-center">
+        <ToastStack toasts={top} onDismiss={onDismiss} />
+      </div>
+      {useSlot && createPortal(<ToastStack toasts={seat} onDismiss={onDismiss} />, seatSlot)}
+    </>
+  )
+}
+
+function ToastStack({ toasts, onDismiss }) {
+  return (
       <AnimatePresence>
         {toasts.map(t => (
           // 進場 spring、只動 transform：不從 opacity:0 出發——動畫時鐘凍結時內容仍可見，
@@ -119,7 +136,6 @@ function ToastContainer({ toasts, onDismiss }) {
           </motion.div>
         ))}
       </AnimatePresence>
-    </div>
   )
 }
 
