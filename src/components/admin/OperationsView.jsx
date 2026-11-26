@@ -7,7 +7,7 @@ import FloorMap from './floormap/FloorMap'
 import ArrivalStrip from './floormap/ArrivalStrip'
 import TableDrawer from './floormap/TableDrawer'
 import CleaningListSheet from './floormap/CleaningListSheet'
-import ModeBanner from './ops/ModeBanner'
+import ModeBanner, { moveSourceNote } from './ops/ModeBanner'
 import OpsRail from './ops/OpsRail'
 import OpsHintBar from './ops/OpsHintBar'
 import { computeStoreStats, phaseLine, seatableNowTables } from '../../utils/opsAlerts'
@@ -21,7 +21,6 @@ import { nextBookableSlot, pastSlotFix } from './ops/QuickReservePanel'
 import { convertNote, finishConvertedWaitlist } from '../../services/waitlistService'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast, useConfirm } from '../ui/Toast'
-import { SeatToastSlot } from '../ui/SeatToastSlot'
 import { useAuth } from '../../contexts/AuthContext'
 import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor, buildPreassignTableMap, squeezeSeats } from '../../utils/capacity'
 import { assignmentKind, statusZh } from '../../utils/tableStatus'
@@ -107,7 +106,7 @@ function LegendSwatch({ fill, stroke, label, dashed = false }) {
 // 大組整組入座。未配桌的訂位不走這裡（報到列改進「選桌入座」模式，見 startArriveSeat）。
 export function handleArriveNow(table, booking, deps) {
   if (assignmentKind(booking, table) === 'preassign') return arrivePreassigned(table, booking, deps)   // 入座前判定
-  const { seatBooking, undoSeatBooking, toast, onMove } = deps
+  const { seatBooking, undoSeatBooking, toast, onMove, inline } = deps
   const r = seatBooking(booking.id)
   if (!r?.ok) {
     const msg = '入座失敗：' + (r?.error || '未知錯誤')
@@ -119,8 +118,8 @@ export function handleArriveNow(table, booking, deps) {
     return r
   }
   const nums = seatedTablesOf(r, booking, table.number)
-  const undoSeat = toastSeatedWithUndo(r, { message: seatedText({ name: booking.name, guests: booking.guests, tables: nums }), name: booking.name, undoSeatBooking, toast })
-  // undoSeat：報到列就地確認卡的「復原」（與 toast 同一支，見 arriveSeat.toastSeatedWithUndo）
+  // inline（報到列）：不發 toast，復原只在原位確認卡上（undoSeat，見 arriveSeat.toastSeatedWithUndo）
+  const undoSeat = toastSeatedWithUndo(r, { message: seatedText({ name: booking.name, guests: booking.guests, tables: nums }), name: booking.name, undoSeatBooking, toast, inline })
   return undoSeat ? { ...r, undoSeat, seatedLabel: joinTables(nums) } : r
 }
 
@@ -150,7 +149,7 @@ function arrivePreassigned(table, booking, deps) {
   return seatPreassignedNow(table, booking, label, deps)
 }
 
-function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove, onArriveReseat }) {
+function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove, onArriveReseat, inline }) {
   const isCombo = (booking.extraTableIds || []).length > 0
   const r = isCombo && seatBookingAllTables ? seatBookingAllTables(booking.id) : seatBooking(booking.id)
   if (!r?.ok) {
@@ -171,7 +170,7 @@ function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAll
     return r
   }
   const nums = seatedTablesOf(r, booking, table.number)
-  const undoSeat = toastSeatedWithUndo(r, { message: seatedText({ name: booking.name, guests: booking.guests, tables: nums }), name: booking.name, undoSeatBooking, toast })
+  const undoSeat = toastSeatedWithUndo(r, { message: seatedText({ name: booking.name, guests: booking.guests, tables: nums }), name: booking.name, undoSeatBooking, toast, inline })
   return undoSeat ? { ...r, undoSeat, seatedLabel: joinTables(nums) } : r
 }
 
@@ -916,7 +915,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const releasedHere = releaseOverlappingPreassigns(overridden, releaseOpts)
       // D1：已入座換桌給「復原換桌」（原桌仍空才搶回，見 seatingService.undoSeatedMove）；未入座的改桌照舊只出成功訊息
       toastMovedWithUndo({ ...r, releasedPreassigns: [...(r.releasedPreassigns || []), ...(releasedHere || [])] }, {
-        name: mode.booking.name, toTables: [number], undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast,
+        name: mode.booking.name, guests: mode.booking.guests, toTables: [number], undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast,
       })
       flashAssigned(number)
       returnToModeSource()
@@ -930,7 +929,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       if (!r.ok) { setPendingConfirm(null); return toast.error((isMove ? '換桌失敗：' : '加桌失敗：') + r.error) }
       // 團體換桌／加桌：同一種文字與位置；沒有復原（換回原桌要動團單梯次桌號，見回報）
       toastSeatDone(toast, isMove
-        ? movedText({ name: `${group.agencyName || '團體'} ${batch.label || ''}`, tables: [number] })
+        ? movedText({ name: `${group.agencyName || '團體'} ${batch.label || ''}`, guests: batch.guests, tables: [number] })
         : `✓ ${group.agencyName || '團體'} ${batch.label || ''} 加桌 ${number}`)
       flashAssigned(number)
       cancelMode()
@@ -1046,7 +1045,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       if (mode.booking.status !== 'arrived') releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
       // D1：已入座整組換桌帶「復原換桌」（r.undo 只有已入座才有；未到店改桌照舊只出成功訊息）
       toastMovedWithUndo(r, {
-        name: mode.booking.name, toTables: mode.selected, undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast,
+        name: mode.booking.name, guests: mode.booking.guests, toTables: mode.selected, undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast,
       })
       flashAssigned(mode.selected[0])
       returnToModeSource()
@@ -1233,7 +1232,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     // 不 setSelectedTable：留在帶位面板才能直接帶下一組（舊版會被 TableDrawer 蓋掉）
     // M2b：成功 toast 直接帶「復原」，8 秒內可反悔（拿掉二次確認換來的安全網）
     toastSeatUndo(toast, seatedText({ name, guests, tables: nums }),
-      { label: undoLabel.walkInSeat(nums), onUndo: () => undoLastSeat(snap) })   // H6：「復原帶位 105」與取消的「復原取消」分得清
+      { ariaLabel: undoLabel.walkInSeat(nums), onUndo: () => undoLastSeat(snap) })   // 看得到「復原」、讀屏念「復原帶位 105」（與「復原取消」分得清）
     return true
   }
 
@@ -1488,7 +1487,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               <p className="font-bold">{mode.booking?.name || mode.wait?.name || mode.group?.agencyName} · {mode.need || mode.booking?.guests || mode.wait?.partySize || mode.batch?.guests} 位</p>
               {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
               <p>目標桌：{(mode.selected?.length ? mode.selected.join(' + ') : pendingConfirm) || '尚未選桌'}</p>
-              {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">保留原入座時間；撤出的原桌需清桌。</p>}
+              {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">{moveSourceNote(mode.booking, tables)}</p>}
               <button type="button" className="tap min-h-[44px] px-4 rounded-lg border" onClick={cancelModeAndNotify}>取消並返回</button>
             </div>
           ) : selectedTableObj ? (
@@ -1650,9 +1649,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 zones={zones}
               />
               </div>
-              {/* B1 入座回饋落點：桌況圖底部、報到列正上方（手指附近）；不佔高度、不蓋左欄確認鈕與報到列「到了」。
-                  手機條件不放（整頁捲、地圖可能在畫面外）→ 照常出現在頂部。 */}
-              {!isPhone && <SeatToastSlot />}
               {/* 報到列：地圖下方 in-flow（不是疊在地圖上），無符合條件的訂位時完全不佔高度。
                   無 booking.update＋table.update 權限時不顯示（到了＝寫 bookings＋tables）。
                   模式進行中（指派/換桌/候位/團體改派）照樣佔位、看得到名單，但整列 disabled＋inert 不可按（A1，2026-11-27）：
@@ -1672,6 +1668,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                   onArriveReseat={startArriveSeat}
                   onArrive={(table, booking) => handleArriveNow(table, booking, {
                     seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove: startMove, onArriveReseat: startArriveSeat,
+                    // 只用原位確認卡（ArrivalStrip），不另發 toast：同一件事畫面上只留一顆「復原」
+                    inline: true,
                     // 預配那條的防呆（團保／他筆預配重疊先確認）；鎖桌那條不用這些
                     confirm,
                     getTable: (n) => tables.find(t => String(t.number) === String(n)),
@@ -1683,8 +1681,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               )}
             </>
           )}
-          {/* 摘要／排程視圖沒有報到列：入座回饋落在卡片底部 */}
-          {(showSchedule || showSummary) && !isPhone && <SeatToastSlot />}
         </div>
       </div>
 

@@ -44,11 +44,12 @@ describe('D1 換桌 → 復原換桌', () => {
     const undo = seating.seatedMoveSnapshot(b.id)
     const r = seating.replaceSeatedBookingTables(b.id, [to], { now: new Date(NOW.getTime() + afterMin * 60000) })
     expect(r.ok).toBe(true)
-    toastMovedWithUndo({ ...r, undo }, { name: b.name, toTables: [to], undoSeatedMove: seating.undoSeatedMove, toast })
+    toastMovedWithUndo({ ...r, undo }, { name: b.name, guests: b.guests, toTables: [to], undoSeatedMove: seating.undoSeatedMove, toast })
     return r
   }
 
-  it('B6 入座 2 分鐘就改桌（點錯修正）：原桌直接回空桌、不變待清；toast「✓ 王先生 改到 108（101 …回空桌）」；復原搬回 101', () => {
+  // 2026-11-27：換桌提示統一「✓ 名 N 位 改到 103」，原桌回空桌／轉待清改在換桌面板確認前講（ModeBanner.moveSourceNote）
+  it('B6 入座 2 分鐘就改桌（點錯修正）：原桌直接回空桌、不變待清；toast「✓ 王先生 2 位 改到 108」；復原搬回 101', () => {
     const b = seated()
     const seatedAt = T('101').seatedAt
     const toast = makeToast()
@@ -56,7 +57,7 @@ describe('D1 換桌 → 復原換桌', () => {
     expect(r.freedTables).toEqual(['101'])
     expect(T('101')).toMatchObject({ status: 'vacant', currentBookingId: null, currentRef: null, seatedAt: null })
     const [msg, action, opts] = lastAction(toast)
-    expect(msg).toBe('✓ 王先生 改到 108（101 剛坐不久，已直接回空桌）')
+    expect(msg).toBe('✓ 王先生 2 位 改到 108')
     expect(opts).toEqual({ duration: 8000, placement: 'seat' })
     action.onClick()
     expect(T('101')).toMatchObject({ status: 'dining', currentBookingId: b.id, seatedAt })
@@ -71,7 +72,7 @@ describe('D1 換桌 → 復原換桌', () => {
     expect(r.freedTables).toEqual([])
     expect(r.cleaningTables).toEqual(['101'])
     expect(T('101').status).toBe('cleaning')
-    expect(lastAction(toast)[0]).toBe('✓ 王先生 改到 108')
+    expect(lastAction(toast)[0]).toBe('✓ 王先生 2 位 改到 108')
   })
 
   it('B6 ★ 點錯修正後原桌（已回空桌）被下一組坐走 → 復原安全失敗，不搶桌', () => {
@@ -92,7 +93,9 @@ describe('D1 換桌 → 復原換桌', () => {
     move(b, '108', toast)
     expect(T('101').status).toBe('cleaning')
     const [, action, opts] = lastAction(toast)
-    expect(action.label).toMatch(/^↩ 復原換桌$/)
+    // 看得到的字一律「復原」，對象在 aria-label
+    expect(action.label).toBe('復原')
+    expect(action.ariaLabel).toBe('復原換桌 108')
     expect(opts.duration).toBeGreaterThanOrEqual(8000)
     action.onClick()
     expect(T('101')).toMatchObject({ status: 'dining', currentBookingId: b.id, seatedAt })

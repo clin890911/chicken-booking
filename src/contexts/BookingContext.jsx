@@ -21,7 +21,7 @@ import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPus
 import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
 import { markCreatedHere } from '../utils/newBookingAlerts'
-import { seatErrorText, withFriendlyErrors } from '../utils/seatErrorText'
+import { withFriendlyErrors } from '../utils/seatErrorText'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
 import { formatBookingTables } from '../utils/bookingTables'
@@ -272,7 +272,8 @@ export function BookingProvider({ children }) {
       setCloudStatus(s => statusAfterPushError(s, err.message, 'cloud-push-failed'))
       // 搶桌 409：回傳店員看得懂的文案（哪一桌、哪一組要重新帶位），並立刻拉雲端自癒。
       if (err?.tableStealConflict) { pullCloud(); return { ok: false, error: err.tableStealMessage || err.message, tableSteals: err.tableSteals } }
-      return { ok: false, error: seatErrorText(err.message || 'cloud-push-failed'), rawError: err.message || 'cloud-push-failed' }
+      // 不套入座店員文案（seatErrorText）：flushCloudNow 是設定頁、佈局頁「儲存」在用，入座句子放在那裡會牛頭不對馬嘴。
+      return { ok: false, error: err.message || 'cloud-push-failed' }
     }
   }, [refresh, pullCloud])
 

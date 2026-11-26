@@ -5,6 +5,10 @@ import { todayTab } from './helpers/opsToday'
 //   A1 選桌模式不再縮小地圖：iPad 橫 1180×820／直 820×1180 進「到了・換桌入座」前後，同一張桌的寬度差 ≤5%
 //   A3 報到列「到了」後原位確認卡：下一位的「到了」不會移到剛按的座標；連點兩次只入座一組
 //   A4 今日卡片對「預配桌被佔」直接是「到了 · 換桌入座」
+// 第二輪（verify-after.md 驗收修正，iPad 橫 1180×820／直 820×1180 都測）：
+//   #1 入座成功提示存在時，地圖每張桌中心的 elementFromPoint 仍是桌本身（提示不疊在地圖上）
+//   #2 報到列「到了」只有原位確認卡一顆「復原」（不另發 toast）
+//   #3 確認卡期間，原「到了」中心點不是「復原」；#4 復原時效一到佔位收起
 // 時間用 page.clock 固定、時區 Asia/Taipei；後台本機模式以 localStorage 為後端，攔截 admin* 雲端端點。
 
 test.use({ timezoneId: 'Asia/Taipei' })
@@ -106,8 +110,14 @@ test('A2 iPad 橫：選桌模式點 101 再點 103 → 只選 103；按「＋再
   await page.setViewportSize({ width: 1180, height: 820 })
   await strip(page).getByRole('button', { name: '陳小姐 到了，換桌入座' }).click()
   const panel = page.getByTestId('mode-banner')
+  // #12 一桌都沒選：不顯示「擠一擠也還差」；#13 選第一桌時「＋再加一桌」不位移
+  await expect(panel).not.toContainText('擠一擠也還差')
+  const toggle = panel.getByRole('button', { name: '＋再加一桌（併桌）' })
+  const tBefore = await toggle.boundingBox()
   await mapTable(page, '101').click()
   await expect(panel).toContainText('已選：101')
+  const tAfter = await toggle.boundingBox()
+  expect(Math.abs(tAfter.y - tBefore.y), `＋再加一桌 y ${tBefore.y} → ${tAfter.y}`).toBeLessThanOrEqual(1)
   await mapTable(page, '103').click()
   await expect(panel).toContainText('已選：103')
   await expect(panel).not.toContainText('101 +')
@@ -139,7 +149,7 @@ test('A3 iPad 直 820：報到列「到了」完整可見；按下後原位確�
   // 連點兩下同一個位置（第二下落在原位的確認卡上）
   await page.mouse.click(cx, cy)
   await page.mouse.click(cx, cy)
-  await expect(strip(page).getByRole('listitem').first()).toContainText('林先生 → 105 已入座')
+  await expect(strip(page).getByRole('listitem').first()).toContainText('林先生 3 位 → 105 已入座')
   const { bookings } = await readState(page)
   expect(bookings.find(b => b.id === LIN.id).status).toBe('arrived')
   expect(bookings.find(b => b.id === LI.id).status).toBe('confirmed')
@@ -148,11 +158,15 @@ test('A3 iPad 直 820：報到列「到了」完整可見；按下後原位確�
   expect(hitLabel).not.toContain('李先生')
   const liAfter = await liBtn.boundingBox()
   expect(Math.abs(liAfter.x - liBefore.x)).toBeLessThanOrEqual(2)
-  // 復原時效過後（5 秒）佔位仍在，李先生的鈕仍不左移
+  // 復原時效（8 秒）內：確認卡仍在，李先生的鈕仍不左移
   await page.clock.runFor(5500)
   await page.waitForTimeout(100)
   const liLater = await liBtn.boundingBox()
   expect(Math.abs(liLater.x - liBefore.x)).toBeLessThanOrEqual(2)
+  // #4 時效一到：佔位以動畫收起、移除，報到列開頭不留空白（李先生回到第一格）
+  await page.clock.runFor(3000)
+  await expect(strip(page).locator('[data-seated-ghost]')).toHaveCount(0)
+  await expect.poll(async () => (await liBtn.boundingBox()).x).toBeLessThan(liBefore.x - 20)
 })
 
 test('A4 今日卡片：預配桌被佔 → 「到了 · 換桌入座」進同一個選桌入座流程（不跳「仍要入座」）', async ({ page }) => {
@@ -172,3 +186,87 @@ test('A4 今日卡片：預配桌被佔 → 「到了 · 換桌入座」進同�
   expect(bookings.find(b => b.id === CHEN.id)).toMatchObject({ status: 'arrived', assignedTableId: '108' })
   expect(tables.find(t => t.number === '106')).toMatchObject({ status: 'dining', currentBookingId: WALK.id })
 })
+
+// 地圖上所有桌：中心點 elementFromPoint 必須落在該桌自己（aria-label 以「N桌」開頭），不能是提示或「復原」
+const tableCentersHitSelf = (page) => page.evaluate(() => {
+  const out = []
+  document.querySelectorAll('[role="button"][aria-label]').forEach(el => {
+    const m = /^(\d+)桌/.exec(el.getAttribute('aria-label') || '')
+    if (!m) return
+    const r = el.getBoundingClientRect()
+    if (!r.width || !r.height) return
+    const x = r.left + r.width / 2, y = r.top + r.height / 2
+    const hit = document.elementFromPoint(x, y)
+    const own = hit?.closest?.('[role="button"][aria-label]')
+    out.push({ n: m[1], ok: own === el, hit: (hit?.closest?.('button,[role=button]')?.getAttribute('aria-label') || hit?.className?.baseVal || hit?.className || '').toString().slice(0, 60) })
+  })
+  return out
+})
+
+for (const vp of [{ name: 'iPad 橫', width: 1180, height: 820 }, { name: 'iPad 直', width: 820, height: 1180 }]) {
+  test(`#1 ${vp.name}：入座成功提示存在時，地圖每張桌中心點仍是桌本身；提示不蓋左欄確認鈕`, async ({ page }) => {
+    await page.clock.setFixedTime(at('11:50'))
+    await seed(page, { tables: TABLES(), bookings: [WALK, CHEN, LI] })
+    await loginToOps(page)
+    await page.setViewportSize({ width: vp.width, height: vp.height })
+    await strip(page).getByRole('button', { name: '陳小姐 到了，換桌入座' }).click()
+    const panel = page.getByTestId('mode-banner')
+    await mapTable(page, '108').click()
+    const confirmBtn = panel.getByRole('button', { name: '確認入座', exact: true })
+    const cb = await confirmBtn.boundingBox()
+    await confirmBtn.click()
+    const toastEl = page.locator('[data-placement="seat"]').filter({ hasText: '✓ 陳小姐 4 位 → 108 已入座' })
+    await expect(toastEl).toBeVisible()
+    // 提示仍在的期間逐桌檢查（含最底排）
+    const hits = await tableCentersHitSelf(page)
+    expect(hits.length).toBeGreaterThanOrEqual(6)
+    expect(hits.filter(h => !h.ok), JSON.stringify(hits)).toEqual([])
+    await expect(toastEl).toBeVisible()
+    // 提示框與任何一張桌都不相交、也不蓋到剛才左欄確認鈕的位置
+    const tb = await toastEl.boundingBox()
+    const overlaps = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    for (const n of ['101', '102', '103', '105', '106', '108']) {
+      const box = await mapTable(page, n).boundingBox()
+      expect(overlaps(tb, box), `提示 ${JSON.stringify(tb)} 蓋到 ${n} ${JSON.stringify(box)}`).toBe(false)
+    }
+    expect(overlaps(tb, cb)).toBe(false)
+  })
+
+  test(`#2／#3 ${vp.name}：報到列「到了」只有原位確認卡一顆復原；原「到了」中心點不是復原`, async ({ page }) => {
+    await page.clock.setFixedTime(at('11:50'))
+    await seed(page, { tables: TABLES(), bookings: [WALK, LIN, LI] })
+    await loginToOps(page)
+    await page.setViewportSize({ width: vp.width, height: vp.height })
+    const linBtn = strip(page).getByRole('button', { name: '林先生 到了，入座 105' })
+    const lb = await linBtn.boundingBox()
+    const cx = lb.x + lb.width / 2, cy = lb.y + lb.height / 2
+    await page.mouse.click(cx, cy)
+    const ghost = strip(page).locator('[data-seated-ghost="E2E-UXA-LIN"]')
+    await expect(ghost).toContainText('✓ 林先生 3 位 → 105 已入座')
+    // #2：沒有 toast；畫面上只有一顆「復原」（原位卡的，讀屏名帶對象）
+    await expect(page.locator('[data-placement="seat"]')).toHaveCount(0)
+    await expect(page.getByTestId('toast-action')).toHaveCount(0)
+    const undoBtns = page.getByRole('button', { name: /^復原/ })
+    await expect(undoBtns).toHaveCount(1)
+    await expect(undoBtns.first()).toHaveAccessibleName('復原入座 林先生')
+    await expect(undoBtns.first()).toHaveText('復原')
+    // #3：確認卡期間（剛出現、800ms 解鎖後各量一次），原「到了」中心點不是「復原」
+    const hitAt = () => page.evaluate(([x, y]) => {
+      const b = document.elementFromPoint(x, y)?.closest('button')
+      return b ? (b.getAttribute('aria-label') || b.textContent || '') : ''
+    }, [cx, cy])
+    expect(await hitAt()).not.toMatch(/復原/)
+    await expect(undoBtns.first()).toBeEnabled()
+    expect(await hitAt()).not.toMatch(/復原/)
+    // 再按一次原位置（「不確定有沒有按到」）：不會復原
+    await page.mouse.click(cx, cy)
+    const { bookings } = await readState(page)
+    expect(bookings.find(b => b.id === LIN.id).status).toBe('arrived')
+    // 真的要復原：按卡片上的「復原」
+    await undoBtns.first().click()
+    await expect(page.getByText('已復原：林先生 回到待到')).toBeVisible()
+    const after = await readState(page)
+    expect(after.bookings.find(b => b.id === LIN.id).status).toBe('confirmed')
+    expect(after.tables.find(t => t.number === '105')).toMatchObject({ status: 'vacant' })
+  })
+}

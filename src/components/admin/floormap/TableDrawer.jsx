@@ -18,6 +18,7 @@ import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../uti
 import { releaseOverlappingPreassigns, conflictLine, restoreReleasedPreassigns, restoreNote } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
 import { toastSeatedWithUndo, seatAfterArriveConfirm, arriveActionFor } from '../../../utils/arriveSeat'
+import { isPreassignArriveEligible } from './FloorMap'
 import { splitSuffix } from '../../../utils/partySplit'
 import { formatPhone } from '../../../utils/phoneFormat'
 import EditBookingModal from '../../booking/EditBookingModal'
@@ -137,7 +138,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     const seated = r.booking
     const n = String(table.number)
     toastSeatUndo(toast, seatedText({ name: seated.name, guests: seated.guests, tables: [n] }), {
-      label: undoLabel.walkInSeat([n]),
+      ariaLabel: undoLabel.walkInSeat([n]),
       onUndo: () => {
         const u = undoWalkInSeat(seated.id, { remove: can('booking.delete') })
         if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
@@ -152,11 +153,14 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   // 預配到這張桌、但這組的桌此刻被別組佔（arriveSeat.arriveActionFor＝'reseat'，與報到列／今日卡同一支判斷）：
   // 抽屜直接給「到了 · 換桌入座」，不給「客人到了」→ 確認框 → 入座失敗（A4）。
   //   preassign（空桌上的預配，大組副桌被佔時）＋ 這張桌被別組佔用時、預配到這張桌的今日待到訂位
+  //   只列「到了」時間窗內（訂位前後 60 分，與報到列同一支 isPreassignArriveEligible）：晚場的預配不在這裡給「到了」
   const preassignReseat = !!(preassign && onArriveReseat && arriveActionFor(preassign, tables) === 'reseat')
+  const nowMs = Date.now()
   const takenPreassigns = (onArriveReseat && table.status !== 'vacant')
     ? (bookings || []).filter(b => b.date === today && ['confirmed', 'pending'].includes(b.status)
       && b.id !== table.currentBookingId
       && [b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean).map(String).includes(String(table.number))
+      && isPreassignArriveEligible((tables || []).find(t => String(t.number) === String(b.assignedTableId)), b, nowMs)
       && arriveActionFor(b, tables) === 'reseat')
     : []
 

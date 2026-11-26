@@ -2,11 +2,14 @@
 //
 // 為什麼存在：同一件事（入座）過去在 8 個入口有三種成功句、5／6／8 秒與「沒有復原」四種，
 // 店員按下去無法預期會怎樣（Barry：「入座有很多不安全感」）。現在所有入口都走這裡：
-//   文字：「✓ 林先生 3 位 → 105 已入座」（多桌用「＋」連接）；換桌：「✓ 林先生 改到 103」
+//   文字：「✓ 林先生 3 位 → 105 已入座」（多桌用「＋」連接）；換桌：「✓ 林先生 3 位 改到 103」
+//   復原鈕：看得到的字一律「復原」；對象（復原帶位 105／復原入座 林先生／復原換桌 103）放 aria-label。
 //   復原：統一 8 秒（SEAT_UNDO_MS）。唯一例外是候位入座——復原是雲端指令，後端只給 5 秒
 //         （functions/lib/waitlistCommands.js 的 undoUntil），前端不能比後端長，見 waitlistSeatToast。
-//   位置：placement:'seat'——現場頁把這類 toast 放在桌況圖底部、報到列正上方（手指附近），
-//         不蓋左欄作業面板的確認鈕、也不蓋報到列的「到了」；沒有落點（手機、其他頁）時退回頂部。
+//   位置：頁面頂部（與其他 toast 同一處）。2026-11-27 驗收 P1：曾放在桌況圖底部「靠近手指」，
+//         iPad 橫向會蓋住最底排桌子 8 秒、點 111 實際點到「復原」——任何會讓手指在入座後幾秒內誤觸
+//         「復原」的位置都不可接受（與「到了鈕不可放回桌上」同一個道理）。placement:'seat' 只是標記。
+//   報到列「到了」：只用原位確認卡（ArrivalStrip），不另發 toast——同一件事不可同時出現兩顆「復原」。
 // 純函式：toast 由呼叫端注入（方便單測）。復原本身的守門一律在 service 層（只倒仍由本筆持有或已空的桌）。
 
 export const SEAT_UNDO_MS = 8000
@@ -31,15 +34,16 @@ export function seatedText({ name, guests, tables } = {}) {
   return `✓ ${String(name || '').trim() || '這組'}${g > 0 ? ` ${g} 位` : ''} → ${joinTables(tables)} 已入座`
 }
 
-// 「✓ 林先生 改到 103」；freed＝入座未滿 5 分鐘、直接回空桌的原桌（B6），講清楚不必清
-export function movedText({ name, tables, freed = [] } = {}) {
-  const tail = freed?.length ? `（${joinTables(freed)} 剛坐不久，已直接回空桌）` : ''
-  return `✓ ${String(name || '').trim() || '這組'} 改到 ${joinTables(tables)}${tail}`
+// 「✓ 林先生 3 位 改到 103」：與入座同一個格式（人數不明就不寫）。原桌回空桌或轉待清，
+// 換桌面板確認前就講清楚（ModeBanner 的 moveSourceNote，B6 五分鐘規則），提示不再多掛一段括號。
+export function movedText({ name, guests, tables } = {}) {
+  const g = Math.floor(Number(guests) || 0)
+  return `✓ ${String(name || '').trim() || '這組'}${g > 0 ? ` ${g} 位` : ''} 改到 ${joinTables(tables)}`
 }
 
-// 成功＋復原：一律 8 秒、placement:'seat'。label 依入口（復原／復原帶位 105／↩ 復原換桌，H6 帶對象）。
-export function toastSeatUndo(toast, message, { label = '復原', onUndo, duration = SEAT_UNDO_MS } = {}) {
-  return toast.action(message, { label, onClick: () => { onUndo?.() } }, { duration, placement: SEAT_TOAST_PLACEMENT })
+// 成功＋復原：一律 8 秒、placement:'seat'。看得到的字一律「復原」；ariaLabel 帶對象（H6：兩則疊在一起時讀屏分得清）。
+export function toastSeatUndo(toast, message, { ariaLabel, onUndo, duration = SEAT_UNDO_MS } = {}) {
+  return toast.action(message, { label: '復原', ariaLabel, onClick: () => { onUndo?.() } }, { duration, placement: SEAT_TOAST_PLACEMENT })
 }
 
 // 沒有復原的成功（例：未入座的改桌、接走前梯待清桌的團體入座）：同樣的位置與停留時間，不給假的復原鈕。
@@ -56,7 +60,7 @@ export function toastGroupSeated(r, { group, batch, undoSeatGroupBatch, toast })
   if (!r?.undo || !undoSeatGroupBatch) return toastSeatDone(toast, message)
   let undone = false
   return toastSeatUndo(toast, message, {
-    label: '復原',
+    ariaLabel: `復原入座 ${name}`,
     onUndo: () => {
       if (undone) return
       const u = undoSeatGroupBatch(r.undo)

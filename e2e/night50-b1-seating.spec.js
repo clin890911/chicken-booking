@@ -402,7 +402,7 @@ test('B5 客人到了但預配桌還在用餐 → 到了·換桌入座一次完�
   expect(bookings.find(b => b.id === 'OCC1')).toMatchObject({ status: 'arrived', assignedTableId: '102' })
   expect(steps).toBe(3)
   // 復原：訂位回待到＋原預配 102、103 回空桌；102 仍是別組
-  await page.getByRole('button', { name: '復原', exact: true }).click()
+  await page.getByRole('button', { name: '復原入座 王先生', exact: true }).click()
   await expect(page.getByText(/已復原：王先生 回到待到/)).toBeVisible()
   ;({ bookings, tables } = await readState(page))
   expect(bookings.find(b => b.id === WANG.id)).toMatchObject({ status: 'confirmed', assignedTableId: '102' })
@@ -448,7 +448,7 @@ test('B7 按錯「到了」→ 復原：booking＋table 都倒回（預配與鎖
     await strip(page).getByRole('button', { name: `${b.name} 到了，入座 ${n}` }).click()
     await expect(page.getByText(new RegExp(`✓ ${b.name} \\d+ 位 → ${n} 已入座`))).toBeVisible()
     await shot(page, `B7-1-${b.id}-toast`)
-    await page.getByRole('button', { name: '復原', exact: true }).click(); steps++
+    await page.getByRole('button', { name: `復原入座 ${b.name}`, exact: true }).click(); steps++   // 報到列：原位確認卡的復原
     await expect(page.getByText(new RegExp(`已復原：${b.name}`))).toBeVisible()
     const { bookings, tables } = await readState(page)
     const bb = bookings.find(x => x.id === b.id), tt = tables.find(t => t.number === n)

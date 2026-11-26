@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react'
-import ArrivalStrip, { mergeSeatedGhosts, ARRIVE_GUARD_MS, GHOST_UNDO_GUARD_MS, SPACER_IDLE_MS } from '../../src/components/admin/floormap/ArrivalStrip'
+import ArrivalStrip, { mergeSeatedGhosts, ARRIVE_GUARD_MS, GHOST_UNDO_GUARD_MS, GHOST_COLLAPSE_MS, BUSY_MAX_MS } from '../../src/components/admin/floormap/ArrivalStrip'
 import { SEATED_UNDO_MS } from '../../src/utils/arriveSeat'
 
 // A3（2026-11-27，Barry：「到了」維持按一下就入座，只加防連點和原位確認）：
-//   入座後 chip 原位變「✓ 林先生 → 101 已入座・復原」，復原時效內位置不變；時效過後變同寬透明佔位，
-//   下一位的「到了」不會滑到剛才按的位置；600ms 內重按無效；確認卡的復原 800ms 內不吃點擊。
+//   入座後 chip 原位變「［復原］✓ 林先生 3 位 → 101 已入座」，復原時效（8 秒）內位置不變，下一位的「到了」不會滑到
+//   剛才按的位置；時效一到佔位以動畫收起（不留空白）。同一張 600ms 內重按無效（逐張計時）；確認卡的復原 800ms 內不吃點擊。
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -48,8 +48,12 @@ describe('ArrivalStrip A3：到了後原位確認＋防連點', () => {
     expect(onArrive).toHaveBeenCalledTimes(1)
     const list = items()
     expect(list[0].dataset.seatedGhost).toBe('b1')
-    expect(list[0].textContent).toContain('林先生 → 101 已入座')
-    expect(list[0].querySelector('button[aria-label="復原 林先生 入座"]')).toBeTruthy()
+    expect(list[0].textContent).toContain('✓ 林先生 3 位 → 101 已入座')
+    // 復原：看得到「復原」、對象在 aria-label；放在卡片最左（原本「到了」在 chip 右端）
+    const undo = list[0].querySelector('button[aria-label="復原入座 林先生"]')
+    expect(undo).toBeTruthy()
+    expect(undo.textContent).toBe('復原')
+    expect(list[0].firstElementChild).toBe(undo)
     expect(list[1].querySelector('button[aria-label="陳小姐 到了，入座 102"]')).toBeTruthy()
     // 報到總數只算真的待到
     expect(container.textContent).toContain('等報到 1')
@@ -61,32 +65,57 @@ describe('ArrivalStrip A3：到了後原位確認＋防連點', () => {
     click(linBtn); click(linBtn)   // 同一 tick 兩次 click
     render()
     act(() => { vi.advanceTimersByTime(300) })
-    click(items()[0].querySelector('button[aria-label="復原 林先生 入座"]'))   // 300ms：落在確認卡上
-    act(() => { vi.advanceTimersByTime(ARRIVE_GUARD_MS - 400) })
-    // 600ms 內點下一位也無效
-    click(container.querySelector('button[aria-label="陳小姐 到了，入座 102"]'))
+    const ghostUndo = () => items()[0].querySelector('button[aria-label="復原入座 林先生"]')
+    expect(ghostUndo().disabled).toBe(true)   // 800ms 內 disabled（手指與 Playwright 都按不下去）
+    click(ghostUndo())   // 300ms：落在確認卡上
     expect(onArrive).toHaveBeenCalledTimes(1)
     expect(undoSeat).not.toHaveBeenCalled()
     // 過了防連點時間：復原正常，確認卡收掉
     act(() => { vi.advanceTimersByTime(GHOST_UNDO_GUARD_MS) })
-    click(items()[0].querySelector('button[aria-label="復原 林先生 入座"]'))
+    expect(ghostUndo().disabled).toBe(false)
+    click(ghostUndo())
     expect(undoSeat).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-seated-ghost="b1"]')).toBeNull()
   })
 
-  it('復原時效過後變同寬透明佔位（不收合），閒置一段時間才收；下一位仍在原位', () => {
+  it('防連點逐張計時：剛按林先生，600ms 內按陳小姐的「到了」照樣入座（不被吃掉）', () => {
+    const { onArrive, render } = setup()
+    click(container.querySelector('button[aria-label="林先生 到了，入座 101"]')); render()
+    act(() => { vi.advanceTimersByTime(100) })
+    click(container.querySelector('button[aria-label="陳小姐 到了，入座 102"]')); render()
+    expect(onArrive).toHaveBeenCalledTimes(2)
+    expect(onArrive.mock.calls.map(c => c[1].id)).toEqual(['b1', 'b2'])
+  })
+
+  it('復原時效（8 秒）一到：佔位以動畫收起（寬度 0、aria-hidden）、收完移除；報到列開頭不留空白', () => {
     const { render } = setup()
     click(container.querySelector('button[aria-label="林先生 到了，入座 101"]')); render()
-    act(() => { vi.advanceTimersByTime(SEATED_UNDO_MS + 10) })
+    act(() => { vi.advanceTimersByTime(SEATED_UNDO_MS - 50) })
+    expect(items()[0].dataset.phase).toBe('done')   // 時效內：仍是確認卡
+    act(() => { vi.advanceTimersByTime(60) })
     let list = items()
     expect(list[0].dataset.phase).toBe('spacer')
     expect(list[0].getAttribute('aria-hidden')).toBe('true')
+    expect(list[0].style.width).toBe('0px')
     expect(list[0].querySelector('button')).toBeNull()
     expect(list[1].textContent).toContain('陳小姐')
-    act(() => { vi.advanceTimersByTime(SPACER_IDLE_MS + 10) })
+    act(() => { vi.advanceTimersByTime(GHOST_COLLAPSE_MS + 10) })
     list = items()
     expect(list.length).toBe(1)
     expect(list[0].textContent).toContain('陳小姐')
+  })
+
+  it('處理中（確認框 Promise 未結束）全列不吃「到了」；Promise 永不結束時逾時保底解除', () => {
+    const tables = [table('101', 'b1'), table('102', 'b2')]
+    const onArrive = vi.fn((t) => (t.number === '101' ? new Promise(() => {}) : { ok: true }))
+    mount(<ArrivalStrip tables={tables} bookings={[LIN, CHEN]} onSelectTable={() => {}} onArrive={onArrive} now={NOW.getTime()} />)
+    click(container.querySelector('button[aria-label="林先生 到了，入座 101"]'))
+    act(() => { vi.advanceTimersByTime(ARRIVE_GUARD_MS + 10) })
+    click(container.querySelector('button[aria-label="陳小姐 到了，入座 102"]'))
+    expect(onArrive).toHaveBeenCalledTimes(1)
+    act(() => { vi.advanceTimersByTime(BUSY_MAX_MS) })
+    click(container.querySelector('button[aria-label="陳小姐 到了，入座 102"]'))
+    expect(onArrive).toHaveBeenCalledTimes(2)
   })
 
   it('disabled（選桌模式中）：列照樣顯示（不改地圖尺寸），但按「到了」無效', () => {

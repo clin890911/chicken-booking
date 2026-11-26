@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import Icon from '../../ui/Icon'
 import GlyphText from '../../ui/GlyphText'
 import { conflictLine } from '../../../utils/preassignOverride'
-import { formatBookingTables } from '../../../utils/bookingTables'
+import { formatBookingTables, bookingTableNumbers } from '../../../utils/bookingTables'
+import { isQuickFixMove } from '../../../services/seatingService'
 // 現場營運的「模式 banner」：指派 / 候位入座 / 立即帶位 / 換桌 / 團體改派桌位
 // 依模式不同底色 + 圖示避免誤判；指派類模式帶二步確認列與預配衝突警告
 // 2026-10 對比 AA：底色各加深一階（sky/emerald 600→800、indigo/violet 600→700）——banner 內有 bg-white/15 確認列
@@ -25,6 +26,21 @@ const BANNER_STYLE = {
 }
 
 const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat', 'group-move', 'group-add']
+
+// 已入座換桌：撤出的原桌會怎樣，確認前就講清楚（與 seatingService.replaceSeatedBookingTables 同一支 isQuickFixMove，B6）。
+//   原桌入座未滿 5 分鐘 → 直接變回空桌；滿 5 分鐘（或無入座時間／他台時鐘偏差）→ 轉待清。
+//   只看本筆持有的原桌；一部分剛坐、一部分已久就逐桌講。純函式匯出（OperationsView 手機面板共用、方便單測）。
+export function moveSourceNote(booking, tables = [], now = new Date()) {
+  const nums = bookingTableNumbers(booking)
+  const own = nums.map(n => (tables || []).find(t => String(t.number) === n && String(t.currentBookingId ?? '') === String(booking?.id)))
+    .filter(Boolean)
+  const quick = own.filter(t => isQuickFixMove(t, now)).map(t => String(t.number))
+  const rest = nums.filter(n => !quick.includes(n))
+  const head = '保留原入座時間；'
+  if (quick.length && !rest.length) return `${head}原桌剛坐不到 5 分鐘，會直接變回空桌。`
+  if (!quick.length) return `${head}原桌會轉為待清。`
+  return `${head}原桌 ${quick.join('、')} 剛坐不到 5 分鐘會直接變回空桌，${rest.join('、')} 會轉為待清。`
+}
 
 // pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
 //   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
@@ -77,6 +93,9 @@ export default function ModeBanner({ layout = 'top', tables = [], onLocateSugges
         {multi ? '併桌中・點桌加／減（改回單桌）' : '＋再加一桌（併桌）'}
       </button>
     ) : null
+    // 還差幾位：一張桌都還沒選時不講（4 位一張 6 人桌就夠，「還差 4 位」會誤導成要併桌）
+    const short = selected.length > 0 && !enough && need > maxSeats ? need - maxSeats : 0
+    const shortLine = short > 0 ? <p data-testid="mode-short" className="text-sm text-chicken-brown/70">擠一擠也還差 {short} 位{multi ? '' : '，可按「＋再加一桌」併桌'}</p> : null
     const excessLine = excess ? <p data-testid="mode-excess" className="text-sm font-bold text-amber-900 bg-amber-100 rounded-lg px-3 py-2">{excess.text}</p> : null
 
     if (layout === 'rail') {
@@ -96,7 +115,7 @@ export default function ModeBanner({ layout = 'top', tables = [], onLocateSugges
           <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
             {isArrive && mode.reseatFrom?.length > 0 && <p data-testid="arrive-reseat-from" className="text-sm font-bold bg-amber-100 text-amber-900 px-3 py-2 rounded-lg">原預配 {mode.reseatFrom.join(' + ')} 被佔 · 換一張空桌</p>}
             {mode.replacing && <p className="text-sm text-chicken-brown/80">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</p>}
-            {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">保留原入座時間；撤出的原桌需清桌。</p>}
+            {mode.booking?.status === 'arrived' && <p data-testid="move-source-note" className="text-sm text-chicken-brown/60">{moveSourceNote(mode.booking, tables)}</p>}
             {/* 選桌入座：到店人數跟訂位不同 → 這裡直接改（確認入座時才寫回訂位） */}
             {isArrive && onChangeNeed && (
               <div className="flex items-center gap-2 flex-wrap" role="group" aria-label="到店人數">
@@ -111,7 +130,8 @@ export default function ModeBanner({ layout = 'top', tables = [], onLocateSugges
             )}
             <div className={`rounded-xl border-2 px-3 py-2 ${enough ? 'border-emerald-600 bg-emerald-50' : 'border-chicken-brown/15 bg-chicken-brown/[0.03]'}`}>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className={`inline-flex items-center px-2.5 py-1 rounded-lg font-bold text-sm ${enough ? 'bg-emerald-700 text-white' : 'bg-white text-chicken-brown border'}`}>
+                {/* 兩態都有 1px 邊框：夠／不夠切換時高度不變（「＋再加一桌」不跟著跳 2px） */}
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-lg font-bold text-sm border ${enough ? 'bg-emerald-700 border-emerald-700 text-white' : 'bg-white text-chicken-brown'}`}>
                   已選 {multiSeats}/{need} 席 · {selected.length} 桌
                 </span>
                 {squeezed && <span data-testid="squeeze-badge" className="text-xs font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded">擠一擠 · 超坐 {need - multiSeats} 位</span>}
@@ -119,11 +139,13 @@ export default function ModeBanner({ layout = 'top', tables = [], onLocateSugges
               <div className="mt-1.5 text-base font-bold text-chicken-brown">
                 {selected.length ? `已選：${selected.join(' + ')}` : (multi ? '尚未選桌（點空桌加入）' : '尚未選桌（點一張空桌）')}
               </div>
-              {!enough && need > maxSeats && <div className="text-sm text-chicken-brown/70">擠一擠也還差 {need - maxSeats} 位{multi ? '' : '，可按「＋再加一桌」併桌'}</div>}
               <div className="mt-1 text-xs text-chicken-brown/55">{multi ? '點桌加／減 · 可選多桌' : '點別張＝改選 · 點同一張＝取消'}</div>
             </div>
-            {excessLine}
+            {/* 「＋再加一桌」固定在這個位置：上面的卡片高度不隨選桌改變；選桌後才出現的提示（還差幾位／選太多桌）
+                都放在它下面（2026-11-27 驗收：選第一桌時這一行消失，「＋再加一桌」上移 31px，手指按空） */}
             {multiControl}
+            {shortLine}
+            {excessLine}
             {mode.suggestion && <p className="text-sm text-chicken-brown/75">建議 {comboLabel}{comboNums && mode.suggestionSqueezed ? '（擠一擠）' : ''}（自行選桌）</p>}
             {mode.suggestion && (
               <div className="flex items-center gap-3 flex-wrap">
@@ -197,7 +219,7 @@ export default function ModeBanner({ layout = 'top', tables = [], onLocateSugges
         <div className="bg-white/15 rounded-lg px-3 py-2 phone:px-2 phone:py-1 flex items-center justify-between gap-2 flex-wrap phone:flex-nowrap">
           <div className="text-sm phone:text-xs font-bold phone:min-w-0 phone:flex-1">
             {selected.length ? `已選：${selected.join(' + ')}` : '尚未選桌（點空桌加入）'}
-            {!enough && need > maxSeats && <span className="ml-2 opacity-90">— 擠一擠也還差 {need - maxSeats} 位</span>}
+            {short > 0 && <span className="ml-2 opacity-90">— 擠一擠也還差 {short} 位</span>}
           </div>
           <button onClick={onCancel} className={`hidden phone:inline-flex items-center flex-none text-xs px-3 min-h-[44px] bg-white ${cancelBtn} rounded-lg font-bold whitespace-nowrap`}>取消</button>
           <button

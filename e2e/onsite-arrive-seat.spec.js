@@ -79,7 +79,7 @@ test('報到列列出未配桌的訂位 → 到了·選桌 → 點桌 → 確認
   await expect(page.getByText('等報到 1')).toHaveCount(0)
 
   // 5 秒內復原：booking 與桌一起倒——訂位回待到且未配桌、桌回空桌 → 又回到報到列
-  await page.getByRole('button', { name: '復原', exact: true }).click()
+  await page.getByRole('button', { name: '復原入座 林先生', exact: true }).click()
   ;({ bookings, tables } = await readState(page))
   expect(bookings.find(b => b.id === LIN.id)).toMatchObject({ status: 'confirmed', assignedTableId: null })
   expect(tables.find(t => t.number === '105')).toMatchObject({ status: 'vacant', currentBookingId: null })
@@ -129,7 +129,7 @@ test('選到的桌有重疊預配 → 勾選才解鎖；入座解除那筆預配
   let { bookings } = await readState(page)
   expect(bookings.find(b => b.id === CHEN.id).assignedTableId).toBeNull()
 
-  await page.getByRole('button', { name: '復原', exact: true }).click()
+  await page.getByRole('button', { name: '復原入座 林先生', exact: true }).click()
   ;({ bookings } = await readState(page))
   expect(bookings.find(b => b.id === LIN.id)).toMatchObject({ status: 'confirmed', assignedTableId: null })
   expect(bookings.find(b => b.id === CHEN.id).assignedTableId).toBe('105')

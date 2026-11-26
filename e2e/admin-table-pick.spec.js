@@ -106,7 +106,7 @@ test('新增（現場、不留電話）→ 表單選桌 106 → 卡片「改桌�
   await page.locator('svg g:has(:text-is("107"))').first().click()
   await expect(page.getByText('已選 4/2 席 · 1 桌')).toBeVisible()
   await page.getByRole('button', { name: /確認改桌/ }).click()
-  await expect(page.getByText(/✓ 余先生 改到 107/)).toBeVisible()
+  await expect(page.getByText(/✓ 余先生 \d+ 位 改到 107/)).toBeVisible()
 
   const state = await page.evaluate(() => ({
     bookings: JSON.parse(localStorage.getItem('chicken_bookings_v1') || '[]'),

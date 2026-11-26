@@ -105,6 +105,30 @@ describe('undoSeatGroupBatch', () => {
     expect(groupService.getById(g.id).status).toBe('arrived')
   })
 
+  // 2026-11-27 驗收：入座後中間加桌／換桌，梯次桌號已和快照不一致 → 整梯安全失敗、明講原因（不留半套）
+  it('★ 入座後中間加桌（103 併入此梯）→ 整梯不動、安全失敗，提示目前桌號與「這桌離席」出口', () => {
+    const { g, b } = oneBatch()
+    const r = seating.seatGroupBatch(g.id, b)
+    expect(seating.addGroupBatchTable(g.id, b, '103').ok).toBe(true)
+    const u = seating.undoSeatGroupBatch(r.undo)
+    expect(u).toMatchObject({ ok: false, code: 'batch-tables-changed', currentTables: ['101', '102', '103'] })
+    expect(u.error).toContain('加桌或換桌')
+    expect(u.error).toContain('101、102、103')
+    expect(u.error).toContain('這桌離席')
+    for (const n of ['101', '102', '103']) expect(t(n)).toMatchObject({ status: 'dining', currentRef: { groupId: g.id, batchId: b } })
+    expect(groupService.getById(g.id).status).toBe('arrived')
+  })
+
+  it('★ 入座後中間換桌（102 → 104）→ 整梯不動、安全失敗', () => {
+    const { g, b } = oneBatch()
+    const r = seating.seatGroupBatch(g.id, b)
+    expect(seating.moveGroupTable('102', '104', { groupId: g.id, batchId: b }).ok).toBe(true)
+    const u = seating.undoSeatGroupBatch(r.undo)
+    expect(u).toMatchObject({ ok: false, code: 'batch-tables-changed' })
+    expect(t('101')).toMatchObject({ status: 'dining', currentRef: { groupId: g.id, batchId: b } })
+    expect(t('104')).toMatchObject({ status: 'dining', currentRef: { groupId: g.id, batchId: b } })
+  })
+
   it('團已整團完成／取消 → 不復原', () => {
     const { g, b } = oneBatch()
     const r = seating.seatGroupBatch(g.id, b)

@@ -32,6 +32,10 @@ describe('isQuickFixMove', () => {
     expect(seating.isQuickFixMove({ status: 'reserved', seatedAt: null }, NOW)).toBe(false)
     expect(seating.isQuickFixMove({ status: 'dining', seatedAt: 'not-a-date' }, NOW)).toBe(false)
     expect(seating.isQuickFixMove({ status: 'dining', seatedAt: new Date(NOW.getTime() + 3000).toISOString() }, NOW)).toBe(true)
+    // 他台時鐘偏差：seatedAt 比現在晚超過 1 分鐘 → 不當成點錯修正（照舊待清）
+    expect(seating.isQuickFixMove({ status: 'dining', seatedAt: new Date(NOW.getTime() + 60000).toISOString() }, NOW)).toBe(true)
+    expect(seating.isQuickFixMove({ status: 'dining', seatedAt: new Date(NOW.getTime() + 61000).toISOString() }, NOW)).toBe(false)
+    expect(seating.isQuickFixMove({ status: 'dining', seatedAt: new Date(NOW.getTime() + 10 * 60000).toISOString() }, NOW)).toBe(false)
   })
 })
 

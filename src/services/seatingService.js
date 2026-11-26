@@ -793,11 +793,16 @@ export function replacePendingBookingTables(bookingId, tableNumbers, { now = new
 //   沒有 seatedAt（舊資料 reserved 鎖桌）一律照舊待清——保守，不猜。回傳 freedTables／cleaningTables 給呈現層講清楚。
 //   復原（undoSeatedMove）本來就接受「待清或空桌、且沒人持有」的原桌，空桌被別組坐走就安全失敗。
 export const QUICK_FIX_MOVE_MS = 5 * 60 * 1000
-// 原桌入座未滿 5 分鐘＝點錯修正（B6）。seatedAt 缺或無效 → false（照舊待清）；時鐘誤差造成的未來時間算 0 分鐘。
+// 原桌入座未滿 5 分鐘＝點錯修正（B6）。seatedAt 缺或無效 → false（照舊待清）。
+// seatedAt 比現在晚：1 分鐘內當成時鐘誤差（算 0 分鐘）；晚超過 1 分鐘＝他台時鐘明顯偏差、無從判斷坐了多久 →
+// 不視為點錯修正，照舊轉待清（保守：寧可多清一次桌，不把可能用過的桌直接放給下一組）。
+export const QUICK_FIX_CLOCK_SKEW_MS = 60 * 1000
 export function isQuickFixMove(table, now = new Date()) {
   const at = table?.status === 'dining' && table.seatedAt ? new Date(table.seatedAt).getTime() : NaN
   if (!Number.isFinite(at)) return false
-  return (new Date(now).getTime() - at) < QUICK_FIX_MOVE_MS
+  const elapsed = new Date(now).getTime() - at
+  if (elapsed < -QUICK_FIX_CLOCK_SKEW_MS) return false
+  return elapsed < QUICK_FIX_MOVE_MS
 }
 
 export function replaceSeatedBookingTables(bookingId, tableNumbers, { now = new Date(), confirmedConflictTables = [], confirmedWarningSignature, originalTableNumbers } = {}) {
@@ -1483,6 +1488,18 @@ export function undoSeatGroupBatch(snap = {}) {
   if (!batch || batch.releasedAt) return { ok: false, error: '此梯狀態已被更動，無法復原' }
   const nums = [...new Set(tableNumbers.map(String))]
   if (!nums.length) return { ok: false, error: '此梯狀態已被更動，無法復原' }
+  // 入座後中間有加桌／換桌（梯次圈桌或此刻坐著本梯的桌和快照不一樣）→ 整梯不動、安全失敗：
+  // 只倒快照那幾張會留下半套（加的那桌還坐著、或換過去的新桌沒倒），店員改用「這桌離席」逐桌處理。
+  const sameSet = (a, b) => a.length === b.length && a.every(x => b.includes(x))
+  const batchNow = [...new Set((batch.tableNumbers || []).map(String))]
+  const seatedNow = [...new Set(tableService.listAll()
+    .filter(t => t.currentRef?.groupId === groupId && t.currentRef?.batchId === batchId && t.status === 'dining')
+    .map(t => String(t.number)))]
+  if (!sameSet(batchNow, nums) || seatedNow.some(n => !nums.includes(n))) {
+    const nowList = [...new Set([...batchNow, ...seatedNow])].sort()
+    return { ok: false, code: 'batch-tables-changed', currentTables: nowList,
+      error: `此梯入座後有加桌或換桌（目前 ${nowList.join('、') || '無桌'}），整梯未復原；請到桌上用「這桌離席」逐桌處理` }
+  }
   const changed = nums.filter(n => {
     const t = tableService.getByNumber(n)
     return !t || t.status !== 'dining' || t.currentBookingId != null

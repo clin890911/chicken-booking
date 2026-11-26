@@ -211,7 +211,7 @@ for (const { label, original, selected } of [
     await page.locator(`svg g:has(:text-is("${n}"))`).first().click()
   }
   await page.getByRole('button',{name:'確認改桌',exact:true}).click()
-  await expect(page.getByText(/✓ \S+ 改到 \S+/)).toBeVisible()
+  await expect(page.getByText(/✓ \S+ \d+ 位 改到 \S+/)).toBeVisible()
   state=await read()
   expect([state.booking.assignedTableId,...state.booking.extraTableIds]).toEqual(selected)
   expect(state.booking.status).toBe('confirmed')

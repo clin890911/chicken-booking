@@ -24,11 +24,12 @@
 // 選好桌確認＝改配＋入座一次完成），不再先吃一顆「入座失敗」再走純改桌、還得再按一次到了。
 // 預配／鎖桌的 chip 也顯示「N 位」（門口最快的確認是「幾位？」），與未配桌 chip 同款小字、不增加高度。
 // 七版（2026-11-27 A3，Barry：「到了」維持按一下就入座，只加防連點和原位確認）：
-//   ① 入座成功後該 chip 原位變成「✓ 林先生 → 105 已入座・復原」，復原時效內寬度／位置不變；
-//      時效過後變成同寬的透明佔位——名單不左滑，下一位的「到了」不會滑到剛才按的位置。
-//      佔位只在「後面已沒有別的 chip」（拿掉不會讓任何按鈕移位）或整列閒置 20 秒後才收掉。
-//   ② 防連點：600ms 內重複按「到了」無效、處理中（確認框開著）也無效；確認卡的「復原」出現後 800ms 內不吃點擊
-//      （iPad 一下觸控可能送兩次 click，第二下會落在原位的確認卡上）。
+//   ① 入座成功後該 chip 原位變成「［復原］✓ 林先生 3 位 → 105 已入座」，復原時效（8 秒）內寬度／位置不變——
+//      名單不左滑，下一位的「到了」不會滑到剛才按的位置。這是報到列入口唯一的回饋（不另發 toast，只有一顆「復原」）。
+//      「復原」放在卡片左側：原本「到了」在右側，隔一秒「不確定有沒有按到、再按一次」只會按到文字，不會復原。
+//      時效一到，佔位以寬度動畫收起再移除（不留一塊透明空白）。
+//   ② 防連點：同一張 chip 600ms 內重按無效（逐張計時，按另一位的「到了」不受影響）；處理中（確認框開著）全列無效，
+//      另有逾時保底（BUSY_MAX_MS），確認框萬一沒結束也不會永遠卡住。確認卡的「復原」出現後 800ms 內不吃點擊。
 //   ③ chip 最寬＝列寬，資訊區可截斷、「到了」鈕不縮：iPad 直向（列寬約 380px）鈕完整露出，不再只露 11px。
 //   ④ disabled（選桌模式中）：列照樣佔位、看得到名單（地圖尺寸不因模式改變），但整列 inert 不可按。
 import { useState, useEffect, useRef } from 'react'
@@ -38,6 +39,7 @@ import { formatDate } from '../../../utils/timeSlots'
 import { isArriveEligible, isPreassignArriveEligible, ARRIVE_WINDOW_BEFORE_MIN, ARRIVE_WINDOW_AFTER_MIN } from './FloorMap'
 import GlyphText from '../../ui/GlyphText'
 import { formatPhone } from '../../../utils/phoneFormat'
+import { seatedText } from '../../../utils/seatFeedback'
 
 // 遲到判定沿用 UpcomingPanel/BookingCard 既有口徑（graceMin=15，見 utils/bookingPulse.js）。
 const LATE_GRACE_MIN = 15
@@ -108,7 +110,8 @@ export function buildTargets(tables, bookings, now) {
 // 防連點／佔位的時間常數（匯出給測試）
 export const ARRIVE_GUARD_MS = 600
 export const GHOST_UNDO_GUARD_MS = 800
-export const SPACER_IDLE_MS = 20000
+export const GHOST_COLLAPSE_MS = 300   // 復原時效到 → 寬度收起的動畫時間，之後移除
+export const BUSY_MAX_MS = 30000       // 處理中（確認框）旗標的逾時保底
 
 // 把「已入座確認卡／佔位」插回原本的位置：優先插在當時右邊那顆之前，其次左邊那顆之後，否則照原索引。
 // 尾端的佔位（後面已沒有真的 chip）直接拿掉——拿掉不會讓任何按鈕移位。純函式匯出方便單測。
@@ -138,40 +141,39 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
   }, [])
   const effectiveNow = now ?? Date.now()
 
-  // 已入座確認卡／佔位：{ id, name, label, width, height, undo, seq, armed, gone, phase:'done'|'spacer', prevKey, nextKey, index }
+  // 已入座確認卡：{ id, name, guests, label, width, height, undo, seq, armed, gone, phase:'done'|'spacer', prevKey, nextKey, index }
+  // phase 'spacer'＝復原時效已過、正在收起（寬度動畫到 0，GHOST_COLLAPSE_MS 後移除）。
   // 計時一律用 setTimeout（不讀 Date.now 比大小）：頁面時鐘被固定（e2e page.clock）或跳動時行為一樣。
   const [ghosts, setGhosts] = useState([])
-  const guard = useRef({ blocked: false, busy: false })
-  const guardTimer = useRef(null)
+  // busy：確認框開著（全列）；blocked：逐張 chip 的 600ms 防連點（key＝訂位 id → timer）
+  const busy = useRef(false)
+  const busyTimer = useRef(null)
+  const blocked = useRef(new Map())
   const ghostTimers = useRef({})
-  const idleTimer = useRef(null)
   const seq = useRef(0)
   const mounted = useRef(true)
   useEffect(() => {
     mounted.current = true
     const timers = ghostTimers.current
+    const blocks = blocked.current
     return () => {
       mounted.current = false
-      clearTimeout(guardTimer.current); clearTimeout(idleTimer.current)
+      clearTimeout(busyTimer.current)
+      blocks.forEach(clearTimeout); blocks.clear()
       Object.values(timers).forEach(ids => ids.forEach(clearTimeout))
     }
   }, [])
-  // 佔位：整列閒置 SPACER_IDLE_MS（沒人碰報到列）才收掉；每次碰報到列都重新計時
-  const touch = () => {
-    clearTimeout(idleTimer.current)
-    idleTimer.current = setTimeout(() => { if (mounted.current) setGhosts(gs => gs.filter(g => g.phase !== 'spacer')) }, SPACER_IDLE_MS)
-  }
   const updateGhost = (id, patch) => setGhosts(gs => gs.map(g => (g.id === id ? { ...g, ...patch } : g)))
   const addGhost = (ghost) => {
     ;(ghostTimers.current[ghost.id] || []).forEach(clearTimeout)
     ghostTimers.current[ghost.id] = [
-      // 確認卡的「復原」出現後 800ms 才吃點擊（一下觸控送兩次 click 的第二下會落在這裡）
+      // 確認卡的「復原」出現後 800ms 才吃點擊（一下觸控送兩次 click 的第二下）
       setTimeout(() => { if (mounted.current) updateGhost(ghost.id, { armed: true }) }, GHOST_UNDO_GUARD_MS),
-      // 過了復原時效 → 同寬透明佔位（不收合）
-      setTimeout(() => { if (mounted.current) { updateGhost(ghost.id, { phase: 'spacer', undo: null }); touch() } }, SEATED_UNDO_MS),
+      // 過了復原時效 → 寬度收起（動畫），收完移除：報到列開頭不留一塊透明空白
+      setTimeout(() => { if (mounted.current) updateGhost(ghost.id, { phase: 'spacer', undo: null }) }, SEATED_UNDO_MS),
+      setTimeout(() => { if (mounted.current) dropGhost(ghost.id) }, SEATED_UNDO_MS + GHOST_COLLAPSE_MS),
     ]
     setGhosts(gs => [...gs.filter(g => g.id !== ghost.id), ghost])
-    touch()
   }
   const dropGhost = (id) => {
     ;(ghostTimers.current[id] || []).forEach(clearTimeout)
@@ -217,34 +219,35 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
 
   if (!items.length) return null
 
-  // 「到了」：防連點（600ms 內／處理中重按無效）；成功（鎖桌／預配一鍵入座）→ 原位留確認卡
-  const pressArrive = (e, idx, fire, target) => {
+  // 「到了」：防連點（同一張 600ms 內重按無效；處理中全列無效）；成功（鎖桌／預配一鍵入座）→ 原位留確認卡
+  const pressArrive = (e, idx, fire, target, chipId) => {
     e.stopPropagation()
-    touch()
-    if (disabled || guard.current.busy || guard.current.blocked) return
-    guard.current = { blocked: true, busy: true }
-    clearTimeout(guardTimer.current)
-    guardTimer.current = setTimeout(() => { guard.current = { ...guard.current, blocked: false } }, ARRIVE_GUARD_MS)
+    const key = String(chipId ?? idx)
+    if (disabled || busy.current || blocked.current.has(key)) return
+    blocked.current.set(key, setTimeout(() => { blocked.current.delete(key) }, ARRIVE_GUARD_MS))
+    busy.current = true
+    clearTimeout(busyTimer.current)
+    // 逾時保底：確認框萬一沒結束（Promise 永不 resolve），也不會讓整列「到了」永遠按不動
+    busyTimer.current = setTimeout(() => { busy.current = false }, BUSY_MAX_MS)
     const item = e.currentTarget?.closest?.('[role="listitem"]')
     const rect = item?.getBoundingClientRect?.() || {}
     const place = { prevKey: items[idx - 1]?.key ?? null, nextKey: items[idx + 1]?.key ?? null, index: idx, width: rect.width || 0, height: rect.height || 0 }
-    const release = () => { guard.current = { ...guard.current, busy: false } }
+    const release = () => { clearTimeout(busyTimer.current); busy.current = false }
     const settle = (r) => {
       if (!target || !r?.ok || !mounted.current) return
       const { booking, table, nums } = target
       const label = r.seatedLabel || ((nums && nums.length > 1) ? nums.join('+') : table?.number)
-      addGhost({ id: booking.id, name: booking.name, label, undo: typeof r.undoSeat === 'function' ? r.undoSeat : null, at: ++seq.current, armed: false, gone: false, phase: 'done', ...place })
+      addGhost({ id: booking.id, name: booking.name, guests: booking.guests, label, undo: typeof r.undoSeat === 'function' ? r.undoSeat : null, at: ++seq.current, armed: false, gone: false, phase: 'done', ...place })
     }
     let res
     try { res = fire() } catch (err) { release(); throw err }
     // 有確認框（Promise）：框本身擋住連點；框關掉後不再吃下一下（店員取消後重按是刻意的）
     if (res && typeof res.then === 'function') {
-      res.then(settle, () => {}).finally(() => { clearTimeout(guardTimer.current); guard.current = { blocked: false, busy: false } })
+      res.then(settle, () => {}).finally(() => { blocked.current.delete(key); release() })
     } else { settle(res); release() }
   }
   const pressGhostUndo = (e, g) => {
     e.stopPropagation()
-    touch()
     if (!g.armed) return
     const u = g.undo?.()
     if (u?.ok) dropGhost(g.id)
@@ -256,7 +259,6 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
       data-disabled={disabled ? 'true' : undefined}
       inert={disabled ? '' : undefined}
       aria-disabled={disabled || undefined}
-      onPointerDownCapture={touch}
       className={`flex-shrink-0 mt-2 pt-2 border-t border-chicken-brown/10 short:col-span-2 short:min-w-0 ${disabled ? 'opacity-45' : ''}`}
     >
       <div className="flex items-center px-0.5 mb-1">
@@ -282,8 +284,11 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
           {items.map((it, idx) => {
             if (it.kind === 'ghost') {
               const g = it.g
+              // spacer＝收起中：寬度動畫到 0（負的右邊距吃掉 gap），GHOST_COLLAPSE_MS 後移除
               const spacer = g.phase === 'spacer'
-              const size = { width: g.width || undefined, minWidth: g.width || undefined, height: g.height || undefined }
+              const size = spacer
+                ? { width: 0, minWidth: 0, height: g.height || undefined, marginRight: -10, paddingLeft: 0, paddingRight: 0, borderWidth: 0, overflow: 'hidden' }
+                : { width: g.width || undefined, minWidth: g.width || undefined, height: g.height || undefined }
               return (
                 <div
                   key={it.key}
@@ -292,25 +297,29 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                   data-phase={g.phase}
                   aria-hidden={spacer ? 'true' : undefined}
                   style={size}
-                  className={`flex items-center gap-2 shrink-0 max-w-full rounded-full border-2 pl-3 pr-1.5 py-1 transition-opacity duration-300
+                  className={`flex items-center gap-2 shrink-0 max-w-full rounded-full border-2 pl-1.5 pr-3 py-1
+                    motion-safe:transition-[width,min-width,margin,padding,opacity] motion-safe:duration-300
                     ${spacer ? 'opacity-0 pointer-events-none border-transparent' : 'bg-chicken-green/10 border-chicken-green/50'}`}
                 >
                   {!spacer && (
                     <>
-                      <span role="status" className="min-w-0 flex-1 truncate text-sm font-bold text-chicken-green">
-                        <GlyphText size={14}>{`✓ ${g.name} → ${g.label} 已入座`}</GlyphText>
-                      </span>
+                      {/* 復原放左側：原本的「到了」在 chip 右端，再按一次同一個位置只會落在文字上 */}
                       {g.undo && (
                         <button
                           type="button"
+                          data-testid="seated-ghost-undo"
+                          disabled={!g.armed}
                           onClick={(e) => pressGhostUndo(e, g)}
-                          aria-label={`復原 ${g.name} 入座`}
+                          aria-label={`復原入座 ${g.name}`}
                           className="rounded-full bg-white border-2 border-chicken-green text-chicken-green text-xs font-bold shrink-0"
                           style={{ height: 44, minWidth: 44, paddingLeft: 12, paddingRight: 12 }}
                         >
                           復原
                         </button>
                       )}
+                      <span role="status" className="min-w-0 flex-1 truncate text-sm font-bold text-chicken-green">
+                        {seatedText({ name: g.name, guests: g.guests, tables: g.label })}
+                      </span>
                     </>
                   )}
                 </div>
@@ -356,7 +365,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                   </span>
                   <button
                     type="button"
-                    onClick={(e) => pressArrive(e, idx, arrive, null)}
+                    onClick={(e) => pressArrive(e, idx, arrive, null, booking.id)}
                     aria-label={`${booking.name} 到了，選桌入座`}
                     className="rounded-full bg-chicken-green text-white text-xs font-bold shrink-0 whitespace-nowrap
                                hover:opacity-90 focus-visible:outline focus-visible:outline-2
@@ -410,7 +419,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                 </span>
                 <button
                   type="button"
-                  onClick={(e) => pressArrive(e, idx, arrive, seatsNow ? it.t : null)}
+                  onClick={(e) => pressArrive(e, idx, arrive, seatsNow ? it.t : null, booking.id)}
                   aria-label={reseat ? `${booking.name} 到了，換桌入座` : `${booking.name} 到了，入座 ${table.number}`}
                   className="rounded-full bg-chicken-green text-white text-xs font-bold shrink-0 whitespace-nowrap
                              hover:opacity-90 focus-visible:outline focus-visible:outline-2

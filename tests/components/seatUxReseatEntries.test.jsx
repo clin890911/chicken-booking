@@ -74,6 +74,17 @@ describe('桌況抽屜：預配桌被佔 → 「到了 · 換桌入座」', () =
     expect(onArriveReseat).toHaveBeenCalledWith(CHEN)
     expect(ctx.seatBooking).not.toHaveBeenCalled()
   })
+  // 2026-11-27 驗收：只列「到了」時間窗內（訂位前後 60 分，與報到列同一支 isPreassignArriveEligible）
+  it('晚場的預配（18:30，此刻 11:50）不在被佔桌的抽屜給「到了 · 換桌入座」', () => {
+    const LATE = { ...CHEN, id: 'LATE', name: '晚場王先生', timeSlot: '18:30' }
+    const tables = [T('105'), T('106', { status: 'dining', currentBookingId: 'WALK', seatedAt: NOW.toISOString() })]
+    setCtx([CHEN, LATE, WALK], tables)
+    mount(<TableDrawer table={tables[1]} booking={WALK} preassign={null} groupHold={null} onClose={() => {}} onStartMove={() => {}} onArriveReseat={vi.fn()} mode={{}} />)
+    const list = container.querySelector('[data-testid="drawer-taken-preassign"]')
+    expect(list.textContent).toContain('陳小姐')
+    expect(list.textContent).not.toContain('晚場王先生')
+    expect(btn('晚場王先生 到了 · 換桌入座')).toBeUndefined()
+  })
   it('併桌預配（主桌 105 空、副桌 106 被佔）：空桌抽屜不給「到了，入座 105」，改給換桌入座', () => {
     const combo = { ...CHEN, guests: 8, assignedTableId: '105', extraTableIds: ['106'] }
     const tables = [T('105'), T('106', { status: 'dining', currentBookingId: 'WALK' })]

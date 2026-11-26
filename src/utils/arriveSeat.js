@@ -52,9 +52,11 @@ export function seatAfterArriveConfirm(booking, { confirm, bookings = [], groupH
 // 被別組佔走就整組不動並明講（不搶桌）。帶位時解除掉的他筆預配（releasedPreassigns）一併還回去。
 // 回傳同一支復原函式（報到列就地確認卡的「復原」也用它）：toast 與確認卡兩邊按哪一個都一樣，
 // 已成功復原過就不再倒第二次（回 { ok:true, already:true }），失敗則可再按。
-// 報到列就地確認卡（A3）與 toast 同一個時效：都是 8 秒（seatFeedback.SEAT_UNDO_MS），按哪一個都還來得及。
+// 報到列就地確認卡（A3）與 toast 同一個時效：都是 8 秒（seatFeedback.SEAT_UNDO_MS）。
+// inline＝true（報到列入口）：不發 toast，只回傳復原函式給原位確認卡用——同一件事畫面上只能有一顆「復原」
+// （2026-11-27 驗收：原位卡與 toast 同時出現兩顆復原）。失敗／已復原的訊息照常走 toast。
 export const SEATED_UNDO_MS = SEAT_UNDO_MS
-export function toastSeatedWithUndo(r, { message, name, undoSeatBooking, toast, releasedPreassigns = [], restoreOverriddenAssignment, onUndone }) {
+export function toastSeatedWithUndo(r, { message, name, undoSeatBooking, toast, releasedPreassigns = [], restoreOverriddenAssignment, onUndone, inline = false }) {
   let undone = false
   const undo = () => {
     if (undone) return { ok: true, already: true }
@@ -68,7 +70,7 @@ export function toastSeatedWithUndo(r, { message, name, undoSeatBooking, toast, 
     onUndone?.(u)
     return u
   }
-  toastSeatUndo(toast, message, { label: '復原', onUndo: undo })
+  if (!inline) toastSeatUndo(toast, message, { ariaLabel: `復原入座 ${name || '這組'}`, onUndo: undo })
   return undo
 }
 

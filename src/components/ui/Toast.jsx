@@ -1,11 +1,9 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react'
-import { createPortal } from 'react-dom'
+import { createContext, useContext, useState, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 import Icon from './Icon'
 import GlyphText from './GlyphText'
 import { SPRING_UI } from './springs'
-import { useSeatToastSlot } from './SeatToastSlot'
 
 // 輕量 Toast 系統：取代 alert/confirm，支援 Undo
 // 使用：
@@ -41,8 +39,6 @@ const MAX_VISIBLE = 3
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
-  // 入座回饋落點（placement:'seat'，見 ./SeatToastSlot 與 utils/seatFeedback）
-  const seatSlot = useSeatToastSlot()
 
   const dismiss = useCallback((id) => {
     setToasts(list => list.filter(t => t.id !== id))
@@ -80,23 +76,21 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismiss} seatSlot={seatSlot} />
+      <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </ToastContext.Provider>
   )
 }
 
-function ToastContainer({ toasts, onDismiss, seatSlot }) {
-  const useSlot = !!seatSlot?.isConnected
-  const top = useSlot ? toasts.filter(t => t.placement !== 'seat') : toasts
-  const seat = useSlot ? toasts.filter(t => t.placement === 'seat') : []
+// 全尺寸統一頂部置中（2026-11-27 驗收 P1）：入座回饋（placement:'seat'）也在這裡，不再疊在桌況圖底部——
+// iPad 橫向時底部的提示會蓋住最底排桌子 8 秒、攔截點擊（點 111 實際點到「復原」）。頂部只有統計列，
+// 不蓋任何桌子、也不蓋左欄作業面板的確認鈕。placement 只留在 data-placement（測試辨識用），不影響位置。
+// role=status＋aria-live=polite 放在常駐容器上：讀屏念出入座成功（live region 要先存在、內容後插入才會念）。
+function ToastContainer({ toasts, onDismiss }) {
   return (
-    <>
-      {/* 全尺寸統一頂部置中：iPad 現場頁右下是地圖與報到列，原本 sm 以上的右下角 toast 會蓋住「到了」鈕與桌子。 */}
-      <div data-testid="toast-container" className="fixed top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none items-center">
-        <ToastStack toasts={top} onDismiss={onDismiss} />
-      </div>
-      {useSlot && createPortal(<ToastStack toasts={seat} onDismiss={onDismiss} />, seatSlot)}
-    </>
+    <div data-testid="toast-container" role="status" aria-live="polite"
+      className="fixed top-4 left-4 right-4 z-[60] flex flex-col gap-2 pointer-events-none items-center">
+      <ToastStack toasts={toasts} onDismiss={onDismiss} />
+    </div>
   )
 }
 
@@ -113,6 +107,7 @@ function ToastStack({ toasts, onDismiss }) {
             exit={{ opacity: 0, y: -16, scale: 0.96, transition: { duration: 0.16 } }}
             transition={SPRING_UI}
             data-type={t.type}
+            data-placement={t.placement}
             className="lg-float lg-toast pointer-events-auto rounded-[22px] text-chicken-brown pl-2.5 pr-4 py-3 flex items-center gap-3 max-w-md min-w-[260px]"
           >
             <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-white flex-shrink-0 ${TYPE_CHIP[t.type] || TYPE_CHIP.info}`}>
@@ -121,8 +116,10 @@ function ToastStack({ toasts, onDismiss }) {
             <span className="flex-1 text-sm font-bold leading-snug">{t.message}</span>
             {t.action && (
               <button
+                type="button"
                 onClick={() => { t.action.onClick?.(); onDismiss(t.id) }}
                 data-testid="toast-action"
+                aria-label={t.action.ariaLabel || undefined}
                 className="min-h-[44px] min-w-[44px] px-4 rounded-full bg-chicken-brown text-white text-sm font-bold hover:bg-chicken-brown/90 active:scale-95 flex-shrink-0"
               >
                 <GlyphText size={16}>{t.action.label || '復原'}</GlyphText>
@@ -153,14 +150,21 @@ const ConfirmContext = createContext(null)
 
 export function ConfirmProvider({ children }) {
   const [state, setState] = useState({ open: false, message: '', resolve: null, options: {} })
+  // 目前開著的那個 confirm 的 resolve：開新的 confirm 前先把舊的 resolve(false)——
+  // 否則舊的 Promise 永遠不結束，等它的呼叫端（例：報到列「到了」的處理中旗標）會卡死。
+  const pending = useRef(null)
 
   const confirm = useCallback((message, options = {}) => {
     return new Promise(resolve => {
+      const prev = pending.current
+      pending.current = resolve
+      prev?.(false)
       setState({ open: true, message, resolve, options })
     })
   }, [])
 
   const handle = (result) => {
+    if (pending.current === state.resolve) pending.current = null
     state.resolve?.(result)
     setState({ open: false, message: '', resolve: null, options: {} })
   }
