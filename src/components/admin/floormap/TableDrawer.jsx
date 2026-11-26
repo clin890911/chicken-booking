@@ -15,7 +15,7 @@ import { STATUS_COLOR } from './statusColors'
 import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
 import { releaseOverlappingPreassigns, conflictLine } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
-import { toastSeatedWithUndo, seatAfterArriveConfirm } from '../../../utils/arriveSeat'
+import { toastSeatedWithUndo, seatAfterArriveConfirm, arriveActionFor } from '../../../utils/arriveSeat'
 import { splitSuffix } from '../../../utils/partySplit'
 import { formatPhone } from '../../../utils/phoneFormat'
 import EditBookingModal from '../../booking/EditBookingModal'
@@ -55,7 +55,7 @@ function addDaysStr(dateStr, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export default function TableDrawer({ table: storedTable, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, onGroupMove, onGroupAdd, onWaitlistSeated, mode }) {
+export default function TableDrawer({ table: storedTable, booking, preassign, groupHold, onClose, onStartMove, onArriveReseat = null, onReseatBatch, onGroupMove, onGroupAdd, onWaitlistSeated, mode }) {
   const handoff=useHandoff()
   const { can } = useAuth()
   const toast = useToast()
@@ -137,6 +137,17 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     setShowWalkIn(false)
     onClose?.()
   }
+
+  // 預配到這張桌、但這組的桌此刻被別組佔（arriveSeat.arriveActionFor＝'reseat'，與報到列／今日卡同一支判斷）：
+  // 抽屜直接給「到了 · 換桌入座」，不給「客人到了」→ 確認框 → 入座失敗（A4）。
+  //   preassign（空桌上的預配，大組副桌被佔時）＋ 這張桌被別組佔用時、預配到這張桌的今日待到訂位
+  const preassignReseat = !!(preassign && onArriveReseat && arriveActionFor(preassign, tables) === 'reseat')
+  const takenPreassigns = (onArriveReseat && table.status !== 'vacant')
+    ? (bookings || []).filter(b => b.date === today && ['confirmed', 'pending'].includes(b.status)
+      && b.id !== table.currentBookingId
+      && [b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean).map(String).includes(String(table.number))
+      && arriveActionFor(b, tables) === 'reseat')
+    : []
 
   // 入座前的預留確認與今日訂位卡／訂位詳情同一套（seatAfterArriveConfirm：時段重疊的他筆預配、今日團保才確認）
   const afterArriveConfirm = (b, proceed) => seatAfterArriveConfirm(b, { confirm: confirmDialog, bookings, groupReservations, tables, settings, now: new Date() }, proceed)
@@ -463,14 +474,42 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             <p className="text-[11px] text-blue-800/70 mt-0.5">
               預訂：會從現在鎖桌到那組用完餐；若會撞到這筆預配，下方候選的「預訂」鈕會標明「將解除」。
             </p>
-            {perms.seat && (
+            {perms.seat && (preassignReseat ? (
+              <>
+                <p className="text-[11px] font-bold text-amber-800 mt-1">這組另一張預配桌此刻有別組：到了請選一張空桌入座。</p>
+                <button
+                  onClick={() => onArriveReseat(preassign)}
+                  aria-label={`${preassign.name} 到了，換桌入座`}
+                  className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
+                >
+                  {preassign.name} 到了 · 換桌入座
+                </button>
+              </>
+            ) : (
               <button
                 onClick={handleSeatPreassigned}
                 className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
               >
                 {preassign.name} 到了，入座 {table.number}
               </button>
-            )}
+            ))}
+          </div>
+        )}
+        {/* 此桌被別組佔，但有今日待到訂位預配在這張桌：客人到了直接換桌入座（與報到列「到了 · 換桌」同一條） */}
+        {perms.seat && takenPreassigns.length > 0 && (
+          <div data-testid="drawer-taken-preassign" className="px-3 py-2 bg-amber-50 border border-dashed border-amber-300 rounded-lg text-xs space-y-2">
+            {takenPreassigns.map(b => (
+              <div key={b.id}>
+                <div className="font-bold text-amber-900">預配此桌：{b.name}（{b.guests} 位{b.timeSlot ? ` · ${b.timeSlot}` : ''}）· 此桌目前有別組</div>
+                <button
+                  onClick={() => onArriveReseat(b)}
+                  aria-label={`${b.name} 到了，換桌入座`}
+                  className="mt-1.5 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
+                >
+                  {b.name} 到了 · 換桌入座
+                </button>
+              </div>
+            ))}
           </div>
         )}
         {/* 維修中：接管空桌的預設引導，明確顯示原因與期間 */}

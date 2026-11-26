@@ -24,6 +24,7 @@ export default function OpsRail({
   // canWalkIn：無散客入座權限（唯讀角色 kitchen）時整個帶位籤不渲染——面板底部的「確認入座」會寫 bookings＋tables
   canWalkIn = true,
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
+  walkinMulti = false, walkinAutoMulti = false, onToggleWalkinMulti = null, walkinExcess = null,
   walkinWarning, onWalkinSeat, lastParty, onLocateSuggestion, onApplySuggestion, showNextWaitlist, onNextWaitlist,
 }) {
   const { bookings, waitlist, groupReservations, tables } = useBooking()
@@ -104,6 +105,10 @@ export default function OpsRail({
           tables={walkinTables}
           onRemoveTable={onRemoveWalkinTable}
           onClearTables={onClearWalkinTables}
+          multi={walkinMulti}
+          autoMulti={walkinAutoMulti}
+          onToggleMulti={onToggleWalkinMulti}
+          excess={walkinExcess}
           warning={walkinWarning}
           onSeat={onWalkinSeat}
           lastParty={lastParty}

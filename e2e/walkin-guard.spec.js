@@ -91,6 +91,8 @@ test('併桌：多桌中任一張被預先配走也要擋，且警示指出是�
   await expect(slider(page)).not.toBeDisabled()
 
   // 再併上被預配的 102 → 警示出現且指名 102（不是 101）
+  // A2（2026-11-27）：帶位預設單選（點別張＝改選），併桌要先按「＋再加一桌（併桌）」
+  await page.getByRole('button', { name: '＋再加一桌（併桌）' }).click()
   await page.locator('svg g:has(:text-is("102"))').first().click()
   await expect(page.getByRole('button', { name: '移除桌 102' })).toBeVisible()
   await expect(page.getByText(/102 已排給 .*預配客/)).toBeVisible()

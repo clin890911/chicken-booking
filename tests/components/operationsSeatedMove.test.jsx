@@ -114,7 +114,7 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
     const b = {id:'P',name:'未到測試',guests:4,date:'2026-09-19',timeSlot:'13:30',status:'confirmed',assignedTableId:'106'}
     act(() => root.render(<OperationsView pendingMove={{booking:b,seq:1}}/>))
     expect(container.querySelector('input[aria-label="電話"]').closest('[hidden]')).toBeTruthy()
-    click(byText('取消並返回'))
+    click(byText('取消'))
     expect(container.querySelector('input[aria-label="電話"]').value).toBe('0911222333')
     expect(container.querySelector('input[placeholder="例：靠窗、慶生、過敏"]').value).toBe('靠窗測試')
     expect(byText('林').getAttribute('aria-pressed')).toBe('true')
@@ -141,7 +141,7 @@ describe('OperationsView × 內嵌新增今日訂位', () => {
     const b = bookingService.create({name:'已到單桌',guests:4,date:'2026-09-19',timeSlot:'13:00',status:'arrived',assignedTableId:'105'})
     tableService.seatTable('105',b.id)
     render();act(() => root.render(<OperationsView pendingMove={{booking:b,seq:2}}/>))
-    click(mapTable('106'));click(byText('取消並返回'))
+    click(mapTable('106'));click(byText('取消'))
     expect(bookingService.getById(b.id).assignedTableId).toBe('105')
     expect(ctx.replaceSeatedBookingTables).not.toHaveBeenCalled()
   })

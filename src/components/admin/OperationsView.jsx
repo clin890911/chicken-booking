@@ -38,6 +38,7 @@ import { preassignArriveConflictLines, toastSeatedWithUndo, preassignTakenByOthe
 import { resolveSuggestedTables } from '../../utils/suggestionApply'
 import { toastMovedWithUndo, clearTablesWithUndo, undoLabel } from '../../utils/tableUndo'
 import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
+import { needsComboTables, pickAction, applyPick, excessTablesHint } from '../../utils/tablePick'
 import { isPhoneLayout, scrollContentTo, usePhoneLayout } from '../../utils/phoneLayout'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
@@ -99,8 +100,9 @@ export function handleArriveNow(table, booking, deps) {
     }
     return r
   }
-  toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${table.number}`, name: booking.name, undoSeatBooking, toast })
-  return r
+  const undoSeat = toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${table.number}`, name: booking.name, undoSeatBooking, toast })
+  // undoSeat：報到列就地確認卡的「復原」（與 toast 同一支，見 arriveSeat.toastSeatedWithUndo）
+  return undoSeat ? { ...r, undoSeat, seatedLabel: String(table.number) } : r
 }
 
 // 預配訂位「到了」前的防呆（團保／重疊預配）：搬到 utils/arriveSeat.js——今日訂位卡也要用，
@@ -117,10 +119,8 @@ function arrivePreassigned(table, booking, deps) {
   const { confirm, preassignConflictLines, getTable } = deps
   const nums = [...new Set([booking.assignedTableId, ...(booking.extraTableIds || [])].filter(Boolean).map(String))]
   const label = nums.length > 1 ? nums.join(' + ') : table.number
-  const taken = nums.some(n => {
-    const t = n === String(table.number) ? table : getTable?.(n)
-    return t && t.status !== 'vacant' && String(t.currentBookingId ?? '') !== String(booking.id)
-  })
+  // 「桌被別組佔」與報到列／今日卡／抽屜同一支判斷（arriveSeat.preassignTakenByOthers）
+  const taken = preassignTakenByOthers(booking, nums.map(n => (n === String(table.number) ? table : getTable?.(n))).filter(Boolean))
   const lines = !taken && preassignConflictLines ? preassignConflictLines(booking) : []
   if (lines.length) {
     if (!confirm) { deps.toast.error(`${lines.join('；')}。請從「今日」清單的卡片確認後入座`); return { ok: false, code: 'needs-confirm' } }
@@ -151,8 +151,8 @@ function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAll
     }
     return r
   }
-  toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${label}`, name: booking.name, undoSeatBooking, toast })
-  return r
+  const undoSeat = toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${label}`, name: booking.name, undoSeatBooking, toast })
+  return undoSeat ? { ...r, undoSeat, seatedLabel: label } : r
 }
 
 // 候位入座成功後的共同收尾（三條路徑共用：二步確認單桌、併桌、桌況抽屜候選名單）。
@@ -285,6 +285,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 桌的真相放這裡（不放面板內），桌況圖與帶位面板共用同一份，避免兩邊各記一套。
   const [walkinGuests, setWalkinGuests] = useState(2)
   const [walkinTableNumbers, setWalkinTableNumbers] = useState([])
+  // A2：帶位面板預設單選（點別張＝改選）；按「＋再加一桌（併桌）」才多選。沒有單桌坐得下時自動多選（walkinAutoMulti）。
+  const [walkinMultiOn, setWalkinMultiOn] = useState(false)
   const [lastSeated, setLastSeated] = useState(null) // M2b 短復原：{ bookingId, tableNumbers, name, guests, at }
   // M6 沿用上一組：{ guests, notes }。放在這裡（不放面板內）是因為切籤會把 FastWalkInPanel
   // 卸載，state 會消失；連續同型客人（一直來 2 位）才是這功能要救的情境。
@@ -428,7 +430,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     rememberModeSource()
     const sugTables = suggestion ? [String(suggestion)] : (suggestionTables || []).map(String)
     setMode({ ...extra, type: 'assign-multi', kind, booking, wait, need, lockKind,
-      selected: [], suitable, suggestion: suggestion || sugTables[0], suggestionTables: sugTables,
+      selected: [], multi: false, suitable, suggestion: suggestion || sugTables[0], suggestionTables: sugTables,
       suggestionSqueezed: !suggestion && sugTables.length > 1 && !!suggestionSqueezed, replacing, confirmedWarning: null })
     setSelectedTable(null)
     setPendingConfirm(null)
@@ -783,19 +785,19 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       // 一桌＝單桌帶位、多桌＝併桌，同一條路徑，人數與桌到齊後由面板滑動入座。
       // 無帶位權限（唯讀角色）時帶位籤不存在，點空桌不可偷偷累積「已選桌」，一律走開抽屜
       if (railTab === 'walkin' && canWalkIn && walkinSelectable.includes(number)) {
-        const isRemove = walkinTableNumbers.includes(number)
-        // 同樓層守門：切樓層後想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
-        if (!isRemove && walkinTableNumbers.length) {
+        // A2 點桌語意（utils/tablePick）：單選＝點別張改選、點已選＝取消；多選（＋再加一桌／大組自動）＝加／減
+        const action = pickAction(walkinTableNumbers, number, { multi: walkinMulti })
+        // 同樓層守門：多選時加別層的桌 → 擋（併桌不可跨層；移除、單選改選一律允許）
+        if (action === 'add' && walkinTableNumbers.length) {
           const selFloor = tables.find(x => x.number === walkinTableNumbers[0])?.floor
           const thisFloor = tables.find(x => x.number === number)?.floor
           if (selFloor && thisFloor && selFloor !== thisFloor) {
             return toast.error('併桌需在同一樓層，請改選同層的桌')
           }
         }
-        // 加/移一律在 updater 內依 prev 判斷：iPad 觸控可能同一個 tick 內送出兩次 click
-        // （touch → 合成 click），若沿用 render 當下的 isRemove，兩次都會判定「加入」→
-        // 同一張桌被塞進陣列兩次 → 席數加倍、入座時帶錯桌數。
-        setWalkinTableNumbers(prev => prev.includes(number) ? prev.filter(n => n !== number) : [...prev, number])
+        // 動作依「當下畫面」決定、結果冪等（applyPick）：iPad 觸控同一個 tick 送兩次 click 時
+        // 兩次都是同一個動作 → 不會同一張桌塞兩次、也不會加了又自己取消。
+        setWalkinTableNumbers(prev => applyPick(prev, number, action))
         setSelectedTable(null) // 抽屜開著時也要退回帶位面板，選了什麼桌才看得見
         return
       }
@@ -811,19 +813,19 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       return
     }
     // 多桌指派（大組併桌）：點桌加入/移除已選集合，不走二步確認（確認在 banner 按鈕）
+    // A2（Barry 2026-11-27 拍板）：單選（預設）＝點別張改選、點已選取消；多選（＋再加一桌／大組自動）＝加／減
     if (mode.type === 'assign-multi') {
       if (!mode.selected.includes(number) && !mode.suitable.includes(number)) return toast.error('此桌目前不可加入（非空桌或維修中）')
-      const isRemove = mode.selected.includes(number)
-      // 同樓層守門：切樓層後若想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
-      if (!isRemove && mode.selected.length) {
+      const action = pickAction(mode.selected, number, { multi: modeMulti })
+      // 同樓層守門：多選時加別層的桌 → 擋（併桌不可跨層；移除、單選改選一律允許）
+      if (action === 'add' && mode.selected.length) {
         const selFloor = tables.find(x => x.number === mode.selected[0])?.floor
         const thisFloor = tables.find(x => x.number === number)?.floor
         if (selFloor && thisFloor && selFloor !== thisFloor) {
           return toast.error('併桌需在同一樓層，請改選同層的桌')
         }
       }
-      const selected = isRemove ? mode.selected.filter(n => n !== number) : [...mode.selected, number]
-      setMode({ ...mode, selected, confirmedWarning: null })
+      setMode({ ...mode, selected: applyPick(mode.selected, number, action), confirmedWarning: null })
       return
     }
     // 指派 / 候位入座 / 換桌 / 團體改派：二步確認
@@ -961,6 +963,18 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     return squeezeSeats((mode.selected || []).map(n => tables.find(t => t.number === n)).filter(Boolean))
   }, [mode, tables])
 
+  // A2：大組（沒有任何一張可選單桌坐得下）自動多選；其餘要按「＋再加一桌（併桌）」才多選
+  const modeAutoMulti = mode?.type === 'assign-multi'
+    && needsComboTables(mode.need, (mode.suitable || []).map(n => tables.find(t => t.number === n)))
+  const modeMulti = mode?.type === 'assign-multi' && (!!mode.multi || modeAutoMulti)
+  // 「一張就夠卻選了多張」（例：3 位選了 2 張共 12 席）→ 黃字提醒，不硬擋
+  const modeExcess = mode?.type === 'assign-multi'
+    ? excessTablesHint((mode.selected || []).map(n => tables.find(t => t.number === n)), mode.need)
+    : null
+  const toggleModeMulti = () => setMode(m => (m?.type === 'assign-multi'
+    ? { ...m, multi: !m.multi, selected: m.multi && m.selected.length > 1 ? m.selected.slice(-1) : m.selected, confirmedWarning: null }
+    : m))
+
   // 多桌確認：席數夠 → 一筆 booking 佔多桌。
   // kind='booking' → 指派該訂位（桌況 reserved，客人到了再入座）
   // kind='waitlist' → 候位直接入座（桌況 dining，客人已在現場）
@@ -1087,6 +1101,18 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     [walkinTableNumbers, walkinSelectable, tables],
   )
 
+  // A2：帶位人數沒有任何一張此刻可帶的單桌坐得下 → 自動多選（大組・可選多桌）
+  const walkinAutoMulti = useMemo(
+    () => needsComboTables(walkinGuests, walkinSelectable.map(n => tables.find(t => t.number === n))),
+    [walkinGuests, walkinSelectable, tables],
+  )
+  const walkinMulti = walkinMultiOn || walkinAutoMulti
+  const toggleWalkinMulti = () => {
+    if (walkinMultiOn && walkinTableNumbers.length > 1) setWalkinTableNumbers(prev => prev.slice(-1))
+    setWalkinMultiOn(v => !v)
+  }
+  const walkinExcess = useMemo(() => excessTablesHint(walkinTables, walkinGuests), [walkinTables, walkinGuests])
+
   // 已選桌被別人佔走/進維修 → 直接從 walkinTableNumbers 剪掉，並告知店員是哪一張。
   // 不能只靠 walkinTables 過濾顯示：留在 walkinTableNumbers 的「幽靈桌」會①在桌況圖上
   // 仍畫成已選 ②被同層守門當成基準桌，害之後選別層的桌跳莫名錯誤 ③只剩一張時面板
@@ -1147,6 +1173,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const note = restoreNote(restoreReleasedPreassigns(snap.releasedPreassigns, { restoreOverriddenAssignment }))
     setLastSeated(null)
     setWalkinTableNumbers(snap.tableNumbers || []) // 桌回到已選狀態，方便馬上改帶別組
+    if ((snap.tableNumbers || []).length > 1) setWalkinMultiOn(true) // 併桌復原回來仍是多選，點桌才不會變成改選
     toast.info(`已復原：${snap.tableNumbers.join(' + ')} 回到空桌${note}`)
   }
 
@@ -1187,6 +1214,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     setLastParty({ guests, children: Number(payload.children) || 0, notes: payload.staffNotes || '' })
     flashAssigned(nums[0])
     setWalkinTableNumbers([])
+    setWalkinMultiOn(false)
     // 不 setSelectedTable：留在帶位面板才能直接帶下一組（舊版會被 TableDrawer 蓋掉）
     // M2b：成功 toast 直接帶「復原」，8 秒內可反悔（拿掉二次確認換來的安全網）
     toast.action(
@@ -1358,6 +1386,24 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     else scrollContentTo(leftColRef.current, { smooth: true })
   }
 
+  const modeBannerProps = {
+    mode, tables,
+    onLocateSuggestion: locateSuggestion,
+    onApplySuggestion: applyModeSuggestion,
+    pendingConfirm, pendingConflicts, pendingGroupHold,
+    multiSeats: walkinMultiSeats,
+    multiMaxSeats: walkinMultiMaxSeats,
+    multiWarnings, multiWarningSevere, multiWarningConfirmed,
+    onConfirmWarning: (checked) => setMode(m => ({ ...m, confirmedWarning: checked ? multiWarningKey : null })),
+    onChangeNeed: changeArriveNeed,
+    onClearSelection: () => setMode(m => ({ ...m, selected: [], confirmedWarning: null })),
+    onCancel: cancelModeAndNotify,
+    onConfirm: () => executeAssign(pendingConfirm),
+    onConfirmMulti: confirmWalkinMulti,
+    onClearPending: () => setPendingConfirm(null),
+    multi: modeMulti, autoMulti: modeAutoMulti, onToggleMulti: toggleModeMulti, excess: modeExcess,
+  }
+
   return (
     // 手機條件（phone:）：平常整頁捲（內容區是捲動容器，這層走自然高度）；選桌模式時改回一面式——
     // 橫幅釘在上方、下面的桌況圖自己捲，這樣看得到地圖就按得到確認（不靠 sticky：iPad/iOS Safari 在 overflow 容器內的 sticky 熱區會錯位）
@@ -1392,11 +1438,14 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         {/* 樓層切換已移到右欄地圖卡片頂端（FloorTabs，2026-10-17）：選桌時眼睛和手都在地圖上 */}
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
-        {!mode && !reserveOpen && (
-          <SegmentedControl
-            className="flex-none max-md:w-full max-md:mb-1 max-md:[&>button]:flex-1"
-            options={[{ key: 'map', label: '地圖' }, { key: 'summary', label: '摘要' }, { key: 'schedule', label: '排程' }]}
-            value={view} onChange={setView} ariaLabel="現場視圖" />
+        {/* 選桌模式中不給切（invisible＋inert），但照樣佔位：頂列高度不變 → 地圖尺寸在模式內外一樣（A1） */}
+        {!reserveOpen && (
+          <div className={`flex-none max-md:w-full ${mode ? 'invisible' : ''}`} inert={mode ? '' : undefined} aria-hidden={mode ? 'true' : undefined}>
+            <SegmentedControl
+              className="flex-none max-md:w-full max-md:mb-1 max-md:[&>button]:flex-1"
+              options={[{ key: 'map', label: '地圖' }, { key: 'summary', label: '摘要' }, { key: 'schedule', label: '排程' }]}
+              value={view} onChange={setView} ariaLabel="現場視圖" />
+          </div>
         )}
 
         {/* 「編輯佈局」與登入者已移出頂列（2026-10-17 精簡）：佈局改從 設定 → 現場與桌位 → 桌位佈局 進入；
@@ -1405,28 +1454,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
       {waitlistSeatPending && <p role="status" className="px-4 py-2 bg-amber-50 text-amber-800 font-bold">正在確認候位入座，雲端確認後才會占桌；請稍候。</p>}
 
-      {/* Mode banner — 依模式不同底色 + 圖示，避免誤判 */}
-      <ModeBanner
-        mode={mode}
-        tables={tables}
-        onLocateSuggestion={locateSuggestion}
-        onApplySuggestion={applyModeSuggestion}
-        pendingConfirm={pendingConfirm}
-        pendingConflicts={pendingConflicts}
-        pendingGroupHold={pendingGroupHold}
-        multiSeats={walkinMultiSeats}
-        multiMaxSeats={walkinMultiMaxSeats}
-        multiWarnings={multiWarnings}
-        multiWarningSevere={multiWarningSevere}
-        multiWarningConfirmed={multiWarningConfirmed}
-        onConfirmWarning={(checked) => setMode(m => ({ ...m, confirmedWarning: checked ? multiWarningKey : null }))}
-        onChangeNeed={changeArriveNeed}
-        onClearSelection={() => setMode(m => ({ ...m, selected: [], confirmedWarning: null }))}
-        onCancel={cancelModeAndNotify}
-        onConfirm={() => executeAssign(pendingConfirm)}
-        onConfirmMulti={confirmWalkinMulti}
-        onClearPending={() => setPendingConfirm(null)}
-      />
+      {/* Mode banner：只在手機條件釘在桌況圖上方（高度 <180 的不變量）。
+          iPad／桌面（A1，2026-11-27）改放左欄作業面板（ModeBanner layout="rail"）——頂端不插任何橫幅，
+          地圖尺寸在模式內外一樣，選桌那一刻桌子不再縮成一半。 */}
+      {isPhone && <ModeBanner layout="top" {...modeBannerProps} />}
       </div>
 
       {/* 主區：左＝操作/帶位欄（常駐、內部捲動）｜右＝桌況（地圖/摘要/排程，填滿）。
@@ -1435,7 +1466,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/今日/候位；團體梯次併在「今日」時間清單）
             TableDrawer 是長內容 → 外層捲動；OpsRail 自己管內部捲動與釘底動作列 → 外層只給 flex 容器 */}
         <div ref={leftColRef} className={`h-full min-h-0 phone:h-auto ${selectedTableObj ? 'overflow-y-auto phone:overflow-visible space-y-3' : 'flex flex-col'} ${mode ? 'phone:order-last' : ''}`}>
-          {mode ? (
+          {mode && !isPhone ? (
+            // A1：左欄作業面板（誰、幾位、已選、警示、人數、確認／取消）；確認鈕釘在左欄底部
+            <ModeBanner layout="rail" {...modeBannerProps} />
+          ) : mode ? (
             <div role="region" aria-label="目前選桌任務" className="bg-white rounded-xl border border-chicken-brown/15 p-4 space-y-3">
               <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.kind === 'arrive' ? '選桌入座' : mode.type === 'group-reseat' ? '團體改派' : mode.type === 'group-move' ? '團體換桌' : mode.type === 'group-add' ? '團體加桌' : '指派桌位'}</h2>
               <p className="font-bold">{mode.booking?.name || mode.wait?.name || mode.group?.agencyName} · {mode.need || mode.booking?.guests || mode.wait?.partySize || mode.batch?.guests} 位</p>
@@ -1452,6 +1486,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               groupHold={groupHoldTables[selectedTable] || null}
               onClose={() => setSelectedTable(null)}
               onStartMove={() => startMove(selectedBooking)}
+              onArriveReseat={seatingPerms(can).seat ? startArriveSeat : null}
               onReseatBatch={startGroupReseat}
               onGroupMove={startGroupMove}
               onGroupAdd={startGroupAdd}
@@ -1470,7 +1505,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               onWalkinGuestsChange={setWalkinGuests}
               walkinTables={walkinTables}
               onRemoveWalkinTable={(n) => setWalkinTableNumbers(prev => prev.filter(x => x !== n))}
-              onClearWalkinTables={() => setWalkinTableNumbers([])}
+              onClearWalkinTables={() => { setWalkinTableNumbers([]); setWalkinMultiOn(false) }}
+              walkinMulti={walkinMulti}
+              walkinAutoMulti={walkinAutoMulti}
+              onToggleWalkinMulti={toggleWalkinMulti}
+              walkinExcess={walkinExcess}
               walkinWarning={walkinWarning}
               onWalkinSeat={handleWalkinSeat}
               lastParty={lastParty}
@@ -1599,10 +1638,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               />
               </div>
               {/* 報到列：地圖下方 in-flow（不是疊在地圖上），無符合條件的訂位時完全不佔高度。
-                  模式進行中（指派/換桌/候位/團體改派）或無 booking.update＋table.update 權限時不顯示（到了＝寫 bookings＋tables）——
-                  這些情境下桌況圖的點擊語意已被模式接管，疊加一條會觸發別的動作的列是額外誤觸風險。 */}
-              {!mode && !reserveOpen && !hideArrivalStrip && seatingPerms(can).seat && (
+                  無 booking.update＋table.update 權限時不顯示（到了＝寫 bookings＋tables）。
+                  模式進行中（指派/換桌/候位/團體改派）照樣佔位、看得到名單，但整列 disabled＋inert 不可按（A1，2026-11-27）：
+                  過去整條消失會讓地圖在模式內外變大變小，且選桌中途看不到下一組；桌況圖點擊語意仍由模式接管，不會誤觸。 */}
+              {!reserveOpen && !hideArrivalStrip && seatingPerms(can).seat && (
                 <ArrivalStrip
+                  disabled={!!mode}
                   tables={tables}
                   bookings={bookings}
                   currentFloor={floor}

@@ -28,7 +28,12 @@ const CONFIRMABLE = ['assign', 'seat-waitlist', 'move', 'group-reseat', 'group-m
 
 // pendingConflicts：待確認桌上他筆的預配 [{ booking, overlaps, willRelease }]（capacity.preassignConflicts），
 //   逐筆據實寫「將解除」或「會保留」——只有與新佔用區間重疊的才會被解除。
-export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiMaxSeats, multiWarnings = [], multiWarningSevere = true, multiWarningConfirmed = true, onConfirmWarning, onChangeNeed, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending }) {
+// layout：'top'＝頂端橫幅（手機條件，照舊釘在桌況圖上方，高度 <180）；
+//         'rail'＝左欄作業面板（iPad／桌面，2026-11-27 A1）：橫幅的資訊與動作全部收進左欄，
+//         地圖尺寸在模式內外一樣；確認鈕釘在左欄底部（手指好按）。左欄用 flex＋min-h-0 串接、內容自己捲，不加固定高、不加 transform。
+// multi／autoMulti／onToggleMulti／excess（A2）：點桌語意——單選（預設，點別張＝改選）／多選（＋再加一桌，或大組自動）；
+//   excess＝「一張就夠卻選了多張」的黃字提醒（utils/tablePick.excessTablesHint），不硬擋。
+export default function ModeBanner({ layout = 'top', tables = [], onLocateSuggestion, onApplySuggestion, mode, pendingConfirm, pendingConflicts, pendingGroupHold, multiSeats = 0, multiMaxSeats, multiWarnings = [], multiWarningSevere = true, multiWarningConfirmed = true, onConfirmWarning, onChangeNeed, onClearSelection, onCancel, onConfirm, onConfirmMulti, onClearPending, multi = true, autoMulti = false, onToggleMulti = null, excess = null }) {
   // 手機（phone:）選桌入座：到店人數 stepper 預設收起（整列 44px 會把橫幅撐高、壓掉桌況圖），
   // 點標題列的「N 位」才展開；桌面／iPad 一律常駐（phone:hidden 只在手機條件成立）。
   const [phoneNeedOpen, setPhoneNeedOpen] = useState(false)
@@ -61,17 +66,104 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
       : (mode.booking?.name || '訂位')
     const bg = seatsNow ? 'bg-emerald-800' : 'bg-sky-800'
     const cancelBtn = seatsNow ? 'text-emerald-700' : 'text-sky-700'
+    const title = isWaitlist ? '候位入座' : isArrive ? (mode.reseatFrom?.length ? '到了 · 換桌入座' : '到了 · 選桌入座') : mode.replacing ? '重新選桌' : '指派桌位'
+    const confirmLabel = `✓ ${mode.replacing ? '確認改桌' : seatsNow ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}`
+    // 點桌語意切換（A2）：大組自動多選只給說明；其餘一顆「＋再加一桌（併桌）」切換鈕
+    const multiControl = autoMulti ? (
+      <p data-testid="mode-auto-multi" className="text-sm font-bold text-amber-800 bg-amber-100 rounded-lg px-3 py-2">大組・可選多桌（沒有單桌坐得下 {need} 位）· 點桌加／減</p>
+    ) : onToggleMulti ? (
+      <button type="button" data-testid="mode-multi-toggle" aria-pressed={!!multi} onClick={onToggleMulti}
+        className={`tap min-h-[44px] px-3 rounded-lg border-2 text-sm font-bold ${multi ? 'border-chicken-brown bg-chicken-brown text-white' : 'border-dashed border-chicken-brown/40 text-chicken-brown bg-white'}`}>
+        {multi ? '併桌中・點桌加／減（改回單桌）' : '＋再加一桌（併桌）'}
+      </button>
+    ) : null
+    const excessLine = excess ? <p data-testid="mode-excess" className="text-sm font-bold text-amber-900 bg-amber-100 rounded-lg px-3 py-2">{excess.text}</p> : null
+
+    if (layout === 'rail') {
+      const accent = seatsNow ? 'border-emerald-700' : 'border-sky-700'
+      return (
+        <section data-testid="mode-banner" data-layout="rail" role="region" aria-label="目前選桌任務"
+          className={`flex-1 min-h-0 flex flex-col bg-white rounded-xl border-2 ${accent} overflow-hidden`}>
+          <header className={`flex-none ${bg} text-white px-4 py-3`}>
+            <div className="flex items-center gap-2 text-base font-bold">
+              <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
+              <span>{title}：{name} {need} 位</span>
+            </div>
+            <div className="mt-1 text-xs opacity-90">
+              {seatsNow ? '確認即入座 · 只能選此刻空桌' : mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}
+            </div>
+          </header>
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+            {isArrive && mode.reseatFrom?.length > 0 && <p data-testid="arrive-reseat-from" className="text-sm font-bold bg-amber-100 text-amber-900 px-3 py-2 rounded-lg">原預配 {mode.reseatFrom.join(' + ')} 被佔 · 換一張空桌</p>}
+            {mode.replacing && <p className="text-sm text-chicken-brown/80">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</p>}
+            {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">保留原入座時間；撤出的原桌需清桌。</p>}
+            {/* 選桌入座：到店人數跟訂位不同 → 這裡直接改（確認入座時才寫回訂位） */}
+            {isArrive && onChangeNeed && (
+              <div className="flex items-center gap-2 flex-wrap" role="group" aria-label="到店人數">
+                <span className="text-sm font-bold">到店人數</span>
+                <button type="button" aria-label="人數減一" disabled={need <= 1} onClick={() => onChangeNeed(need - 1)}
+                  className="min-h-[44px] min-w-[44px] rounded-lg border-2 border-emerald-700 text-emerald-800 text-lg font-bold disabled:opacity-40">−</button>
+                <span data-testid="arrive-need" className="min-w-[3.5rem] text-center text-lg font-bold tabular-nums">{need} 位</span>
+                <button type="button" aria-label="人數加一" disabled={need >= 200} onClick={() => onChangeNeed(need + 1)}
+                  className="min-h-[44px] min-w-[44px] rounded-lg border-2 border-emerald-700 text-emerald-800 text-lg font-bold disabled:opacity-40">＋</button>
+                {Number(mode.booking?.guests) !== need && <span className="text-xs text-chicken-brown/70">訂位 {mode.booking?.guests} 位 · 入座時一併改</span>}
+              </div>
+            )}
+            <div className={`rounded-xl border-2 px-3 py-2 ${enough ? 'border-emerald-600 bg-emerald-50' : 'border-chicken-brown/15 bg-chicken-brown/[0.03]'}`}>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-lg font-bold text-sm ${enough ? 'bg-emerald-700 text-white' : 'bg-white text-chicken-brown border'}`}>
+                  已選 {multiSeats}/{need} 席 · {selected.length} 桌
+                </span>
+                {squeezed && <span data-testid="squeeze-badge" className="text-xs font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded">擠一擠 · 超坐 {need - multiSeats} 位</span>}
+              </div>
+              <div className="mt-1.5 text-base font-bold text-chicken-brown">
+                {selected.length ? `已選：${selected.join(' + ')}` : (multi ? '尚未選桌（點空桌加入）' : '尚未選桌（點一張空桌）')}
+              </div>
+              {!enough && need > maxSeats && <div className="text-sm text-chicken-brown/70">擠一擠也還差 {need - maxSeats} 位{multi ? '' : '，可按「＋再加一桌」併桌'}</div>}
+              <div className="mt-1 text-xs text-chicken-brown/55">{multi ? '點桌加／減 · 可選多桌' : '點別張＝改選 · 點同一張＝取消'}</div>
+            </div>
+            {excessLine}
+            {multiControl}
+            {mode.suggestion && <p className="text-sm text-chicken-brown/75">建議 {comboLabel}{comboNums && mode.suggestionSqueezed ? '（擠一擠）' : ''}（自行選桌）</p>}
+            {mode.suggestion && (
+              <div className="flex items-center gap-3 flex-wrap">
+                {onApplySuggestion && (
+                  <button type="button" data-testid="mode-apply-suggestion" onClick={onApplySuggestion}
+                    className="tap min-h-[44px] px-3 rounded-lg border-2 border-emerald-700 text-emerald-800 text-sm font-bold">
+                    用建議桌 {comboLabel}{comboNums && mode.suggestionSqueezed ? '（擠一擠）' : ''}
+                  </button>
+                )}
+                <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-sm">定位建議桌 {suggestionLabel}</button>
+              </div>
+            )}
+            {!!selected.length && <button type="button" onClick={onClearSelection} className="text-sm underline min-h-[44px]">清空已選桌</button>}
+            {/* 紅＝會解除別組排位或佔團體桌；黃＝只是提醒（時間不衝突、對方保留）。都要勾一下才放行（防呆綁在已選的桌，不變） */}
+            {!!multiWarnings.length && <div className={`rounded-lg px-3 py-2 text-sm space-y-1 ${multiWarningSevere ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-900'}`}>
+              {multiWarnings.map(line => <div key={line} className="font-bold">{line}</div>)}
+              <label className="flex items-center gap-2 min-h-[44px] font-bold"><input type="checkbox" className="w-5 h-5" checked={multiWarningConfirmed} onChange={e => onConfirmWarning?.(e.target.checked)} />知道了，仍用這桌</label>
+            </div>}
+          </div>
+          {/* 釘底：取消＋確認（手指在下半部，好按）；確認文字跟著已選桌數變 */}
+          <footer className="flex-none border-t border-chicken-brown/10 p-3 flex items-stretch gap-2">
+            <button type="button" onClick={onCancel} className="tap min-h-[56px] px-4 rounded-xl border-2 border-chicken-brown/20 text-chicken-brown font-bold whitespace-nowrap">取消</button>
+            <button type="button" onClick={onConfirmMulti} disabled={!ready}
+              className={`tap flex-1 min-h-[56px] rounded-xl text-lg font-bold whitespace-nowrap ${ready ? `${bg} text-white` : 'bg-chicken-brown/10 text-chicken-brown/45 cursor-not-allowed'}`}
+            ><GlyphText>{confirmLabel}</GlyphText></button>
+          </footer>
+        </section>
+      )
+    }
     return (
       <div data-testid="mode-banner" className={`lg-mode ${bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2 ${PHONE_BANNER}`}>
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-bold flex-1 flex items-center gap-2 flex-wrap">
             <Icon name={isWaitlist ? 'traffic' : 'bookings'} size={18} />
-            <span>{isWaitlist ? '候位入座' : isArrive ? (mode.reseatFrom?.length ? '到了 · 換桌入座' : '到了 · 選桌入座') : mode.replacing ? '重新選桌' : '指派桌位'}：{name} {need} 位</span>
+            <span>{title}：{name} {need} 位</span>
             <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-sm shadow-sm ${enough ? 'bg-white text-emerald-700' : 'bg-white/95 text-chicken-brown'}`}>
               已選 {multiSeats}/{need} 席 · {selected.length} 桌
             </span>
             {squeezed && <span data-testid="squeeze-badge" className="text-xs font-bold bg-amber-300 text-amber-900 px-2 py-1 rounded">擠一擠 · 超坐 {need - multiSeats} 位</span>}
-            <span className="text-xs opacity-90 phone:hidden">點桌加 / 減 · 可選單桌或多桌</span>
+            <span className="text-xs opacity-90 phone:hidden">{multi ? '點桌加 / 減 · 可選多桌' : '點別張＝改選 · 點同一張＝取消'}</span>
             {mode.replacing && <span className="text-xs bg-white/20 px-2 py-1 rounded phone:hidden">原配桌 {formatBookingTables(mode.booking)} · 確認成功前保留</span>}
             {mode.suggestion && <span className="text-xs bg-white/20 px-2 py-1 rounded phone:hidden">建議 {comboLabel}{comboNums && mode.suggestionSqueezed ? '（擠一擠）' : ''}（自行選桌）</span>}
             {!seatsNow && <span className="text-xs opacity-90 phone:hidden">{mode.lockKind === 'preassign' ? '預配 · 桌子先不鎖' : '指派即鎖桌'}</span>}
@@ -113,8 +205,10 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
             disabled={!ready}
             className={`text-xs px-4 phone:px-3 py-2 min-h-[44px] flex-none rounded-lg font-bold whitespace-nowrap shadow-sm ${
               ready ? 'bg-white text-emerald-700' : 'bg-white/40 text-white/70 cursor-not-allowed'}`}
-          ><GlyphText>{`✓ ${mode.replacing ? '確認改桌' : seatsNow ? (selected.length > 1 ? '確認併桌入座' : '確認入座') : mode.lockKind === 'preassign' ? (selected.length > 1 ? '確認併桌預配' : '確認預配') : (selected.length > 1 ? '確認併桌指派' : '確認指派')}`}</GlyphText></button>
+          ><GlyphText>{confirmLabel}</GlyphText></button>
         </div>
+        {/* 手機：選了桌才出現（進模式當下橫幅高度不變，<180 的不變量） */}
+        {(excessLine || (selected.length > 0 && multiControl)) && <div className="flex items-center gap-2 flex-wrap text-chicken-brown text-xs">{excessLine}{selected.length > 0 ? multiControl : null}</div>}
         {mode.suggestion && onApplySuggestion && (
           <button type="button" data-testid="mode-apply-suggestion" onClick={onApplySuggestion}
             className={`mr-3 min-h-[44px] px-3 rounded-lg bg-white text-emerald-700 text-xs font-bold shadow-sm ${selected.length ? 'phone:hidden' : ''}`}>
@@ -175,6 +269,84 @@ export default function ModeBanner({ tables = [], onLocateSuggestion, onApplySug
           ? `確認預配 ${pendingTargetName} 到 ${pendingConfirm}？（桌子現在仍可帶位）`
           : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm} 並鎖桌？`)
         : `確認指派 ${pendingTargetName} 至桌 ${pendingConfirm}？`
+
+  const confirmBtnLabel = (willRelease || pendingGroupHold) ? (assignPreassign ? '仍要覆蓋預配' : '仍要覆蓋指派')
+    : hasConflict ? (assignPreassign ? '仍要預配（他筆預配保留）' : '仍要指派（預配保留）')
+    : mode.type === 'group-reseat' ? '✓ 確認改派' : mode.type === 'group-move' ? '✓ 確認換桌' : mode.type === 'group-add' ? '✓ 確認加桌' : mode.type === 'move' ? '✓ 確認改桌'
+    : assignPreassign ? '✓ 確認預配' : '✓ 確認指派'
+  const conflictBlocks = pendingConfirm && CONFIRMABLE.includes(mode.type) ? (
+    <>
+      {/* 防呆：此桌已被別筆 booking 預先配走 → 紅底示警（逐筆寫明預配將解除或會保留） */}
+      {pendingConflicts?.length > 0 && (
+        <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
+          <Icon name="warning" size={16} className="shrink-0 mt-px" />
+          <span className="space-y-0.5">
+            {pendingConflicts.map(c => (
+              <span key={c.booking.id} className="block">{conflictLine(pendingConfirm, c, '確認')}</span>
+            ))}
+          </span>
+        </div>
+      )}
+      {/* 防呆：此桌為今日團體圈桌未入座 → 紅底示警（桌況雖空，散客坐下去團體就沒桌了） */}
+      {pendingGroupHold && (
+        <div className="bg-rose-600 text-white rounded-lg px-3 py-2 text-xs font-bold flex items-start gap-1.5">
+          <Icon name="bus" size={16} className="shrink-0 mt-px" />
+          <span>
+            此桌為今日團體 <span className="underline">{pendingGroupHold.agencyName || '旅行社'}</span> 預留
+            {pendingGroupHold.holds?.[0]?.batch ? (
+              `（${pendingGroupHold.holds[0].batch.label} ${pendingGroupHold.holds[0].batch.timeSlot}）`
+            ) : ''}。確認後散客將佔用團體桌。
+          </span>
+        </div>
+      )}
+    </>
+  ) : null
+
+  // 左欄作業面板（A1）：同一套資訊，確認鈕釘在左欄底部；地圖不因模式縮小
+  if (layout === 'rail') {
+    const canConfirm = !!pendingConfirm && CONFIRMABLE.includes(mode.type)
+    return (
+      <section data-testid="mode-banner" data-layout="rail" role="region" aria-label="目前選桌任務"
+        className="flex-1 min-h-0 flex flex-col bg-white rounded-xl border-2 border-chicken-brown/20 overflow-hidden">
+        <header className={`flex-none ${style.bg} text-white px-4 py-3`}>
+          <div className="flex items-start gap-2 text-base font-bold">
+            <Icon name={style.icon} size={18} className="mt-0.5 shrink-0" />
+            <span>{bannerText}</span>
+          </div>
+          {mode.type === 'assign' && (
+            <div className="mt-1 text-xs opacity-90">{assignPreassign ? `${mode.booking?.timeSlot || ''} 預配 · 桌子先不鎖`.trim() : '指派即鎖桌'}</div>
+          )}
+        </header>
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+          <p className="text-xs text-chicken-brown/55">點一張可選的桌 → 下方確認</p>
+          {CONFIRMABLE.includes(mode.type) && (
+            mode.suggestion ? (
+              <div className="flex items-center gap-3 flex-wrap">
+                {onApplySuggestion && (
+                  <button type="button" data-testid="mode-apply-suggestion" onClick={onApplySuggestion}
+                    className="tap min-h-[44px] px-3 rounded-lg border-2 border-chicken-brown/30 text-chicken-brown text-sm font-bold">
+                    用建議桌 {suggestionLabel}
+                  </button>
+                )}
+                <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-sm">定位建議桌 {suggestionLabel}</button>
+              </div>
+            ) : <p className="text-sm text-chicken-brown/60">無建議桌</p>
+          )}
+          <div className="rounded-xl border-2 border-chicken-brown/15 px-3 py-2">
+            <div className="text-sm font-bold text-chicken-brown">{canConfirm ? confirmText : '尚未選桌'}</div>
+            {canConfirm && <button type="button" onClick={onClearPending} className="mt-1 text-sm underline min-h-[44px]">重選</button>}
+          </div>
+          {conflictBlocks}
+        </div>
+        <footer className="flex-none border-t border-chicken-brown/10 p-3 flex items-stretch gap-2">
+          <button type="button" onClick={onCancel} className="tap min-h-[56px] px-4 rounded-xl border-2 border-chicken-brown/20 text-chicken-brown font-bold whitespace-nowrap">取消</button>
+          <button type="button" onClick={onConfirm} disabled={!canConfirm}
+            className={`tap flex-1 min-h-[56px] rounded-xl text-lg font-bold whitespace-nowrap ${!canConfirm ? 'bg-chicken-brown/10 text-chicken-brown/45 cursor-not-allowed' : (hasConflict || pendingGroupHold) ? 'bg-rose-600 text-white' : `${style.bg} text-white`}`}
+          ><GlyphText>{confirmBtnLabel}</GlyphText></button>
+        </footer>
+      </section>
+    )
+  }
 
   return (
     <div data-testid="mode-banner" className={`lg-mode ${style.bg} text-white px-4 py-2.5 rounded-xl shadow-md space-y-2 ${PHONE_BANNER}`}>

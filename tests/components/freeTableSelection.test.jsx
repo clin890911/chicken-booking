@@ -24,6 +24,8 @@ const mount = el => { container = document.createElement('div'); document.body.a
 const button = text => [...container.querySelectorAll('button')].find(b => b.textContent.includes(text))
 const click = text => act(() => button(text).click())
 const pick = n => act(() => container.querySelector(`[data-table="${n}"]`).click())
+// A2（2026-11-27）：現場選桌預設單選（點別張＝改選）；要併桌先按「＋再加一桌（併桌）」。規劃頁（SlotMapPanel）不在此範圍、照舊加選
+const addMore = flow => { if (flow !== 'planning') click('＋再加一桌') }
 const confirm = () => button('確認併桌') || button('確認預配') || button('確認指派') || button('確認入座')
 const begin = (flow, guests = 8) => {
   booking.guests = guests
@@ -54,7 +56,7 @@ for (const flow of ['planning','booking','waitlist']) describe(`${flow} 人工�
     expect(container.textContent).toContain('已選 0/8 席')
     expect(confirm().disabled).toBe(true)
     pick(a); expect(confirm().disabled).toBe(true)
-    pick(b); expect(confirm().disabled).toBe(false)
+    addMore(flow); pick(b); expect(confirm().disabled).toBe(false)
     expect(container.querySelector('[data-table="A"]').dataset.selected).toBe('false')
     await act(async () => confirm().click())
     expect(saveSpy(flow)).toHaveBeenCalledWith(flow === 'waitlist' ? 'W1' : 'B1', [a,b], ...(flow==='waitlist'?[{confirmedConflictTables:[]}]:[]))
@@ -74,6 +76,7 @@ for (const flow of ['planning','booking','waitlist']) describe(`${flow} 人工�
   })
   it('小組仍可選單桌，跨樓層被擋', () => {
     begin(flow,2); pick('B'); expect(confirm().disabled).toBe(false)
+    addMore(flow)
     pick('X'); expect(harness.toast.error).toHaveBeenCalledWith(expect.stringContaining('同一樓層'))
     expect(container.querySelector('[data-table="X"]').dataset.selected).toBe('false')
   })
@@ -81,7 +84,7 @@ for (const flow of ['planning','booking','waitlist']) describe(`${flow} 人工�
 
 it('現場多桌選擇保留預配警示確認，選桌改變後重新鎖確認', () => {
   harness.ctx.bookings.push({ id:'OTHER', name:'預配測試', date:booking.date, timeSlot:'12:30', guests:4, status:'confirmed', assignedTableId:'B' })
-  begin('booking'); pick('B'); pick('C')
+  begin('booking'); pick('B'); click('＋再加一桌'); pick('C')
   expect(container.textContent).toContain('預配測試')
   expect(confirm().disabled).toBe(true)
   act(() => container.querySelector('input[type="checkbox"]').click())
@@ -90,7 +93,7 @@ it('現場多桌選擇保留預配警示確認，選桌改變後重新鎖確認'
 })
 
 it('確認前桌被佔用時不寫入', async () => {
-  begin('booking'); pick('B'); pick('C'); harness.ctx.tables.find(t=>t.number==='B').status='dining'
+  begin('booking'); pick('B'); click('＋再加一桌'); pick('C'); harness.ctx.tables.find(t=>t.number==='B').status='dining'
   await act(async () => confirm().click())
   expect(harness.ctx.assignBookingTablesMulti).not.toHaveBeenCalled()
   expect(harness.toast.error).toHaveBeenCalledWith('所選桌已不可用，請重新選桌')
@@ -98,7 +101,7 @@ it('確認前桌被佔用時不寫入', async () => {
 
 it('現場團保桌仍需明確確認，取消不入座', () => {
   harness.ctx.groupReservations=[{id:'G1',date:booking.date,status:'confirmed',agencyName:'測試團',batches:[{id:'GB1',label:'第一梯',timeSlot:'12:00',tableNumbers:['B'],guests:4}]}]
-  begin('waitlist'); pick('B'); pick('C')
+  begin('waitlist'); pick('B'); click('＋再加一桌'); pick('C')
   expect(container.textContent).toContain('測試團')
   expect(confirm().disabled).toBe(true)
   click('取消'); expect(harness.ctx.seatWaitlistMulti).not.toHaveBeenCalled()
@@ -106,7 +109,7 @@ it('現場團保桌仍需明確確認，取消不入座', () => {
 
 it('較早時段的訂位可人工多桌預配，不提前鎖桌', () => {
   booking.timeSlot='17:00'
-  begin('booking'); pick('B'); pick('C'); act(()=>confirm().click())
+  begin('booking'); pick('B'); click('＋再加一桌'); pick('C'); act(()=>confirm().click())
   expect(harness.ctx.preassignBookingTables).toHaveBeenCalledWith('B1',['B','C'])
   expect(harness.ctx.assignBookingTablesMulti).not.toHaveBeenCalled()
 })
@@ -126,11 +129,11 @@ it('未到併桌改選：取消保留原配桌，重新選4+4後確認才替換'
   mount(<OperationsView pendingMove={{booking,seq:1}} />)
   expect(container.textContent).toContain('原配桌 D + A')
   expect(container.textContent).toContain('已選 0/8 席')
-  pick('B'); pick('C'); click('取消')
+  pick('B'); click('＋再加一桌'); pick('C'); click('取消')
   expect(harness.ctx.replacePendingBookingTables).not.toHaveBeenCalled()
   expect(booking.assignedTableId).toBe('D')
   act(()=>root.render(<OperationsView pendingMove={{booking,seq:2}} />))
-  pick('B'); pick('C'); click('確認改桌')
+  pick('B'); click('＋再加一桌'); pick('C'); click('確認改桌')
   expect(harness.ctx.replacePendingBookingTables).toHaveBeenCalledWith('B1',['B','C'])
 })
 
@@ -138,7 +141,7 @@ it('未到單桌可重選為多桌；service拒絕時原桌與選擇保持', () 
   booking.assignedTableId='A'
   harness.ctx.replacePendingBookingTables.mockReturnValue({ok:false,error:'所選桌已被占用'})
   mount(<OperationsView pendingMove={{booking,seq:1}} />)
-  pick('B'); pick('C'); click('確認改桌')
+  pick('B'); click('＋再加一桌'); pick('C'); click('確認改桌')
   expect(harness.toast.error).toHaveBeenCalledWith('改桌失敗：所選桌已被占用')
   expect(booking.assignedTableId).toBe('A')
   expect(container.textContent).toContain('已選 8/8 席')
@@ -147,7 +150,7 @@ it('未到單桌可重選為多桌；service拒絕時原桌與選擇保持', () 
 it('改桌跨過餐前30分鐘門檻：先更新鎖桌文字，不直接儲存，再確認才替換', () => {
   booking.timeSlot='17:00';booking.assignedTableId='A'
   mount(<OperationsView pendingMove={{booking,seq:1}} />)
-  pick('B');pick('C');expect(container.textContent).toContain('預配 · 桌子先不鎖')
+  pick('B');click('＋再加一桌');pick('C');expect(container.textContent).toContain('預配 · 桌子先不鎖')
   vi.setSystemTime(new Date(2026,9,4,16,40));click('確認改桌')
   expect(harness.ctx.replacePendingBookingTables).not.toHaveBeenCalled()
   expect(container.textContent).toContain('指派即鎖桌')
@@ -160,11 +163,11 @@ it('餐中選桌任務隱藏散客表單，取消恢復候位來源；建議定�
   mount(<OperationsView />); click('查看候位'); click('開始候位')
   expect(container.querySelector('[data-rail]').parentElement.hidden).toBe(true)
   expect(container.textContent).toContain('測試候位')
-  expect(container.textContent).toContain('目標桌：尚未選桌')
+  expect(container.textContent).toContain('尚未選桌')
   click('定位建議桌')
   expect(container.textContent).toContain('已選 0/8 席')
   expect(harness.ctx.seatWaitlist).not.toHaveBeenCalled()
-  click('取消並返回')
+  click('取消')
   expect(container.querySelector('[data-rail]').dataset.rail).toBe('waitlist')
   expect(container.textContent).toContain('散客表單')
 })
@@ -195,4 +198,52 @@ it('現場指派：無單桌可容、併桌建議要擠一擠 → 橫幅標「�
   expect(confirm().disabled).toBe(false)
   await act(async () => confirm().click())
   expect(harness.ctx.assignBookingTablesMulti).toHaveBeenCalledWith('B1', ['B','C'])
+})
+
+
+// === A2 點桌＝改選（Barry 2026-11-27 拍板）＋A1 左欄作業面板 ===
+describe('A2 點桌語意：單選改選、＋再加一桌才多選、大組自動多選', () => {
+  it('單選：點 A 再點 B → 只選 B；點已選的 B → 取消', () => {
+    begin('booking', 3); pick('B')
+    expect(container.querySelector('[data-table="B"]').dataset.selected).toBe('true')
+    pick('C')
+    expect(container.querySelector('[data-table="B"]').dataset.selected).toBe('false')
+    expect(container.querySelector('[data-table="C"]').dataset.selected).toBe('true')
+    expect(container.textContent).toContain('已選 4/3 席 · 1 桌')
+    pick('C')
+    expect(container.querySelector('[data-table="C"]').dataset.selected).toBe('false')
+    expect(container.textContent).toContain('已選 0/3 席 · 0 桌')
+  })
+  it('按「＋再加一桌（併桌）」後點 C → B + C；超過所需顯示黃字「一張就夠」但不擋確認', async () => {
+    begin('booking', 3); pick('B'); click('＋再加一桌'); pick('C')
+    expect(container.querySelector('[data-table="B"]').dataset.selected).toBe('true')
+    expect(container.querySelector('[data-table="C"]').dataset.selected).toBe('true')
+    expect(container.querySelector('[data-testid="mode-excess"]').textContent).toContain('3 位用了 2 桌 8 席')
+    expect(confirm().disabled).toBe(false)
+    await act(async () => confirm().click())
+    expect(harness.ctx.assignBookingTablesMulti).toHaveBeenCalledWith('B1', ['B', 'C'])
+  })
+  it('改回單桌：多選中再按一次切換 → 只留最後選的那張', () => {
+    begin('booking', 3); pick('B'); click('＋再加一桌'); pick('C')
+    click('改回單桌')
+    expect(container.querySelector('[data-table="B"]').dataset.selected).toBe('false')
+    expect(container.querySelector('[data-table="C"]').dataset.selected).toBe('true')
+  })
+  it('大組：沒有單桌坐得下 → 自動多選、說明「大組・可選多桌」，不出現切換鈕', () => {
+    harness.ctx.tables = harness.ctx.tables.filter(t => t.number !== 'A')
+    begin('booking', 8)
+    expect(container.querySelector('[data-testid="mode-auto-multi"]').textContent).toContain('大組・可選多桌')
+    expect(container.querySelector('[data-testid="mode-multi-toggle"]')).toBeNull()
+    pick('B'); pick('C')
+    expect(container.textContent).toContain('已選 8/8 席 · 2 桌')
+  })
+  it('A1：iPad／桌面選桌任務在左欄作業面板（rail），確認鈕在面板底部，頂端不插橫幅', () => {
+    begin('booking', 3)
+    const panels = container.querySelectorAll('[data-testid="mode-banner"]')
+    expect(panels.length).toBe(1)
+    expect(panels[0].dataset.layout).toBe('rail')
+    const footer = panels[0].querySelector('footer')
+    expect(footer.textContent).toContain('確認')
+    expect(footer.textContent).toContain('取消')
+  })
 })

@@ -10,7 +10,7 @@ import { todayStr } from '../../../utils/timeSlots'
 import { overdueMinOf, fmtOverdueMin } from '../../../utils/bookingPulse'
 import { buildTodayTimeline, matchesTimelineQuery } from '../../../utils/todayTimeline'
 import { buildGroupHolds, todayActiveGroups } from '../../../utils/groupLive'
-import { seatAfterArriveConfirm, toastSeatedWithUndo } from '../../../utils/arriveSeat'
+import { seatAfterArriveConfirm, toastSeatedWithUndo, arriveActionFor } from '../../../utils/arriveSeat'
 import { assignmentKind } from '../../../utils/tableStatus'
 import { bookingTableNumbers } from '../../../utils/bookingTables'
 import { getNoshowCount } from '../../../services/bookingService'
@@ -40,7 +40,7 @@ function QuickAssignButtons({ b, quick, onQuickAssign, onAssignTable, outline = 
   </>
 }
 
-function BookingCard({ b, now, kind, quick = null, onQuickAssign, onClickBooking, onOpenDetail, onAssignTable, onArriveSeat, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, onEdit, onCancel, perms, flash = false }) {
+function BookingCard({ b, now, kind, reseat = false, quick = null, onQuickAssign, onClickBooking, onOpenDetail, onAssignTable, onArriveSeat, onMoveTable, onMoveBlocked, onSeat, onNoshow, onComplete, onEdit, onCancel, perms, flash = false }) {
   const overdueMin = overdueMinOf(b.timeSlot, now)
   const overdue = overdueMin > 15 // 與 classifyTodayPulse graceMin 同口徑
   const assigned = !!b.assignedTableId
@@ -57,6 +57,9 @@ function BookingCard({ b, now, kind, quick = null, onQuickAssign, onClickBooking
   // 未配桌的客人到了：選桌即入座（指派＋入座一步，見 OperationsView.startArriveSeat）——尖峰省 3–4 下
   const showArriveSeat = showAssign && !!onArriveSeat
   const showSeat = assigned && perms.booking && perms.table
+  // 預配的桌此刻被別組佔（arriveSeat.arriveActionFor＝'reseat'，與報到列同一支判斷）：
+  // 主鈕直接是「到了 · 換桌入座」（選桌確認＝改配＋入座），不再顯示「客人到了」→ 確認框 → 入座失敗（A4）
+  const showReseat = showSeat && reseat && !!onArriveSeat
   const showNoshow = overdue && perms.booking && perms.table   // markNoshow 會釋出本筆鎖住的桌
   const showComplete = overdue && (assigned ? perms.booking && perms.table : perms.booking)
   // 改桌：已有桌的待到訂位從更多操作進現場整組選桌。
@@ -127,7 +130,8 @@ function BookingCard({ b, now, kind, quick = null, onQuickAssign, onClickBooking
       </div>
 
       <div className="mt-2 flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
-        {showSeat ? <button onClick={() => onSeat?.(b)} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">客人到了</button>
+        {showReseat ? <button onClick={() => onArriveSeat(b)} aria-label={`${b.name} 到了，換桌入座`} title={`預配 ${tableLabel} 此刻有別組：選一張空桌，確認即入座`} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">到了 · 換桌入座</button>
+          : showSeat ? <button onClick={() => onSeat?.(b)} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">客人到了</button>
           : showArriveSeat ? <>
             <button onClick={() => onArriveSeat(b)} aria-label={`${b.name} 到了，選桌入座`} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">到了 · 選桌入座</button>
             {quick ? <QuickAssignButtons b={b} quick={quick} onQuickAssign={onQuickAssign} onAssignTable={onAssignTable} outline withPick={false} />
@@ -349,6 +353,10 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
     if (!r?.ok) {
       const msg = '入座失敗：' + (r?.error || '未知錯誤')
       // 桌被別組佔用／停用 → toast 直接帶「改桌」出口
+      // 預配桌剛被別組坐走（按下前一刻才變）→ 出口與報到列一致：「換桌入座」
+      if (onArriveSeat && arriveActionFor(bookings.find(x => x.id === b.id) || b, tables) === 'reseat') {
+        return toast.action(msg, { label: '換桌入座', onClick: () => onArriveSeat(b) }, { type: 'error', duration: 8000 })
+      }
       if (onMoveTable && ['confirmed', 'pending'].includes(b.status)) {
         return toast.action(msg, { label: '改桌', onClick: () => onMoveTable(b) }, { type: 'error', duration: 8000 })
       }
@@ -374,7 +382,7 @@ export default function UpcomingPanel({ onClickBooking, onOpenDetail = null, onA
     <GroupBatchRow key={e.key} entry={e} now={now} expanded={expandedKey === e.key} onToggle={toggleExpanded}
       onFocusTable={onFocusTable} onReseatBatch={onReseatBatch} onOpenSheet={setSheetGroup} />
   ) : (
-    <BookingCard key={e.key} b={e.booking} now={now} kind={kindOf(e.booking)} quick={quickOf(e.booking)} onQuickAssign={onQuickAssign}
+    <BookingCard key={e.key} b={e.booking} now={now} kind={kindOf(e.booking)} reseat={arriveActionFor(e.booking, tables) === 'reseat'} quick={quickOf(e.booking)} onQuickAssign={onQuickAssign}
       onClickBooking={onClickBooking} onOpenDetail={onOpenDetail} onEdit={b => setEditingId(b.id)} onCancel={handleCancel} onAssignTable={onAssignTable} onArriveSeat={onArriveSeat} onMoveTable={onMoveTable} onMoveBlocked={() => toast.info(MOVE_COMBO_REASON)} onSeat={handleSeat} onNoshow={handleNoshow}
       onComplete={handleComplete} perms={perms} flash={e.key === flashBookingId} />
   )
