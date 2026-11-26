@@ -117,6 +117,9 @@ test('A2 iPad 橫：選桌模式點 101 再點 103 → 只選 103；按「＋再
   await mapTable(page, '101').click()
   await expect(panel).toContainText('已選：101')
   const tAfter = await toggle.boundingBox()
+  // P2（verify-final）：「＋再加一桌」與「清空已選桌」不貼在一起（同一行時水平間距 ≥24px）
+  const clearBox = await panel.getByTestId('mode-clear-selection').boundingBox()
+  if (Math.abs(clearBox.y - tAfter.y) < tAfter.height) expect(clearBox.x - (tAfter.x + tAfter.width)).toBeGreaterThanOrEqual(24)
   expect(Math.abs(tAfter.y - tBefore.y), `＋再加一桌 y ${tBefore.y} → ${tAfter.y}`).toBeLessThanOrEqual(1)
   await mapTable(page, '103').click()
   await expect(panel).toContainText('已選：103')
@@ -268,5 +271,199 @@ for (const vp of [{ name: 'iPad 橫', width: 1180, height: 820 }, { name: 'iPad 
     const after = await readState(page)
     expect(after.bookings.find(b => b.id === LIN.id).status).toBe('confirmed')
     expect(after.tables.find(t => t.number === '105')).toMatchObject({ status: 'vacant' })
+  })
+}
+
+// ───────────── 第三輪（verify-final.md P1）：浮動提示不可互動＋復原欄固定保留 ─────────────
+// 前兩輪「把帶復原的提示疊在某處」都失敗（地圖底部蓋桌、頁面頂部蓋待清／1F／同步燈）。這輪換方法：
+//   入座提示整個 pointer-events:none、不帶按鈕；「復原」只在地圖工具列右端的復原欄（in-flow、固定 44px 高）。
+// 驗：連續入座 3 組時頂部統計鈕／樓層籤／同步燈／左欄確認鈕／每張桌的中心點都不是提示；
+//     復原欄出現前後地圖 SVG 與左欄外框不動；復原欄只復原最近一筆且 booking＋table 都倒回；與桌、確認鈕距離 ≥24px。
+
+const rectOf = (page, sel) => page.locator(sel).first().evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } })
+const gap = (a, b) => {
+  const dx = Math.max(0, b.x - (a.x + a.w), a.x - (b.x + b.w))
+  const dy = Math.max(0, b.y - (a.y + a.h), a.y - (b.y + b.h))
+  return Math.hypot(dx, dy)
+}
+const boxToRect = (b) => ({ x: b.x, y: b.y, w: b.width, h: b.height })
+// 外框不變：四個值都在 1px 內（只容許次像素捨入；版面真的位移一定 ≥ 數 px）
+const sameRect = (a, b, what) => {
+  for (const k of ['x', 'y', 'w', 'h']) expect(Math.abs(a[k] - b[k]), `${what}.${k} ${JSON.stringify(b)} → ${JSON.stringify(a)}`).toBeLessThan(1)
+}
+// 與復原欄最近的一張桌（所有 g[role=button] 桌）的距離
+const nearestTableGap = (page) => page.evaluate(() => {
+  const s = document.querySelector('[data-testid="seat-undo-bar"]').getBoundingClientRect()
+  let best = Infinity, who = ''
+  document.querySelectorAll('svg[aria-label$="桌況圖"] g[role=button][data-table-number]').forEach(g => {
+    const r = g.getBoundingClientRect()
+    if (!r.width) return
+    const dx = Math.max(0, r.left - s.right, s.left - r.right), dy = Math.max(0, r.top - s.bottom, s.top - r.bottom)
+    const d = Math.hypot(dx, dy)
+    if (d < best) { best = d; who = g.dataset.tableNumber }
+  })
+  return { d: best, who }
+})
+
+// 每個目標中心點：elementFromPoint 不在提示容器裡，且打到的是目標自己
+const centersNotToast = (page, selectors = TOP_TARGETS) => page.evaluate((selectors) => {
+  const out = []
+  for (const [label, sel, text] of selectors) {
+    ;[...document.querySelectorAll(sel)].filter(el => !text || el.textContent.includes(text)).forEach((el, i) => {
+      const r = el.getBoundingClientRect()
+      if (!r.width || !r.height) return
+      const x = r.left + r.width / 2, y = r.top + r.height / 2
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return
+      const hit = document.elementFromPoint(x, y)
+      const inToast = !!hit?.closest?.('[data-testid="toast-container"]')
+      out.push({ label: `${label}#${i}`, ok: !inToast && !!hit && (hit === el || el.contains(hit)), inToast, hit: (hit?.closest?.('button,[role=button]')?.getAttribute('aria-label') || hit?.textContent || '').slice(0, 40) })
+    })
+  }
+  return out
+}, selectors)
+
+const TOP_TARGETS = [
+  ['待清', '[role=group][aria-label="需要處理"] button', '待清'],
+  ['候位', '[role=group][aria-label="需要處理"] button', '候位'],
+  ['將到', '[role=group][aria-label="需要處理"] button', '將到'],
+  ['樓層籤', '[role=tablist][aria-label="樓層"] [role=tab], [role=tablist][aria-label="樓層"] button'],
+  ['同步燈', '[data-testid="sync-status-pill"]'],
+  ['帶位確認鈕', '[data-testid="walkin-seat"]'],
+  ['桌', 'svg[aria-label$="桌況圖"] g[role=button][data-table-number]'],
+]
+
+async function loginDemoOps(page) {
+  await page.goto('/login?demo=ops')
+  await page.getByPlaceholder('your@email.com').fill('berrylin0911@gmail.com')
+  await page.getByRole('button', { name: /模擬登入/ }).click()
+  await expect(page).toHaveURL(/\/admin/)
+  // 沙盒專屬的「雲端同步未啟用」橫幅正式站不會出現（同 mobile-admin-scroll）
+  await page.addStyleTag({ content: 'main > div.border-chicken-red.bg-red-50{display:none !important}' })
+  const nav = page.locator('nav.lg-bottomnav')
+  if (await nav.isVisible()) await nav.locator('button', { hasText: '現場' }).click()
+  else await page.locator('aside').getByRole('button', { name: '現場' }).click()
+}
+
+for (const vp of [{ name: 'iPad 橫', width: 1180, height: 820 }, { name: 'iPad 直', width: 820, height: 1180 }]) {
+  test(`R3-1 ${vp.name}：連續帶位 3 組——提示不可互動、頂部／樓層籤／同步燈／確認鈕／每張桌都點得到；復原欄零位移、只復原最近一筆`, async ({ page }) => {
+    const d = new Date()
+    const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    await page.clock.setFixedTime(new Date(`${ymd}T12:00:00+08:00`))
+    await page.setViewportSize({ width: vp.width, height: vp.height })
+    await loginDemoOps(page)
+    const bar = page.getByTestId('seat-undo-bar')
+    await expect(bar).toHaveAttribute('data-state', 'empty')
+    await expect(bar).toContainText('最近動作')
+    // 尖峰四顆提示都在（這個場景才會有頂部被蓋的風險）
+    for (const k of ['超時', '將到', '待清', '候位']) await expect(page.locator('[role=group][aria-label="需要處理"]').getByRole('button', { name: new RegExp(k) })).toBeVisible()
+
+    const svgBefore = await rectOf(page, 'svg[aria-label$="桌況圖"]')
+    const leftBefore = await rectOf(page, '[data-testid="ops-left-col"]')
+    const barBefore = await rectOf(page, '[data-testid="seat-undo-bar"]')
+    const seatBox = boxToRect(await page.getByTestId('walkin-seat').boundingBox())
+
+    const seats = ['113', '108', '111']
+    for (const [i, n] of seats.entries()) {
+      await page.getByRole('button', { name: '王', exact: true }).click()
+      await page.locator(`svg[aria-label$="桌況圖"] g[data-table-number="${n}"]`).click()
+      await expect(page.getByRole('button', { name: `移除桌 ${n}` })).toBeVisible()
+      await page.getByTestId('walkin-seat').click()
+      const toastEl = page.locator('[data-placement="seat"]').filter({ hasText: `→ ${n} 已入座` })
+      await expect(toastEl).toBeVisible()
+      // 提示：整個 pointer-events:none、沒有任何按鈕
+      expect(await toastEl.evaluate(el => getComputedStyle(el).pointerEvents)).toBe('none')
+      await expect(toastEl.locator('button')).toHaveCount(0)
+      await expect(page.getByTestId('toast-action')).toHaveCount(0)
+      // 復原欄：只有最近這一筆
+      await expect(bar).toHaveAttribute('data-state', 'live')
+      await expect(bar).toContainText(`復原：王先生 2 位 → ${n}`)
+      await expect(page.getByTestId('seat-undo-action')).toHaveAccessibleName(`復原帶位 ${n}`)
+      // 提示還在的期間逐一檢查中心點
+      const hits = await centersNotToast(page)
+      expect(hits.filter(h => h.label.startsWith('桌')).length).toBeGreaterThanOrEqual(10)
+      for (const k of ['待清', '候位', '將到', '樓層籤', '同步燈', '帶位確認鈕']) expect(hits.some(h => h.label.startsWith(k)), `${k} 沒量到`).toBe(true)
+      expect(hits.filter(h => !h.ok), `第 ${i + 1} 組：${JSON.stringify(hits.filter(h => !h.ok))}`).toEqual([])
+      await expect(toastEl).toBeVisible()
+      // 零位移：地圖 SVG、左欄、復原欄外框都不動
+      sameRect(await rectOf(page, 'svg[aria-label$="桌況圖"]'), svgBefore, 'svg[aria-label$="桌況圖"]')
+      sameRect(await rectOf(page, '[data-testid="ops-left-col"]'), leftBefore, '[data-testid="ops-left-col"]')
+      sameRect(await rectOf(page, '[data-testid="seat-undo-bar"]'), barBefore, '[data-testid="seat-undo-bar"]')
+    }
+    // 三組都疊著時（3 則提示）也都點得到
+    expect(await page.locator('[data-placement="seat"]').count()).toBeGreaterThanOrEqual(2)
+
+    // 復原欄與最近的桌、帶位確認鈕距離 ≥24px；高度 ≥44
+    const near = await nearestTableGap(page)
+    expect(near.d, `最近的桌 ${near.who} 只差 ${near.d}px`).toBeGreaterThanOrEqual(24)
+    expect(gap(barBefore, seatBox), '與帶位確認鈕距離').toBeGreaterThanOrEqual(24)
+    expect(barBefore.h).toBeGreaterThanOrEqual(44)
+
+    // 復原最近一筆（111）：booking＋table 都倒回；前兩筆不受影響（舊的已被取代、不能再復原）
+    await page.getByTestId('seat-undo-action').click()
+    await expect(page.getByText('已復原：111 回到空桌')).toBeVisible()
+    await expect(bar).toHaveAttribute('data-state', 'empty')
+    sameRect(await rectOf(page, 'svg[aria-label$="桌況圖"]'), svgBefore, 'svg[aria-label$="桌況圖"]')
+    sameRect(await rectOf(page, '[data-testid="ops-left-col"]'), leftBefore, '[data-testid="ops-left-col"]')
+    const { bookings, tables } = await readState(page)
+    const t = (n) => tables.find(x => String(x.number) === n)
+    expect(t('111')).toMatchObject({ status: 'vacant', currentBookingId: null })
+    const walkins = bookings.filter(b => b.source === 'walkin' && b.name === '王先生' && b.status === 'arrived')
+    expect(walkins.map(b => b.assignedTableId).sort()).toEqual(['108', '113'])
+    expect(t('113').status).toBe('dining')
+    expect(t('108').status).toBe('dining')
+    expect(t('113').currentBookingId).toBe(walkins.find(b => b.assignedTableId === '113').id)
+  })
+
+  test(`R3-2 ${vp.name}：到了・換桌入座→確認後復原欄可復原（booking＋table 都倒回）；確認鈕與復原欄距離 ≥24px；時效過後淡色不可按`, async ({ page }) => {
+    await page.clock.setFixedTime(at('11:50'))
+    await seed(page, { tables: TABLES(), bookings: [WALK, CHEN, LI] })
+    await loginToOps(page)
+    await page.setViewportSize({ width: vp.width, height: vp.height })
+    const bar = page.getByTestId('seat-undo-bar')
+    await expect(bar).toHaveAttribute('data-state', 'empty')
+    const svgBefore = await rectOf(page, 'svg[aria-label$="桌況圖"]')
+    const leftBefore = await rectOf(page, '[data-testid="ops-left-col"]')
+    await strip(page).getByRole('button', { name: '陳小姐 到了，換桌入座' }).click()
+    const panel = page.getByTestId('mode-banner')
+    await mapTable(page, '108').click()
+    const confirmBtn = panel.getByRole('button', { name: '確認入座', exact: true })
+    const cb = boxToRect(await confirmBtn.boundingBox())
+    const barBox = await rectOf(page, '[data-testid="seat-undo-bar"]')
+    expect(gap(barBox, cb), '復原欄與左欄確認鈕').toBeGreaterThanOrEqual(24)
+    // 報到列的「到了」也要 ≥24px
+    for (const b of await strip(page).getByRole('button', { name: /到了/ }).all()) {
+      expect(gap(barBox, boxToRect(await b.boundingBox())), '復原欄與「到了」').toBeGreaterThanOrEqual(24)
+    }
+    await confirmBtn.click()
+    await expect(page.locator('[data-placement="seat"]').filter({ hasText: '✓ 陳小姐 4 位 → 108 已入座' })).toBeVisible()
+    await expect(bar).toHaveAttribute('data-state', 'live')
+    await expect(bar).toContainText('復原：陳小姐 4 位 → 108')
+    // 模式結束、復原欄出現：地圖與左欄外框不變
+    sameRect(await rectOf(page, 'svg[aria-label$="桌況圖"]'), svgBefore, 'svg[aria-label$="桌況圖"]')
+    sameRect(await rectOf(page, '[data-testid="ops-left-col"]'), leftBefore, '[data-testid="ops-left-col"]')
+    let s = await readState(page)
+    expect(s.bookings.find(b => b.id === CHEN.id)).toMatchObject({ status: 'arrived', assignedTableId: '108' })
+    // 按復原欄：讀屏名帶對象
+    await page.getByRole('button', { name: '復原入座 陳小姐', exact: true }).click()
+    await expect(page.getByText(/已復原：陳小姐/)).toBeVisible()
+    await expect(bar).toHaveAttribute('data-state', 'empty')
+    s = await readState(page)
+    const chen = s.bookings.find(b => b.id === CHEN.id)
+    expect(chen.status).toBe('confirmed')
+    expect(s.tables.find(t => t.number === '108')).toMatchObject({ status: 'vacant', currentBookingId: null })
+    // 106 仍是原本那組散客（復原沒有硬搶別組的桌）
+    expect(s.tables.find(t => t.number === '106')).toMatchObject({ status: 'dining', currentBookingId: WALK.id })
+
+    // 今日卡「客人到了」（非報到列，走 arriveSeat.seatAfterArriveConfirm）也進復原欄；
+    // 8 秒時效一到：淡色「最近」、不可按，外框不變
+    await todayTab(page).click()
+    await page.locator(`[data-booking-id="${LI.id}"]`).getByRole('button', { name: '客人到了', exact: true }).click()
+    await expect(bar).toHaveAttribute('data-state', 'live')
+    await expect(page.getByTestId('seat-undo-action')).toHaveAccessibleName('復原入座 李先生')
+    await page.clock.runFor(8200)
+    await expect(bar).toHaveAttribute('data-state', 'recent')
+    await expect(page.getByTestId('seat-undo-action')).toHaveCount(0)
+    await expect(bar).toContainText('最近：李先生 3 位 → 102')
+    sameRect(await rectOf(page, 'svg[aria-label$="桌況圖"]'), svgBefore, 'svg')
   })
 }

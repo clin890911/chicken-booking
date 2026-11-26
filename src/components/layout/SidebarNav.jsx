@@ -3,6 +3,7 @@ import { useConfirm } from '../ui/Toast'
 import Icon from '../ui/Icon'
 import { useState } from 'react'
 import { ChevronsLeft, ChevronsRight } from 'lucide-react'
+import SyncStatusPill from './SyncStatusPill'
 
 // 收合狀態只是這台裝置的版面偏好 → localStorage（私密模式／被封鎖時照常運作，只是不記住）
 const COLLAPSE_KEY = 'chicken_sidebar_collapsed_v1'
@@ -35,9 +36,11 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
         {/* 收合時也看得到登入者（#197 收尾）：非現場頁已沒有頂端標題列，側欄是唯一顯示處。
             純展示、不可點（不佔觸控目標）；滑鼠停留 title、讀屏 aria-label 帶名字與角色。登出要先展開側欄。 */}
         <div data-testid="sidebar-user-collapsed" role="img" aria-label={`登入者：${userTitle}`} title={userTitle}
-          className="mt-auto mb-[env(safe-area-inset-bottom)] w-8 h-8 rounded-full bg-[#e9e5df] text-chicken-brown/80 text-[13px] font-bold flex items-center justify-center flex-shrink-0 select-none">
+          className="mt-auto w-8 h-8 rounded-full bg-[#e9e5df] text-chicken-brown/80 text-[13px] font-bold flex items-center justify-center flex-shrink-0 select-none">
           <span aria-hidden="true">{initial}</span>
         </div>
+        {/* 常駐同步燈的精簡形態：只有燈號（問題態加紅框），點了照樣看說明／導向同步狀態 */}
+        <div className="mt-1 mb-[env(safe-area-inset-bottom)]"><SyncStatusPill variant="dot" /></div>
       </aside>
     )
   }
@@ -89,6 +92,9 @@ export default function SidebarNav({ tabs, active, onChange, badges = {} }) {
       {/* 登入者／角色：非現場頁頂端標題列拿掉後（頁面捲動第 2 批），這裡是唯一顯示處——
           76px 圖示欄（iPad 橫向）也要看得到角色，不能只剩頭像縮寫 */}
       <div className="border-t border-chicken-brown/10 p-2 pb-[calc(0.5rem_+_env(safe-area-inset-bottom))]">
+        {/* 常駐同步燈（2026-11-27 從現場頁統計列移來）：放在登入者上方，任何分頁都看得到這台的變更上雲了沒；
+            不佔現場頁版面（統計列多一顆會在尖峰換成兩行、地圖縮 11%） */}
+        <SyncStatusPill variant="rail" />
         <div data-testid="sidebar-user" className="flex flex-col xl:flex-row items-center justify-center xl:justify-start gap-1 xl:gap-2.5 px-1 xl:px-2 py-2">
           <div className="w-8 h-8 rounded-full bg-[#e9e5df] text-chicken-brown/80 text-[13px] font-bold flex items-center justify-center flex-shrink-0" title={user?.displayName}>
             {initial}

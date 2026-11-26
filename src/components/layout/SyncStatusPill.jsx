@@ -1,4 +1,4 @@
-// 常駐同步燈（現場頁頂列）：平常也看得到「這台的變更到底上雲了沒」。
+// 常駐同步燈（側欄底部／頂欄；手機橫向在現場頁頂列）：平常也看得到「這台的變更到底上雲了沒」。
 // 只讀 cloudStatus／usingFirebase，不改任何同步邏輯（狀態轉移見 utils/syncStatus.js）。
 // 🔴 顯示規則必須與既有狀態機一致：
 //   - rejected 黏住：只能由乾淨的推送成功或使用者主動放棄清除——這裡只顯示、不推導。
@@ -46,7 +46,18 @@ const TONE = {
   neutral: 'border-chicken-brown/20 bg-chicken-brown/5 text-chicken-brown/70',
 }
 
-export function SyncStatusPillView({ usingFirebase, cloudStatus, onView }) {
+// 側欄 76px 圖示欄放不下整句 → 短字（燈號顏色＋2–3 字），完整狀態在 aria-label／title／點開的說明
+const SHORT = { local: '本機', synced: '已同步', syncing: '同步中', offline: '離線', unsent: '未上傳', idle: '連線中' }
+const DOT = {
+  ok: 'bg-emerald-600', info: 'bg-blue-500', warn: 'bg-amber-500', danger: 'bg-red-600', neutral: 'bg-chicken-brown/40',
+}
+
+// variant（2026-11-27 驗收 P1：燈移出現場頁統計列，不再讓尖峰四顆提示＋燈擠成兩行）：
+//   pill   （預設）完整膠囊；手機橫向現場頁頂列用
+//   rail   側欄底部（登入者上方）：76px 圖示欄是「燈＋短字」、≥1280px 展開側欄是完整字
+//   dot    側欄收合時的精簡形態：44×44 只有燈號（有問題時加紅框），名稱在 aria-label
+//   header iPad 直向／手機直向的頂欄右側：完整膠囊，但上下負邊距吃進頂欄內距、不撐高頂欄
+export function SyncStatusPillView({ usingFirebase, cloudStatus, onView, variant = 'pill' }) {
   const info = describeSyncPill({ usingFirebase, cloudStatus })
   const [open, setOpen] = useState(false)
   const id = useId()
@@ -54,17 +65,34 @@ export function SyncStatusPillView({ usingFirebase, cloudStatus, onView }) {
     if (info.problem && onView) { onView(); return }
     setOpen(v => !v)
   }
+  const common = {
+    type: 'button', onClick: handle, 'data-testid': 'sync-status-pill', 'data-sync-key': info.key, 'data-variant': variant,
+    'aria-expanded': info.problem ? undefined : open, 'aria-describedby': open ? id : undefined, title: info.detail,
+  }
+  const side = variant === 'rail' || variant === 'dot'
   return (
-    <div className="relative flex-none">
-      <button type="button" onClick={handle} data-testid="sync-status-pill" data-sync-key={info.key}
-        aria-expanded={info.problem ? undefined : open} aria-describedby={open ? id : undefined}
-        title={info.detail}
-        className={`tap inline-flex min-h-[44px] items-center whitespace-nowrap rounded-full border px-3 text-sm font-bold ${TONE[info.tone]}`}>
-        {info.text}
-      </button>
+    <div className={`relative flex-none ${variant === 'rail' ? 'w-full' : ''} ${variant === 'header' ? '-my-1.5' : ''}`}>
+      {variant === 'rail' ? (
+        <button {...common}
+          className={`tap w-full min-h-[44px] flex flex-col xl:flex-row items-center justify-center xl:justify-start gap-0.5 xl:gap-2 px-1 xl:px-3 py-1 rounded-xl border text-[11px] xl:text-[13px] font-bold leading-tight ${TONE[info.tone]}`}>
+          <span aria-hidden="true" className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${DOT[info.tone]}`} />
+          <span className="xl:hidden">{SHORT[info.key] || info.text}</span>
+          <span className="hidden xl:inline truncate">{info.text}</span>
+        </button>
+      ) : variant === 'dot' ? (
+        <button {...common} aria-label={`同步狀態：${info.text}`}
+          className={`tap w-11 h-11 flex items-center justify-center rounded-xl ${info.problem ? 'border-2 border-red-500 bg-red-50' : ''}`}>
+          <span aria-hidden="true" className={`w-3 h-3 rounded-full ${DOT[info.tone]}`} />
+        </button>
+      ) : (
+        <button {...common}
+          className={`tap inline-flex min-h-[44px] items-center whitespace-nowrap rounded-full border px-3 text-sm font-bold ${TONE[info.tone]}`}>
+          {info.text}
+        </button>
+      )}
       {open && (
         <p id={id} role="status" data-testid="sync-status-detail"
-          className="absolute right-0 top-full z-30 mt-1 whitespace-nowrap rounded-lg border border-chicken-brown/15 bg-white px-3 py-2 text-xs font-bold text-chicken-brown shadow-lg">
+          className={`absolute z-30 whitespace-nowrap rounded-lg border border-chicken-brown/15 bg-white px-3 py-2 text-xs font-bold text-chicken-brown shadow-lg ${side ? 'left-full bottom-0 ml-2' : 'right-0 top-full mt-1'}`}>
           {info.detail}
         </p>
       )}
@@ -77,12 +105,12 @@ function WithRouter(props) {
   return <SyncStatusPillView {...props} onView={() => setSearchParams({ tab: 'settings', section: 'data', block: 'firestore' })} />
 }
 
-// 連接 context 的版本（現場頁用）。沒有 Router（測試／孤立渲染）時問題態點了只是展開說明。
-function SyncStatusPill() {
+// 連接 context 的版本。沒有 Router（測試／孤立渲染）時問題態點了只是展開說明。
+function SyncStatusPill({ variant } = {}) {
   const { cloudStatus } = useBooking() || {}
   const { usingFirebase } = useAuth() || {}
   const inRouter = useInRouterContext()
-  const props = { usingFirebase, cloudStatus }
+  const props = { usingFirebase, cloudStatus, variant }
   return inRouter ? <WithRouter {...props} /> : <SyncStatusPillView {...props} />
 }
 export default memo(SyncStatusPill)

@@ -38,12 +38,14 @@ function truncateGuestName(name, w, fontSize) {
 }
 
 // 鍵盤焦點環（只在 :focus-visible 顯示，CSS 在 FloorMap）。獨立 rect、不碰桌本體邊框，所以不會蓋掉選中樣式。
+// 平常 display:none（只在 :focus-visible 由 FloorMap 的 <style> 打開）：不顯示時也不算進桌的外框尺寸——
+// 否則每張桌的 getBoundingClientRect 都多出一圈 gap（量桌子大小、量與復原欄距離都會失真）。
 function FocusRing({ x, y, w, h }) {
   const g = FOCUS_RING.gap
   return (
     <rect className="table-focus-ring" x={x - g} y={y - g} width={w + g * 2} height={h + g * 2} rx={12}
           fill="none" stroke={FOCUS_RING.color} strokeWidth={FOCUS_RING.width}
-          opacity={0} pointerEvents="none" />
+          opacity={0} display="none" pointerEvents="none" />
   )
 }
 

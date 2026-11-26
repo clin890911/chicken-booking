@@ -16,6 +16,7 @@ import { useNewVersion } from '../hooks/useNewVersion'
 import { useAdminAppManifest } from '../hooks/useAppManifest'
 import { resolveAdminTab } from '../utils/landingTab'
 import SyncAlertBar from '../components/layout/SyncAlertBar'
+import SyncStatusPill from '../components/layout/SyncStatusPill'
 import { isPhoneLayout } from '../utils/phoneLayout'
 import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere, mergeSeenIds } from '../utils/newBookingAlerts'
 
@@ -191,9 +192,13 @@ export default function AdminPage() {
             title="雞王管理後台"
             subtitle={tabInfo.label}
             right={
-              <div className="text-right text-xs">
-                <div className="font-semibold text-chicken-brown">{user?.displayName}</div>
-                <div className="text-chicken-brown/55">{user?.roleLabel}</div>
+              <div className="flex items-center gap-3 min-w-0">
+                {/* 常駐同步燈：lg 以下（iPad 直向、手機直向）沒有側欄，放頂欄登入者左邊；負邊距不撐高頂欄 */}
+                <SyncStatusPill variant="header" />
+                <div className="text-right text-xs min-w-0">
+                  <div className="font-semibold text-chicken-brown truncate">{user?.displayName}</div>
+                  <div className="text-chicken-brown/55">{user?.roleLabel}</div>
+                </div>
               </div>
             }
           />

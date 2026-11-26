@@ -6,9 +6,11 @@
 //   復原鈕：看得到的字一律「復原」；對象（復原帶位 105／復原入座 林先生／復原換桌 103）放 aria-label。
 //   復原：統一 8 秒（SEAT_UNDO_MS）。唯一例外是候位入座——復原是雲端指令，後端只給 5 秒
 //         （functions/lib/waitlistCommands.js 的 undoUntil），前端不能比後端長，見 waitlistSeatToast。
-//   位置：頁面頂部（與其他 toast 同一處）。2026-11-27 驗收 P1：曾放在桌況圖底部「靠近手指」，
-//         iPad 橫向會蓋住最底排桌子 8 秒、點 111 實際點到「復原」——任何會讓手指在入座後幾秒內誤觸
-//         「復原」的位置都不可接受（與「到了鈕不可放回桌上」同一個道理）。placement:'seat' 只是標記。
+//   位置（2026-11-27 驗收 P1 第三輪）：現場頁的入座提示是「不可互動」的浮動提示（pointer-events:none、
+//         不帶任何按鈕、約 4 秒），「復原」只出現在版面內固定保留的復原欄（ops/SeatUndoBar，地圖工具列右端）。
+//         前兩輪把帶「復原」的 toast 放在地圖底部（蓋桌）、頁面頂部（蓋待清／1F／同步燈）都失敗——
+//         任何浮在內容上的「復原」都會在入座後幾秒內被手指誤觸（與「到了鈕不可放回桌上」同一個道理）。
+//         placement:'seat' 是給 ToastProvider 的路由標記：有復原欄時改走上述行為；沒有（非現場頁）照舊。
 //   報到列「到了」：只用原位確認卡（ArrivalStrip），不另發 toast——同一件事不可同時出現兩顆「復原」。
 // 純函式：toast 由呼叫端注入（方便單測）。復原本身的守門一律在 service 層（只倒仍由本筆持有或已空的桌）。
 
@@ -39,6 +41,11 @@ export function seatedText({ name, guests, tables } = {}) {
 export function movedText({ name, guests, tables } = {}) {
   const g = Math.floor(Number(guests) || 0)
   return `✓ ${String(name || '').trim() || '這組'}${g > 0 ? ` ${g} 位` : ''} 改到 ${joinTables(tables)}`
+}
+
+// 「✓ 王先生 3 位 → 101 已入座」→「王先生 3 位 → 101」（現場頁復原欄的對象文字；換桌句「改到 103」原樣保留）
+export function seatUndoTextOf(message) {
+  return String(message || '').replace(/^\s*✓\s*/, '').replace(/\s*已入座\s*$/, '').trim()
 }
 
 // 成功＋復原：一律 8 秒、placement:'seat'。看得到的字一律「復原」；ariaLabel 帶對象（H6：兩則疊在一起時讀屏分得清）。

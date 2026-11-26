@@ -431,11 +431,13 @@ test.describe('iPad 橫向 1180×820 回歸（尖峰主力，版面與互動不�
     expect(await hittable(page, SEAT)).toBe(true)
   })
 
-  test('手機專屬的東西都不出現；放大視圖沒有樓層切換；提示與圖例照舊', async ({ page }) => {
+  test('手機專屬的東西都不出現；放大視圖沒有樓層切換；復原欄與圖例照舊', async ({ page }) => {
     await expect(page.locator(JUMP)).toBeHidden()
     await expect(page.getByRole('button', { name: '圖例' })).toBeHidden()
     await expect(page.getByText('待清桌', { exact: true })).toBeVisible()
-    await expect(page.getByText(/Tab 選桌/)).toBeVisible()
+    // 2026-11-27 第三輪：地圖工具列右端的工程師文案「Tab 選桌…」換成入座復原欄（固定保留、空時淡色「最近動作」）
+    await expect(page.getByText(/Tab 選桌/)).toHaveCount(0)
+    await expect(page.getByTestId('seat-undo-bar')).toBeVisible()
     await page.getByRole('button', { name: '放大視圖' }).click()
     const dialog = page.getByRole('dialog', { name: /放大桌況圖/ })
     await expect(dialog).toBeVisible()

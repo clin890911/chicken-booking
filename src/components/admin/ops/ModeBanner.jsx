@@ -158,7 +158,8 @@ export default function ModeBanner({ layout = 'top', tables = [], onLocateSugges
                 <button type="button" onClick={() => onLocateSuggestion?.(mode.suggestion)} className="underline min-h-[44px] text-sm">定位建議桌 {suggestionLabel}</button>
               </div>
             )}
-            {!!selected.length && <button type="button" onClick={onClearSelection} className="text-sm underline min-h-[44px]">清空已選桌</button>}
+            {/* 與「＋再加一桌」同一行時兩顆貼在一起（2026-11-27 驗收 P2）→ 左邊留 24px，手指不會按錯 */}
+            {!!selected.length && <button type="button" data-testid="mode-clear-selection" onClick={onClearSelection} className="ml-6 px-1 text-sm underline min-h-[44px]">清空已選桌</button>}
             {/* 紅＝會解除別組排位或佔團體桌；黃＝只是提醒（時間不衝突、對方保留）。都要勾一下才放行（防呆綁在已選的桌，不變） */}
             {!!multiWarnings.length && <div className={`rounded-lg px-3 py-2 text-sm space-y-1 ${multiWarningSevere ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-900'}`}>
               {multiWarnings.map(line => <div key={line} className="font-bold">{line}</div>)}

@@ -1,6 +1,7 @@
 import { toastWaitlistSeat } from '../../utils/waitlistSeatToast'
 import HandoffPanel from './ops/HandoffPanel'
 import SyncStatusPill from '../layout/SyncStatusPill'
+import SeatUndoBar from './ops/SeatUndoBar'
 import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import FloorMap from './floormap/FloorMap'
@@ -21,6 +22,7 @@ import { nextBookableSlot, pastSlotFix } from './ops/QuickReservePanel'
 import { convertNote, finishConvertedWaitlist } from '../../services/waitlistService'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast, useConfirm } from '../ui/Toast'
+import { useRegisterSeatUndoSlot } from '../ui/seatUndoContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor, buildPreassignTableMap, squeezeSeats } from '../../utils/capacity'
 import { assignmentKind, statusZh } from '../../utils/tableStatus'
@@ -246,6 +248,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     preassignBookingTable, preassignBookingTables, addBooking, updateBooking, clearBookingPreassign, leaveWaitlist,
   } = useBooking()
   const toast = useToast()
+  // 現場頁掛著復原欄：入座類提示改成不可互動，「復原」只在地圖工具列右端的復原欄（SeatUndoBar）
+  useRegisterSeatUndoSlot()
   const confirm = useConfirm()
   const { can, user } = useAuth()
   // 帶位（散客直接入座）要同時寫 bookings＋tables，依實際寫入集合判定（見 utils/seatingPerms.js）
@@ -1449,7 +1453,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         {/* 樓層切換已移到右欄地圖卡片頂端（FloorTabs，2026-10-17）：選桌時眼睛和手都在地圖上 */}
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
-        <SyncStatusPill />
+        {/* 常駐同步燈已移到側欄底部（iPad 橫向）／頂欄（iPad 直向、手機直向）：放在這列會讓尖峰四顆提示＋燈
+            擠成兩行、地圖縮 11%（2026-11-27 驗收 P1）。手機橫向（short）沒有側欄也沒有頂欄，才留在這裡。 */}
+        <div className="hidden short:block flex-none"><SyncStatusPill /></div>
         {/* 選桌模式中不給切（invisible＋inert），但照樣佔位：頂列高度不變 → 地圖尺寸在模式內外一樣（A1） */}
         {!reserveOpen && (
           <div className={`flex-none max-md:w-full ${mode ? 'invisible' : ''}`} inert={mode ? '' : undefined} aria-hidden={mode ? 'true' : undefined}>
@@ -1477,7 +1483,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       <div className={`flex-1 min-h-0 mt-2 grid grid-cols-1 md:grid-cols-[400px_1fr] lg:grid-cols-[420px_1fr] gap-3 phone:!grid-cols-1 ${mode ? 'phone:overflow-y-auto phone:overscroll-y-contain phone:auto-rows-max phone:content-start short:mt-0 short:min-w-0' : 'phone:flex-none'}`}>
         {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/今日/候位；團體梯次併在「今日」時間清單）
             TableDrawer 是長內容 → 外層捲動；OpsRail 自己管內部捲動與釘底動作列 → 外層只給 flex 容器 */}
-        <div ref={leftColRef} className={`h-full min-h-0 phone:h-auto ${selectedTableObj ? 'overflow-y-auto phone:overflow-visible space-y-3' : 'flex flex-col'} ${mode ? 'phone:order-last' : ''}`}>
+        <div ref={leftColRef} data-testid="ops-left-col" className={`h-full min-h-0 phone:h-auto ${selectedTableObj ? 'overflow-y-auto phone:overflow-visible space-y-3' : 'flex flex-col'} ${mode ? 'phone:order-last' : ''}`}>
           {mode && !isPhone ? (
             // A1：左欄作業面板（誰、幾位、已選、警示、人數、確認／取消）；確認鈕釘在左欄底部
             <ModeBanner layout="rail" {...modeBannerProps} />
@@ -1579,6 +1585,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           <FloorTabs floor={floor} onChange={setFloor} counts={floorCounts} className="short:grid-cols-1 short:gap-1" />
           {showSchedule ? (
             // 排程視圖＝縱向堆疊卡片，會長 → 內部捲動避免裁切
+            <>
+            <SeatUndoBar className="mb-2 flex-shrink-0 w-full sm:w-80 sm:self-end" />
             <div className="flex-1 min-h-0 overflow-y-auto phone:flex-none phone:overflow-visible">
               <TableScheduleView
                 tables={tables.filter(t => t.floor === floor)}
@@ -1588,8 +1596,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
               />
             </div>
+            </>
           ) : showSummary ? (
             // 摘要視圖＝可坐存量 + 依狀態分組（不估時間）
+            <>
+            <SeatUndoBar className="mb-2 flex-shrink-0 w-full sm:w-80 sm:self-end" />
             <div className="flex-1 min-h-0 phone:flex-none">
               <TableSummaryView
                 store={storeSummary}
@@ -1601,6 +1612,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
               />
             </div>
+            </>
           ) : (
             <>
               <div className={`mb-2 flex-shrink-0 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55 ${legendOpen ? 'short:col-start-1' : 'phone:hidden'}`}>
@@ -1621,6 +1633,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                   <button type="button" aria-expanded={legendOpen} onClick={() => setLegendOpen(v => !v)}
                     className="hidden phone:inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2 rounded-lg border text-xs font-bold">圖例</button>
                 )}
+                // 入座復原欄：工具列右端固定保留（取代工程師文案「Tab 選桌…」）。basis-0＋min-w：iPad 橫向接在按鈕右邊；
+                // iPad 直向／手機放不下就整個換到工具列第二行、撐滿寬度——不論有沒有內容都佔同一個位置與高度，零位移。
+                // 手機選桌模式中收起（桌況圖要留給選桌；模式中不會產生新的復原，確認後模式結束它就回來）。
+                toolbarEnd={<SeatUndoBar className={`flex-1 basis-0 min-w-[160px] ml-auto ${mode ? 'phone:hidden' : ''}`} />}
                 locateTableNumber={locateTableRequest?.number}
                 locateRequestId={locateTableRequest?.seq || 0}
                 tablePresentation={tablePresentation}
