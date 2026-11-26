@@ -54,8 +54,10 @@ test('管理端：現場頁內 取號 → 叫號 → 入座（人工選桌確認
 
   // 入座後不開桌況抽屜、直接切回「帶位」籤讓店員接著帶下一組（店主指定 UX：
   // 「候位的客人選定位子後，會直接回到帶位頁面，這樣 UX 比較順」）。
-  // toast 帶「查看」動作，按下才回頭開該桌抽屜確認
-  await page.getByRole('button', { name: '查看', exact: true }).click()
+  // 2026-11-27 第三輪：現場頁的入座提示不可互動（不再帶「查看」）；復原在地圖工具列的復原欄（時效照後端 5 秒）。
+  // 要回頭確認剛剛那桌：直接點桌況圖上的桌開抽屜
+  await expect(page.locator('[data-placement="seat"] button')).toHaveCount(0)
+  await page.locator(`[data-table-number="${tableNo}"]`).first().click()
   await expect(page.getByText(/人桌 ·/)).toBeVisible() // 桌況抽屜的容量列，證明抽屜真的開了
   await page.keyboard.press('Escape')
 

@@ -113,7 +113,8 @@ describe('UpcomingPanel × 團體梯次（今日時間清單）', () => {
 
     await act(async () => { btn(row('GB:B1'), '梯次入座').click() })
     expect(ctx.seatGroupBatch).toHaveBeenCalledWith('GB', 'B1')
-    expect(toast.success).toHaveBeenCalledWith('山城旅遊 第一梯 已入座（101、102）')
+    // B1：團體整梯入座與其他入座入口同一種文字＋位置（mock 的 seatGroupBatch 沒回復原快照 → 不給復原鈕）
+    expect(toast.success).toHaveBeenCalledWith('✓ 山城旅遊 第一梯 11 位 → 101＋102 已入座', { duration: 8000, placement: 'seat' })
     render() // context 更新後重繪
     expect(rowKeys('soon')).toEqual(['W1'])
     expect(rowKeys('seated')).toContain('GB:B1')

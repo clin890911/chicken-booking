@@ -39,12 +39,52 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers() })
 
 describe('D1 換桌 → 復原換桌', () => {
-  const move = (b, to, toast) => {
+  // 換桌發生在入座 10 分鐘後（B6：滿 5 分鐘＝客人用過原桌 → 原桌待清；未滿 5 分鐘的「點錯修正」見下方 B6 兩條）
+  const move = (b, to, toast, { afterMin = 10 } = {}) => {
     const undo = seating.seatedMoveSnapshot(b.id)
-    const r = seating.replaceSeatedBookingTables(b.id, [to], { now: NOW })
+    const r = seating.replaceSeatedBookingTables(b.id, [to], { now: new Date(NOW.getTime() + afterMin * 60000) })
     expect(r.ok).toBe(true)
-    toastMovedWithUndo({ ...r, undo }, { message: `${b.name} 已改桌至 ${to}`, name: b.name, toTables: [to], undoSeatedMove: seating.undoSeatedMove, toast })
+    toastMovedWithUndo({ ...r, undo }, { name: b.name, guests: b.guests, toTables: [to], undoSeatedMove: seating.undoSeatedMove, toast })
+    return r
   }
+
+  // 2026-11-27：換桌提示統一「✓ 名 N 位 改到 103」，原桌回空桌／轉待清改在換桌面板確認前講（ModeBanner.moveSourceNote）
+  it('B6 入座 2 分鐘就改桌（點錯修正）：原桌直接回空桌、不變待清；toast「✓ 王先生 2 位 改到 108」；復原搬回 101', () => {
+    const b = seated()
+    const seatedAt = T('101').seatedAt
+    const toast = makeToast()
+    const r = move(b, '108', toast, { afterMin: 2 })
+    expect(r.freedTables).toEqual(['101'])
+    expect(T('101')).toMatchObject({ status: 'vacant', currentBookingId: null, currentRef: null, seatedAt: null })
+    const [msg, action, opts] = lastAction(toast)
+    expect(msg).toBe('✓ 王先生 2 位 改到 108')
+    expect(opts).toEqual({ duration: 8000, placement: 'seat' })
+    action.onClick()
+    expect(T('101')).toMatchObject({ status: 'dining', currentBookingId: b.id, seatedAt })
+    expect(T('108')).toMatchObject({ status: 'vacant', currentBookingId: null })
+    expect(bookingService.getById(b.id).assignedTableId).toBe('101')
+  })
+
+  it('B6 入座 10 分鐘才改桌：原桌照舊待清；toast 不提回空桌', () => {
+    const b = seated()
+    const toast = makeToast()
+    const r = move(b, '108', toast, { afterMin: 10 })
+    expect(r.freedTables).toEqual([])
+    expect(r.cleaningTables).toEqual(['101'])
+    expect(T('101').status).toBe('cleaning')
+    expect(lastAction(toast)[0]).toBe('✓ 王先生 2 位 改到 108')
+  })
+
+  it('B6 ★ 點錯修正後原桌（已回空桌）被下一組坐走 → 復原安全失敗，不搶桌', () => {
+    const b = seated()
+    const toast = makeToast()
+    move(b, '108', toast, { afterMin: 2 })
+    const next = seating.walkInSeat('101', { name: '下一組', guests: 2 })
+    lastAction(toast)[1].onClick()
+    expect(toast.error).toHaveBeenCalledWith('原桌 101 已有其他客人，未復原')
+    expect(T('101')).toMatchObject({ status: 'dining', currentBookingId: next.booking.id })
+    expect(T('108')).toMatchObject({ status: 'dining', currentBookingId: b.id })
+  })
 
   it('復原：客人搬回原桌（用餐中、入座時間照舊），新桌回空桌、訂位桌號寫回原桌', () => {
     const b = seated()
@@ -53,7 +93,9 @@ describe('D1 換桌 → 復原換桌', () => {
     move(b, '108', toast)
     expect(T('101').status).toBe('cleaning')
     const [, action, opts] = lastAction(toast)
-    expect(action.label).toMatch(/^↩ 復原換桌$/)
+    // 看得到的字一律「復原」，對象在 aria-label
+    expect(action.label).toBe('復原')
+    expect(action.ariaLabel).toBe('復原換桌 108')
     expect(opts.duration).toBeGreaterThanOrEqual(8000)
     action.onClick()
     expect(T('101')).toMatchObject({ status: 'dining', currentBookingId: b.id, seatedAt })

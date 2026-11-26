@@ -6,6 +6,7 @@ import { buildGroupHolds, todayActiveGroups } from './groupLive'
 import { todayStr } from './timeSlots'
 import { bookingTableNumbers } from './bookingTables'
 import { splitFields } from './partySplit'
+import { SEAT_UNDO_MS, toastSeatUndo } from './seatFeedback'
 
 // 入座前的預留警示（報到列與今日訂位卡同一個口徑）：
 // 桌（大組含副桌）被今日團體圈桌未入座、或他筆訂位預配且用餐區間與「現在入座」重疊
@@ -44,27 +45,33 @@ export function seatAfterArriveConfirm(booking, { confirm, bookings = [], groupH
     .then(ok => (ok ? proceed() : false))
 }
 
-// 入座成功後的 toast＋5 秒復原（四個入口與選桌入座共用，不各寫一套）。
+// 入座成功後的 toast＋8 秒復原（四個入口與選桌入座共用，不各寫一套）。
+// 文字與秒數、位置走 utils/seatFeedback（全部入座入口同一種回饋）：message 請用 seatedText() 組。
 // r＝入座結果（seatBooking／seatBookingAllTables／assignAndSeatBooking），r.undo 是 service 入座前拍的快照。
 // 復原走 undoSeatBooking：booking 與 table 兩邊一起倒；只倒仍由本筆用餐中、或已空的桌——
 // 被別組佔走就整組不動並明講（不搶桌）。帶位時解除掉的他筆預配（releasedPreassigns）一併還回去。
-export function toastSeatedWithUndo(r, { message, name, undoSeatBooking, toast, releasedPreassigns = [], restoreOverriddenAssignment, onUndone }) {
-  toast.action(
-    message,
-    {
-      label: '復原',
-      onClick: () => {
-        const u = undoSeatBooking?.(r?.undo)
-        if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
-        const note = releasedPreassigns.length && restoreOverriddenAssignment
-          ? restoreNote(restoreReleasedPreassigns(releasedPreassigns, { restoreOverriddenAssignment }))
-          : ''
-        toast.info(`已復原：${name || '這組'} 回到待到${note}`)
-        onUndone?.(u)
-      },
-    },
-    { duration: 5000 },
-  )
+// 回傳同一支復原函式（報到列就地確認卡的「復原」也用它）：toast 與確認卡兩邊按哪一個都一樣，
+// 已成功復原過就不再倒第二次（回 { ok:true, already:true }），失敗則可再按。
+// 報到列就地確認卡（A3）與 toast 同一個時效：都是 8 秒（seatFeedback.SEAT_UNDO_MS）。
+// inline＝true（報到列入口）：不發 toast，只回傳復原函式給原位確認卡用——同一件事畫面上只能有一顆「復原」
+// （2026-11-27 驗收：原位卡與 toast 同時出現兩顆復原）。失敗／已復原的訊息照常走 toast。
+export const SEATED_UNDO_MS = SEAT_UNDO_MS
+export function toastSeatedWithUndo(r, { message, name, undoSeatBooking, toast, releasedPreassigns = [], restoreOverriddenAssignment, onUndone, inline = false }) {
+  let undone = false
+  const undo = () => {
+    if (undone) return { ok: true, already: true }
+    const u = undoSeatBooking?.(r?.undo)
+    if (!u?.ok) { toast.error('復原失敗：' + (u?.error || '未知錯誤')); return u || { ok: false } }
+    undone = true
+    const note = releasedPreassigns.length && restoreOverriddenAssignment
+      ? restoreNote(restoreReleasedPreassigns(releasedPreassigns, { restoreOverriddenAssignment }))
+      : ''
+    toast.info(`已復原：${name || '這組'} 回到待到${note}`)
+    onUndone?.(u)
+    return u
+  }
+  if (!inline) toastSeatUndo(toast, message, { ariaLabel: `復原入座 ${name || '這組'}`, onUndo: undo })
+  return undo
 }
 
 // 這筆訂位現在的桌（主桌＋副桌）有沒有被本筆持有（鎖桌 reserved／用餐中）。
@@ -82,6 +89,16 @@ export function preassignTakenByOthers(booking, tables = []) {
     const t = (tables || []).find(x => String(x.number) === n)
     return t && t.status !== 'vacant' && String(t.currentBookingId ?? '') !== String(booking.id)
   })
+}
+
+// 「客人到了」該走哪一條——報到列、今日訂位卡、桌抽屜共用這一支判斷（2026-11 A4，取代三份複製）：
+//   'pick'   還沒配桌 → 進「到了 · 選桌入座」
+//   'reseat' 預配的桌此刻被別組佔 → 進「到了 · 換桌入座」（選好桌確認＝改配＋入座），不先撞一次入座失敗
+//   'seat'   有桌可坐（鎖桌給本筆、或預配桌空著）→ 一鍵入座（seatAfterArriveConfirm）
+export function arriveActionFor(booking, tables = []) {
+  if (!booking) return null
+  if (!bookingTableNumbers(booking).length) return 'pick'
+  return preassignTakenByOthers(booking, tables) ? 'reseat' : 'seat'
 }
 
 // 「到了 · 選桌入座／換桌入座」確認：可同時改到店人數、把被佔的預配換成選到的空桌，一次入座。

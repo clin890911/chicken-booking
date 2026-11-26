@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useBooking } from '../../../contexts/BookingContext'
 import { useToast, useConfirm } from '../../ui/Toast'
+import { toastGroupSeated } from '../../../utils/seatFeedback'
 import { nextBatchForTable } from '../../../utils/groupLive'
 
 // TableDrawer 內的「團體桌」資訊與操作區，三種情境：
@@ -16,7 +17,7 @@ import { nextBatchForTable } from '../../../utils/groupLive'
 //    單桌清桌走 clearGroupTable（清完本梯最後一桌自動落 releasedAt／結團），有「↩ 復原」。
 export default function GroupTableSection({ table, groupRef, groupBatch, groupHold, perms, onWalkInOverride, onReseatBatch, onGroupMove, onGroupAdd, onClose }) {
   const {
-    tables, seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, seatNextBatchOnTable,
+    tables, seatGroupBatch, undoSeatGroupBatch, checkoutGroupBatch, releaseGroupBatch, finalizeGroup, seatNextBatchOnTable,
     checkoutGroupTable, undoGroupCheckout, clearGroupTable, undoClearGroupTable,
   } = useBooking()
   const toast = useToast()
@@ -84,7 +85,7 @@ export default function GroupTableSection({ table, groupRef, groupBatch, groupHo
       }
       return
     }
-    toast.success(`${g.agencyName} ${batch.label} 已入座（${tablesTxt}）`)
+    toastGroupSeated(r, { group: g, batch: batch, undoSeatGroupBatch, toast })
   }
 
   // 這桌離席（S1）：只動這一張桌，不跳 confirm（有復原），同梯其他桌照常用餐

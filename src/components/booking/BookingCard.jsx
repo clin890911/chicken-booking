@@ -99,7 +99,7 @@ function BookingCard({ booking, onAssign, onMove }) {
                     : stage === 'late'
                     ? 'bg-chicken-yellow text-white'
                     : 'bg-chicken-brown/10 text-chicken-brown'}`}>
-                  {minutes} 分{stage === 'buffer-overtime' ? ' · 超緩衝' : stage === 'overtime' ? ' · 時間到' : stage === 'late' ? ' · 即將結束' : ''}
+                  {minutes < 1 ? '剛入座' : `${minutes} 分`}{stage === 'buffer-overtime' ? ' · 超緩衝' : stage === 'overtime' ? ' · 時間到' : stage === 'late' ? ' · 即將結束' : ''}
                 </span>
               )}
             </div>

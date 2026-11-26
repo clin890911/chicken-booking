@@ -479,6 +479,8 @@ describe('跨 service 端到端流程', () => {
       const booking = mkOnlineBooking({ guests: 4 })
       seating.assignBookingToTable(booking.id, '101')
       seating.seatBooking(booking.id) // 101 dining
+      // B6：入座滿 5 分鐘才算「用過」→ 待清；未滿 5 分鐘回空桌（quickFixMove.test.js）
+      tableService.setStatus('101', 'dining', { seatedAt: new Date(Date.now() - 10 * 60000).toISOString() })
       const r = seating.moveTable(booking.id, '201')
       expect(r.ok).toBe(true)
       expect(tableService.getByNumber('101').status).toBe('cleaning')

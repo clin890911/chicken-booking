@@ -16,8 +16,9 @@ import { useNewVersion } from '../hooks/useNewVersion'
 import { useAdminAppManifest } from '../hooks/useAppManifest'
 import { resolveAdminTab } from '../utils/landingTab'
 import SyncAlertBar from '../components/layout/SyncAlertBar'
+import SyncStatusPill from '../components/layout/SyncStatusPill'
 import { isPhoneLayout } from '../utils/phoneLayout'
-import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere } from '../utils/newBookingAlerts'
+import { isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts, wasCreatedHere, mergeSeenIds } from '../utils/newBookingAlerts'
 
 const TABS = [
   { key: 'ops',       label: '現場',  icon: 'ops', subtitle: '即時桌況 · 候位 · 今日團體', badgeKey: 'ops' },
@@ -100,7 +101,8 @@ export default function AdminPage() {
     // 本裝置剛建立的不通報（已有「已新增」確認 toast）；線上客人與其他裝置建立的照常通報
     buildNewBookingAlerts(diffNewConfirmed(prevIdsRef.current, bookings, { exclude: wasCreatedHere }), todayStr())
       .forEach(a => toast.info(a.message, { duration: a.duration }))
-    prevIdsRef.current = ids
+    // 累積基準：復原（已入座→待到）再出現的訂位不算新訂位，見 utils/newBookingAlerts.mergeSeenIds
+    prevIdsRef.current = mergeSeenIds(prevIdsRef.current, bookings)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookings, ready])
 
@@ -190,9 +192,13 @@ export default function AdminPage() {
             title="雞王管理後台"
             subtitle={tabInfo.label}
             right={
-              <div className="text-right text-xs">
-                <div className="font-semibold text-chicken-brown">{user?.displayName}</div>
-                <div className="text-chicken-brown/55">{user?.roleLabel}</div>
+              <div className="flex items-center gap-3 min-w-0">
+                {/* 常駐同步燈：lg 以下（iPad 直向、手機直向）沒有側欄，放頂欄登入者左邊；負邊距不撐高頂欄 */}
+                <SyncStatusPill variant="header" />
+                <div className="text-right text-xs min-w-0">
+                  <div className="font-semibold text-chicken-brown truncate">{user?.displayName}</div>
+                  <div className="text-chicken-brown/55">{user?.roleLabel}</div>
+                </div>
               </div>
             }
           />

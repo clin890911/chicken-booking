@@ -60,7 +60,7 @@ test('?demo=ops：散客＋甲乙兩團同一條時間清單 → 點開乙團梯
   await seatBtn.click()
   await expect(page.getByText(/整梯 2 桌：101、102/)).toBeVisible()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/山城旅遊 第一梯 已入座/)).toBeVisible()
+  await expect(page.getByText(/山城旅遊 第一梯 \d+ 位 → \S+ 已入座/)).toBeVisible()
   await expect(seated.locator('[data-group-batch="GOPSDEMO-B:BTOPSDEMO-B1"]')).toContainText('用餐中 2 桌')
   await expect(soon.locator('[data-group-batch="GOPSDEMO-B:BTOPSDEMO-B1"]')).toHaveCount(0)
   await expect(seated.locator('[data-group-batch="GOPSDEMO-B:BTOPSDEMO-B1"]').getByRole('button', { name: '梯次離席' })).toBeVisible()
@@ -86,7 +86,7 @@ test('整團完成後移到「已完成」區，展開仍可開回傳單', async
   const row = await openGroupRow(page, '山城旅遊')
   await row.getByRole('button', { name: '梯次入座' }).click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/山城旅遊 第一梯 已入座/)).toBeVisible()
+  await expect(page.getByText(/山城旅遊 第一梯 \d+ 位 → \S+ 已入座/)).toBeVisible()
   await page.locator('[data-group-batch="GOPSDEMO-B:BTOPSDEMO-B1"]').getByRole('button', { name: '整團完成' }).click()
   await page.getByRole('button', { name: '完成釋桌', exact: true }).click()
 

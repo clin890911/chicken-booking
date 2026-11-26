@@ -90,12 +90,12 @@ const seedSeated=()=>{
 it.each(['card','detail'])('真實%s已入座併桌入口：取消回原URL/篩選/捲動，保留桌組與arrival',entry=>{
  seedSeated();admin();seedSource();openEntry(entry)
  expect(container.querySelector('[data-url]').textContent).toContain('tab=ops')
- pick('B');pick('C');click('取消並返回');assertReturned()
+ pick('B');click('＋再加一桌');pick('C');click('取消');assertReturned()
  expect(harness.ctx.replaceSeatedBookingTables).not.toHaveBeenCalled()
  expect(booking).toMatchObject({status:'arrived',assignedTableId:'A',extraTableIds:['D'],actualArrivalTime:'2026-10-04T11:15:00+08:00'})
 })
 it.each(['card','detail'])('真實%s已入座併桌入口：成功單次提交並回原URL/篩選/捲動',entry=>{
- seedSeated();admin();seedSource();openEntry(entry);pick('B');pick('C')
+ seedSeated();admin();seedSource();openEntry(entry);pick('B');click('＋再加一桌');pick('C')
  act(()=>button('確認改桌').click());assertReturned()
  expect(harness.ctx.replaceSeatedBookingTables).toHaveBeenCalledTimes(1)
  expect(harness.ctx.replaceSeatedBookingTables).toHaveBeenCalledWith('B1',['B','C'],expect.objectContaining({originalTableNumbers:['A','D']}))

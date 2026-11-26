@@ -10,6 +10,8 @@ import { todayStr } from '../../../utils/timeSlots'
 import { fmtOverdueMin } from '../../../utils/bookingPulse'
 import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
 import { releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } from '../../../utils/preassignOverride'
+import { toastSeatedWithUndo } from '../../../utils/arriveSeat'
+import { seatedText } from '../../../utils/seatFeedback'
 
 // 點空桌時顯示「可入座」候選名單
 // - 待指派訂位（今日 confirmed + assignedTableId=null + 人數 ≤ 桌容量＋擠一擠 1 位）
@@ -20,7 +22,7 @@ import { releaseOverlappingPreassigns, restoreReleasedPreassigns, restoreNote } 
 //   - 候位列：[入座]
 export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated }) {
   const {
-    bookings, waitlist, groupReservations = [], tables = [], settings, assignBookingToTable, seatBooking, seatWaitlist, undoWaitlistSeat,
+    bookings, waitlist, groupReservations = [], tables = [], settings, assignBookingToTable, assignAndSeatBooking, undoSeatBooking, seatWaitlist, undoWaitlistSeat,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
   } = useBooking()
   const toast = useToast()
@@ -112,19 +114,21 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
   const needOverrideMsg = () => toast.warning('請先勾選「我知道，仍要帶這桌」')
 
   // === 動作 ===
+  // 訂位列「入座」＝指派＋入座一步完成：走 assignAndSeatBooking（與「到了 · 選桌入座」同一支）——
+  // 入座失敗會把剛才的指派倒回，不再留「已指派但入座失敗」的半套狀態（過去 assignBookingToTable 成功、
+  // seatBooking 失敗時桌被鎖成 reserved、訂位掛著桌號，店員要自己收拾）。
+  // 成功給 8 秒復原（B1，與其他入座入口同一套）：undoSeatBooking 只倒「仍由本筆用餐中」的桌
+  // （被別組坐走就安全失敗、不搶桌），訂位回未配桌；這次解除的他筆預配一併還回去。
   const assignAndSeat = (booking) => {
     const overridden = conflictsFor('now', booking)
     if (lockedBy(overridden)) return needOverrideMsg()
-    const r1 = assignBookingToTable(booking.id, table.number)
-    if (!r1.ok) return toast.error('指派失敗：' + r1.error)
-    releaseOverlappingPreassigns(overridden, releaseOpts)
-    const r2 = seatBooking(booking.id)
-    if (!r2.ok) {
-      toast.warning(`已指派但入座失敗：${r2.error}`)
-      onPicked?.()
-      return
-    }
-    toast.success(`${booking.name}（${booking.guests} 位）入座 ${table.number}`)
+    const r = assignAndSeatBooking(booking.id, [table.number])
+    if (!r?.ok) return toast.error('入座失敗：' + (r?.error || '未知錯誤'))
+    const releasedPreassigns = releaseOverlappingPreassigns(overridden, releaseOpts)
+    toastSeatedWithUndo(r, {
+      message: seatedText({ name: booking.name, guests: booking.guests, tables: r.tableNumbers || [table.number] }),
+      name: booking.name, undoSeatBooking, toast, releasedPreassigns, restoreOverriddenAssignment,
+    })
     onPicked?.()
   }
 
@@ -161,7 +165,7 @@ export default function TableCandidatePanel({ table, onPicked, onWaitlistSeated 
     // 預配釋放與復原由雲端交易完成，不能另推本機解除。
     // 候位入座＝客人已在現場，不留在桌況抽屜——切回帶位籤讓店員接著帶下一組
     // （由父層 OperationsView 的 seatedToWalkin 統一收尾：關抽屜＋切籤＋toast 帶「查看」）
-    const message = `${wait.name}（候位 #${wait.queueNumber}）入座 ${table.number}`
+    const message = seatedText({ name: wait.name, guests: wait.partySize, tables: [table.number] })
     if (!onWaitlistSeated) toastWaitlistSeat(r, { message, toast, undoWaitlistSeat })
     onWaitlistSeated?.(table.number, message, r)
   }

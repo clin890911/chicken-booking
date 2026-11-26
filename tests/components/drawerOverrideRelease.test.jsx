@@ -29,6 +29,9 @@ function setCtx(bookings) {
     walkInSeat: vi.fn(() => ({ ok: true, booking: { id: 'W1', name: '散客' } })),
     assignBookingToTable: vi.fn(() => ({ ok: true })),
     seatBooking: vi.fn(() => ({ ok: true })),
+    assignAndSeatBooking: vi.fn(() => ({ ok: true, tableNumber: '105', tableNumbers: ['105'], undo: { bookingId: 'CHEN', tableNumbers: ['105'], restore: { 105: 'vacant' } } })),
+    undoSeatBooking: vi.fn(() => ({ ok: true, tableNumbers: ['105'] })),
+    undoWalkInSeat: vi.fn(() => ({ ok: true, tableNumbers: ['105'] })),
     seatWaitlist: vi.fn(() => ({ ok: true })),
     releaseOverriddenAssignment: vi.fn(() => ({ ok: true, tableNumbers: ['105'], released: [] })),
     undoAssignBooking: vi.fn(() => ({ ok: true })),
@@ -102,11 +105,13 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
     mount(<TableCandidatePanel table={T105} onPicked={() => {}} />)
     expect(btn('入座').disabled).toBe(true)
     act(() => { btn('入座').click() })
-    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+    expect(ctx.assignAndSeatBooking).not.toHaveBeenCalled()
     expect(ctx.releaseOverriddenAssignment).not.toHaveBeenCalled()
     act(() => { overrideBox().click() })
     act(() => { btn('入座').click() })
-    expect(ctx.assignBookingToTable).toHaveBeenCalledWith('CHEN', '105')
+    // B1：指派＋入座一步完成（assignAndSeatBooking，失敗會自己倒回指派，不留半套）
+    expect(ctx.assignAndSeatBooking).toHaveBeenCalledWith('CHEN', ['105'])
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
     expect(ctx.releaseOverriddenAssignment).toHaveBeenCalledWith('YU')
   })
 

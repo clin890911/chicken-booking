@@ -21,6 +21,7 @@ import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPus
 import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
 import { markCreatedHere } from '../utils/newBookingAlerts'
+import { withFriendlyErrors } from '../utils/seatErrorText'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
 import { formatBookingTables } from '../utils/bookingTables'
@@ -271,6 +272,7 @@ export function BookingProvider({ children }) {
       setCloudStatus(s => statusAfterPushError(s, err.message, 'cloud-push-failed'))
       // 搶桌 409：回傳店員看得懂的文案（哪一桌、哪一組要重新帶位），並立刻拉雲端自癒。
       if (err?.tableStealConflict) { pullCloud(); return { ok: false, error: err.tableStealMessage || err.message, tableSteals: err.tableSteals } }
+      // 不套入座店員文案（seatErrorText）：flushCloudNow 是設定頁、佈局頁「儲存」在用，入座句子放在那裡會牛頭不對馬嘴。
       return { ok: false, error: err.message || 'cloud-push-failed' }
     }
   }, [refresh, pullCloud])
@@ -952,6 +954,8 @@ export function BookingProvider({ children }) {
 
   // 團體梯次入座流程（含通知略過：團體現場操作頻繁，暫不發 TG）
   const seatGroupBatch = (groupId, batchId) => { const r = seatingService.seatGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
+  // 整梯入座的 8 秒復原（B1）：只倒仍是本梯用餐中的桌，任一張變了整梯不動（見 seatingService.undoSeatGroupBatch）
+  const undoSeatGroupBatch = (snapshot) => { const r = seatingService.undoSeatGroupBatch(snapshot); if (r?.ok) { refresh(); syncCloudSoon() } return r }
   const checkoutGroupBatch = (groupId, batchId) => { const r = seatingService.checkoutGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const releaseGroupBatch = (groupId, batchId) => { const r = seatingService.releaseGroupBatch(groupId, batchId); refresh(); syncCloudSoon(); return r }
   const seatNextBatchOnTable = (tableNumber, groupId, batchId) => { const r = seatingService.seatNextBatchOnTable(tableNumber, groupId, batchId); refresh(); syncCloudSoon(); return r }
@@ -1011,7 +1015,13 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, undoWalkInSeat, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, undoSeatedMove, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    // 入座／換桌／復原類動作：失敗時 error 換成店員看得懂的句子（原文在 rawError；ok／code 不動），見 utils/seatErrorText。
+    // 2026-11 B 包留尾：團體梯次系列、清桌、離席後釋出也一起轉（同一個失敗句不該因入口不同而一個友善、一個原文）。
+    ...withFriendlyErrors({ assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, undoWalkInSeat, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, undoSeatedMove,
+      clearTable, releaseCheckedOutTables,
+      seatGroupBatch, undoSeatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
+      checkoutGroupTable, undoGroupCheckout, clearGroupTable, undoClearGroupTable, moveGroupTable, addGroupBatchTable }),
+    findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,
@@ -1020,8 +1030,6 @@ export function BookingProvider({ children }) {
     addAgency, updateAgency, archiveAgency, addGuide, updateGuide, archiveGuide,
     addGroupReservation, updateGroupReservation, setGroupStatus, removeGroupReservation, reserveGroupTables,
     createAndReserveGroup, purgeBlankGroups,
-    seatGroupBatch, checkoutGroupBatch, releaseGroupBatch, seatNextBatchOnTable, finalizeGroup, cancelGroup, reseatGroupBatchTable,
-    checkoutGroupTable, undoGroupCheckout, clearGroupTable, undoClearGroupTable, moveGroupTable, addGroupBatchTable,
     updateSettings, flushCloudNow, discardRejectedChanges,
   }), [
     bookings, tables, waitlist, customers, settings, cloudStatus, localPersistDegraded, hydrated, pendingWaitlistCommands, waitlistOwner,

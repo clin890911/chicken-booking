@@ -16,8 +16,8 @@
 //     確保「桌況圖色彩語義不可回退」。整桌填分區色只發生在 LayoutEditor 內。
 //   - 字級啟發式改用 min(w,h)：自由縮放後 h 不再恆為 75。
 import { memo } from 'react'
-import { diffMin, stageOf } from '../../../utils/diningStage'
-import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './statusColors'
+import { seatedMinutes, seatedElapsedLabel, stageOf } from '../../../utils/diningStage'
+import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL, SELECTION_STYLE, FOCUS_RING } from './statusColors'
 import { Check, TriangleAlert } from 'lucide-react'
 
 // 配色層級「可坐醒目 vs 佔用降噪」（2026-07 依店家反饋反轉 PR#52）：
@@ -35,6 +35,35 @@ function truncateGuestName(name, w, fontSize) {
   const maxChars = Math.max(1, Math.floor((w - 12) / charWidth))
   if (s.length <= maxChars) return s
   return s.slice(0, Math.max(1, maxChars - 1)) + '…'
+}
+
+// 鍵盤焦點環（只在 :focus-visible 顯示，CSS 在 FloorMap）。獨立 rect、不碰桌本體邊框，所以不會蓋掉選中樣式。
+// 平常 display:none（只在 :focus-visible 由 FloorMap 的 <style> 打開）：不顯示時也不算進桌的外框尺寸——
+// 否則每張桌的 getBoundingClientRect 都多出一圈 gap（量桌子大小、量與復原欄距離都會失真）。
+function FocusRing({ x, y, w, h }) {
+  const g = FOCUS_RING.gap
+  return (
+    <rect className="table-focus-ring" x={x - g} y={y - g} width={w + g * 2} height={h + g * 2} rx={12}
+          fill="none" stroke={FOCUS_RING.color} strokeWidth={FOCUS_RING.width}
+          opacity={0} display="none" pointerEvents="none" />
+  )
+}
+
+// 選中徽章 ✓：貼在桌框右上角。桌可能旋轉，座標先依桌中心旋轉到實際角點，再放進「反旋」的文字群組裡（保持水平）。
+function SelectedBadge({ x, y, w, h, rot }) {
+  const cx = x + w / 2, cy = y + h / 2
+  const rad = (rot * Math.PI) / 180
+  const dx = w / 2 - 3, dy = -h / 2 + 3          // 右上角往內縮 3
+  const bx = cx + dx * Math.cos(rad) - dy * Math.sin(rad)
+  const by = cy + dx * Math.sin(rad) + dy * Math.cos(rad)
+  const S = SELECTION_STYLE.selected
+  return (
+    <g data-selected-badge="true" pointerEvents="none">
+      <circle cx={bx} cy={by} r={9} fill={S.badgeFill} stroke="#ffffff" strokeWidth={1.5} />
+      <path d={`M ${bx - 4} ${by} L ${bx - 1} ${by + 3} L ${bx + 4.5} ${by - 3.2}`}
+            fill="none" stroke={S.badgeText} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+    </g>
+  )
 }
 
 // React.memo（見檔尾）：FloorMap 一層 50+ 張桌，任何一張桌變動都會讓 FloorMap 重繪；
@@ -134,6 +163,7 @@ function TableShape({
     const strokeWidth = isSelected ? 3 : 1.5
     return (
       <g {...semantics} onClick={onClick} style={{ cursor: planState === 'blocked' ? 'not-allowed' : 'pointer' }} transform={gTransform}>
+        <FocusRing x={x} y={y} w={w} h={h} />
         <rect x={x} y={y} width={w} height={h} rx={8}
               fill={P.fill} stroke={stroke} strokeWidth={strokeWidth}
               strokeDasharray={planState === 'blocked' ? '4 3' : null} />
@@ -168,10 +198,11 @@ function TableShape({
       group:  { fill: '#4f46e5', stroke: '#3730a3', text: '#ffffff' },
       free:   { fill: '#e2e8f0', stroke: '#94a3b8', text: '#334155' },
     }[occState] || { fill: '#e2e8f0', stroke: '#94a3b8', text: '#334155' }
-    const stroke = isSelected ? '#e60012' : occHighlight ? '#9eb63a' : O.stroke
-    const strokeWidth = isSelected ? 3 : occHighlight ? 3 : 1.5
+    const stroke = isSelected ? SELECTION_STYLE.selected.stroke : occHighlight ? SELECTION_STYLE.highlight.stroke : O.stroke
+    const strokeWidth = isSelected ? SELECTION_STYLE.selected.strokeWidth : occHighlight ? SELECTION_STYLE.highlight.strokeWidth : 1.5
     return (
-      <g {...semantics} onClick={onClick} style={{ cursor: 'pointer', opacity: occDimmed ? 0.5 : 1 }} className={occHighlight ? 'animate-pulse' : ''} transform={gTransform}>
+      <g {...semantics} onClick={onClick} style={{ cursor: 'pointer', opacity: occDimmed ? 0.5 : 1, filter: isSelected ? SELECTION_STYLE.selected.shadow : undefined }} className={occHighlight ? 'animate-pulse' : ''} transform={gTransform}>
+        <FocusRing x={x} y={y} w={w} h={h} />
         {/* 時間軸點團跳地圖：白圈脈動標示這團坐哪（深靛外暈撐在淺底/靛底都讀得出，白環在其上吸睛） */}
         {focusRing && (
           <>
@@ -185,6 +216,7 @@ function TableShape({
               fill={O.fill} stroke={stroke} strokeWidth={strokeWidth}
               strokeDasharray={occHighlight ? '4 2' : null} />
         {zoneDot}
+        {isSelected && <g transform={textTransform}><SelectedBadge x={x} y={y} w={w} h={h} rot={rot} /></g>}
         <g transform={textTransform}>
           <text x={cx} y={y + (small ? 24 : 26)} fontSize={small ? 19 : 21} fontWeight={900} fill={O.text} textAnchor="middle" pointerEvents="none">{number}</text>
           <text x={cx} y={y + (small ? 40 : 41)} fontSize={small ? 12 : 13} fontWeight={700} fill={O.text} opacity={0.95} textAnchor="middle" pointerEvents="none">{capacity}人</text>
@@ -199,7 +231,7 @@ function TableShape({
   }
 
   // === 計算用餐時長階段（僅 dining）===
-  const minutes = (status === 'dining' && table.seatedAt) ? diffMin(table.seatedAt, now || Date.now()) : 0
+  const minutes = (status === 'dining' && table.seatedAt) ? seatedMinutes(table.seatedAt, now || Date.now()) : 0
   const stage = status === 'dining' ? stageOf(minutes, settings) : null
 
   // 填色：vacant 被團 hold → 實心紫色；vacant 被預配 → 訂位藍（虛線框）；
@@ -228,11 +260,13 @@ function TableShape({
 
   // 這幾個覆蓋分支的邊框表達的是「當下的模式」而非桌況，故一併清掉狀態帶來的虛線
   // （預配桌被選中時該讀成紅色實線選取框，不是紅色虛線的另一種狀態）。
-  if (isSelected) { stroke = '#e60012'; strokeWidth = 3; strokeDash = null }
-  else if (isPendingConfirm) { stroke = '#d97706'; strokeWidth = 4; strokeDash = null; className = 'animate-pulse' }
-  else if (isAssignSuggestion) { stroke = '#9eb63a'; strokeWidth = 4; strokeDash = null; className = 'animate-pulse' }
-  else if (isJustAssigned) { stroke = '#9eb63a'; strokeWidth = 4; strokeDash = null }
-  else if (isHighlight) { stroke = '#9eb63a'; strokeWidth = 3; strokeDash = '4 2' }
+  // 選取／模式覆蓋層的樣式全部來自 statusColors.SELECTION_STYLE（見該處說明）。
+  // 選中＝實心粗框＋✓徽章＋浮起陰影；暫選／建議＝虛線、不脈動；剛指派＝細實線。
+  if (isSelected) { const S = SELECTION_STYLE.selected; stroke = S.stroke; strokeWidth = S.strokeWidth; strokeDash = null }
+  else if (isPendingConfirm) { const S = SELECTION_STYLE.pending; stroke = S.stroke; strokeWidth = S.strokeWidth; strokeDash = S.strokeDash }
+  else if (isAssignSuggestion) { const S = SELECTION_STYLE.suggest; stroke = S.stroke; strokeWidth = S.strokeWidth; strokeDash = S.strokeDash }
+  else if (isJustAssigned) { const S = SELECTION_STYLE.justAssigned; stroke = S.stroke; strokeWidth = S.strokeWidth; strokeDash = S.strokeDash }
+  else if (isHighlight) { const S = SELECTION_STYLE.highlight; stroke = S.stroke; strokeWidth = S.strokeWidth; strokeDash = S.strokeDash }
   else if (stage === 'buffer-overtime') { stroke = '#7f1d1d'; strokeWidth = 3; className = 'animate-pulse' }
   else if (stage === 'overtime') { stroke = '#7f1d1d'; strokeWidth = 3 }
   else if (stage === 'late') { stroke = '#9a3412'; strokeWidth = 2 }
@@ -240,7 +274,7 @@ function TableShape({
   const opacity = isDimmed ? 0.35 : 1
 
   return (
-    <g {...semantics} onClick={onClick} style={{ cursor: 'pointer', opacity }} className={className} transform={gTransform}>
+    <g {...semantics} onClick={onClick} style={{ cursor: 'pointer', opacity, filter: isSelected ? SELECTION_STYLE.selected.shadow : undefined }} className={className} transform={gTransform}>
       <title>{semantics['aria-label']}</title>
       {/* 即將結束：橘色光暈（還有時間，提醒留意） */}
       {stage === 'late' && (
@@ -253,18 +287,20 @@ function TableShape({
               fill="none" stroke="#dc2626" strokeWidth={3} opacity={0.85} />
       )}
       {/* 二步確認：待確認桌的醒目琥珀光暈 */}
-      {isPendingConfirm && (
+      {isPendingConfirm && !isSelected && (
         <rect x={x - 5} y={y - 5} width={w + 10} height={h + 10} rx={12}
-              fill="none" stroke="#d97706" strokeWidth={3} opacity={0.85} />
+              fill="none" stroke={SELECTION_STYLE.pending.halo} strokeWidth={2} opacity={0.6} />
       )}
-      {isJustAssigned && (
+      {isJustAssigned && !isSelected && (
         <rect x={x - 5} y={y - 5} width={w + 10} height={h + 10} rx={12}
-              fill="none" stroke="#9eb63a" strokeWidth={3} opacity={0.7} />
+              fill="none" stroke={SELECTION_STYLE.justAssigned.halo} strokeWidth={2} opacity={0.6} />
       )}
+      <FocusRing x={x} y={y} w={w} h={h} />
 
       <rect x={x} y={y} width={w} height={h} rx={8}
             fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={strokeDash} />
       {zoneDot}
+      {isSelected && <g transform={textTransform}><SelectedBadge x={x} y={y} w={w} h={h} rot={rot} /></g>}
 
       <g transform={textTransform}>
         {status === 'reserved' ? (
@@ -330,7 +366,7 @@ function TableShape({
               <text x={cx} y={y + h - 8}
                     fontSize={stage === 'overtime' || stage === 'buffer-overtime' ? 11 : 10}
                     fill={textColor} fontWeight={700} textAnchor="middle" pointerEvents="none">
-                {(stage === 'overtime' || stage === 'buffer-overtime') ? '! ' : ''}{minutes} 分
+                {(stage === 'overtime' || stage === 'buffer-overtime') ? '! ' : ''}{seatedElapsedLabel(table.seatedAt, now || Date.now())}
               </text>
             )}
             {(status === 'cleaning' || status === 'blocked') && (

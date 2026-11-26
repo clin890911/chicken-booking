@@ -1,12 +1,14 @@
 import { toastWaitlistSeat } from '../../utils/waitlistSeatToast'
 import HandoffPanel from './ops/HandoffPanel'
+import SyncStatusPill from '../layout/SyncStatusPill'
+import SeatUndoBar from './ops/SeatUndoBar'
 import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import FloorMap from './floormap/FloorMap'
 import ArrivalStrip from './floormap/ArrivalStrip'
 import TableDrawer from './floormap/TableDrawer'
 import CleaningListSheet from './floormap/CleaningListSheet'
-import ModeBanner from './ops/ModeBanner'
+import ModeBanner, { moveSourceNote } from './ops/ModeBanner'
 import OpsRail from './ops/OpsRail'
 import OpsHintBar from './ops/OpsHintBar'
 import { computeStoreStats, phaseLine, seatableNowTables } from '../../utils/opsAlerts'
@@ -20,6 +22,7 @@ import { nextBookableSlot, pastSlotFix } from './ops/QuickReservePanel'
 import { convertNote, finishConvertedWaitlist } from '../../services/waitlistService'
 import { useBooking } from '../../contexts/BookingContext'
 import { useToast, useConfirm } from '../ui/Toast'
+import { useRegisterSeatUndoSlot } from '../ui/seatUndoContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { findPreassignedBooking, preassignConflicts, assignmentWindow, lockKindFor, buildPreassignTableMap, squeezeSeats } from '../../utils/capacity'
 import { assignmentKind, statusZh } from '../../utils/tableStatus'
@@ -30,14 +33,16 @@ import { buildOpsTablePresentation } from '../../utils/opsTablePresentation'
 import { buildTableTurns } from '../../utils/tableTurns'
 import { seatedMoveWarningSignature } from '../../utils/seatedMoveWarnings'
 import { todayStr, nowSlot } from '../../utils/timeSlots'
-import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL } from './floormap/statusColors'
+import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL, SELECTION_STYLE } from './floormap/statusColors'
+import { seatedText, seatedTablesOf, movedText, joinTables, toastSeatUndo, toastSeatDone, SEAT_UNDO_MS, SEAT_TOAST_PLACEMENT } from '../../utils/seatFeedback'
 import SegmentedControl from '../ui/SegmentedControl'
 import { seatingPerms } from '../../utils/seatingPerms'
-import { formatBookingTables, bookingTableNumbers } from '../../utils/bookingTables'
+import { bookingTableNumbers } from '../../utils/bookingTables'
 import { preassignArriveConflictLines, toastSeatedWithUndo, preassignTakenByOthers, seatArriveSelection } from '../../utils/arriveSeat'
 import { resolveSuggestedTables } from '../../utils/suggestionApply'
 import { toastMovedWithUndo, clearTablesWithUndo, undoLabel } from '../../utils/tableUndo'
 import { useDeviceFlag, HIDE_ARRIVAL_STRIP_KEY } from '../../utils/devicePrefs'
+import { needsComboTables, pickAction, applyPick, excessTablesHint } from '../../utils/tablePick'
 import { isPhoneLayout, scrollContentTo, usePhoneLayout } from '../../utils/phoneLayout'
 
 // 桌況圖圖例的小色塊：吃 statusColors.js 同一份 hex，不再各寫一套 Tailwind class
@@ -69,6 +74,21 @@ function FloorTabs({ floor, onChange, counts, className = '' }) {
   )
 }
 
+// 圖例「選中」格：與桌況圖同一份 SELECTION_STYLE.selected（粗紅框＋右上 ✓ 徽章），不再自己寫一個 ring（B3 留尾）
+export function SelectedLegendSwatch() {
+  const S = SELECTION_STYLE.selected
+  return (
+    <span className="inline-flex items-center gap-1" data-testid="legend-selected">
+      <svg width="16" height="14" viewBox="0 0 16 14" aria-hidden="true" className="flex-none">
+        <rect x="1" y="3" width="10" height="10" rx="2" fill="#ffffff" stroke={S.stroke} strokeWidth="2" />
+        <circle cx="11" cy="4" r="3.6" fill={S.badgeFill} stroke="#ffffff" strokeWidth="0.8" />
+        <path d="M 9.4 4 L 10.6 5.2 L 12.8 2.9" fill="none" stroke={S.badgeText} strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      選中
+    </span>
+  )
+}
+
 function LegendSwatch({ fill, stroke, label, dashed = false }) {
   return (
     <span className="inline-flex items-center gap-1">
@@ -80,7 +100,7 @@ function LegendSwatch({ fill, stroke, label, dashed = false }) {
 
 // 「✓ 到了」一鍵入座：抽成不依賴元件 state 的純函式方便單測（注入 seatBooking/undoSeatBooking/toast）。
 // 不二次確認——這顆鈕本身就是「已經在合理時間窗內」的防呆。
-// 5 秒復原走共用的 toastSeatedWithUndo → undoSeatBooking（utils/arriveSeat.js、seatingService）：
+// 8 秒復原走共用的 toastSeatedWithUndo → undoSeatBooking（utils/arriveSeat.js、seatingService）：
 // booking 與 table 兩邊一起倒（鎖桌倒回 reserved、預配倒回空桌），且只倒仍由本筆用餐中／已空的桌，
 // 被別組佔走就不搶（2026-10 起四個「客人到了」入口統一這一套，不再各自 setStatus＋setTableStatus）。
 // onMove（可選）：入座被擋（桌被別組佔用／停用）時，toast 直接帶「改桌」出口。
@@ -88,7 +108,7 @@ function LegendSwatch({ fill, stroke, label, dashed = false }) {
 // 大組整組入座。未配桌的訂位不走這裡（報到列改進「選桌入座」模式，見 startArriveSeat）。
 export function handleArriveNow(table, booking, deps) {
   if (assignmentKind(booking, table) === 'preassign') return arrivePreassigned(table, booking, deps)   // 入座前判定
-  const { seatBooking, undoSeatBooking, toast, onMove } = deps
+  const { seatBooking, undoSeatBooking, toast, onMove, inline } = deps
   const r = seatBooking(booking.id)
   if (!r?.ok) {
     const msg = '入座失敗：' + (r?.error || '未知錯誤')
@@ -99,8 +119,10 @@ export function handleArriveNow(table, booking, deps) {
     }
     return r
   }
-  toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${table.number}`, name: booking.name, undoSeatBooking, toast })
-  return r
+  const nums = seatedTablesOf(r, booking, table.number)
+  // inline（報到列）：不發 toast，復原只在原位確認卡上（undoSeat，見 arriveSeat.toastSeatedWithUndo）
+  const undoSeat = toastSeatedWithUndo(r, { message: seatedText({ name: booking.name, guests: booking.guests, tables: nums }), name: booking.name, undoSeatBooking, toast, inline })
+  return undoSeat ? { ...r, undoSeat, seatedLabel: joinTables(nums) } : r
 }
 
 // 預配訂位「到了」前的防呆（團保／重疊預配）：搬到 utils/arriveSeat.js——今日訂位卡也要用，
@@ -117,10 +139,8 @@ function arrivePreassigned(table, booking, deps) {
   const { confirm, preassignConflictLines, getTable } = deps
   const nums = [...new Set([booking.assignedTableId, ...(booking.extraTableIds || [])].filter(Boolean).map(String))]
   const label = nums.length > 1 ? nums.join(' + ') : table.number
-  const taken = nums.some(n => {
-    const t = n === String(table.number) ? table : getTable?.(n)
-    return t && t.status !== 'vacant' && String(t.currentBookingId ?? '') !== String(booking.id)
-  })
+  // 「桌被別組佔」與報到列／今日卡／抽屜同一支判斷（arriveSeat.preassignTakenByOthers）
+  const taken = preassignTakenByOthers(booking, nums.map(n => (n === String(table.number) ? table : getTable?.(n))).filter(Boolean))
   const lines = !taken && preassignConflictLines ? preassignConflictLines(booking) : []
   if (lines.length) {
     if (!confirm) { deps.toast.error(`${lines.join('；')}。請從「今日」清單的卡片確認後入座`); return { ok: false, code: 'needs-confirm' } }
@@ -131,7 +151,7 @@ function arrivePreassigned(table, booking, deps) {
   return seatPreassignedNow(table, booking, label, deps)
 }
 
-function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove, onArriveReseat }) {
+function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove, onArriveReseat, inline }) {
   const isCombo = (booking.extraTableIds || []).length > 0
   const r = isCombo && seatBookingAllTables ? seatBookingAllTables(booking.id) : seatBooking(booking.id)
   if (!r?.ok) {
@@ -151,8 +171,9 @@ function seatPreassignedNow(table, booking, label, { seatBooking, seatBookingAll
     }
     return r
   }
-  toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${label}`, name: booking.name, undoSeatBooking, toast })
-  return r
+  const nums = seatedTablesOf(r, booking, table.number)
+  const undoSeat = toastSeatedWithUndo(r, { message: seatedText({ name: booking.name, guests: booking.guests, tables: nums }), name: booking.name, undoSeatBooking, toast, inline })
+  return undoSeat ? { ...r, undoSeat, seatedLabel: joinTables(nums) } : r
 }
 
 // 候位入座成功後的共同收尾（三條路徑共用：二步確認單桌、併桌、桌況抽屜候選名單）。
@@ -167,7 +188,7 @@ export function seatedToWalkin(tableNumber, msg, { setSelectedTable, setMode, se
   setMode(null)
   setPendingConfirm(null)
   setRailTab('walkin')
-  toast.action(msg, { label: '查看', onClick: () => setSelectedTable(tableNumber) })
+  toast.action(msg, { label: '查看', onClick: () => setSelectedTable(tableNumber) }, { duration: SEAT_UNDO_MS, placement: SEAT_TOAST_PLACEMENT })
 }
 
 // 現場內嵌「新增今日訂位」的存檔（純函式，注入 context 動作與 toast 方便單測；同 handleArriveNow 手法）。
@@ -227,6 +248,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     preassignBookingTable, preassignBookingTables, addBooking, updateBooking, clearBookingPreassign, leaveWaitlist,
   } = useBooking()
   const toast = useToast()
+  // 現場頁掛著復原欄：入座類提示改成不可互動，「復原」只在地圖工具列右端的復原欄（SeatUndoBar）
+  useRegisterSeatUndoSlot()
   const confirm = useConfirm()
   const { can, user } = useAuth()
   // 帶位（散客直接入座）要同時寫 bookings＋tables，依實際寫入集合判定（見 utils/seatingPerms.js）
@@ -285,6 +308,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 桌的真相放這裡（不放面板內），桌況圖與帶位面板共用同一份，避免兩邊各記一套。
   const [walkinGuests, setWalkinGuests] = useState(2)
   const [walkinTableNumbers, setWalkinTableNumbers] = useState([])
+  // A2：帶位面板預設單選（點別張＝改選）；按「＋再加一桌（併桌）」才多選。沒有單桌坐得下時自動多選（walkinAutoMulti）。
+  const [walkinMultiOn, setWalkinMultiOn] = useState(false)
   const [lastSeated, setLastSeated] = useState(null) // M2b 短復原：{ bookingId, tableNumbers, name, guests, at }
   // M6 沿用上一組：{ guests, notes }。放在這裡（不放面板內）是因為切籤會把 FastWalkInPanel
   // 卸載，state 會消失；連續同型客人（一直來 2 位）才是這功能要救的情境。
@@ -428,7 +453,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     rememberModeSource()
     const sugTables = suggestion ? [String(suggestion)] : (suggestionTables || []).map(String)
     setMode({ ...extra, type: 'assign-multi', kind, booking, wait, need, lockKind,
-      selected: [], suitable, suggestion: suggestion || sugTables[0], suggestionTables: sugTables,
+      selected: [], multi: false, suitable, suggestion: suggestion || sugTables[0], suggestionTables: sugTables,
       suggestionSqueezed: !suggestion && sugTables.length > 1 && !!suggestionSqueezed, replacing, confirmedWarning: null })
     setSelectedTable(null)
     setPendingConfirm(null)
@@ -783,19 +808,19 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       // 一桌＝單桌帶位、多桌＝併桌，同一條路徑，人數與桌到齊後由面板滑動入座。
       // 無帶位權限（唯讀角色）時帶位籤不存在，點空桌不可偷偷累積「已選桌」，一律走開抽屜
       if (railTab === 'walkin' && canWalkIn && walkinSelectable.includes(number)) {
-        const isRemove = walkinTableNumbers.includes(number)
-        // 同樓層守門：切樓層後想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
-        if (!isRemove && walkinTableNumbers.length) {
+        // A2 點桌語意（utils/tablePick）：單選＝點別張改選、點已選＝取消；多選（＋再加一桌／大組自動）＝加／減
+        const action = pickAction(walkinTableNumbers, number, { multi: walkinMulti })
+        // 同樓層守門：多選時加別層的桌 → 擋（併桌不可跨層；移除、單選改選一律允許）
+        if (action === 'add' && walkinTableNumbers.length) {
           const selFloor = tables.find(x => x.number === walkinTableNumbers[0])?.floor
           const thisFloor = tables.find(x => x.number === number)?.floor
           if (selFloor && thisFloor && selFloor !== thisFloor) {
             return toast.error('併桌需在同一樓層，請改選同層的桌')
           }
         }
-        // 加/移一律在 updater 內依 prev 判斷：iPad 觸控可能同一個 tick 內送出兩次 click
-        // （touch → 合成 click），若沿用 render 當下的 isRemove，兩次都會判定「加入」→
-        // 同一張桌被塞進陣列兩次 → 席數加倍、入座時帶錯桌數。
-        setWalkinTableNumbers(prev => prev.includes(number) ? prev.filter(n => n !== number) : [...prev, number])
+        // 動作依「當下畫面」決定、結果冪等（applyPick）：iPad 觸控同一個 tick 送兩次 click 時
+        // 兩次都是同一個動作 → 不會同一張桌塞兩次、也不會加了又自己取消。
+        setWalkinTableNumbers(prev => applyPick(prev, number, action))
         setSelectedTable(null) // 抽屜開著時也要退回帶位面板，選了什麼桌才看得見
         return
       }
@@ -811,19 +836,19 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       return
     }
     // 多桌指派（大組併桌）：點桌加入/移除已選集合，不走二步確認（確認在 banner 按鈕）
+    // A2（Barry 2026-11-27 拍板）：單選（預設）＝點別張改選、點已選取消；多選（＋再加一桌／大組自動）＝加／減
     if (mode.type === 'assign-multi') {
       if (!mode.selected.includes(number) && !mode.suitable.includes(number)) return toast.error('此桌目前不可加入（非空桌或維修中）')
-      const isRemove = mode.selected.includes(number)
-      // 同樓層守門：切樓層後若想加別層的桌 → 擋（併桌不可跨層；移除一律允許）
-      if (!isRemove && mode.selected.length) {
+      const action = pickAction(mode.selected, number, { multi: modeMulti })
+      // 同樓層守門：多選時加別層的桌 → 擋（併桌不可跨層；移除、單選改選一律允許）
+      if (action === 'add' && mode.selected.length) {
         const selFloor = tables.find(x => x.number === mode.selected[0])?.floor
         const thisFloor = tables.find(x => x.number === number)?.floor
         if (selFloor && thisFloor && selFloor !== thisFloor) {
           return toast.error('併桌需在同一樓層，請改選同層的桌')
         }
       }
-      const selected = isRemove ? mode.selected.filter(n => n !== number) : [...mode.selected, number]
-      setMode({ ...mode, selected, confirmedWarning: null })
+      setMode({ ...mode, selected: applyPick(mode.selected, number, action), confirmedWarning: null })
       return
     }
     // 指派 / 候位入座 / 換桌 / 團體改派：二步確認
@@ -885,7 +910,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const r = await awaitWaitlistSeat(()=>seatWaitlist(mode.wait.id, number, { confirmedConflictTables: (overridden.some(c=>c.overlaps) || groupHoldTables[number]?.holds?.length) ? [number] : [] }))
       if (!r.ok) return toast.error('入座失敗：' + r.error)
       flashAssigned(number)
-      finishWaitlistSeat(number, `${mode.wait.name}（候位 #${mode.wait.queueNumber}）入座 ${number} · 可指派下一組`, r)
+      finishWaitlistSeat(number, seatedText({ name: mode.wait.name, guests: mode.wait.partySize, tables: [number] }), r)
       return
     }
     if (mode.type === 'move') {
@@ -894,8 +919,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const releasedHere = releaseOverlappingPreassigns(overridden, releaseOpts)
       // D1：已入座換桌給「復原換桌」（原桌仍空才搶回，見 seatingService.undoSeatedMove）；未入座的改桌照舊只出成功訊息
       toastMovedWithUndo({ ...r, releasedPreassigns: [...(r.releasedPreassigns || []), ...(releasedHere || [])] }, {
-        message: `${mode.booking.name} 已從 ${formatBookingTables(mode.booking)} 改到 ${number} · 可指派下一組`,
-        name: mode.booking.name, toTables: [number], undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast,
+        name: mode.booking.name, guests: mode.booking.guests, toTables: [number], undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast,
       })
       flashAssigned(number)
       returnToModeSource()
@@ -907,9 +931,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const isMove = mode.type === 'group-move'
       const r = isMove ? moveGroupTable(from, number, { groupId: group.id, batchId: batch.id }) : addGroupBatchTable(group.id, batch.id, number)
       if (!r.ok) { setPendingConfirm(null); return toast.error((isMove ? '換桌失敗：' : '加桌失敗：') + r.error) }
-      toast.success(isMove
-        ? `${group.agencyName || '團體'} ${batch.label || ''} 已從 ${from} 換到 ${number}（用餐時間照舊）`
-        : `${group.agencyName || '團體'} ${batch.label || ''} 已加桌 ${number}`)
+      // 團體換桌／加桌：同一種文字與位置；沒有復原（換回原桌要動團單梯次桌號，見回報）
+      toastSeatDone(toast, isMove
+        ? movedText({ name: `${group.agencyName || '團體'} ${batch.label || ''}`, guests: batch.guests, tables: [number] })
+        : `✓ ${group.agencyName || '團體'} ${batch.label || ''} 加桌 ${number}`)
       flashAssigned(number)
       cancelMode()
       modeSource.current = null
@@ -921,7 +946,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const r = reseatGroupBatchTable(group.id, batch.id, current, number)
       if (!r.ok) { setPendingConfirm(null); return toast.error('改派失敗：' + r.error) }
       if (r.seated) {
-        toast.success(`已改派 ${current} → ${number}，${group.agencyName || '團體'} ${batch.label || ''} 整梯入座`)
+        toastSeatDone(toast, seatedText({ name: `${group.agencyName || '團體'} ${batch.label || ''}`, guests: batch.guests, tables: r.tableNumbers || [number] }))
         flashAssigned(number)
         cancelMode()
         setSelectedTable(number)
@@ -960,6 +985,18 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (mode?.type !== 'assign-multi') return 0
     return squeezeSeats((mode.selected || []).map(n => tables.find(t => t.number === n)).filter(Boolean))
   }, [mode, tables])
+
+  // A2：大組（沒有任何一張可選單桌坐得下）自動多選；其餘要按「＋再加一桌（併桌）」才多選
+  const modeAutoMulti = mode?.type === 'assign-multi'
+    && needsComboTables(mode.need, (mode.suitable || []).map(n => tables.find(t => t.number === n)))
+  const modeMulti = mode?.type === 'assign-multi' && (!!mode.multi || modeAutoMulti)
+  // 「一張就夠卻選了多張」（例：3 位選了 2 張共 12 席）→ 黃字提醒，不硬擋
+  const modeExcess = mode?.type === 'assign-multi'
+    ? excessTablesHint((mode.selected || []).map(n => tables.find(t => t.number === n)), mode.need)
+    : null
+  const toggleModeMulti = () => setMode(m => (m?.type === 'assign-multi'
+    ? { ...m, multi: !m.multi, selected: m.multi && m.selected.length > 1 ? m.selected.slice(-1) : m.selected, confirmedWarning: null }
+    : m))
 
   // 多桌確認：席數夠 → 一筆 booking 佔多桌。
   // kind='booking' → 指派該訂位（桌況 reserved，客人到了再入座）
@@ -1012,8 +1049,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       if (mode.booking.status !== 'arrived') releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
       // D1：已入座整組換桌帶「復原換桌」（r.undo 只有已入座才有；未到店改桌照舊只出成功訊息）
       toastMovedWithUndo(r, {
-        message: `${mode.booking.name} 已改桌至 ${mode.selected.join(' + ')}（原訂位保留）`,
-        name: mode.booking.name, toTables: mode.selected, undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast,
+        name: mode.booking.name, guests: mode.booking.guests, toTables: mode.selected, undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast,
       })
       flashAssigned(mode.selected[0])
       returnToModeSource()
@@ -1032,11 +1068,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       if (!res.ok) return toast.error('入座失敗：' + res.error)
       // 只解除與「現在入座」重疊的他筆預配；快照帶進復原，按「復原」時一併還回去
       const releasedPreassigns = releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
-      const label = res.tableNumbers.join(' + ')
-      const guestNote = res.guestsChanged ? `，原訂 ${res.oldGuests} 位` : ''
-      const fromNote = res.reseatFrom.length ? `（原預配 ${res.reseatFrom.join(' + ')} 被佔）` : ''
       toastSeatedWithUndo(res.r, {
-        message: `${b.name}（${res.guests} 位${guestNote}）已入座 ${label}${fromNote}`, name: b.name,
+        message: seatedText({ name: b.name, guests: res.guests, tables: res.tableNumbers }), name: b.name,
         undoSeatBooking: () => res.undo(), toast, releasedPreassigns, restoreOverriddenAssignment,
       })
       flashAssigned(mode.selected[0])
@@ -1053,7 +1086,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       const r = await awaitWaitlistSeat(()=>seatWaitlistMulti(mode.wait.id, mode.selected, { confirmedConflictTables: mode.selected.filter(n=>preassignConflictsFor(n).some(c=>c.overlaps) || groupHoldTables[n]?.holds?.length) }))
       if (!r.ok) return toast.error('入座失敗：' + r.error)
       flashAssigned(mode.selected[0])
-      finishWaitlistSeat(mode.selected[0], `${mode.wait.name}（候位 #${mode.wait.queueNumber}・${mode.need} 位）併桌入座 ${tablesText} · 可指派下一組`, r)
+      finishWaitlistSeat(mode.selected[0], seatedText({ name: mode.wait.name, guests: mode.need, tables: mode.selected }), r)
       return
     }
     if (mode.lockKind === 'preassign') {
@@ -1086,6 +1119,18 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       .filter(Boolean),
     [walkinTableNumbers, walkinSelectable, tables],
   )
+
+  // A2：帶位人數沒有任何一張此刻可帶的單桌坐得下 → 自動多選（大組・可選多桌）
+  const walkinAutoMulti = useMemo(
+    () => needsComboTables(walkinGuests, walkinSelectable.map(n => tables.find(t => t.number === n))),
+    [walkinGuests, walkinSelectable, tables],
+  )
+  const walkinMulti = walkinMultiOn || walkinAutoMulti
+  const toggleWalkinMulti = () => {
+    if (walkinMultiOn && walkinTableNumbers.length > 1) setWalkinTableNumbers(prev => prev.slice(-1))
+    setWalkinMultiOn(v => !v)
+  }
+  const walkinExcess = useMemo(() => excessTablesHint(walkinTables, walkinGuests), [walkinTables, walkinGuests])
 
   // 已選桌被別人佔走/進維修 → 直接從 walkinTableNumbers 剪掉，並告知店員是哪一張。
   // 不能只靠 walkinTables 過濾顯示：留在 walkinTableNumbers 的「幽靈桌」會①在桌況圖上
@@ -1147,6 +1192,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const note = restoreNote(restoreReleasedPreassigns(snap.releasedPreassigns, { restoreOverriddenAssignment }))
     setLastSeated(null)
     setWalkinTableNumbers(snap.tableNumbers || []) // 桌回到已選狀態，方便馬上改帶別組
+    if ((snap.tableNumbers || []).length > 1) setWalkinMultiOn(true) // 併桌復原回來仍是多選，點桌才不會變成改選
     toast.info(`已復原：${snap.tableNumbers.join(' + ')} 回到空桌${note}`)
   }
 
@@ -1177,7 +1223,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (!r.ok) { toast.error('入座失敗：' + r.error); return false }
     // 只解除用餐時段重疊的；快照帶進復原，按「復原」時一併還回去
     const releasedPreassigns = releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
-    const label = nums.join(' + ')
     const name = r.booking?.name || '散客'
     const guests = r.booking?.guests || payload.guests
     const snap = { bookingId: r.booking?.id, tableNumbers: nums, name, guests, at: Date.now(), releasedPreassigns }
@@ -1187,20 +1232,18 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     setLastParty({ guests, children: Number(payload.children) || 0, notes: payload.staffNotes || '' })
     flashAssigned(nums[0])
     setWalkinTableNumbers([])
+    setWalkinMultiOn(false)
     // 不 setSelectedTable：留在帶位面板才能直接帶下一組（舊版會被 TableDrawer 蓋掉）
     // M2b：成功 toast 直接帶「復原」，8 秒內可反悔（拿掉二次確認換來的安全網）
-    toast.action(
-      `${name}（${guests} 位）入座 ${label} · 可帶下一組`,
-      { label: undoLabel.walkInSeat(nums), onClick: () => undoLastSeat(snap) },   // H6：「復原帶位 105」與取消的「復原取消」分得清
-      { duration: 8000 },
-    )
+    toastSeatUndo(toast, seatedText({ name, guests, tables: nums }),
+      { ariaLabel: undoLabel.walkInSeat(nums), onUndo: () => undoLastSeat(snap) })   // 看得到「復原」、讀屏念「復原帶位 105」（與「復原取消」分得清）
     return true
   }
 
   // 復原提示 8 秒後失效（toast 也同步消失）
   useEffect(() => {
     if (!lastSeated) return
-    const id = setTimeout(() => setLastSeated(null), 8000)
+    const id = setTimeout(() => setLastSeated(null), SEAT_UNDO_MS)
     return () => clearTimeout(id)
   }, [lastSeated])
 
@@ -1358,6 +1401,24 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     else scrollContentTo(leftColRef.current, { smooth: true })
   }
 
+  const modeBannerProps = {
+    mode, tables,
+    onLocateSuggestion: locateSuggestion,
+    onApplySuggestion: applyModeSuggestion,
+    pendingConfirm, pendingConflicts, pendingGroupHold,
+    multiSeats: walkinMultiSeats,
+    multiMaxSeats: walkinMultiMaxSeats,
+    multiWarnings, multiWarningSevere, multiWarningConfirmed,
+    onConfirmWarning: (checked) => setMode(m => ({ ...m, confirmedWarning: checked ? multiWarningKey : null })),
+    onChangeNeed: changeArriveNeed,
+    onClearSelection: () => setMode(m => ({ ...m, selected: [], confirmedWarning: null })),
+    onCancel: cancelModeAndNotify,
+    onConfirm: () => executeAssign(pendingConfirm),
+    onConfirmMulti: confirmWalkinMulti,
+    onClearPending: () => setPendingConfirm(null),
+    multi: modeMulti, autoMulti: modeAutoMulti, onToggleMulti: toggleModeMulti, excess: modeExcess,
+  }
+
   return (
     // 手機條件（phone:）：平常整頁捲（內容區是捲動容器，這層走自然高度）；選桌模式時改回一面式——
     // 橫幅釘在上方、下面的桌況圖自己捲，這樣看得到地圖就按得到確認（不靠 sticky：iPad/iOS Safari 在 overflow 容器內的 sticky 熱區會錯位）
@@ -1392,11 +1453,17 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         {/* 樓層切換已移到右欄地圖卡片頂端（FloorTabs，2026-10-17）：選桌時眼睛和手都在地圖上 */}
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
-        {!mode && !reserveOpen && (
-          <SegmentedControl
-            className="flex-none max-md:w-full max-md:mb-1 max-md:[&>button]:flex-1"
-            options={[{ key: 'map', label: '地圖' }, { key: 'summary', label: '摘要' }, { key: 'schedule', label: '排程' }]}
-            value={view} onChange={setView} ariaLabel="現場視圖" />
+        {/* 常駐同步燈已移到側欄底部（iPad 橫向）／頂欄（iPad 直向、手機直向）：放在這列會讓尖峰四顆提示＋燈
+            擠成兩行、地圖縮 11%（2026-11-27 驗收 P1）。手機橫向（short）沒有側欄也沒有頂欄，才留在這裡。 */}
+        <div className="hidden short:block flex-none"><SyncStatusPill /></div>
+        {/* 選桌模式中不給切（invisible＋inert），但照樣佔位：頂列高度不變 → 地圖尺寸在模式內外一樣（A1） */}
+        {!reserveOpen && (
+          <div className={`flex-none max-md:w-full ${mode ? 'invisible' : ''}`} inert={mode ? '' : undefined} aria-hidden={mode ? 'true' : undefined}>
+            <SegmentedControl
+              className="flex-none max-md:w-full max-md:mb-1 max-md:[&>button]:flex-1"
+              options={[{ key: 'map', label: '地圖' }, { key: 'summary', label: '摘要' }, { key: 'schedule', label: '排程' }]}
+              value={view} onChange={setView} ariaLabel="現場視圖" />
+          </div>
         )}
 
         {/* 「編輯佈局」與登入者已移出頂列（2026-10-17 精簡）：佈局改從 設定 → 現場與桌位 → 桌位佈局 進入；
@@ -1405,28 +1472,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
 
       {waitlistSeatPending && <p role="status" className="px-4 py-2 bg-amber-50 text-amber-800 font-bold">正在確認候位入座，雲端確認後才會占桌；請稍候。</p>}
 
-      {/* Mode banner — 依模式不同底色 + 圖示，避免誤判 */}
-      <ModeBanner
-        mode={mode}
-        tables={tables}
-        onLocateSuggestion={locateSuggestion}
-        onApplySuggestion={applyModeSuggestion}
-        pendingConfirm={pendingConfirm}
-        pendingConflicts={pendingConflicts}
-        pendingGroupHold={pendingGroupHold}
-        multiSeats={walkinMultiSeats}
-        multiMaxSeats={walkinMultiMaxSeats}
-        multiWarnings={multiWarnings}
-        multiWarningSevere={multiWarningSevere}
-        multiWarningConfirmed={multiWarningConfirmed}
-        onConfirmWarning={(checked) => setMode(m => ({ ...m, confirmedWarning: checked ? multiWarningKey : null }))}
-        onChangeNeed={changeArriveNeed}
-        onClearSelection={() => setMode(m => ({ ...m, selected: [], confirmedWarning: null }))}
-        onCancel={cancelModeAndNotify}
-        onConfirm={() => executeAssign(pendingConfirm)}
-        onConfirmMulti={confirmWalkinMulti}
-        onClearPending={() => setPendingConfirm(null)}
-      />
+      {/* Mode banner：只在手機條件釘在桌況圖上方（高度 <180 的不變量）。
+          iPad／桌面（A1，2026-11-27）改放左欄作業面板（ModeBanner layout="rail"）——頂端不插任何橫幅，
+          地圖尺寸在模式內外一樣，選桌那一刻桌子不再縮成一半。 */}
+      {isPhone && <ModeBanner layout="top" {...modeBannerProps} />}
       </div>
 
       {/* 主區：左＝操作/帶位欄（常駐、內部捲動）｜右＝桌況（地圖/摘要/排程，填滿）。
@@ -1434,14 +1483,17 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       <div className={`flex-1 min-h-0 mt-2 grid grid-cols-1 md:grid-cols-[400px_1fr] lg:grid-cols-[420px_1fr] gap-3 phone:!grid-cols-1 ${mode ? 'phone:overflow-y-auto phone:overscroll-y-contain phone:auto-rows-max phone:content-start short:mt-0 short:min-w-0' : 'phone:flex-none'}`}>
         {/* 左欄：選中桌→TableDrawer；否則→OpsRail（帶位/今日/候位；團體梯次併在「今日」時間清單）
             TableDrawer 是長內容 → 外層捲動；OpsRail 自己管內部捲動與釘底動作列 → 外層只給 flex 容器 */}
-        <div ref={leftColRef} className={`h-full min-h-0 phone:h-auto ${selectedTableObj ? 'overflow-y-auto phone:overflow-visible space-y-3' : 'flex flex-col'} ${mode ? 'phone:order-last' : ''}`}>
-          {mode ? (
+        <div ref={leftColRef} data-testid="ops-left-col" className={`h-full min-h-0 phone:h-auto ${selectedTableObj ? 'overflow-y-auto phone:overflow-visible space-y-3' : 'flex flex-col'} ${mode ? 'phone:order-last' : ''}`}>
+          {mode && !isPhone ? (
+            // A1：左欄作業面板（誰、幾位、已選、警示、人數、確認／取消）；確認鈕釘在左欄底部
+            <ModeBanner layout="rail" {...modeBannerProps} />
+          ) : mode ? (
             <div role="region" aria-label="目前選桌任務" className="bg-white rounded-xl border border-chicken-brown/15 p-4 space-y-3">
               <h2 className="font-bold text-lg">{mode.replacing || mode.type === 'move' ? '換桌' : mode.kind === 'waitlist' || mode.type === 'seat-waitlist' ? '候位入座' : mode.kind === 'arrive' ? '選桌入座' : mode.type === 'group-reseat' ? '團體改派' : mode.type === 'group-move' ? '團體換桌' : mode.type === 'group-add' ? '團體加桌' : '指派桌位'}</h2>
               <p className="font-bold">{mode.booking?.name || mode.wait?.name || mode.group?.agencyName} · {mode.need || mode.booking?.guests || mode.wait?.partySize || mode.batch?.guests} 位</p>
               {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
               <p>目標桌：{(mode.selected?.length ? mode.selected.join(' + ') : pendingConfirm) || '尚未選桌'}</p>
-              {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">保留原入座時間；撤出的原桌需清桌。</p>}
+              {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">{moveSourceNote(mode.booking, tables)}</p>}
               <button type="button" className="tap min-h-[44px] px-4 rounded-lg border" onClick={cancelModeAndNotify}>取消並返回</button>
             </div>
           ) : selectedTableObj ? (
@@ -1452,6 +1504,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               groupHold={groupHoldTables[selectedTable] || null}
               onClose={() => setSelectedTable(null)}
               onStartMove={() => startMove(selectedBooking)}
+              onArriveReseat={seatingPerms(can).seat ? startArriveSeat : null}
               onReseatBatch={startGroupReseat}
               onGroupMove={startGroupMove}
               onGroupAdd={startGroupAdd}
@@ -1470,7 +1523,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               onWalkinGuestsChange={setWalkinGuests}
               walkinTables={walkinTables}
               onRemoveWalkinTable={(n) => setWalkinTableNumbers(prev => prev.filter(x => x !== n))}
-              onClearWalkinTables={() => setWalkinTableNumbers([])}
+              onClearWalkinTables={() => { setWalkinTableNumbers([]); setWalkinMultiOn(false) }}
+              walkinMulti={walkinMulti}
+              walkinAutoMulti={walkinAutoMulti}
+              onToggleWalkinMulti={toggleWalkinMulti}
+              walkinExcess={walkinExcess}
               walkinWarning={walkinWarning}
               onWalkinSeat={handleWalkinSeat}
               lastParty={lastParty}
@@ -1528,6 +1585,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           <FloorTabs floor={floor} onChange={setFloor} counts={floorCounts} className="short:grid-cols-1 short:gap-1" />
           {showSchedule ? (
             // 排程視圖＝縱向堆疊卡片，會長 → 內部捲動避免裁切
+            <>
+            <SeatUndoBar className="mb-2 flex-shrink-0 w-full sm:w-80 sm:self-end" />
             <div className="flex-1 min-h-0 overflow-y-auto phone:flex-none phone:overflow-visible">
               <TableScheduleView
                 tables={tables.filter(t => t.floor === floor)}
@@ -1537,8 +1596,11 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
               />
             </div>
+            </>
           ) : showSummary ? (
             // 摘要視圖＝可坐存量 + 依狀態分組（不估時間）
+            <>
+            <SeatUndoBar className="mb-2 flex-shrink-0 w-full sm:w-80 sm:self-end" />
             <div className="flex-1 min-h-0 phone:flex-none">
               <TableSummaryView
                 store={storeSummary}
@@ -1550,6 +1612,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 onSelectTable={(n) => setSelectedTable(prev => prev === n ? null : n)}
               />
             </div>
+            </>
           ) : (
             <>
               <div className={`mb-2 flex-shrink-0 flex flex-wrap items-center gap-2 px-1 text-[11px] font-bold text-chicken-brown/55 ${legendOpen ? 'short:col-start-1' : 'phone:hidden'}`}>
@@ -1560,7 +1623,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 <LegendSwatch fill={STATUS_COLOR.cleaning.fill} stroke={STATUS_COLOR.cleaning.stroke} label="待清桌" />
                 <LegendSwatch fill={DINING_STAGE_FILL.overtime} stroke={DINING_STAGE_FILL.overtime} label="超時" />
                 <LegendSwatch fill={GROUP_HOLD_COLOR.fill} stroke={GROUP_HOLD_COLOR.stroke} label="團體保留" />
-                <span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-sm bg-white ring-2 ring-chicken-red ring-inset" />選中</span>
+                <SelectedLegendSwatch />
               </div>
               <div className="flex-1 min-h-0 phone:flex-none short:col-start-2 short:row-start-1 short:row-span-3">
               <FloorMap
@@ -1570,6 +1633,10 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                   <button type="button" aria-expanded={legendOpen} onClick={() => setLegendOpen(v => !v)}
                     className="hidden phone:inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2 rounded-lg border text-xs font-bold">圖例</button>
                 )}
+                // 入座復原欄：工具列右端固定保留（取代工程師文案「Tab 選桌…」）。basis-0＋min-w：iPad 橫向接在按鈕右邊；
+                // iPad 直向／手機放不下就整個換到工具列第二行、撐滿寬度——不論有沒有內容都佔同一個位置與高度，零位移。
+                // 手機選桌模式中收起（桌況圖要留給選桌；模式中不會產生新的復原，確認後模式結束它就回來）。
+                toolbarEnd={<SeatUndoBar className={`flex-1 basis-0 min-w-[160px] ml-auto ${mode ? 'phone:hidden' : ''}`} />}
                 locateTableNumber={locateTableRequest?.number}
                 locateRequestId={locateTableRequest?.seq || 0}
                 tablePresentation={tablePresentation}
@@ -1599,10 +1666,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               />
               </div>
               {/* 報到列：地圖下方 in-flow（不是疊在地圖上），無符合條件的訂位時完全不佔高度。
-                  模式進行中（指派/換桌/候位/團體改派）或無 booking.update＋table.update 權限時不顯示（到了＝寫 bookings＋tables）——
-                  這些情境下桌況圖的點擊語意已被模式接管，疊加一條會觸發別的動作的列是額外誤觸風險。 */}
-              {!mode && !reserveOpen && !hideArrivalStrip && seatingPerms(can).seat && (
+                  無 booking.update＋table.update 權限時不顯示（到了＝寫 bookings＋tables）。
+                  模式進行中（指派/換桌/候位/團體改派）照樣佔位、看得到名單，但整列 disabled＋inert 不可按（A1，2026-11-27）：
+                  過去整條消失會讓地圖在模式內外變大變小，且選桌中途看不到下一組；桌況圖點擊語意仍由模式接管，不會誤觸。 */}
+              {!reserveOpen && !hideArrivalStrip && seatingPerms(can).seat && (
                 <ArrivalStrip
+                  disabled={!!mode}
                   tables={tables}
                   bookings={bookings}
                   currentFloor={floor}
@@ -1615,6 +1684,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                   onArriveReseat={startArriveSeat}
                   onArrive={(table, booking) => handleArriveNow(table, booking, {
                     seatBooking, seatBookingAllTables, undoSeatBooking, toast, onMove: startMove, onArriveReseat: startArriveSeat,
+                    // 只用原位確認卡（ArrivalStrip），不另發 toast：同一件事畫面上只留一顆「復原」
+                    inline: true,
                     // 預配那條的防呆（團保／他筆預配重疊先確認）；鎖桌那條不用這些
                     confirm,
                     getTable: (n) => tables.find(t => String(t.number) === String(n)),

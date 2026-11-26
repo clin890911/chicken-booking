@@ -6,11 +6,14 @@
 // 這裡只負責：動手前拍快照、toast 帶「復原○○」、失敗時把 service 的原因原樣講給店員。
 //
 // H6：復原鈕文案一律帶對象（復原取消／復原帶位 105／復原清桌 105…），兩則 toast 疊在一起時店員分得清。
+// 2026-11-27：入座／換桌兩類（walkInSeat、move）改成看得到的字一律「復原」、對象放 aria-label（seatFeedback.toastSeatUndo）。
+
+import { movedText, toastSeatUndo, toastSeatDone } from './seatFeedback'
 
 export const undoLabel = {
   cancel: () => '↩ 復原取消',
   walkInSeat: (tables) => `復原帶位 ${[].concat(tables).join('+')}`,
-  move: () => '↩ 復原換桌',
+  move: (tables) => `復原換桌 ${[].concat(tables ?? []).join('+')}`.trim(),
   checkout: () => '↩ 復原離席',
   clear: (tables) => (tables.length > 1 ? `↩ 復原清桌（${tables.length}）` : `↩ 復原清桌 ${tables[0]}`),
 }
@@ -26,11 +29,14 @@ export function moveUndoFailText(u, name) {
 
 // 換桌成功後的 toast＋復原（D1）。r＝replaceSeatedBookingTables／moveTable 的結果（r.undo＝換桌前快照）。
 // 沒有快照（未入座的改桌）就只出成功訊息，不給假的復原鈕。
-export function toastMovedWithUndo(r, { message, name, toTables, undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast }) {
-  if (!r?.undo) { toast.success(message); return }
-  toast.action(message, {
-    label: undoLabel.move(),
-    onClick: () => {
+// 文字／秒數／位置與入座同一套（utils/seatFeedback：movedText＋8 秒＋placement:'seat'）。
+// message 沒給就依 name／guests／toTables 組「✓ 林先生 3 位 改到 103」。
+export function toastMovedWithUndo(r, { message, name, guests, toTables, undoSeatedMove, restoreOverriddenAssignment, restoreReleasedPreassigns, restoreNote, toast }) {
+  const text = message || movedText({ name, guests, tables: toTables })
+  if (!r?.undo) { toastSeatDone(toast, text); return }
+  toastSeatUndo(toast, text, {
+    ariaLabel: undoLabel.move(toTables),
+    onUndo: () => {
       const u = undoSeatedMove(r.undo, toTables)
       if (!u?.ok) return toast.error(moveUndoFailText(u, name))
       const released = r.releasedPreassigns || []
@@ -39,7 +45,7 @@ export function toastMovedWithUndo(r, { message, name, toTables, undoSeatedMove,
         : ''
       toast.info(`已復原：${name || '這組'} 回到 ${u.tableNumbers.join(' + ')}${note}`)
     },
-  }, { duration: 8000 })
+  })
 }
 
 // 離席後的 toast＋復原（D2）。r＝context.checkoutBooking 的結果（r.undo＝離席前快照）。

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   isAlertBaselineReady, diffNewConfirmed, confirmedIdSet, buildNewBookingAlerts,
-  markCreatedHere, wasCreatedHere,
+  markCreatedHere, wasCreatedHere, mergeSeenIds,
 } from '../../src/utils/newBookingAlerts'
 
 const TODAY = '2026-08-01'
@@ -114,5 +114,51 @@ describe('本裝置剛建立的訂位不通報', () => {
     markCreatedHere('LOCAL-3')
     const added = diffNewConfirmed(confirmedIdSet([]), [b('LOCAL-3')], { exclude: wasCreatedHere })
     expect(buildNewBookingAlerts(added, TODAY)).toEqual([])
+  })
+})
+
+// 🔴 B2：復原入座後不可再跳「新訂位」。模擬 AdminPage 的偵測迴圈：每輪「先 diff 再累積基準」。
+describe('復原不被當成新訂位（mergeSeenIds 累積基準）', () => {
+  const run = (rounds) => {
+    let prev = null
+    const fired = []
+    for (const bookings of rounds) {
+      if (prev) fired.push(buildNewBookingAlerts(diffNewConfirmed(prev, bookings), TODAY).map(a => a.message))
+      else fired.push([])
+      prev = mergeSeenIds(prev, bookings)
+    }
+    return fired
+  }
+
+  it('已入座 → 復原回待到：第三輪不通報', () => {
+    const seated = [b('b1', { status: 'arrived' })]
+    const rounds = [[b('b1')], seated, [b('b1')]]
+    expect(run(rounds)).toEqual([[], [], []])
+  })
+
+  it('舊寫法（每輪整個換基準）會在復原那輪誤報——證明這條測試有咬住缺陷', () => {
+    let prev = confirmedIdSet([b('b1')])
+    prev = confirmedIdSet([b('b1', { status: 'arrived' })])
+    expect(diffNewConfirmed(prev, [b('b1')]).map(x => x.id)).toEqual(['b1'])
+  })
+
+  it('取消 → 取消復原同理不誤報', () => {
+    expect(run([[b('b1')], [b('b1', { status: 'cancelled' })], [b('b1')]])).toEqual([[], [], []])
+  })
+
+  it('真正新增的訂位仍會通報（即使同一輪也有復原）', () => {
+    const out = run([
+      [b('b1')],
+      [b('b1', { status: 'arrived' })],
+      [b('b1'), b('b2', { name: '林先生', guests: 3 })],
+    ])
+    expect(out[2]).toEqual(['新訂位：林先生 3 位 · 12:00'])
+  })
+
+  it('mergeSeenIds 不吃非 confirmed、不改動傳入的集合', () => {
+    const prev = new Set(['x'])
+    const next = mergeSeenIds(prev, [b('b1'), b('b2', { status: 'pending' })])
+    expect([...next].sort()).toEqual(['b1', 'x'])
+    expect(prev.size).toBe(1)
   })
 })

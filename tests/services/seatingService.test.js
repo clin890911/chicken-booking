@@ -945,6 +945,8 @@ describe('seatingService 整合層', () => {
       const b = mkBooking({ guests: 2 })
       seating.assignBookingToTable(b.id, '101')
       seating.seatBooking(b.id) // status arrived，101 dining
+      // B6：入座滿 5 分鐘才算「用過」→ 待清（未滿 5 分鐘＝點錯修正，回空桌，另見 tests/services/quickFixMove.test.js）
+      tableService.setStatus('101', 'dining', { seatedAt: new Date(Date.now() - 10 * 60000).toISOString() })
       const r = seating.moveTable(b.id, '108')
       expect(r).toMatchObject({ ok: true })
       const oldT = tableService.getByNumber('101')

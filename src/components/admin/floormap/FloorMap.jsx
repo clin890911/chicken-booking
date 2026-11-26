@@ -5,7 +5,7 @@ import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr, formatDate } from '../../../utils/timeSlots'
 import { overdueMinOf } from '../../../utils/bookingPulse'
 import { assignmentKind, diningTablePresentation } from '../../../utils/tableStatus'
-import { GROUP_HOLD_COLOR } from './statusColors'
+import { GROUP_HOLD_COLOR, FOCUS_RING } from './statusColors'
 import { useDeviceFlag, MAP_ROT180_KEY_PREFIX } from '../../../utils/devicePrefs'
 
 // 「到了」一鍵入座的出現窗：訂位時間前 60 分 ~ 後 60 分。寫成具名常數方便日後調整。
@@ -247,6 +247,7 @@ export default function FloorMap({
   phoneFit = false,         // 現場頁：手機條件下走自然高度＋限高（規則在 index.css），iPad／其他頁不受影響
   onFloorChange = null,     // 放大視圖裡的樓層切換（只在手機條件顯示）；未傳就不顯示
   toolbarExtra = null,      // 地圖工具列尾端的額外控制項
+  toolbarEnd = null,        // 地圖工具列最右端的固定保留欄（現場頁＝入座復原欄）；給了就取代鍵盤操作說明
 }) {
   // 用餐計時（分鐘）只在「今日即時圖」需要；規劃／統一佔用視圖沒有計時，不必跑 tick。
   // 以前不分模式每 5 秒 setState 一次、52 張桌全部重繪——規劃頁排位地圖白白每 5 秒重畫一次。
@@ -393,7 +394,7 @@ export default function FloorMap({
           className={`min-h-[44px] px-3 phone:px-2 rounded-lg border text-xs font-bold ${rotated ? 'bg-chicken-brown/10' : ''}`}>⟲ 轉向</button>
         <button type="button" onClick={() => { setZoom(1); setExpanded(v => !v) }} className="min-h-[44px] px-3 phone:px-2 rounded-lg border text-xs font-bold">{expanded ? '關閉放大視圖' : '放大視圖'}</button>
         {!expanded && toolbarExtra}
-        <span className="text-[11px] text-chicken-brown/60">{zoom > 1 ? "可捲動地圖" : ""}<span className="phone:hidden">{zoom > 1 ? " · " : ""}Tab 選桌，Enter／空白鍵開啟</span></span>
+        {toolbarEnd || <span className="text-[11px] text-chicken-brown/60">{zoom > 1 ? "可捲動地圖" : ""}<span className="phone:hidden">{zoom > 1 ? " · " : ""}Tab 選桌，Enter／空白鍵開啟</span></span>}
       </div>
       {/* 只有放大（真的能在地圖裡捲）時才 contain：全貌時 viewport 沒東西可捲，contain 會把手指吃掉、外層整頁捲到一半卡住（規劃頁、團單圈桌、手機現場頁） */}
       <div ref={viewportRef} data-map-phone-viewport={phoneFitActive ? '' : undefined} className="overflow-auto min-h-0 flex-1" style={{ overscrollBehavior: zoom > 1 ? 'contain' : 'auto', ...(phoneFitActive ? { '--map-zoom': zoom, '--map-ar': viewBox.width / viewBox.height } : null) }}>
@@ -405,7 +406,9 @@ export default function FloorMap({
       className="block"
 
     >
-      <style>{`g[role="button"]:focus { outline: none; } g[role="button"]:focus > rect { stroke: #111827; stroke-width: 5; stroke-dasharray: 3 2; }`}</style>
+      {/* 焦點環只在鍵盤操作（:focus-visible）時顯示，畫在桌外圈的獨立 rect（TableShape 的 FocusRing），不改桌本體邊框——
+          所以最後一張被點的桌不會再被黑色點線蓋掉「選中」樣式（B3）。色值來自 statusColors.FOCUS_RING。 */}
+      <style>{`g[role="button"]:focus { outline: none; } g[role="button"]:focus-visible > .table-focus-ring { display: inline; opacity: 1; stroke: ${FOCUS_RING.color}; stroke-dasharray: ${FOCUS_RING.dash}; }`}</style>
       {/* 樓層浮水印已移除（2026-10-17：留白縮到 16 後會疊在牆與醬料台上；樓層看頂列 1F／2F 切換） */}
 
       {/* 設施標示（桌位底下） */}

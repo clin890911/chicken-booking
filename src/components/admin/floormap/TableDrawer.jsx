@@ -6,16 +6,19 @@ import { useBooking } from '../../../contexts/BookingContext'
 import { useAuth } from '../../../contexts/AuthContext'
 import TableCandidatePanel from './TableCandidatePanel'
 import { cancelWithUndo } from '../../../utils/bookingActions'
-import { toastCheckoutWithUndo, clearTablesWithUndo } from '../../../utils/tableUndo'
+import { toastCheckoutWithUndo, clearTablesWithUndo, undoLabel } from '../../../utils/tableUndo'
+import { seatedText, seatedTablesOf, toastSeatUndo } from '../../../utils/seatFeedback'
+import { seatedMinutes, seatedElapsedLabel } from '../../../utils/diningStage'
 import GroupTableSection from './GroupTableSection'
 import { STATUS_ZH as STATUS_LABELS, diningTablePresentation } from '../../../utils/tableStatus'
 import { isTableOutOnDate, normalizeOutage, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr } from '../../../utils/timeSlots'
 import { STATUS_COLOR } from './statusColors'
 import { preassignConflicts, assignmentWindow, squeezeSeats } from '../../../utils/capacity'
-import { releaseOverlappingPreassigns, conflictLine } from '../../../utils/preassignOverride'
+import { releaseOverlappingPreassigns, conflictLine, restoreReleasedPreassigns, restoreNote } from '../../../utils/preassignOverride'
 import { seatingPerms } from '../../../utils/seatingPerms'
-import { toastSeatedWithUndo, seatAfterArriveConfirm } from '../../../utils/arriveSeat'
+import { toastSeatedWithUndo, seatAfterArriveConfirm, arriveActionFor } from '../../../utils/arriveSeat'
+import { isPreassignArriveEligible } from './FloorMap'
 import { splitSuffix } from '../../../utils/partySplit'
 import { formatPhone } from '../../../utils/phoneFormat'
 import EditBookingModal from '../../booking/EditBookingModal'
@@ -45,9 +48,6 @@ function fmtTime(d) {
   const t = new Date(d)
   return `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
 }
-function diffMin(d) {
-  return Math.floor((Date.now() - new Date(d).getTime()) / 60000)
-}
 // YYYY-MM-DD 往後加 n 天（本地時區安全：以中午起算避免 DST/時區邊界）
 function addDaysStr(dateStr, n) {
   const d = new Date(`${dateStr}T12:00:00`)
@@ -55,14 +55,14 @@ function addDaysStr(dateStr, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export default function TableDrawer({ table: storedTable, booking, preassign, groupHold, onClose, onStartMove, onReseatBatch, onGroupMove, onGroupAdd, onWaitlistSeated, mode }) {
+export default function TableDrawer({ table: storedTable, booking, preassign, groupHold, onClose, onStartMove, onArriveReseat = null, onReseatBatch, onGroupMove, onGroupAdd, onWaitlistSeated, mode }) {
   const handoff=useHandoff()
   const { can } = useAuth()
   const toast = useToast()
   const confirmDialog = useConfirm()
   const {
-    blockTable, unblockTable, walkInSeat,
-    assignBookingToTable, seatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking,
+    blockTable, unblockTable, walkInSeat, undoWalkInSeat, restoreOverriddenAssignment,
+    seatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, clearTable, undoClearTable, cancelBooking, undoCancelBooking,
     setTableOutage, clearTableOutage, releaseOverriddenAssignment,
     settings, groupReservations, bookings, tables,
   } = useBooking()
@@ -132,11 +132,37 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     if (overridden.some(c => c.willRelease) && !walkInOverride) return toast.warning('請先勾選「我知道，仍要帶這桌」')
     const r = walkInSeat(table.number, { ...walkInForm, name: walkInForm.name.trim() })
     if (!r.ok) return toast.error('入座失敗：' + r.error)
-    releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
-    toast.success(`${r.booking.name} 已入座 ${table.number}`)
+    const releasedPreassigns = releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
+    // B1：與現場帶位同一套回饋＋8 秒復原（undoWalkInSeat：只清仍由本筆用餐中的桌；桌已被別組坐走就安全失敗、不搶桌）。
+    // 這筆是入座自己建的散客單 → 有刪除權直接刪、沒有就退回取消（同帶位面板的 undoLastSeat）。
+    const seated = r.booking
+    const n = String(table.number)
+    toastSeatUndo(toast, seatedText({ name: seated.name, guests: seated.guests, tables: [n] }), {
+      ariaLabel: undoLabel.walkInSeat([n]),
+      onUndo: () => {
+        const u = undoWalkInSeat(seated.id, { remove: can('booking.delete') })
+        if (!u?.ok) return toast.error('復原失敗：' + (u?.error || '未知錯誤'))
+        const note = restoreNote(restoreReleasedPreassigns(releasedPreassigns, { restoreOverriddenAssignment }))
+        toast.info(`已復原：${n} 回到空桌${note}`)
+      },
+    })
     setShowWalkIn(false)
     onClose?.()
   }
+
+  // 預配到這張桌、但這組的桌此刻被別組佔（arriveSeat.arriveActionFor＝'reseat'，與報到列／今日卡同一支判斷）：
+  // 抽屜直接給「到了 · 換桌入座」，不給「客人到了」→ 確認框 → 入座失敗（A4）。
+  //   preassign（空桌上的預配，大組副桌被佔時）＋ 這張桌被別組佔用時、預配到這張桌的今日待到訂位
+  //   只列「到了」時間窗內（訂位前後 60 分，與報到列同一支 isPreassignArriveEligible）：晚場的預配不在這裡給「到了」
+  const preassignReseat = !!(preassign && onArriveReseat && arriveActionFor(preassign, tables) === 'reseat')
+  const nowMs = Date.now()
+  const takenPreassigns = (onArriveReseat && table.status !== 'vacant')
+    ? (bookings || []).filter(b => b.date === today && ['confirmed', 'pending'].includes(b.status)
+      && b.id !== table.currentBookingId
+      && [b.assignedTableId, ...(b.extraTableIds || [])].filter(Boolean).map(String).includes(String(table.number))
+      && isPreassignArriveEligible((tables || []).find(t => String(t.number) === String(b.assignedTableId)), b, nowMs)
+      && arriveActionFor(b, tables) === 'reseat')
+    : []
 
   // 入座前的預留確認與今日訂位卡／訂位詳情同一套（seatAfterArriveConfirm：時段重疊的他筆預配、今日團保才確認）
   const afterArriveConfirm = (b, proceed) => seatAfterArriveConfirm(b, { confirm: confirmDialog, bookings, groupReservations, tables, settings, now: new Date() }, proceed)
@@ -152,8 +178,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
         }
         return toast.error(r.error)
       }
-      // 5 秒復原：與報到列／今日訂位卡共用（booking 與桌一起倒、被別組佔走不搶）
-      toastSeatedWithUndo(r, { message: `${booking.name} 已入座 ${(r.tableNumbers || [table.number]).join('、')}`, name: booking.name, undoSeatBooking, toast })
+      // 8 秒復原：與報到列／今日訂位卡共用（booking 與桌一起倒、被別組佔走不搶）
+      toastSeatedWithUndo(r, { message: seatedText({ name: booking.name, guests: booking.guests, tables: seatedTablesOf(r, booking, table.number) }), name: booking.name, undoSeatBooking, toast })
     })
   }
 
@@ -162,19 +188,14 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
   const handleSeatPreassigned = () => {
     if (!preassign) return
     return afterArriveConfirm(preassign, () => {
-      // 併桌預配（主桌＋副桌）不可走單桌指派：assignTable 會重設 extraTableIds，副桌就掉了。
-      // 直接 seatBooking → seatBookingAllTables 整組守門入座。
-      const isComboPreassign = (preassign.extraTableIds || []).filter(Boolean).length > 0
-      const r1 = isComboPreassign ? { ok: true } : assignBookingToTable(preassign.id, table.number)
-      if (!r1.ok) return toast.error('入座失敗：' + r1.error)
+      // 預配的桌此刻是空桌 → seatBooking 直接入座（守門：空桌或本筆持有；大組自動走 seatBookingAllTables 整組守門）。
+      // 不再先 assignBookingToTable 鎖桌再入座：那條在「鎖成功、入座失敗」時會留下「已指派但入座失敗」的半套狀態
+      // （桌被鎖成 reserved、訂位卻沒入座）。直接入座要嘛整組成功、要嘛什麼都沒動。
+      // 併桌預配也不可走單桌指派（assignTable 會重設 extraTableIds，副桌就掉了）。
       const r2 = seatBooking(preassign.id)
-      if (!r2.ok) {
-        if (isComboPreassign) return toast.error('入座失敗：' + r2.error)
-        toast.warning(`已指派但入座失敗：${r2.error}`); onClose?.(); return
-      }
-      // 復原：桌倒回空桌、訂位回待到（單桌時入座前剛鎖給本筆，快照記為 reserved → 改倒回空桌，保留原本的預配語意）
-      const undo = isComboPreassign ? r2.undo : { ...r2.undo, restore: Object.fromEntries((r2.undo?.tableNumbers || []).map(n => [n, 'vacant'])) }
-      toastSeatedWithUndo({ ...r2, undo }, { message: `${preassign.name}（${preassign.guests} 位）入座 ${(r2.tableNumbers || [table.number]).join('、')}`, name: preassign.name, undoSeatBooking, toast })
+      if (!r2.ok) return toast.error('入座失敗：' + r2.error)
+      // 復原：入座前桌是空桌 → 快照本來就記 vacant；訂位回待到、保留預配（undoSeatBooking 不動桌號）
+      toastSeatedWithUndo(r2, { message: seatedText({ name: preassign.name, guests: preassign.guests, tables: seatedTablesOf(r2, preassign, table.number) }), name: preassign.name, undoSeatBooking, toast })
       onClose?.()
     })
   }
@@ -185,9 +206,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     : []
   const isCombo = bookingTables.length > 1
 
-  const minutesSeated = () => table.seatedAt
-    ? Math.floor((Date.now() - new Date(table.seatedAt).getTime()) / 60000)
-    : 0
+  // 已用餐分鐘一律走 diningStage.seatedMinutes（夾 0：多台 iPad 時鐘差幾秒時不會算出「-1 分」）
+  const minutesSeated = () => table.seatedAt ? seatedMinutes(table.seatedAt) : 0
   const diningDuration = Number(settings.diningDurationMin) || 90
   const cleanupBuffer = Number(settings.cleanupBufferMin) || 10
   const bufferLimit = diningDuration + cleanupBuffer
@@ -356,7 +376,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             )}
             {displayStatus === 'dining' && (table.seatedAt || booking.actualArrivalTime) && (() => {
               const seatedAt = table.seatedAt || booking.actualArrivalTime
-              const m = diffMin(seatedAt)
+              const m = seatedMinutes(seatedAt)
               const stage = m >= bufferLimit ? 'buffer-overtime' : m >= diningDuration ? 'overtime' : m >= lateThreshold ? 'late' : 'normal'
               return (
                 <>
@@ -371,7 +391,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
                       : 'bg-chicken-cream text-chicken-brown'}`}>
                     <span className="text-xs font-bold">已用餐</span>
                     <span className="text-2xl font-bold tabular-nums">
-                      {m} <span className="text-sm">分</span>
+                      {m < 1 ? <span className="text-lg">{seatedElapsedLabel(seatedAt)}</span> : <>{m} <span className="text-sm">分</span></>}
                     </span>
                   </div>
                   {stage === 'late' && (
@@ -463,14 +483,42 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             <p className="text-[11px] text-blue-800/70 mt-0.5">
               預訂：會從現在鎖桌到那組用完餐；若會撞到這筆預配，下方候選的「預訂」鈕會標明「將解除」。
             </p>
-            {perms.seat && (
+            {perms.seat && (preassignReseat ? (
+              <>
+                <p className="text-[11px] font-bold text-amber-800 mt-1">這組另一張預配桌此刻有別組：到了請選一張空桌入座。</p>
+                <button
+                  onClick={() => onArriveReseat(preassign)}
+                  aria-label={`${preassign.name} 到了，換桌入座`}
+                  className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
+                >
+                  {preassign.name} 到了 · 換桌入座
+                </button>
+              </>
+            ) : (
               <button
                 onClick={handleSeatPreassigned}
                 className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
               >
                 {preassign.name} 到了，入座 {table.number}
               </button>
-            )}
+            ))}
+          </div>
+        )}
+        {/* 此桌被別組佔，但有今日待到訂位預配在這張桌：客人到了直接換桌入座（與報到列「到了 · 換桌」同一條） */}
+        {perms.seat && takenPreassigns.length > 0 && (
+          <div data-testid="drawer-taken-preassign" className="px-3 py-2 bg-amber-50 border border-dashed border-amber-300 rounded-lg text-xs space-y-2">
+            {takenPreassigns.map(b => (
+              <div key={b.id}>
+                <div className="font-bold text-amber-900">預配此桌：{b.name}（{b.guests} 位{b.timeSlot ? ` · ${b.timeSlot}` : ''}）· 此桌目前有別組</div>
+                <button
+                  onClick={() => onArriveReseat(b)}
+                  aria-label={`${b.name} 到了，換桌入座`}
+                  className="mt-1.5 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
+                >
+                  {b.name} 到了 · 換桌入座
+                </button>
+              </div>
+            ))}
           </div>
         )}
         {/* 維修中：接管空桌的預設引導，明確顯示原因與期間 */}

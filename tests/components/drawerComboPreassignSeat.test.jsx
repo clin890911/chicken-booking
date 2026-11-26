@@ -53,16 +53,30 @@ describe('TableDrawer 預配客人到了：併桌整組入座、不走單桌指�
     act(() => { btn('余先生 到了，入座 105').click() })
     expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
     expect(ctx.seatBooking).toHaveBeenCalledWith('YU')
-    expect(toast.action).toHaveBeenCalledWith('余先生（10 位）入座 105、106', expect.objectContaining({ label: '復原' }), { duration: 5000 })
+    expect(toast.action).toHaveBeenCalledWith('✓ 余先生 10 位 → 105＋106 已入座', expect.objectContaining({ label: '復原' }), { duration: 8000, placement: 'seat' })
   })
 
-  it('單桌預配 → 照舊先 assignBookingToTable 再 seatBooking', () => {
+  // 2026-11 B1：單桌預配也直接 seatBooking（預配桌是空桌，seatBooking 本來就放行）。
+  // 不再先 assignBookingToTable 鎖桌——那條在「鎖成功、入座失敗」時會留下「已指派但入座失敗」的半套狀態。
+  it('單桌預配 → 直接 seatBooking，不先 assignBookingToTable', () => {
     const yu = mk([])
     setCtx([yu])
     ctx.seatBooking = vi.fn(() => ({ ok: true, tableNumber: '105' }))
     mount(<TableDrawer table={T105} booking={null} preassign={yu} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} />)
     act(() => { btn('余先生 到了，入座 105').click() })
-    expect(ctx.assignBookingToTable).toHaveBeenCalledWith('YU', '105')
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
     expect(ctx.seatBooking).toHaveBeenCalledWith('YU')
+  })
+
+  it('單桌預配入座失敗 → 只報錯、什麼都沒動（沒有「已指派但入座失敗」的半套狀態）', () => {
+    const yu = mk([])
+    setCtx([yu])
+    ctx.seatBooking = vi.fn(() => ({ ok: false, code: 'table-occupied', error: '105 現在是 王 在用，請換一張桌' }))
+    mount(<TableDrawer table={T105} booking={null} preassign={yu} groupHold={null} onClose={() => {}} onStartMove={() => {}} mode={{}} />)
+    act(() => { btn('余先生 到了，入座 105').click() })
+    expect(ctx.assignBookingToTable).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledWith('入座失敗：105 現在是 王 在用，請換一張桌')
+    expect(toast.warning).not.toHaveBeenCalled()
+    expect(toast.action).not.toHaveBeenCalled()
   })
 })

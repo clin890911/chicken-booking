@@ -62,7 +62,7 @@ test('現場：點桌 → 選人數 → 滑動帶位 → 入座成功', async ({
 
   // 桌與人數到齊 → 滑桿解鎖並可滑動入座
   await slideToSeat(page)
-  await expect(page.getByText(new RegExp(`入座 ${tableNo}\\s*·\\s*可帶下一組`))).toBeVisible()
+  await expect(page.getByText(new RegExp(`→ ${tableNo} 已入座`))).toBeVisible()
 
   // 入座後面板清空，可以直接帶下一組
   await expect(page.getByRole('button', { name: /還差桌位/ })).toBeVisible()
@@ -87,7 +87,7 @@ test('現場：先點桌再選人數（反序）也能帶位，且滑桿未湊�
   await expect(page.getByTestId('walkin-seat')).not.toBeDisabled()
 
   await slideToSeat(page)
-  await expect(page.getByText(new RegExp(`入座 ${tableNo}\\s*·\\s*可帶下一組`))).toBeVisible()
+  await expect(page.getByText(new RegExp(`→ ${tableNo} 已入座`))).toBeVisible()
 })
 
 test('現場：稱謂＋姓氏快選組成姓名，全程不用鍵盤', async ({ page }) => {
@@ -104,7 +104,7 @@ test('現場：稱謂＋姓氏快選組成姓名，全程不用鍵盤', async ({
   await slideToSeat(page)
 
   // 入座成功且姓名記成「陳先生」
-  await expect(page.getByText(/陳先生（2 位）入座/)).toBeVisible()
+  await expect(page.getByText(/✓ 陳先生 2 位 →/)).toBeVisible()
 })
 
 // 迴歸：iPad 觸控可能在同一個 React batch 內送出兩次 click（touch → 合成 click）。
@@ -141,7 +141,7 @@ test('現場：選桌不會直接入座，Space 確認後才入座', async ({ pa
   await expect(confirm).toHaveText(new RegExp(`確認入座.*2 位.*${tableNo}`))
   await confirm.focus()
   await confirm.press('Space')
-  await expect(page.getByText(new RegExp(`入座 ${tableNo}.*可帶下一組`))).toBeVisible()
+  await expect(page.getByText(new RegExp(`→ ${tableNo} 已入座`))).toBeVisible()
 })
 
 // M6 沿用上一組：連續同型客人（一直來 4 位）不必每組重選人數。
@@ -155,7 +155,7 @@ test('現場：帶完一組後可「沿用上一組」快速帶下一組', async
   await page.getByPlaceholder('例：靠窗、慶生、過敏').fill('靠窗')
   await page.locator(`svg g:has(:text-is("${t1}"))`).first().click()
   await slideToSeat(page)
-  await expect(page.getByText(new RegExp(`入座 ${t1}\\s*·\\s*可帶下一組`))).toBeVisible()
+  await expect(page.getByText(new RegExp(`→ ${t1} 已入座`))).toBeVisible()
 
   // 面板已重置成預設 2 位 → 出現「沿用上一組（4 位 · 靠窗）」
   const reuse = page.getByRole('button', { name: /沿用上一組/ })
@@ -204,7 +204,7 @@ test('現場：「沿用上一組」不可把上一組的過敏註記帶給下�
   const t1 = await readSuggestedTable(page)
   await page.locator(`svg g:has(:text-is("${t1}"))`).first().click()
   await slideToSeat(page)
-  await expect(page.getByText(new RegExp(`入座 ${t1}`))).toBeVisible()
+  await expect(page.getByText(new RegExp(`→ ${t1} 已入座`))).toBeVisible()
 
   // 沿用按鈕只能帶「靠窗」，絕不能出現「花生」
   const reuse = page.getByRole('button', { name: /沿用上一組/ })

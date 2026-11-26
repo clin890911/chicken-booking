@@ -249,7 +249,7 @@ test('S8 團體圈 101/102、101 被散客佔走 → 梯次入座被擋 → 改�
   await page.getByRole('button', { name: /散客入座（覆蓋團體預留）/ }).click()
   await page.getByRole('button', { name: '改散客入座', exact: true }).click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/已入座 101/)).toBeVisible()
+  await expect(page.getByText(/→ 101 已入座/)).toBeVisible()
 
   // 團體梯次入座 → 101 被佔 → 自動進改派模式
   await page.keyboard.press('Escape') // 關掉 101 抽屜回左欄
@@ -263,7 +263,7 @@ test('S8 團體圈 101/102、101 被散客佔走 → 梯次入座被擋 → 改�
   await mapTable(page, '105').click()
   await expect(page.getByText(/把 101 改派為 105 並整梯入座/)).toBeVisible()
   await page.getByRole('button', { name: /確認改派/ }).click()
-  await expect(page.getByText(/已改派 101 → 105/)).toBeVisible()
+  await expect(page.getByText(/✓ 尖峰旅行社 .*→ (105＋102|102＋105) 已入座/)).toBeVisible()   // B1：改派後整梯入座同一種成功句
 
   const s = await readState(page)
   expect(tableOf(s, '105')).toMatchObject({ status: 'dining' })
@@ -287,7 +287,7 @@ test('S9 散客帶位到團體預留桌 105 → 團保防呆，未勾「仍要�
   await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()
   await expect(seat).toBeEnabled()
   await seat.click()
-  await expect(page.getByText(/入座 105\s*·\s*可帶下一組/)).toBeVisible()
+  await expect(page.getByText(/→ 105 已入座/)).toBeVisible()
   expect(tableOf(await readState(page), '105').status).toBe('dining')
 })
 
@@ -299,7 +299,7 @@ test('S10 散客 4 人帶位入座 → 8 秒內復原 → 桌回空桌', async (
   await mapTable(page, '105').click()
   await expect(page.getByRole('button', { name: '移除桌 105' })).toBeVisible()
   await page.getByTestId('walkin-seat').click()
-  await expect(page.getByText(/入座 105\s*·\s*可帶下一組/)).toBeVisible()
+  await expect(page.getByText(/→ 105 已入座/)).toBeVisible()
   let s = await readState(page)
   expect(tableOf(s, '105').status).toBe('dining')
   expect(s.bookings).toHaveLength(1)
@@ -326,7 +326,7 @@ test('S11 散客 8 人沒有單桌容得下 → 用建議併桌 → 一次入座
   const seat = page.getByTestId('walkin-seat')
   await expect(seat).toBeEnabled()
   await seat.click()
-  await expect(page.getByText(/入座 10[67]\s*\+\s*10[67]/)).toBeVisible()
+  await expect(page.getByText(/→ 10[67]＋10[67] 已入座/)).toBeVisible()
 
   const s = await readState(page)
   const b = s.bookings.find(x => x.id !== 'X')
@@ -361,7 +361,7 @@ test('S12 訂位預配 105、105 被別人佔走 → 報到列標桌被佔、「
 
   await mapTable(page, '106').click()
   await page.getByRole('button', { name: '確認入座', exact: true }).click()
-  await expect(page.getByText(/已入座 106（原預配 105 被佔）/)).toBeVisible()
+  await expect(page.getByText(/✓ \S+ \d+ 位 → 106 已入座/)).toBeVisible()
   s = await readState(page)
   expect(s.bookings.find(b => b.id === YU.id)).toMatchObject({ status: 'arrived', assignedTableId: '106' })
   expect(tableOf(s, '106')).toMatchObject({ status: 'dining', currentBookingId: YU.id })
@@ -430,7 +430,7 @@ test('S15 訂位時段早 40 分鐘未報到 → 過時未到找得到 → 客�
   await expect(page.getByText('遲到客').first()).toBeVisible()
   await page.getByRole('button', { name: /客人到了/ }).first().click()
 
-  await expect(page.getByText(/遲到客 已入座 105/)).toBeVisible()
+  await expect(page.getByText(/✓ 遲到客 \d+ 位 → 105 已入座/)).toBeVisible()
   const s = await readState(page)
   expect(s.bookings.find(b => b.id === LATE.id).status).toBe('arrived')
   expect(tableOf(s, '105')).toMatchObject({ status: 'dining', currentBookingId: LATE.id })

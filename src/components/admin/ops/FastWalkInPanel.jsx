@@ -31,7 +31,7 @@ import { History } from 'lucide-react'
 export default function FastWalkInPanel({
   suspended = false, onLocateSuggestion, onApplySuggestion, showNextWaitlist, onNextWaitlist,
   guests, onGuestsChange, tables = [], onRemoveTable, onClearTables, warning, onSeat, onOpenTable,
-  lastParty,
+  lastParty, multi = false, autoMulti = false, onToggleMulti = null, excess = null,
 }) {
   const toast = useToast()
   const { suggestTable, suggestTableCombo } = useBooking()
@@ -262,6 +262,22 @@ export default function FastWalkInPanel({
           <div className={`rounded-xl border px-3 py-1.5 text-sm font-bold ${V[verdict.tone]}`}>
             <Icon name={verdict.icon} size={16} className="inline-block align-[-3px] mr-1" />{verdict.text}
           </div>
+        )}
+        {/* A2 點桌語意：單選（預設，點別張＝改選）／多選（＋再加一桌，或大組自動）。與選桌入座模式同一套（utils/tablePick） */}
+        {(autoMulti || (onToggleMulti && tables.length > 0)) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {autoMulti ? (
+              <span data-testid="walkin-auto-multi" className="text-sm font-bold text-amber-800">大組・可選多桌（沒有單桌坐得下 {g} 位）</span>
+            ) : (
+              <button type="button" data-testid="walkin-multi-toggle" aria-pressed={multi} onClick={onToggleMulti}
+                className={`tap min-h-[44px] px-3 rounded-xl border-2 text-sm font-bold ${multi ? 'border-chicken-brown bg-chicken-brown text-white' : 'border-dashed border-chicken-brown/40 text-chicken-brown'}`}>
+                {multi ? '併桌中・點桌加／減（改回單桌）' : '＋再加一桌（併桌）'}
+              </button>
+            )}
+          </div>
+        )}
+        {excess && (
+          <div data-testid="walkin-excess" className="rounded-xl border border-amber-500/40 bg-amber-100 px-3 py-1.5 text-sm font-bold text-amber-900">{excess.text}</div>
         )}
         {/* 「用建議桌」＝切樓層＋選好建議桌（含併桌），店員再按確認入座；不自動勾（PR #137） */}
         {recommendation && (
