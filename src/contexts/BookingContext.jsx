@@ -21,6 +21,7 @@ import { statusFromPushResult, statusAfterPull, statusAfterError, statusAfterPus
 import { reconcileList, reconcileValue } from '../utils/stableState'
 import { todayStr } from '../utils/timeSlots'
 import { markCreatedHere } from '../utils/newBookingAlerts'
+import { seatErrorText, withFriendlyErrors } from '../utils/seatErrorText'
 import { useAuth } from './AuthContext'
 import { useToast } from '../components/ui/Toast'
 import { formatBookingTables } from '../utils/bookingTables'
@@ -271,7 +272,7 @@ export function BookingProvider({ children }) {
       setCloudStatus(s => statusAfterPushError(s, err.message, 'cloud-push-failed'))
       // 搶桌 409：回傳店員看得懂的文案（哪一桌、哪一組要重新帶位），並立刻拉雲端自癒。
       if (err?.tableStealConflict) { pullCloud(); return { ok: false, error: err.tableStealMessage || err.message, tableSteals: err.tableSteals } }
-      return { ok: false, error: err.message || 'cloud-push-failed' }
+      return { ok: false, error: seatErrorText(err.message || 'cloud-push-failed'), rawError: err.message || 'cloud-push-failed' }
     }
   }, [refresh, pullCloud])
 
@@ -1011,7 +1012,9 @@ export function BookingProvider({ children }) {
     fixtures: settings.floorPlan?.fixtures,
     zones: settings.floorPlan?.zones || [],
     backgroundImages: settings.floorPlan?.backgroundImages,
-    assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, clearTable, releaseCheckedOutTables, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, undoWalkInSeat, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, undoSeatedMove, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
+    // 入座／換桌／復原類動作：失敗時 error 換成店員看得懂的句子（原文在 rawError；ok／code 不動），見 utils/seatErrorText。
+    ...withFriendlyErrors({ assignBookingToTable, assignBookingTablesMulti, seatBooking, seatBookingAllTables, undoSeatPreassigned, assignAndSeatBooking, undoSeatBooking, reseatBookingTables, checkoutBooking, undoCheckoutBooking, finalizeBooking, undoClearTable, cancelBooking, undoCancelBooking, walkInSeat, walkInSeatMulti, undoWalkInSeat, moveTable, replacePendingBookingTables, replaceSeatedBookingTables, undoSeatedMove }),
+    clearTable, releaseCheckedOutTables, findSuitableTables, suggestTable, suggestTableCombo, findReserveCandidates, preassignableTables,
     completeWithoutSeating, undoCompleteWithoutSeating,
     preassignBookingTable, preassignBookingTables, clearBookingPreassign,
     releaseOverriddenAssignment, restoreOverriddenAssignment, undoAssignBooking,

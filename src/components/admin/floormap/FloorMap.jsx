@@ -5,7 +5,7 @@ import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr, formatDate } from '../../../utils/timeSlots'
 import { overdueMinOf } from '../../../utils/bookingPulse'
 import { assignmentKind, diningTablePresentation } from '../../../utils/tableStatus'
-import { GROUP_HOLD_COLOR } from './statusColors'
+import { GROUP_HOLD_COLOR, FOCUS_RING } from './statusColors'
 import { useDeviceFlag, MAP_ROT180_KEY_PREFIX } from '../../../utils/devicePrefs'
 
 // 「到了」一鍵入座的出現窗：訂位時間前 60 分 ~ 後 60 分。寫成具名常數方便日後調整。
@@ -405,7 +405,9 @@ export default function FloorMap({
       className="block"
 
     >
-      <style>{`g[role="button"]:focus { outline: none; } g[role="button"]:focus > rect { stroke: #111827; stroke-width: 5; stroke-dasharray: 3 2; }`}</style>
+      {/* 焦點環只在鍵盤操作（:focus-visible）時顯示，畫在桌外圈的獨立 rect（TableShape 的 FocusRing），不改桌本體邊框——
+          所以最後一張被點的桌不會再被黑色點線蓋掉「選中」樣式（B3）。色值來自 statusColors.FOCUS_RING。 */}
+      <style>{`g[role="button"]:focus { outline: none; } g[role="button"]:focus-visible > .table-focus-ring { opacity: 1; stroke: ${FOCUS_RING.color}; stroke-dasharray: ${FOCUS_RING.dash}; }`}</style>
       {/* 樓層浮水印已移除（2026-10-17：留白縮到 16 後會疊在牆與醬料台上；樓層看頂列 1F／2F 切換） */}
 
       {/* 設施標示（桌位底下） */}

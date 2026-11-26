@@ -1,5 +1,6 @@
 import { toastWaitlistSeat } from '../../utils/waitlistSeatToast'
 import HandoffPanel from './ops/HandoffPanel'
+import SyncStatusPill from '../layout/SyncStatusPill'
 import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import FloorMap from './floormap/FloorMap'
@@ -1392,6 +1393,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         {/* 樓層切換已移到右欄地圖卡片頂端（FloorTabs，2026-10-17）：選桌時眼睛和手都在地圖上 */}
 
         {/* 視圖切換：桌況（SVG 即時圖）｜排程（每桌當日 turns）。帶位模式中隱藏，避免在排程視圖操作。 */}
+        <SyncStatusPill />
         {!mode && !reserveOpen && (
           <SegmentedControl
             className="flex-none max-md:w-full max-md:mb-1 max-md:[&>button]:flex-1"
