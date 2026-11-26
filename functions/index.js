@@ -31,7 +31,6 @@ import {
 import {
   normalizeOnlineGuardSettings,
   isOverAutoCloseThreshold,
-  isPastSessionCutoff,
 } from './lib/onlineGuards.js'
 import {
   roleCan,

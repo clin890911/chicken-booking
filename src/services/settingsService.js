@@ -24,7 +24,7 @@ const DEFAULT = {
   // 線上訂位防線（只擋線上客人端，店員後台/現場不受影響；★ 與 functions 白名單成對）：
   onlineAutoCloseEnabled: false,   // 滿座門檻自動關閉（預設關，後台開啟後生效）
   onlineAutoClosePercent: 80,      // 已訂達總容量 N% 即關閉該時段線上訂位（clamp 50–100）
-  onlineSessionCutoffMin: 0,       // 場次開始前 X 分鐘停止線上訂位（0 = 不啟用，clamp 0–720）
+  onlineSessionCutoffMin: 0,       // 已停用：線上訂位改由「抵達前 2 小時」控制（guestReliability），只為相容雲端舊資料保留
   // 固定場次（批次）：地圖時間軸與「關閉整場次」依此；店家可在後台增刪。
   seatings: [
     { id: 'lunch1', name: '午餐第一批', start: '11:00', end: '12:30' },
