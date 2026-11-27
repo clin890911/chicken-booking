@@ -17,7 +17,7 @@
 //   - 字級啟發式改用 min(w,h)：自由縮放後 h 不再恆為 75。
 import { memo } from 'react'
 import { seatedMinutes, seatedElapsedLabel, stageOf } from '../../../utils/diningStage'
-import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL, SELECTION_STYLE, FOCUS_RING } from './statusColors'
+import { STATUS_COLOR, GROUP_HOLD_COLOR, PREASSIGN_COLOR, DINING_STAGE_FILL, SELECTION_STYLE, FOCUS_RING, COMBO_STYLE } from './statusColors'
 import { Check, TriangleAlert } from 'lucide-react'
 
 // 配色層級「可坐醒目 vs 佔用降噪」（2026-07 依店家反饋反轉 PR#52）：
@@ -66,6 +66,21 @@ function SelectedBadge({ x, y, w, h, rot }) {
   )
 }
 
+// 併桌同組小標（2026-11-27 C 包）：桌框上緣置中的小膠囊「王・併」，一半在桌外（島內上下間距 15 unit，凸出 9 不碰鄰桌）、
+// 一半壓在桌框上緣——不蓋桌號與桌面填色（status 色語義不變）。放在反旋的文字群組裡，桌子旋轉時字維持水平。
+function ComboTag({ label, cx, y }) {
+  const fs = 13
+  const textW = [...label].reduce((w, c) => w + (/[\u2E80-\uFFFF]/.test(c) ? fs : fs * 0.6), 0)
+  const pw = textW + 10, ph = 17
+  return (
+    <g data-combo-tag={label} pointerEvents="none">
+      <rect x={cx - pw / 2} y={y - 9} width={pw} height={ph} rx={8.5}
+            fill={COMBO_STYLE.pillFill} stroke={COMBO_STYLE.pillStroke} strokeWidth={1.2} />
+      <text x={cx} y={y + 4} fontSize={fs} fontWeight={800} fill={COMBO_STYLE.pillText} textAnchor="middle">{label}</text>
+    </g>
+  )
+}
+
 // React.memo（見檔尾）：FloorMap 一層 50+ 張桌，任何一張桌變動都會讓 FloorMap 重繪；
 // memo 後 props 沒變的桌直接跳過（FloorMap 端已保證 onClick / table / settings 參考穩定）。
 function TableShape({
@@ -92,6 +107,8 @@ function TableShape({
   outClickable = false,        // 僅現場即時圖開啟：點維修桌可開抽屜「結束維修」；規劃/統一視圖維持不可點
   zoneColor = null,            // 分區色（依 zoneId 解析）：只在左上角畫小圓點，不蓋 status 填色
   presentation = null,
+  comboTag = '',               // 今日即時圖：併桌同組小標（「王・併」，見 utils/comboTables）；空字串＝不是併桌
+  comboWith = '',              // 今日即時圖：同組其他桌號（「110、113」），併進讀屏名
   onClick,
 }) {
   const { x, y, w, h, capacity, status, isActive, number } = table
@@ -105,7 +122,7 @@ function TableShape({
     role: 'button', tabIndex: interactive ? 0 : -1,
     'aria-disabled': !interactive || undefined,
     'aria-pressed': isSelected || planState === 'selected',
-    'aria-label': `${number}桌，${capacity}人，${stateLabel}${presentation?.availabilityLabel ? `，${presentation.availabilityLabel}` : ''}${presentation?.unavailableReason ? `，${presentation.unavailableReason}` : ''}`,
+    'aria-label': `${number}桌，${capacity}人，${stateLabel}${presentation?.availabilityLabel ? `，${presentation.availabilityLabel}` : ''}${presentation?.unavailableReason ? `，${presentation.unavailableReason}` : ''}${comboWith ? `，與 ${comboWith} 併桌` : ''}`,
     onKeyDown: (event) => {
       if (interactive && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault(); onClick(event)
@@ -301,6 +318,7 @@ function TableShape({
             fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={strokeDash} />
       {zoneDot}
       {isSelected && <g transform={textTransform}><SelectedBadge x={x} y={y} w={w} h={h} rot={rot} /></g>}
+      {comboTag && <g transform={textTransform}><ComboTag label={comboTag} cx={cx} y={y} /></g>}
 
       <g transform={textTransform}>
         {status === 'reserved' ? (

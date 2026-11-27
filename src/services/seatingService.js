@@ -12,6 +12,7 @@ import { isTableUsableOnDate, normalizeOutage } from '../utils/tableAvailability
 import { groupTableNumbers, CAPACITY_EXCLUDED_STATUSES, overlappingBookedTables, assignmentWindow, bookingOverlapsWindow, occupancyMinutes, rangesOverlap, lockKindFor, preassignConflicts, squeezeSeats, SQUEEZE_PER_TABLE } from '../utils/capacity'
 import { seatedMoveWarningSignature } from '../utils/seatedMoveWarnings'
 import { buildGroupHolds } from '../utils/groupLive'
+import { preferFloorFirst, preferFloorCombo } from '../utils/floorPreference'
 import { todayStr, nowSlot, formatDate } from '../utils/timeSlots'
 
 // === 停用/維修守門（service 層底線；UI 防線會被新介面或程式呼叫繞過）===
@@ -1008,13 +1009,15 @@ export function timeConflictTableNumbers({ bookingId, date, timeSlot, mode = 'ho
 // opts（可選）＝{ bookingId, date, timeSlot, mode, now }：帶了就再排除「依佔用區間會撞桌」的桌
 //   （timeConflictTableNumbers）。建議桌、新增表單候選、訂位卡「建議桌 N」全部走這一條，不各算各的。
 //   只有「建議／候選」才帶 opts；現場指派/帶位的可點選集合一律不帶（不可縮小，預配/團保靠警示＋勾選解鎖）。
+// opts.preferFloor（2026-11-27 C 包）：店員目前看的樓層——容量合適的前提下排前面（utils/floorPreference，排序偏好不是硬限制）。
 export function findSuitableTables(partySize, opts = null) {
   const today = opts?.now ? formatDate(opts.now) : todayStr()
   const conflicts = opts ? timeConflictTableNumbers(opts) : null
-  return tableService.listAll()
+  const sorted = tableService.listAll()
     .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && squeezeSeats([t]) >= partySize)
     .filter(t => !conflicts || !conflicts.has(String(t.number)))
     .sort(bySuitability(partySize))
+  return opts?.preferFloor ? preferFloorFirst(sorted, partySize, opts.preferFloor) : sorted
 }
 
 // 候選排序（findSuitableTables 與預配型候選共用）：浪費小 → 1F 優先 → 桌號
@@ -1060,18 +1063,19 @@ export function preassignableTables(partySize, { bookingId, date, timeSlot, now 
 // （timeConflictTableNumbers，與鎖桌型候選同一支 helper，只差 mode）。第一張＝建議桌。
 export function findPreassignCandidates(partySize, opts = {}) {
   const conflicts = timeConflictTableNumbers({ ...opts, mode: 'preassign' })
-  return preassignableTables(partySize, opts).filter(t => !conflicts.has(String(t.number)))
+  const list = preassignableTables(partySize, opts).filter(t => !conflicts.has(String(t.number)))
+  return opts?.preferFloor ? preferFloorFirst(list, partySize, opts.preferFloor) : list
 }
 
 // 幫一筆今日訂位挑桌（新增表單、現場新增面板、訂位卡「建議桌」、現場指派模式的建議）：
 // 依鎖桌時機（capacity.lockKindFor）分流 → { kind:'hold'|'preassign', tables }（已排序、第一張＝建議）。
 //   hold      ＝現在就鎖桌：此刻空桌、依鎖桌區間不撞他筆（findSuitableTables mode 'hold'）
 //   preassign ＝只預配：findPreassignCandidates
-export function findReserveCandidates(partySize, { bookingId, date, timeSlot, now = new Date() } = {}) {
+export function findReserveCandidates(partySize, { bookingId, date, timeSlot, now = new Date(), preferFloor = null } = {}) {
   const kind = lockKindFor({ date, timeSlot, now })
   const tables = kind === 'hold'
-    ? findSuitableTables(partySize, { bookingId, date, timeSlot, mode: 'hold', now })
-    : findPreassignCandidates(partySize, { bookingId, date, timeSlot, now })
+    ? findSuitableTables(partySize, { bookingId, date, timeSlot, mode: 'hold', now, preferFloor })
+    : findPreassignCandidates(partySize, { bookingId, date, timeSlot, now, preferFloor })
   return { kind, tables }
 }
 
@@ -1211,12 +1215,13 @@ export function suggestTableCombo(partySize, opts = {}) {
   const pool = tableService.listAll()
     .filter(t => isTableUsableOnDate(t, today) && t.status === 'vacant' && (Number(t.capacity) || 0) > 0)
     .filter(t => !conflicts.has(String(t.number)))
-  return suggestComboFromPool(pool, need)
+  return suggestComboFromPool(pool, need, { preferFloor: opts?.preferFloor || null })
 }
 
 // suggestTableCombo 的純函式核心：給定「可選桌池」與人數，挑最佳組合（規則同上，含擠一擠退路）。
 // 規劃頁「當日排位」用它對未來日的可選桌池（daySeatingPlan.assignableTables）出建議——不讀今日桌況。
-export function suggestComboFromPool(poolInput = [], partySize = 0) {
+// opts.preferFloor：目前樓層的組合桌數相同、座位最多多 2 席 → 優先（utils/floorPreference.preferFloorCombo）。
+export function suggestComboFromPool(poolInput = [], partySize = 0, { preferFloor = null } = {}) {
   const need = Math.max(0, Number(partySize) || 0)
   const pool = (poolInput || []).filter(t => (Number(t.capacity) || 0) > 0)
   const floors = [...new Set(pool.map(t => t.floor))]
@@ -1227,7 +1232,7 @@ export function suggestComboFromPool(poolInput = [], partySize = 0) {
         a.tableNumbers.length - b.tableNumbers.length ||
         a.effSeats - b.effSeats ||
         (a.floor === b.floor ? 0 : a.floor === '1F' ? -1 : 1))
-    return { best: enoughFloors[0] || null, perFloor }
+    return { best: preferFloorCombo(enoughFloors, preferFloor), perFloor }
   }
   const finish = (r, squeezed) => {
     const picked = pool.filter(t => r.tableNumbers.includes(String(t.number)))

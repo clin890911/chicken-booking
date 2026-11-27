@@ -83,3 +83,7 @@ export const SELECTION_STYLE = {
 
 // 鍵盤焦點環：只在 :focus-visible（鍵盤操作）出現，畫在桌外圈的獨立 rect 上，不蓋選中樣式的邊框。
 export const FOCUS_RING = { color: '#111827', width: 3, dash: '5 3', gap: 6 }
+
+// 併桌同組標示（2026-11-27 C 包，walkthrough #21）：中性石板灰，不借用任何桌況色（綠/藍/暖灰褐/琥珀/紅/紫）——
+// 小標只是「同一組」的身分，不是另一種桌況；連結線畫在桌子底下（只在桌與桌之間的空白露出），不蓋桌面填色。
+export const COMBO_STYLE = { link: '#475569', linkWidth: 5, linkOpacity: 0.45, linkDash: '1 9', pillFill: '#ffffff', pillStroke: '#475569', pillText: '#1e293b' }

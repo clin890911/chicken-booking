@@ -83,8 +83,10 @@ export function ToastProvider({ children }) {
     const t = { id, message, type, action, passive, placement: opts.placement || 'top' }
     // 擠掉最舊的：帶「復原」動作的那則例外——它是使用者唯一的反悔入口，
     // 被別的通知擠掉等於動作做不回來。真的滿了就讓新的那則排在後面自然輪替。
+    // 現場頁入座提示（passive seat）同時最多 1 則：新的取代舊的（2026-11-27 C 包，verify P2-4——iPad 直向
+    // 第 3 則會視覺蓋住頂列的「待清／候位」）。與復原欄「只留最近一筆」一致；其他提示不受影響。
     setToasts(list => {
-      const next = [...list, t]
+      const next = [...(passive ? list.filter(x => !(x.passive && x.placement === 'seat')) : list), t]
       if (next.length <= MAX_VISIBLE) return next
       const evictable = next.findIndex(x => !x.action)
       return evictable === -1 ? next : next.filter((_, i) => i !== evictable)
