@@ -24,6 +24,9 @@ import { formatPhone } from '../../../utils/phoneFormat'
 import EditBookingModal from '../../booking/EditBookingModal'
 import { X } from 'lucide-react'
 import GlyphText from '../../ui/GlyphText'
+import RiskAck, { RISK_ACK_TEXT } from '../ops/RiskAck'
+import { SEAT_PRIMARY, SEAT_SECONDARY } from '../ops/seatButtons'
+import { isQuickFixMove } from '../../../services/seatingService'
 
 // 點桌位後彈出的詳情 + 操作面板
 // 設計重點：操作不超過 2 下 tap，按鈕語意明確、避免誤觸
@@ -33,6 +36,14 @@ import GlyphText from '../../ui/GlyphText'
 const STATUS_PILL_BG = Object.fromEntries(
   Object.entries(STATUS_COLOR).map(([status, c]) => [status, c.badge])
 )
+
+// 用餐中桌的主鈕（C 包 #13）：入座未滿 5 分鐘＝多半是坐錯桌要換，主鈕是「換桌」、「客人已離席」降為次要；
+// 滿 5 分鐘照舊「客人已離席」為主。5 分鐘與改桌「原桌直接回空桌」同一支 isQuickFixMove（seatingService.QUICK_FIX_MOVE_MS），
+// 兩邊永遠同一條線：抽屜叫你換桌的那段時間，換過去原桌也正好會直接變回空桌。
+// 沒有換桌入口（onStartMove 未給）時一律離席為主。
+export function diningPrimaryAction(table, { canMove = true, now = new Date() } = {}) {
+  return canMove && isQuickFixMove(table, now) ? 'move' : 'checkout'
+}
 
 // 孤兒桌：桌況說「已預訂／用餐中」卻找不到對應訂位（訂位被刪掉或資料清理過），也不是團體桌。
 // ★ 為什麼要特別處理：下方所有動作鈕的渲染條件都要 booking（reserved/dining 兩段），孤兒桌會讓
@@ -129,7 +140,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
     if (!walkInForm.guests || walkInForm.guests < 1) return toast.error('請填人數')
     // 姓名選填：空白交給 walkInSeat 補「散客」（與現場帶位面板同口徑，不逼店員打字）
     const overridden = nowConflicts()
-    if (overridden.some(c => c.willRelease) && !walkInOverride) return toast.warning('請先勾選「我知道，仍要帶這桌」')
+    if (overridden.some(c => c.willRelease) && !walkInOverride) return toast.warning(`請先勾選「${RISK_ACK_TEXT}」`)
     const r = walkInSeat(table.number, { ...walkInForm, name: walkInForm.name.trim() })
     if (!r.ok) return toast.error('入座失敗：' + r.error)
     const releasedPreassigns = releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
@@ -489,7 +500,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
                 <button
                   onClick={() => onArriveReseat(preassign)}
                   aria-label={`${preassign.name} 到了，換桌入座`}
-                  className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
+                  className={`${SEAT_PRIMARY} mt-2 w-full text-sm`}
                 >
                   {preassign.name} 到了 · 換桌入座
                 </button>
@@ -497,7 +508,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             ) : (
               <button
                 onClick={handleSeatPreassigned}
-                className="mt-2 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
+                className={`${SEAT_PRIMARY} mt-2 w-full text-sm`}
               >
                 {preassign.name} 到了，入座 {table.number}
               </button>
@@ -513,7 +524,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
                 <button
                   onClick={() => onArriveReseat(b)}
                   aria-label={`${b.name} 到了，換桌入座`}
-                  className="mt-1.5 w-full min-h-[44px] bg-chicken-green text-white rounded-lg text-sm font-bold hover:opacity-90"
+                  className={`${SEAT_PRIMARY} mt-1.5 w-full text-sm`}
                 >
                   {b.name} 到了 · 換桌入座
                 </button>
@@ -574,11 +585,11 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
           )}
           {table.status === 'vacant' && !activeHold && !outToday && (
             <>
-              {perms.walkIn && <button onClick={() => setShowWalkIn(true)} className="btn-primary w-full">散客直接入座</button>}
+              {perms.walkIn && <button onClick={() => setShowWalkIn(true)} className={`${SEAT_PRIMARY} w-full`}>散客直接入座</button>}
               {canBlock && (
                 <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setShowBlock(true)} className="btn-secondary text-sm">設不可用</button>
-                  <button onClick={() => setShowOutage(true)} className="btn-secondary text-sm">維修停用</button>
+                  <button onClick={() => setShowBlock(true)} className={`${SEAT_SECONDARY} text-sm`}>設不可用</button>
+                  <button onClick={() => setShowOutage(true)} className={`${SEAT_SECONDARY} text-sm`}>維修停用</button>
                 </div>
               )}
             </>
@@ -586,38 +597,51 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
 
           {displayStatus === 'reserved' && booking && perms.seat && (
             <>
-              <button onClick={handleSeat} className="btn-primary w-full">客人到了 — 入座</button>
+              <button onClick={handleSeat} className={`${SEAT_PRIMARY} w-full`}>客人到了 — 入座</button>
               {/* 改桌：待到的訂位也能換桌（過去只有用餐中分支有「換桌」，鎖了桌就改不了）。
                   未到訂位使用整組人工選桌，原配桌保留至確認成功。 */}
               <button
                 onClick={onStartMove}
-                className="btn-secondary w-full text-sm min-h-[44px]"
+                className={`${SEAT_SECONDARY} w-full text-sm`}
               ><GlyphText>{`↔ 改桌（${booking.name} 換到別桌）`}</GlyphText></button>
 
               <button onClick={handleCancel} className="w-full text-sm rounded-xl font-bold py-3 bg-white border border-chicken-red/40 text-chicken-red hover:bg-chicken-red/5"><GlyphText>✕ 取消訂位</GlyphText></button>
             </>
           )}
 
-          {displayStatus === 'dining' && booking && perms.seat && (
-            <>
-              {/* 主要操作：漸進式 — 先進「等待清桌」，避免連點直接釋出髒桌 */}
-              <button onClick={handleCheckout} className="bg-orange-500 hover:opacity-90 text-white font-bold py-3 min-h-[44px] rounded-xl w-full">
-                客人已離席
-              </button>
-              {/* 次要：直接釋出（已清桌完成），降權重、較小較淡、保留 confirm */}
-              <button
-                onClick={handleFinalize}
-                className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
-              >
-                直接釋出（已清桌完成）
-              </button>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={onStartMove} className="btn-secondary text-sm disabled:opacity-45"><GlyphText>↔ 換桌</GlyphText></button>
+          {displayStatus === 'dining' && booking && perms.seat && (() => {
+            // 🔴 C 包驗收 F3：「換桌」固定在左、「客人已離席」固定在右，兩顆同尺寸並排；未滿／滿 5 分鐘只換強調樣式，
+            // 不交換位置——過去滿 5 分鐘時同一個位置的綠色大鈕會從「換桌」變成「客人已離席」，手指記住的位置按到另一個動作。
+            // 下方說明列、改人數、直接釋出也一律同位置（說明列兩種時間都佔一行，只換文字）。
+            const quick = diningPrimaryAction(table, { canMove: !!onStartMove }) === 'move'
+            return (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <button data-testid={quick ? 'drawer-primary' : 'drawer-move'} data-drawer-slot="move" onClick={onStartMove} disabled={!onStartMove}
+                    className={`${quick ? SEAT_PRIMARY : SEAT_SECONDARY} w-full min-h-[56px]`}>
+                    <GlyphText>↔ 換桌</GlyphText>
+                  </button>
+                  {/* 主要操作（滿 5 分）：漸進式 — 先進「等待清桌」，避免連點直接釋出髒桌 */}
+                  <button data-testid={quick ? 'drawer-checkout' : 'drawer-primary'} data-drawer-slot="checkout" onClick={handleCheckout}
+                    className={`${quick ? SEAT_SECONDARY : SEAT_PRIMARY} w-full min-h-[56px]`}>
+                    客人已離席
+                  </button>
+                </div>
+                <p data-testid="drawer-dining-hint" className="text-[11px] text-chicken-brown/60 text-center">
+                  {quick ? '剛入座未滿 5 分鐘：換桌後原桌直接回空桌' : '入座已滿 5 分鐘：換桌後原桌改為待清'}
+                </p>
                 {/* 用餐中加人／補過敏備註：原地改（只開放人數＋備註，桌位不動）；取代原本空殼的「訂單明細」 */}
-                <button onClick={() => setEditingBooking(true)} className="btn-secondary text-sm">改人數／備註</button>
-              </div>
-            </>
-          )}
+                <button onClick={() => setEditingBooking(true)} className={`${SEAT_SECONDARY} w-full text-sm`}>改人數／備註</button>
+                {/* 次要：直接釋出（已清桌完成），降權重、較小較淡、保留 confirm */}
+                <button
+                  onClick={handleFinalize}
+                  className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
+                >
+                  直接釋出（已清桌完成）
+                </button>
+              </>
+            )
+          })()}
 
           {/* 團體桌的清桌（含接下一梯）在 GroupTableSection 內處理 */}
           {table.status === 'cleaning' && !groupRef && (
@@ -643,8 +667,8 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
       {/* Walk-in Modal */}
       <Modal open={showWalkIn} onClose={() => setShowWalkIn(false)} title={`${table.number} · 散客入座`} footer={
         <>
-          <button onClick={() => setShowWalkIn(false)} className="btn-secondary px-4 py-2">取消</button>
-          <button onClick={handleWalkIn} disabled={walkInLocked} className="btn-primary px-4 py-2 disabled:opacity-40">確認入座</button>
+          <button onClick={() => setShowWalkIn(false)} className={SEAT_SECONDARY}>取消</button>
+          <button onClick={handleWalkIn} disabled={walkInLocked} className={SEAT_PRIMARY}>確認入座</button>
         </>
       }>
         <div className="space-y-3">
@@ -653,10 +677,7 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
               {walkInReleases.map(c => (
                 <div key={c.booking.id} className="text-sm font-bold text-chicken-red">{conflictLine(table.number, c, '入座')}</div>
               ))}
-              <label className="mt-1.5 flex items-center gap-2 text-xs font-bold text-chicken-red cursor-pointer">
-                <input type="checkbox" checked={walkInOverride} onChange={e => setWalkInOverride(e.target.checked)} className="w-4 h-4 accent-current" />
-                我知道，仍要帶這桌
-              </label>
+              <RiskAck checked={walkInOverride} onChange={setWalkInOverride} />
             </div>
           )}
           <Input label="姓名（選填）" value={walkInForm.name} onChange={e => setWalkInForm(f => ({ ...f, name: e.target.value }))} placeholder="散客" />

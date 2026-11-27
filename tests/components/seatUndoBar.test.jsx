@@ -127,3 +127,20 @@ describe('離開現場頁', () => {
     expect(bar().dataset.state).toBe('empty')
   })
 })
+
+describe('復原欄在工具列裡（toolbar）', () => {
+  it('同一行 → 左側分隔線＋內距；不改高度（h-11）', () => {
+    mount(false)
+    act(() => root.render(<ToastProvider><Probe /><div><button>放大視圖</button><SeatUndoBar toolbar /></div></ToastProvider>))
+    expect(bar().dataset.wrapped).toBe('false')
+    expect(bar().className).toMatch(/\bborder-l\b/)
+    expect(bar().className).toMatch(/\bpl-2\b/)
+    expect(bar().className).toMatch(/\bh-11\b/)
+  })
+  it('不在工具列（排程／摘要）→ 不加分組樣式', () => {
+    mount(false)
+    act(() => root.render(<ToastProvider><Probe /><div><button>x</button><SeatUndoBar /></div></ToastProvider>))
+    expect(bar().dataset.wrapped).toBeUndefined()
+    expect(bar().className).not.toMatch(/\bborder-l\b|\btop-2\b/)
+  })
+})

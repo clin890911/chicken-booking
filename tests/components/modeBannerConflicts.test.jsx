@@ -71,9 +71,9 @@ describe('ModeBanner：多桌警示嚴重度配色', () => {
     act(() => { root.render(<ModeBanner mode={multi} multiSeats={4} multiMaxSeats={5} multiWarnings={['107 已排給 16:30 王先生（4 位）· 時間不衝突，王先生 的排位保留']} multiWarningSevere={severe} multiWarningConfirmed={false} onConfirmWarning={() => {}} onCancel={() => {}} onConfirmMulti={() => {}} onClearSelection={() => {}} />) })
   }
   afterEach(() => { act(() => root?.unmount()); container?.remove() })
-  const box = () => [...container.querySelectorAll('label')].find(l => l.textContent.includes('知道了，仍用這桌')).parentElement
+  const box = () => [...container.querySelectorAll('label')].find(l => l.textContent.includes('我知道，仍要用這桌')).parentElement
 
-  it('只是提醒 → 黃底；仍要勾「知道了，仍用這桌」', () => {
+  it('只是提醒 → 黃底；仍要勾「我知道，仍要用這桌」', () => {
     render(false)
     expect(box().className).toContain('bg-amber-100')
     expect(box().querySelector('input[type="checkbox"]').checked).toBe(false)

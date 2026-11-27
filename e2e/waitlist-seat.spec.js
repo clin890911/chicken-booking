@@ -37,9 +37,9 @@ test('管理端：現場頁內 取號 → 叫號 → 入座（人工選桌確認
   await expect(page.getByText(/候位入座：陳先生/)).toBeVisible()
 
   // 讀建議桌號 → 點該桌 → 人工選桌確認 → 入座成功
-  const suggestChip = page.getByText(/^建議\s*(?:\d+F・)?\d+/)
+  const suggestChip = page.getByTestId('mode-apply-suggestion')  // C 包：建議桌只放「用建議桌 1F・N」鈕（不再另寫一行「建議 …（自行選桌）」）
   await expect(suggestChip).toBeVisible()
-  const tableNo = ((await suggestChip.textContent()).match(/建議\s*(?:\d+F・)?(\d+)/) || [])[1]
+  const tableNo = ((await suggestChip.textContent()).match(/用建議桌\s*(?:\d+F・)?(\d+)/) || [])[1]
   expect(tableNo).toBeTruthy()
 
   await page.locator(`[data-table-number="${tableNo}"]`).first().click()

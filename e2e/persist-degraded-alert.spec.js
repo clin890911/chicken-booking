@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickDefaultWalkinGuests } from './helpers/opsWalkin'
 import { FIREBASE_STUB } from './helpers/firebaseStub.js'
 
 // 「同步基準線落不了地」的主動警示（PR #109 後半段）。
@@ -87,7 +88,8 @@ test.beforeEach(async ({ page }) => {
 async function loginToOnsite(page) {
   await page.goto('/admin')
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
-  await expect(page.getByRole('button', { name: /還差桌位/ })).toBeVisible()
+  await pickDefaultWalkinGuests(page) // 載入時人數未選（C 包驗收 F7）→ 補點 2 位，確認鈕才是「請先選桌」
+  await expect(page.getByRole('button', { name: /請先選桌/ })).toBeVisible()
 }
 
 test('同步基準線寫不進 localStorage 時，現場頁會主動跳 toast 警示', async ({ page }) => {
@@ -97,7 +99,7 @@ test('同步基準線寫不進 localStorage 時，現場頁會主動跳 toast �
   await expect(page.getByText(TOAST_TEXT)).toBeVisible({ timeout: 15_000 })
 
   // 人在現場頁時就看得到——不必先切到設定頁才會知道出事。
-  await expect(page.getByRole('button', { name: /還差桌位/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /請先選桌/ })).toBeVisible()
 
   // 確認真的是那把 key 被擋、其餘 localStorage 照常運作（否則測到的是「整個 app 存不了東西」）
   const state = await page.evaluate(k => localStorage.getItem(k), SYNC_STATE_KEY)

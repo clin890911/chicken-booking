@@ -61,10 +61,10 @@ test('管理端：登入 → 指派桌位（人工選桌確認）→ 指派成�
   await expect(page.getByText(/指派桌位：王大明\s*4\s*位/)).toBeVisible()
 
   // 4) 讀出系統建議桌號（💡 建議 N）
-  const suggestChip = page.getByText(/^建議\s*(?:\d+F・)?\d+/)
+  const suggestChip = page.getByTestId('mode-apply-suggestion')  // C 包：建議桌只放「用建議桌 1F・N」鈕（不再另寫一行「建議 …（自行選桌）」）
   await expect(suggestChip).toBeVisible()
   const chipText = await suggestChip.textContent()
-  const tableNo = (chipText.match(/建議\s*(?:\d+F・)?(\d+)/) || [])[1]
+  const tableNo = (chipText.match(/用建議桌\s*(?:\d+F・)?(\d+)/) || [])[1]
   expect(tableNo).toBeTruthy()
 
   // 5) 點該桌（SVG 內 <g> 含桌號文字）→ 進入待確認預覽（A6 二步）
@@ -88,8 +88,8 @@ test('管理端：09:00 指派 18:00 的訂位 → 只預配（確認句／toast
   await page.getByRole('button', { name: '指派桌位' }).click()
   await expect(page.getByText(/指派桌位：王大明\s*4\s*位/)).toBeVisible()
   await expect(page.getByText('預配 · 桌子先不鎖')).toBeVisible()
-  const chipText = await page.getByText(/^建議\s*(?:\d+F・)?\d+/).textContent()
-  const tableNo = (chipText.match(/建議\s*(?:\d+F・)?(\d+)/) || [])[1]
+  const chipText = await page.getByTestId('mode-apply-suggestion').textContent()
+  const tableNo = (chipText.match(/用建議桌\s*(?:\d+F・)?(\d+)/) || [])[1]
 
   await page.locator(`svg g:has(:text-is("${tableNo}"))`).first().click()
   await expect(page.getByText(`已選：${tableNo}`)).toBeVisible()

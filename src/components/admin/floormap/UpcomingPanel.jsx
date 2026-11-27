@@ -25,6 +25,7 @@ import GroupBatchRow from '../ops/GroupBatchRow'
 import GroupTodayCard from '../ops/GroupTodayCard'
 import GroupSheet from '../group/GroupSheet'
 import { ArrowLeftRight, Phone, X } from 'lucide-react'
+import { SEAT_PRIMARY, SEAT_SECONDARY } from '../ops/seatButtons'
 
 
 // 搜尋口徑（姓名／電話／桌號；團體：旅行社／導遊／桌號）見 utils/todayTimeline.matchesTimelineQuery
@@ -34,10 +35,10 @@ import { ArrowLeftRight, Phone, X } from 'lucide-react'
 function QuickAssignButtons({ b, quick, onQuickAssign, onAssignTable, outline = false, withPick = true }) {
   return <>
     <button onClick={() => onQuickAssign?.(b)} aria-label={`${b.name} 指派 ${quick.table}`}
-      className={`px-3 min-h-[44px] rounded-md text-xs font-bold ${outline ? 'border border-chicken-red/50 text-chicken-red' : 'bg-chicken-red text-white'}`}>
+      className={outline ? `${SEAT_SECONDARY} !px-3 text-xs` : `${SEAT_PRIMARY} !px-3 text-xs`}>
       {quick.lockKind === 'preassign' ? '預配' : '指派'} {quick.table}
     </button>
-    {withPick && <button onClick={() => onAssignTable?.(b)} aria-label={`${b.name} 到地圖選別桌`} className="px-3 min-h-[44px] border rounded-md text-xs font-bold text-chicken-brown/70">選桌</button>}
+    {withPick && <button onClick={() => onAssignTable?.(b)} aria-label={`${b.name} 到地圖選別桌`} className={`${SEAT_SECONDARY} !px-3 text-xs`}>選桌</button>}
   </>
 }
 
@@ -131,24 +132,24 @@ function BookingCard({ b, now, kind, reseat = false, quick = null, onQuickAssign
       </div>
 
       <div className="mt-2 flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
-        {showReseat ? <button onClick={() => onArriveSeat(b)} aria-label={`${b.name} 到了，換桌入座`} title={`預配 ${tableLabel} 此刻有別組：選一張空桌，確認即入座`} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">到了 · 換桌入座</button>
-          : showSeat ? <button onClick={() => onSeat?.(b)} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">客人到了</button>
+        {showReseat ? <button onClick={() => onArriveSeat(b)} aria-label={`${b.name} 到了，換桌入座`} title={`預配 ${tableLabel} 此刻有別組：選一張空桌，確認即入座`} className={`${SEAT_PRIMARY} !px-3 text-xs`}>到了 · 換桌入座</button>
+          : showSeat ? <button onClick={() => onSeat?.(b)} className={`${SEAT_PRIMARY} !px-3 text-xs`}>客人到了</button>
           : showArriveSeat ? <>
-            <button onClick={() => onArriveSeat(b)} aria-label={`${b.name} 到了，選桌入座`} className="px-3 min-h-[44px] bg-chicken-green text-white rounded-md text-xs font-bold">到了 · 選桌入座</button>
+            <button onClick={() => onArriveSeat(b)} aria-label={`${b.name} 到了，選桌入座`} className={`${SEAT_PRIMARY} !px-3 text-xs`}>到了 · 選桌入座</button>
             {quick ? <QuickAssignButtons b={b} quick={quick} onQuickAssign={onQuickAssign} onAssignTable={onAssignTable} outline withPick={false} />
-              : <button onClick={() => onAssignTable?.(b)} className="px-3 min-h-[44px] border border-chicken-red/50 text-chicken-red rounded-md text-xs font-bold">指派桌位</button>}
+              : <button onClick={() => onAssignTable?.(b)} className={`${SEAT_SECONDARY} !px-3 text-xs`}>指派桌位</button>}
           </>
           : showAssign ? (quick ? <QuickAssignButtons b={b} quick={quick} onQuickAssign={onQuickAssign} onAssignTable={onAssignTable} />
-            : <button onClick={() => onAssignTable?.(b)} className="px-3 min-h-[44px] bg-chicken-red text-white rounded-md text-xs font-bold">指派桌位</button>) : null}
+            : <button onClick={() => onAssignTable?.(b)} className={`${SEAT_PRIMARY} !px-3 text-xs`}>指派桌位</button>) : null}
         {/* 2026-10-17 卡片減量（Barry：按鈕太多、「客人到了」和「已完成」看起來一樣）：
             第一層只留「聯絡＋主動作（客人到了／到了·選桌入座／指派）＋更多＋詳情」。
             「已完成」改名「補登：來過、已吃完」收進更多——它是事後補登（客人沒按入座就吃完走了），
             不是「到了」，放第一層會被當成同義鈕誤按。No-show 的「先聯絡」提醒已在確認框裡，選單不再重複。 */}
         {/* 第一排第二顆＝「改桌」（2026-10-17：撥號還沒接、到店最常做的是換桌）。聯絡改收進更多。 */}
         {canMove && <button type="button" aria-disabled={isCombo ? 'true' : undefined} onClick={() => isCombo ? onMoveBlocked?.() : onMoveTable(b)} title={isCombo ? MOVE_COMBO_REASON : `重新選擇桌位（目前${preassigned ? '預配' : ''} ${tableLabel}）`}
-          className={`inline-flex items-center gap-1 min-h-[44px] px-3 border rounded-md text-xs font-bold ${isCombo ? 'text-chicken-brown/40' : 'text-chicken-brown'}`}><ArrowLeftRight size={14} strokeWidth={2.4} aria-hidden="true" className="shrink-0" />改桌</button>}
+          className={`${SEAT_SECONDARY} !px-3 text-xs ${isCombo ? '!text-chicken-brown/40' : ''}`}><ArrowLeftRight size={14} strokeWidth={2.4} aria-hidden="true" className="shrink-0" />改桌</button>}
         {hasMenu ? <details data-popover>
-          <summary className="cursor-pointer list-none min-h-[44px] px-3 flex items-center rounded-md border text-xs" aria-label={`${b.name} 更多操作`}>⋯ 更多</summary>
+          <summary className={`${SEAT_SECONDARY} !px-3 text-xs cursor-pointer list-none`} aria-label={`${b.name} 更多操作`}>⋯ 更多</summary>
           {/* 浮出選單以「整張卡片」為定位基準（details 不設 relative）：左右貼齊卡片內距，
               垂直位置留在原本的流位置（top 不設）——不會往右溢出被側欄裁掉，也不會把下面的卡片推開 */}
           <div className="absolute left-3 right-3 z-20 mt-1 bg-white rounded-lg border shadow-lg p-1 flex flex-col" onKeyDown={e => { if (e.key === 'Escape') { const el = e.currentTarget.closest('details'); el.open = false; el.querySelector('summary').focus() } }}>
@@ -197,8 +198,8 @@ function SeatedRow({ b, now, onOpenTable, onMoveTable, onEdit, perms }) {
       </div>
       <div className="mt-1.5 flex items-center gap-2 flex-wrap">
         {canMove && <button type="button" onClick={() => onMoveTable(b)} title="換到別桌"
-          className="inline-flex items-center gap-1 min-h-[44px] px-3 border rounded-md text-xs font-bold"><ArrowLeftRight size={14} strokeWidth={2.4} aria-hidden="true" />改桌</button>}
-        {canEdit && <button type="button" onClick={() => onEdit(b)} className="min-h-[44px] px-3 border rounded-md text-xs font-bold">改人數／備註</button>}
+          className={`${SEAT_SECONDARY} !px-3 text-xs`}><ArrowLeftRight size={14} strokeWidth={2.4} aria-hidden="true" />改桌</button>}
+        {canEdit && <button type="button" onClick={() => onEdit(b)} className={`${SEAT_SECONDARY} !px-3 text-xs`}>改人數／備註</button>}
         {tables.length > 0 && <button type="button" onClick={() => onOpenTable(b)} className="min-h-[44px] px-2 text-xs text-chicken-brown/60">桌況 ›</button>}
       </div>
     </div>

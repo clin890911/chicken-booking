@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickDefaultWalkinGuests } from './helpers/opsWalkin'
 import { todayTab } from './helpers/opsToday'
 
 // 現場直接改單＋建議桌一鍵套用（2026-10 前台尖峰 A2／A3／A4）：
@@ -9,7 +10,7 @@ import { todayTab } from './helpers/opsToday'
 //   5) 未配桌訂位的「詳情 ›」開訂位詳情（過去點了沒反應）
 //   6) 帶位面板「用建議桌」：一下切到建議桌樓層並選好，按確認才入座
 //   7) 到了 · 選桌入座：「用建議桌」選好併桌組合（含切樓層），確認後整組入座
-//   8) 「用建議桌」選好後，那張桌才被別筆預配（時段重疊）→ 確認鈕鎖住，勾「仍要帶這桌」才解鎖（帶位面板＋選桌入座模式）
+//   8) 「用建議桌」選好後，那張桌才被別筆預配（時段重疊）→ 確認鈕鎖住，勾「仍要用這桌」才解鎖（帶位面板＋選桌入座模式）
 // 時間用 page.clock 固定、時區固定 Asia/Taipei；後台本機模式以 localStorage 為後端，攔截 admin* 雲端端點。
 
 test.use({ timezoneId: 'Asia/Taipei' })
@@ -45,6 +46,7 @@ async function loginToOps(page) {
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await pickDefaultWalkinGuests(page) // 載入時人數未選（C 包驗收 F7）→ 補點 2 位還原既有前提
 }
 
 const readState = (page) => page.evaluate(() => ({
@@ -245,7 +247,7 @@ async function preassignFromAnotherDevice(page, bookingId, tableNumber) {
   }, { bookingId, tableNumber })
 }
 
-test('帶位面板「用建議桌」後該桌被別筆預配（時段重疊）→ 確認入座鎖住，勾「仍要帶這桌」才解鎖', async ({ page }) => {
+test('帶位面板「用建議桌」後該桌被別筆預配（時段重疊）→ 確認入座鎖住，勾「仍要用這桌」才解鎖', async ({ page }) => {
   await page.clock.setFixedTime(at('11:40'))
   const CHEN = mkBooking({ id: 'E2E-ED-CHEN', name: '陳小姐', guests: 2, timeSlot: '12:30' })
   await seed(page, {
@@ -268,7 +270,7 @@ test('帶位面板「用建議桌」後該桌被別筆預配（時段重疊）�
   let { tables } = await readState(page)
   expect(tables.find(t => t.number === '201').status).toBe('vacant')
 
-  await page.getByLabel('我知道，仍要帶這桌').check()
+  await page.getByLabel('我知道，仍要用這桌').check()
   await expect(seat).toBeEnabled()
   await seat.click()
   ;({ tables } = await readState(page))
@@ -296,7 +298,7 @@ test('選桌入座「用建議桌」後其中一張被別筆預配（時段重�
   await expect(confirmBtn).toBeEnabled()
 
   await preassignFromAnotherDevice(page, CHEN.id, '201')
-  const ack = page.getByLabel('知道了，仍用這桌')
+  const ack = page.getByLabel('我知道，仍要用這桌')
   await expect(ack).toBeVisible()
   await expect(confirmBtn).toBeDisabled()
 

@@ -21,6 +21,8 @@ import BookingDetailSheet from '../booking/BookingDetailSheet'
 import { nextBookableSlot, pastSlotFix } from './ops/QuickReservePanel'
 import { convertNote, finishConvertedWaitlist } from '../../services/waitlistService'
 import { useBooking } from '../../contexts/BookingContext'
+import { PreferFloorContext } from '../../contexts/preferFloorContext'
+import { suggestionFloorHint } from '../../utils/floorPreference'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useRegisterSeatUndoSlot } from '../ui/seatUndoContext'
 import { useAuth } from '../../contexts/AuthContext'
@@ -51,6 +53,8 @@ import { isPhoneLayout, scrollContentTo, usePhoneLayout } from '../../utils/phon
 // 否則兩格同樣的藍會被讀成圖例畫錯。
 // 地圖卡片頂端的樓層大分頁（取代頂列的小分段控制）。目前樓層深色實心；另一層白底粗框。
 // nudge＝本層分頁數字是 0、另一層 >0 → 紅點＋輕微脈動提示切換（motion-safe 才動）；口徑同分頁上的數字。
+// suggest＝建議桌在這一層、但店員正看著另一層（C 包，walkthrough #18）：進選桌模式不再自動跳樓層，
+// 改在這一層的分頁上標「建議桌在 2F」，讓店員自己切（不脈動、不改分頁尺寸）。
 function FloorTabs({ floor, onChange, counts, className = '' }) {
   // 一顆膠囊切兩半（Barry 2026-10-17）：外框一圈、中間無縫；選中那半實心深色「滑塊」，另一半透明。
   return (
@@ -65,7 +69,8 @@ function FloorTabs({ floor, onChange, counts, className = '' }) {
                 : c.nudge ? 'text-chicken-brown ring-2 ring-inset ring-chicken-red motion-safe:animate-pulse'
                 : 'text-chicken-brown/70 hover:bg-chicken-brown/[0.06]'}`}>
             <span className="text-lg">{c.key}</span>
-            <span className={`text-sm tabular-nums ${active ? 'text-white/85' : 'text-chicken-brown/60'}`}>{c.label} {c.value}</span>
+            <span className={`text-sm tabular-nums ${active ? 'text-white/85' : 'text-chicken-brown/60'} ${c.suggest ? 'phone:hidden' : ''}`}>{c.label} {c.value}</span>
+            {c.suggest && <span data-testid="floor-suggest-hint" className="min-w-0 truncate px-2 py-0.5 rounded-full bg-chicken-brown text-white text-xs font-bold">建議桌在 {c.key}</span>}
             {c.nudge && <span aria-label={`另一層有${c.label}的桌`} className="absolute top-1 right-1.5 w-3 h-3 rounded-full bg-chicken-red" />}
           </button>
         )
@@ -267,7 +272,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const leftColRef = useRef(null)
   const mapCardRef = useRef(null)
   const [legendOpen, setLegendOpen] = useState(false) // 手機條件：圖例預設收合
-  const [mapInView, setMapInView] = useState(false)   // 手機條件：跳轉鈕要往下（桌況圖）還是往上（清單）
   const [mode, setMode] = useState(null)
   const modeSource = useRef(null)
   const waitlistSeatBusy = useRef(false)
@@ -306,7 +310,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // === 現場帶位 v3（順序不拘）===
   // 系統只需要「桌」和「人數」：先點桌或先選人數都行，兩者到齊由面板的滑動手勢入座。
   // 桌的真相放這裡（不放面板內），桌況圖與帶位面板共用同一份，避免兩邊各記一套。
-  const [walkinGuests, setWalkinGuests] = useState(2)
+  // 人數初值＝「未選」（0），與入座後歸零一致（C 包驗收 F7）：預選 2 位會讓第一組 4 位被當 2 位入座。
+  const [walkinGuests, setWalkinGuests] = useState(0)
   const [walkinTableNumbers, setWalkinTableNumbers] = useState([])
   // A2：帶位面板預設單選（點別張＝改選）；按「＋再加一桌（併桌）」才多選。沒有單桌坐得下時自動多選（walkinAutoMulti）。
   const [walkinMultiOn, setWalkinMultiOn] = useState(false)
@@ -315,6 +320,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 卸載，state 會消失；連續同型客人（一直來 2 位）才是這功能要救的情境。
   // 刻意不記姓名／電話——那是每組不同的資料，沿用會把上一組的客人資料掛到新客人身上。
   const [lastParty, setLastParty] = useState(null)
+  // 復原散客入座時要回填的表單（姓氏、稱謂、小孩、電話、店員備註；C 包驗收 F4）。面板讀到後呼叫 onRestored 清掉。
+  const [walkinRestore, setWalkinRestore] = useState(null)
   // 復原時要讀「當下」的訂位狀態（toast 的 onClick 閉包會抓到入座當時的舊值）
   const bookingsRef = useRef(bookings)
   const tablesRef = useRef(tables)
@@ -392,7 +399,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     // 可點選集合（suitable）不因他筆預配／團保縮小（那些走警示＋「將解除／會保留」）：
     //   hold＝此刻空桌；preassign＝桌子不必此刻空著，只要此刻的佔用不延續進預配區間
     const suitable = (lockKind === 'preassign' ? preassignableTables(1, reserveOpts) : findSuitableTables(1)).map(t => t.number)
-    const suggestion = findReserveCandidates(guests, reserveOpts).tables[0]
+    const suggestion = findReserveCandidates(guests, { ...reserveOpts, preferFloor: floor }).tables[0]
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { ...reserveOpts, mode: lockKind })
     startMultiMode({ kind: 'booking', booking, need: guests, lockKind, suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
   }
@@ -404,7 +411,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (!booking || booking.assignedTableId || !(Number(booking.guests) > 0)) return null
     const date = booking.date || todayStr()
     const lockKind = lockKindFor({ date, timeSlot: booking.timeSlot })
-    const n = findReserveCandidates(Number(booking.guests), { bookingId: booking.id, date, timeSlot: booking.timeSlot }).tables[0]?.number
+    const n = findReserveCandidates(Number(booking.guests), { bookingId: booking.id, date, timeSlot: booking.timeSlot, preferFloor: floor }).tables[0]?.number
     if (!n) return null
     const m = { type: 'assign', booking, lockKind, suitable: [n] }
     if (preassignConflictsFor(n, m).some(c => c.overlaps) || groupHoldTables[n]?.holds?.length) return null
@@ -439,7 +446,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 回傳 { tables, squeezed }：squeezed＝原席數湊不到、要擠一擠（每桌多坐 1 位）才坐得下的組合（橫幅照實標出）。
   const comboSuggestionFor = (need, suitable, opts) => {
     if (!(need > 0)) return { tables: [], squeezed: false }
-    const combo = suggestTableCombo(need, opts)
+    // 建議以店員目前看的樓層優先（容量合適的前提下；utils/floorPreference）
+    const combo = suggestTableCombo(need, { preferFloor: floor, ...opts })
     const nums = (combo?.enough ? combo.tableNumbers || [] : []).map(String)
     const pool = new Set((suitable || []).map(String))
     const ok = nums.length > 1 && nums.every(n => pool.has(n))
@@ -457,8 +465,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       suggestionSqueezed: !suggestion && sugTables.length > 1 && !!suggestionSqueezed, replacing, confirmedWarning: null })
     setSelectedTable(null)
     setPendingConfirm(null)
-    const suggestedTable = tables.find(t => String(t.number) === String(suggestion || sugTables[0]))
-    if (suggestedTable) setFloor(suggestedTable.floor)
+    // 不自動切到建議桌的樓層（C 包，walkthrough #18／verify P2-3）：維持店員目前看的樓層；
+    // 建議桌在別層時，樓層分頁標「建議桌在 2F」（suggestFloor），由店員自己切（或按「用建議桌」定位過去）。
   }
 
   // 「用建議桌」：切到建議桌樓層並選好（含併桌組合），店員再按確認。整組都仍可點（與手點同一個可選集合）才選；
@@ -485,7 +493,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (blockedByReserve()) return
     const guests = Number(wait.partySize) || 0
     const suitable = findSuitableTables(1).map(t => t.number)
-    const suggestion = suggestTable(guests, { date: todayStr(), mode: 'now' })
+    const suggestion = suggestTable(guests, { date: todayStr(), mode: 'now', preferFloor: floor })
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { date: todayStr(), mode: 'now' })
     startMultiMode({ kind: 'waitlist', wait, need: guests, suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
   }
@@ -508,7 +516,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   }
   const startArriveMode = (booking, guests, extra = {}) => {
     const suitable = findSuitableTables(1).map(t => t.number)
-    const suggestion = suggestTable(guests, { bookingId: booking.id, date: todayStr(), mode: 'now' })
+    const suggestion = suggestTable(guests, { bookingId: booking.id, date: todayStr(), mode: 'now', preferFloor: floor })
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { bookingId: booking.id, date: todayStr(), mode: 'now' })
     startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed, extra })
   }
@@ -516,7 +524,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const changeArriveNeed = (n) => {
     if (mode?.type !== 'assign-multi' || mode.kind !== 'arrive') return
     const guests = Math.max(1, Math.min(200, Math.floor(Number(n) || 1)))
-    const opts = { bookingId: mode.booking.id, date: todayStr(), mode: 'now' }
+    const opts = { bookingId: mode.booking.id, date: todayStr(), mode: 'now', preferFloor: floor }
     const suggestion = suggestTable(guests, opts)
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, mode.suitable, opts)
     const sugTables = suggestion ? [String(suggestion.number)] : combo.tables
@@ -822,6 +830,9 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         // 兩次都是同一個動作 → 不會同一張桌塞兩次、也不會加了又自己取消。
         setWalkinTableNumbers(prev => applyPick(prev, number, action))
         setSelectedTable(null) // 抽屜開著時也要退回帶位面板，選了什麼桌才看得見
+        // C 包 #11：手機上桌況圖在表單下方約 700px，點了桌確認鈕就在畫面外 → 單選選好一張就自動捲回確認鈕。
+        // 併桌（多選）還要再點別張，不捲；移除也不捲。iPad 一面式不受影響（isPhone 為假）。
+        if (isPhone && action !== 'remove' && !walkinMulti) walkinFooterScroll.current = true
         return
       }
       // D5：點散客待清桌＝就地快捷「清桌完成」（toast 上的鈕，不是放在桌上——桌子太小、鈕會壓到鄰桌）。
@@ -1192,6 +1203,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const note = restoreNote(restoreReleasedPreassigns(snap.releasedPreassigns, { restoreOverriddenAssignment }))
     setLastSeated(null)
     setWalkinTableNumbers(snap.tableNumbers || []) // 桌回到已選狀態，方便馬上改帶別組
+    if (snap.guests > 0) setWalkinGuests(snap.guests) // 人數也回來（C 包 #14 入座後人數歸零；復原＝回到按下入座前）
+    if (snap.form) setWalkinRestore({ ...snap.form, nonce: Date.now() }) // 姓氏、稱謂也回來（C 包驗收 F4）
     if ((snap.tableNumbers || []).length > 1) setWalkinMultiOn(true) // 併桌復原回來仍是多選，點桌才不會變成改選
     toast.info(`已復原：${snap.tableNumbers.join(' + ')} 回到空桌${note}`)
   }
@@ -1225,7 +1238,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const releasedPreassigns = releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
     const name = r.booking?.name || '散客'
     const guests = r.booking?.guests || payload.guests
-    const snap = { bookingId: r.booking?.id, tableNumbers: nums, name, guests, at: Date.now(), releasedPreassigns }
+    const snap = { bookingId: r.booking?.id, tableNumbers: nums, name, guests, at: Date.now(), releasedPreassigns, form: payload.form || null }
     setLastSeated(snap)
     // M6：供下一組一鍵沿用。只存店員手打的 staffNotes——payload.notes 還含著
     // 由電話帶出的「過敏：xxx」，沿用會把上一位客人的過敏資訊掛到新客人身上。
@@ -1332,6 +1345,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 紅點（nudge）＝跟分頁上「顯示的數字」同一個口徑（#194 收尾，2026-10-31）：本層顯示 0、另一層顯示 >0
   //   → 另一層亮紅點提示切換。以前紅點看選桌池、數字看 seatableNowTables，會出現「紅點亮著、旁邊寫可坐 0」
   //   （另一層只剩時段衝突的空桌：選得到、但不是現在就能坐）。紅點只在選桌情境（指派/改桌、帶位籤）出現。
+  // 選桌模式的建議桌（單桌或併桌組合）在別層 → 那一層的分頁標「建議桌在 2F」（不自動切樓層）
+  const suggestFloor = mode ? suggestionFloorHint(mode.suggestionTables?.length ? mode.suggestionTables : [mode.suggestion], tables, floor) : null
   const floorCounts = (() => {
     const selecting = mode?.suitable ? 'mode' : (!mode && !reserveOpen && railTab === 'walkin' && canWalkIn) ? 'walkin' : null
     const pool = selecting === 'mode' ? new Set((mode.suitable || []).map(String)) : null
@@ -1342,6 +1357,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     return ['1F', '2F'].map(f => ({
       key: f, value: shown(f), label, total: tables.filter(t => t.floor === f).length,
       nudge: !!selecting && f !== floor && shown(floor) === 0 && shown(f) > 0,
+      suggest: suggestFloor === f,
     }))
   })()
 
@@ -1362,6 +1378,13 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 關掉抽屜／結束選桌 → 回到開之前的位置（地圖上點的就回地圖、清單上點的就回清單）。
   // 舊位置在 render 當下記：layout effect 時左欄已換內容，scrollTop 可能已被瀏覽器夾掉。
   const phoneTask = !!mode || !!selectedTableObj
+  const walkinFooterScroll = useRef(false)
+  useLayoutEffect(() => {
+    if (!walkinFooterScroll.current) return
+    walkinFooterScroll.current = false
+    const footer = leftColRef.current?.querySelector('[data-rail-footer]')
+    if (footer) scrollContentTo(footer, { block: 'end', smooth: true, clear: 16 })
+  }, [walkinTableNumbers])
   const phoneTaskWas = useRef(false)
   const phoneScrollBefore = useRef(null)
   if (isPhone && phoneTask && !phoneTaskWas.current && phoneScrollBefore.current == null) {
@@ -1379,21 +1402,12 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (!phoneTask) phoneScrollBefore.current = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPhone, phoneTask, !!mode, selectedTable])
-  useEffect(() => {
-    if (!isPhone || typeof IntersectionObserver === 'undefined' || !mapCardRef.current) return undefined
-    // 桌況圖上緣進到畫面上半才算「看到了」，跳轉鈕才改成回清單
-    const io = new IntersectionObserver(([e]) => setMapInView(e.isIntersecting), {
-      root: opsRootRef.current?.closest('[data-testid="admin-content"]') || null,
-      rootMargin: '0px 0px -50% 0px',
-    })
-    io.observe(mapCardRef.current)
-    return () => io.disconnect()
-  }, [isPhone])
-  const jumpLabel = mapInView
-    ? (selectedTableObj ? '回桌位' : reserveOpen ? '回新增' : ({ walkin: '回帶位', upcoming: '回今日', waitlist: '回候位' }[railTab] || '回清單'))
-    : (showSummary ? '看摘要' : showSchedule ? '看排程' : '桌況圖')
-  const handleJump = () => {
-    if (!mapInView) return scrollContentTo(mapCardRef.current, { smooth: true })
+  // C 包 #11：跳轉鈕改成 in-flow（不再 fixed 浮在內容上——浮鈕蓋住第一張卡的「客人到了」與「1 位」「2 位」，
+  // elementFromPoint 取到的是浮鈕）。往下＝頂列裡的「↓ 桌況圖」；往上＝桌況圖正上方的「↑ 回帶位／回今日…」。
+  const jumpDownLabel = showSummary ? '看摘要' : showSchedule ? '看排程' : '桌況圖'
+  const jumpBackLabel = selectedTableObj ? '回桌位' : reserveOpen ? '回新增' : ({ walkin: '回帶位', upcoming: '回今日', waitlist: '回候位' }[railTab] || '回清單')
+  const jumpToMap = () => scrollContentTo(mapCardRef.current, { smooth: true })
+  const jumpBack = () => {
     // 帶位／新增已選好桌 → 直接回到確認鈕；其餘回清單頂
     const footer = !selectedTableObj && (reserveOpen ? reserveTable : (railTab === 'walkin' && walkinTableNumbers.length > 0))
       ? leftColRef.current?.querySelector('[data-rail-footer]') : null
@@ -1458,12 +1472,20 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         <div className="hidden short:block flex-none"><SyncStatusPill /></div>
         {/* 選桌模式中不給切（invisible＋inert），但照樣佔位：頂列高度不變 → 地圖尺寸在模式內外一樣（A1） */}
         {!reserveOpen && (
-          <div className={`flex-none max-md:w-full ${mode ? 'invisible' : ''}`} inert={mode ? '' : undefined} aria-hidden={mode ? 'true' : undefined}>
+          // 手機直向（< md）：跟「↓ 桌況圖」同一行（flex-1 撐滿剩餘寬），不另起一行吃高度
+          <div className={`flex-none max-md:flex-1 max-md:min-w-0 ${mode ? 'invisible' : ''}`} inert={mode ? '' : undefined} aria-hidden={mode ? 'true' : undefined}>
             <SegmentedControl
               className="flex-none max-md:w-full max-md:mb-1 max-md:[&>button]:flex-1"
               options={[{ key: 'map', label: '地圖' }, { key: 'summary', label: '摘要' }, { key: 'schedule', label: '排程' }]}
               value={view} onChange={setView} ariaLabel="現場視圖" />
           </div>
+        )}
+        {/* 手機：往下跳到桌況圖（in-flow，C 包 #11）。iPad display:none、不佔位（統計列不受影響） */}
+        {!mode && (
+          <button type="button" data-testid="ops-phone-jump" onClick={jumpToMap}
+            className="hidden phone:inline-flex flex-none items-center justify-center gap-1 min-h-[44px] px-4 rounded-full bg-chicken-brown text-white text-sm font-bold">
+            <ArrowDown size={16} strokeWidth={2.4} aria-hidden="true" />{jumpDownLabel}
+          </button>
         )}
 
         {/* 「編輯佈局」與登入者已移出頂列（2026-10-17 精簡）：佈局改從 設定 → 現場與桌位 → 桌位佈局 進入；
@@ -1494,7 +1516,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               {mode.booking?.assignedTableId && <p>原桌：{[mode.booking.assignedTableId, ...(mode.booking.extraTableIds || [])].join(' + ')}（確認成功前保留）</p>}
               <p>目標桌：{(mode.selected?.length ? mode.selected.join(' + ') : pendingConfirm) || '尚未選桌'}</p>
               {mode.booking?.status === 'arrived' && <p className="text-sm text-chicken-brown/60">{moveSourceNote(mode.booking, tables)}</p>}
-              <button type="button" className="tap min-h-[44px] px-4 rounded-lg border" onClick={cancelModeAndNotify}>取消並返回</button>
+              {/* 取消只留橫幅上那一顆（C 包 #17：過去這裡還有一顆「取消並返回」，同一件事兩顆鈕） */}
             </div>
           ) : selectedTableObj ? (
             <TableDrawer
@@ -1514,6 +1536,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           ) : null}
           <div hidden={!!mode || !!selectedTableObj} aria-hidden={!!mode || !!selectedTableObj} inert={mode || selectedTableObj ? '' : undefined} style={mode || selectedTableObj ? { display: 'none' } : undefined} className="flex-1 min-h-0 phone:flex-none flex flex-col">
             <HandoffPanel onLocate={n=>{const t=tables.find(t=>String(t.number)===String(n));if(t)setFloor(t.floor);setSelectedTable(n)}}/>
+            {/* 帶位表單的建議桌以目前樓層優先（PreferFloorContext → useBooking().suggestTable 帶 preferFloor；C 包 #18） */}
+            <PreferFloorContext.Provider value={floor}>
             <OpsRail
               suspended={!!mode || !!selectedTableObj}
               activeTab={railTab}
@@ -1531,6 +1555,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               walkinWarning={walkinWarning}
               onWalkinSeat={handleWalkinSeat}
               lastParty={lastParty}
+              walkinRestore={walkinRestore}
+              onWalkinRestored={() => setWalkinRestore(null)}
               onLocateSuggestion={locateSuggestion}
               onApplySuggestion={applyWalkinSuggestion}
               showNextWaitlist={waitlistNext && waitlist.some(w => ['waiting', 'called'].includes(w.status))}
@@ -1576,9 +1602,17 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 setSelectedTable(n)
               }}
             />
+            </PreferFloorContext.Provider>
           </div>
         </div>
 
+        {/* 手機：桌況圖正上方的「↑ 回帶位／回今日…」（in-flow，C 包 #11）。iPad display:none → 不佔格線的格子 */}
+        {!mode && (
+          <button type="button" data-testid="ops-phone-jump-back" onClick={jumpBack}
+            className="hidden phone:inline-flex justify-self-start items-center gap-1 min-h-[44px] px-4 rounded-full border-2 border-chicken-brown/20 bg-white text-chicken-brown text-sm font-bold">
+            <ArrowUp size={16} strokeWidth={2.4} aria-hidden="true" />{jumpBackLabel}
+          </button>
+        )}
         {/* 右欄：桌況（地圖 SVG／摘要／排程）。高度填滿剩餘空間，SVG 自動縮放 */}
         {/* 手機橫向（short）地圖視圖：樓層鈕放左、地圖放右，整張卡片塞得進一個畫面（上下疊會比視窗高） */}
         <div ref={mapCardRef} data-testid="ops-map-card" className={`bg-white rounded-xl border border-chicken-brown/10 p-2 sm:p-3 h-full min-h-[260px] phone:h-auto phone:min-h-0 overflow-hidden flex flex-col ${!showSchedule && !showSummary ? 'short:grid short:grid-cols-[140px_minmax(0,1fr)] short:gap-x-2 short:items-start' : ''}`}>
@@ -1636,7 +1670,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 // 入座復原欄：工具列右端固定保留（取代工程師文案「Tab 選桌…」）。basis-0＋min-w：iPad 橫向接在按鈕右邊；
                 // iPad 直向／手機放不下就整個換到工具列第二行、撐滿寬度——不論有沒有內容都佔同一個位置與高度，零位移。
                 // 手機選桌模式中收起（桌況圖要留給選桌；模式中不會產生新的復原，確認後模式結束它就回來）。
-                toolbarEnd={<SeatUndoBar className={`flex-1 basis-0 min-w-[160px] ml-auto ${mode ? 'phone:hidden' : ''}`} />}
+                // toolbar：和「放大視圖／轉向」至少隔 16px（同一行＝分隔線＋內距；換到第二行＝下移 8px），不改工具列高度（C 包 P2-1）
+                toolbarEnd={<SeatUndoBar toolbar className={`flex-1 basis-0 min-w-[160px] ml-auto ${mode ? 'phone:hidden' : ''}`} />}
                 locateTableNumber={locateTableRequest?.number}
                 locateRequestId={locateTableRequest?.seq || 0}
                 tablePresentation={tablePresentation}
@@ -1707,16 +1742,6 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
         </div>
       )}
 
-
-      {/* 手機條件：帶位表單到桌況圖相隔約 700px → 浮動跳轉鈕（清單 ⇄ 桌況圖）。固定在底部導覽上方、不佔版面；
-          放左下：卡片的動作鈕都在右側，不擋。選桌模式桌況圖已在最上面，不需要。 */}
-      {!mode && (
-        <button type="button" data-testid="ops-phone-jump" onClick={handleJump}
-          className="hidden phone:inline-flex fixed left-3 z-20 items-center gap-1 min-h-[44px] px-4 rounded-full bg-chicken-brown text-white text-sm font-bold shadow-lg bottom-[calc(env(safe-area-inset-bottom)+76px)] short:bottom-[calc(env(safe-area-inset-bottom)+60px)]">
-          {mapInView ? <ArrowUp size={16} strokeWidth={2.4} aria-hidden="true" /> : <ArrowDown size={16} strokeWidth={2.4} aria-hidden="true" />}
-          {jumpLabel}
-        </button>
-      )}
 
       {/* 系統自動處理紀錄（自動清檯留痕） */}
       <OpsLogModal open={showOpsLog} onClose={() => setShowOpsLog(false)} />

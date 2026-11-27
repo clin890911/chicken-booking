@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickDefaultWalkinGuests } from './helpers/opsWalkin'
 import { todayTab, openGroupRow } from './helpers/opsToday'
 
 // 前台（現場頁）尖峰 15 情境實測。
@@ -56,6 +57,7 @@ async function loginToOps(page) {
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await pickDefaultWalkinGuests(page) // 載入時人數未選（C 包驗收 F7）→ 補點 2 位還原既有前提
 }
 
 const readState = (page) => page.evaluate(() => ({
@@ -284,7 +286,7 @@ test('S9 散客帶位到團體預留桌 105 → 團保防呆，未勾「仍要�
   await expect(seat).toBeDisabled()
   expect(tableOf(await readState(page), '105').status).toBe('vacant')
 
-  await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()
+  await page.getByRole('checkbox', { name: /仍要用這桌/ }).check()
   await expect(seat).toBeEnabled()
   await seat.click()
   await expect(page.getByText(/→ 105 已入座/)).toBeVisible()

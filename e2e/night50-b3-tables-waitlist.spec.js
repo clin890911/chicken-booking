@@ -252,7 +252,7 @@ test('D8 換桌到有預配的桌（黃字可解鎖）', async ({ page }) => {
   await page.getByRole('button', { name: /換桌/ }).first().click(); step()
   await mapTable(page, 106).click(); step()
   await shot(page, 'D8-1-warning')
-  const cb = page.getByRole('checkbox', { name: /知道了/ })
+  const cb = page.getByRole('checkbox', { name: /仍要用這桌/ })  // C 包：勾選收斂成 RiskAck「我知道，仍要用這桌」
   note('warnCheckbox', await cb.count())
   const confirm = page.getByRole('button', { name: /確認改桌/ })
   note('confirmDisabledBefore', await confirm.isDisabled())

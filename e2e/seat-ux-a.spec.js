@@ -365,6 +365,8 @@ for (const vp of [{ name: 'iPad 橫', width: 1180, height: 820 }, { name: 'iPad 
     const seats = ['113', '108', '111']
     for (const [i, n] of seats.entries()) {
       await page.getByRole('button', { name: '王', exact: true }).click()
+      // C 包 #14：入座後人數回到「未選」，每一組都要點人數
+      await page.getByRole('button', { name: '2 位', exact: true }).click()
       await page.locator(`svg[aria-label$="桌況圖"] g[data-table-number="${n}"]`).click()
       await expect(page.getByRole('button', { name: `移除桌 ${n}` })).toBeVisible()
       await page.getByTestId('walkin-seat').click()
@@ -389,8 +391,8 @@ for (const vp of [{ name: 'iPad 橫', width: 1180, height: 820 }, { name: 'iPad 
       sameRect(await rectOf(page, '[data-testid="ops-left-col"]'), leftBefore, '[data-testid="ops-left-col"]')
       sameRect(await rectOf(page, '[data-testid="seat-undo-bar"]'), barBefore, '[data-testid="seat-undo-bar"]')
     }
-    // 三組都疊著時（3 則提示）也都點得到
-    expect(await page.locator('[data-placement="seat"]').count()).toBeGreaterThanOrEqual(2)
+    // 三組連續入座：C 包（verify P2-4）起入座提示同時最多 1 則（新的取代舊的），舊的退場後只剩最新那則
+    await expect(page.locator('[data-placement="seat"]')).toHaveCount(1)
 
     // 復原欄與最近的桌、帶位確認鈕距離 ≥24px；高度 ≥44
     const near = await nearestTableGap(page)

@@ -9,7 +9,8 @@ import { test, expect } from '@playwright/test'
 const CONTENT = '[data-testid=admin-content]'
 const MAP_SVG = 'svg[aria-label$="桌況圖"]'
 const SEAT = '[data-testid=walkin-seat]'
-const JUMP = '[data-testid=ops-phone-jump]'
+const JUMP = '[data-testid=ops-phone-jump]'            // C 包 #11：頂列 in-flow「↓ 桌況圖」（不再是 fixed 浮鈕）
+const JUMP_BACK = '[data-testid=ops-phone-jump-back]'  // 桌況圖正上方 in-flow「↑ 回今日／回帶位…」
 const BANNER = '[data-testid=mode-banner]'
 const tableOf = (n) => `${MAP_SVG} g[data-table-number="${n}"]`
 
@@ -152,26 +153,31 @@ for (const size of [{ width: 390, height: 844 }, { width: 360, height: 640 }, { 
       await noHorizontalOverflow(page, '現場')
     })
 
-    test('跳轉鈕：清單 ⇄ 桌況圖；觸控 ≥ 44px', async ({ page }) => {
+    test('跳轉鈕：清單 ⇄ 桌況圖；觸控 ≥ 44px；in-flow 不是 fixed', async ({ page }) => {
       const jump = page.locator(JUMP)
       expect(Math.round((await jump.boundingBox()).height)).toBeGreaterThanOrEqual(44)
+      expect(await jump.evaluate(el => getComputedStyle(el).position)).not.toBe('fixed')
       await expect(jump).toContainText('桌況圖')
       await jump.tap()
       await expect.poll(() => mapVisibleHeight(page)).toBeGreaterThan(100)
-      await expect(jump).toContainText('回今日')
-      await jump.tap()
+      const back = page.locator(JUMP_BACK)
+      await expect(back).toContainText('回今日')
+      expect(Math.round((await back.boundingBox()).height)).toBeGreaterThanOrEqual(44)
+      await back.tap()
       await expect(page.locator('.lg-tabs button', { hasText: '今日' })).toBeInViewport()
-      await expect(jump).toContainText('桌況圖')
     })
 
     test('帶位：桌況圖選桌 → 跳回 → 確認入座可點且真的入座', async ({ page }) => {
       await page.locator('.lg-tabs button', { hasText: '帶位' }).tap()
+      // 載入時人數未選（C 包驗收 F7）：先點人數
+      const two = page.getByRole('button', { name: '2 位', exact: true })
+      await two.scrollIntoViewIfNeeded()
+      await two.tap()
       await swipeUntil(page, () => hittable(page, SEAT), { step: 100 })
       await page.locator(JUMP).tap()
       await expect.poll(() => mapVisibleHeight(page)).toBeGreaterThan(100)
       await tapCenter(page, tableOf('113'))
-      await expect(page.locator(JUMP)).toContainText('回帶位')
-      await page.locator(JUMP).tap()
+      // C 包 #11：點桌後自動捲回確認鈕（不必再按「回帶位」）
       await expect(page.locator(SEAT)).toContainText('113')
       await expect.poll(() => hittable(page, SEAT)).toBe(true)
       await page.locator(SEAT).tap()
@@ -425,7 +431,8 @@ test.describe('iPad 橫向 1180×820 回歸（尖峰主力，版面與互動不�
 
   test('整頁不捲、左欄與桌況圖尺寸與基準相同、預設籤帶位', async ({ page }) => {
     const m = await metrics(page)
-    expect(m).toEqual({ rail: 704, inner: 479, drawnW: 521, drawnH: 472, short: 49.3, overflow: 0, docOverflow: 0, contentOverflowY: 'hidden', tab: '帶位' })
+    // inner：左欄第一個可捲區。C 包驗收 F2 起姓氏＋人數鍵獨立成不捲的 data-rail-keys，可捲區只剩電話＋備註（原 479，整個上半部）
+    expect(m).toEqual({ rail: 704, inner: 277, drawnW: 521, drawnH: 472, short: 49.3, overflow: 0, docOverflow: 0, contentOverflowY: 'hidden', tab: '帶位' })
     await page.locator('[role=tablist][aria-label=樓層] button', { hasText: '2F' }).click()
     expect((await metrics(page)).short).toBe(42)
     expect(await hittable(page, SEAT)).toBe(true)
@@ -433,6 +440,7 @@ test.describe('iPad 橫向 1180×820 回歸（尖峰主力，版面與互動不�
 
   test('手機專屬的東西都不出現；放大視圖沒有樓層切換；復原欄與圖例照舊', async ({ page }) => {
     await expect(page.locator(JUMP)).toBeHidden()
+    await expect(page.locator(JUMP_BACK)).toBeHidden()
     await expect(page.getByRole('button', { name: '圖例' })).toBeHidden()
     await expect(page.getByText('待清桌', { exact: true })).toBeVisible()
     // 2026-11-27 第三輪：地圖工具列右端的工程師文案「Tab 選桌…」換成入座復原欄（固定保留、空時淡色「最近動作」）

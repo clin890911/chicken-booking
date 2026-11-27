@@ -132,7 +132,7 @@ describe('#12／#13 ModeBanner（左欄作業面板）：還差幾位只在選�
   it('選了一張不夠的桌：才出現「還差」，而且在「＋再加一桌」下面', () => {
     mount(render(['105'], { need: 10, seats: 4 }))
     const short = container.querySelector('[data-testid="mode-short"]')
-    expect(short.textContent).toContain('擠一擠也還差 5 位')
+    expect(short.textContent).toContain('還差 6 位')   // C 包：講離人數還差幾位（10−4），不再寫「擠一擠也還差 5 位」
     const toggle = container.querySelector('[data-testid="mode-multi-toggle"]')
     expect(toggle.compareDocumentPosition(short) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })

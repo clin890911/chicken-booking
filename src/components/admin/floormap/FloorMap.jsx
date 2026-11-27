@@ -5,7 +5,9 @@ import { isTableOutOnDate, outageLabel } from '../../../utils/tableAvailability'
 import { todayStr, formatDate } from '../../../utils/timeSlots'
 import { overdueMinOf } from '../../../utils/bookingPulse'
 import { assignmentKind, diningTablePresentation } from '../../../utils/tableStatus'
-import { GROUP_HOLD_COLOR, FOCUS_RING } from './statusColors'
+import { GROUP_HOLD_COLOR, FOCUS_RING, COMBO_STYLE } from './statusColors'
+import { comboGroupsByTable, comboLinks } from '../../../utils/comboTables'
+import { pickTableAt } from '../../../utils/tableHitArea'
 import { useDeviceFlag, MAP_ROT180_KEY_PREFIX } from '../../../utils/devicePrefs'
 
 // 「到了」一鍵入座的出現窗：訂位時間前 60 分 ~ 後 60 分。寫成具名常數方便日後調整。
@@ -344,6 +346,26 @@ export default function FloorMap({
     return (zoneId) => (zoneId && m[zoneId]) || null
   }, [zones])
 
+  // 併桌同組標示（2026-11-27 C 包）：只在今日即時圖。口徑見 utils/comboTables（主＋副桌、團體桌排除）。
+  // 用「全部樓層」的桌算組別（同組另一張在別層也照樣標「併」），連結線只畫同一層。
+  const comboByTable = useMemo(() => liveMode ? comboGroupsByTable(tables, bookings) : {}, [liveMode, tables, bookings])
+  const comboLinkList = useMemo(() => liveMode ? comboLinks(floorTables, comboByTable) : [], [liveMode, floorTables, comboByTable])
+
+  // 透明擴大命中區（2026-11-27 C 包，utils/tableHitArea）：只在今日即時圖。桌子畫出來不到 44px 時（iPad 直向），
+  // 手指落在桌外但仍在「以桌為中心 44px」內 → 等同點那張桌。命中層在所有桌子底下，點在桌上永遠是桌本身；
+  // 視覺尺寸與每張桌的外框（getBoundingClientRect）都不變。可點的桌與 TableShape 同口徑（停用不可點；維修桌只在非指派模式可點）。
+  const hitTables = useMemo(() => liveMode
+    ? floorTables.filter(t => t.isActive && (!assignMode || !isTableOutOnDate(t, effectiveDate) || ['dining', 'reserved', 'cleaning'].includes(t.status) || !!t.currentBookingId || !!t.currentRef))
+    : [], [liveMode, floorTables, assignMode, effectiveDate])
+  const onHitLayerClick = (event) => {
+    const svg = event.currentTarget.ownerSVGElement
+    const ctm = svg?.getScreenCTM?.()
+    if (!ctm) return
+    const pt = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse())
+    const n = pickTableAt({ x: pt.x, y: pt.y }, hitTables, Math.hypot(ctm.a, ctm.b))
+    if (n != null) clickHandlers[n]?.()
+  }
+
   // 自動裁切 viewBox：每個樓層各自依當前內容算，切樓層/改佈局都會重算。
   const viewBox = useMemo(
     () => computeFloorViewBox(floorTables, fixtureItems),
@@ -411,8 +433,25 @@ export default function FloorMap({
       <style>{`g[role="button"]:focus { outline: none; } g[role="button"]:focus-visible > .table-focus-ring { display: inline; opacity: 1; stroke: ${FOCUS_RING.color}; stroke-dasharray: ${FOCUS_RING.dash}; }`}</style>
       {/* 樓層浮水印已移除（2026-10-17：留白縮到 16 後會疊在牆與醬料台上；樓層看頂列 1F／2F 切換） */}
 
+      {/* 透明命中層（最底層）：只接住「桌與桌之間的空白」上的點擊，再依距離判給 44px 範圍內最近的桌 */}
+      {liveMode && hitTables.length > 0 && (
+        <rect data-testid="table-hit-layer" aria-hidden="true" x={viewBox.x} y={viewBox.y} width={viewBox.width} height={viewBox.height}
+              fill="none" pointerEvents="all" onClick={onHitLayerClick} />
+      )}
+
       {/* 設施標示（桌位底下） */}
       <FixtureLayer items={fixtureItems} />
+
+      {/* 併桌連結線（桌子底下）：只在桌與桌之間的空白露出，不蓋桌面填色；接邊的併桌只靠桌上的「併」小標 */}
+      {comboLinkList.length > 0 && (
+        <g pointerEvents="none" data-testid="combo-links">
+          {comboLinkList.map(l => (
+            <line key={`${l.bookingId}-${l.from}-${l.to}`} data-combo-link={`${l.from}-${l.to}`} x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+                  stroke={COMBO_STYLE.link} strokeWidth={COMBO_STYLE.linkWidth} strokeOpacity={COMBO_STYLE.linkOpacity}
+                  strokeDasharray={COMBO_STYLE.linkDash} strokeLinecap="round" />
+          ))}
+        </g>
+      )}
 
       {floorTables.map(t => {
         // 統一佔用視圖（日期+場次）：散客暖色 / 團客冷色 / 空桌淺色；不吃今日即時狀態。
@@ -500,6 +539,8 @@ export default function FloorMap({
             outClickable={!assignMode}
             zoneColor={zoneColorOf(t.zoneId)}
             now={displayTable.status === 'dining' ? now : 0}
+            comboTag={comboByTable[String(t.number)]?.label || ''}
+            comboWith={comboByTable[String(t.number)]?.others.join('、') || ''}
             onClick={clickHandlers[t.number]}
           />
         )

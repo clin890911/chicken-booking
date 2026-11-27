@@ -14,28 +14,31 @@ let root, node
 const mount = el => { node = document.createElement('div'); document.body.append(node); root = createRoot(node); act(() => root.render(el)) }
 afterEach(() => { act(() => root?.unmount()); node?.remove() })
 
-it('FastWalkInPanel：13 位只有兩張 6 人桌 → 建議文字標「擠一擠」', () => {
+it('FastWalkInPanel：13 位只有兩張 6 人桌 → 建議文字標「超坐」（C 包：不再用「擠一擠」）', () => {
   mocks.combo = { enough: true, squeezed: true, tableNumbers: ['101', '102'], seats: 12, maxSeats: 14, floor: '1F' }
   mount(<FastWalkInPanel guests={13} tables={[]} onGuestsChange={vi.fn()} />)
-  expect(node.textContent).toContain('建議 1F・101 + 102（擠一擠：12 席坐 13 位）')
+  expect(node.textContent).toContain('建議併桌 1F・101 + 102（12 席・超坐 1 位）')
 })
 
 it('FastWalkInPanel：原席就夠的組合不標擠一擠', () => {
   mocks.combo = { enough: true, squeezed: false, tableNumbers: ['101', '103'], seats: 10, maxSeats: 12, floor: '1F' }
   mount(<FastWalkInPanel guests={9} tables={[]} onGuestsChange={vi.fn()} />)
-  expect(node.textContent).toContain('建議 1F・101 + 103')
+  expect(node.textContent).toContain('建議併桌 1F・101 + 103')
+  expect(node.textContent).not.toContain('超坐')
   expect(node.textContent).not.toContain('擠一擠')
 })
 
 const tables = [{ number: '101', floor: '1F', capacity: 6 }, { number: '102', floor: '1F', capacity: 6 }]
 const multiMode = (extra) => ({ type: 'assign-multi', kind: 'waitlist', wait: { name: '王', queueNumber: 3 }, need: 13, selected: [], suggestion: '101', suggestionTables: ['101', '102'], ...extra })
 
-it('ModeBanner：擠一擠併桌建議 → 「建議 1F・101 + 102（擠一擠）」', () => {
+it('ModeBanner：超坐併桌建議 → 「用建議桌 1F・101 + 102（超坐）」', () => {
   mount(<ModeBanner tables={tables} mode={multiMode({ suggestionSqueezed: true })} onApplySuggestion={vi.fn()} />)
-  expect(node.textContent).toContain('建議 1F・101 + 102（擠一擠）（自行選桌）')
+  expect(node.textContent).toContain('用建議桌 1F・101 + 102（超坐）')
+  expect(node.textContent).not.toContain('自行選桌')
 })
 
 it('ModeBanner：一般併桌建議不標擠一擠', () => {
   mount(<ModeBanner tables={tables} mode={multiMode({ need: 12 })} onApplySuggestion={vi.fn()} />)
-  expect(node.textContent).toContain('建議 1F・101 + 102（自行選桌）')
+  expect(node.textContent).toContain('用建議桌 1F・101 + 102')
+  expect(node.textContent).not.toContain('超坐')
 })

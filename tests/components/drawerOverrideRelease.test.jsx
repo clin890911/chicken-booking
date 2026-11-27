@@ -51,7 +51,7 @@ describe('抽屜路徑覆蓋預配：重疊才解除', () => {
     act(() => { root.render(el) })
   }
   const btn = (text) => [...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith(text))
-  const overrideBox = () => [...document.querySelectorAll('label')].find(l => l.textContent.includes('我知道，仍要帶這桌'))?.querySelector('input[type="checkbox"]')
+  const overrideBox = () => [...document.querySelectorAll('label')].find(l => l.textContent.includes('我知道，仍要用這桌'))?.querySelector('input[type="checkbox"]')
 
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOW); vi.clearAllMocks() })
   afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.useRealTimers() })
@@ -147,7 +147,7 @@ describe('抽屜「入座」與「預訂」分開據實（12:00，P 18:00 預配
   const Q2 = { ...CHEN, id: 'Q2', name: 'Q2', timeSlot: '12:30' }
   const rowOf = (name) => [...container.querySelectorAll('.rounded-lg.p-2')]
     .find(r => r.querySelector('span.truncate')?.textContent === name)
-  const overrideBox = () => [...document.querySelectorAll('label')].find(l => l.textContent.includes('我知道，仍要帶這桌'))?.querySelector('input[type="checkbox"]')
+  const overrideBox = () => [...document.querySelectorAll('label')].find(l => l.textContent.includes('我知道，仍要用這桌'))?.querySelector('input[type="checkbox"]')
   const rowBtn = (name, label) => [...rowOf(name).querySelectorAll('button')].find(b => b.textContent.startsWith(label))
 
   beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(NOON); vi.clearAllMocks() })
