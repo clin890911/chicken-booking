@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickDefaultWalkinGuests } from './helpers/opsWalkin'
 import { todayTab, openGroupRow } from './helpers/opsToday'
 
 // 前台（現場頁）尖峰 15 情境實測。
@@ -56,6 +57,7 @@ async function loginToOps(page) {
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await pickDefaultWalkinGuests(page) // 載入時人數未選（C 包驗收 F7）→ 補點 2 位還原既有前提
 }
 
 const readState = (page) => page.evaluate(() => ({

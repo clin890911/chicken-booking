@@ -118,8 +118,10 @@ test('#13 iPad 橫：剛入座 2 分鐘的桌，抽屜主鈕是「換桌」，�
   await expect(page.getByRole('button', { name: '客人已離席' })).toBeVisible()
   const pb = await primary.boundingBox()
   const ob = await page.getByRole('button', { name: '客人已離席' }).boundingBox()
-  expect(pb.y).toBeLessThan(ob.y)               // 主鈕在上
-  expect(pb.width).toBeGreaterThan(ob.width)    // 主鈕滿寬、離席是半寬次要
+  // 驗收 F3：兩顆鈕位置固定並排（換桌在左、離席在右、同寬），只差強調樣式（原斷言：主鈕在上、主鈕較寬）
+  expect(Math.round(pb.y)).toBe(Math.round(ob.y))
+  expect(pb.x).toBeLessThan(ob.x)
+  expect(Math.round(pb.width)).toBe(Math.round(ob.width))
   await shot(page, 'c1-ipadL-02-drawer-quickfix')
 })
 

@@ -142,7 +142,8 @@ test('2b iPad 橫：容量合適時建議目前樓層——散客 2 位建議 1F
   const busy = Object.fromEntries(['102', '103', '105', '106', '107', '108', '109', '110', '111', '112', '113'].map(n => [n, dining(W.id)]))
   await seed(page, { tables: [...FLOOR1(busy), ...FLOOR2({ 201: dining(W.id), 203: dining(W.id), 210: dining(W.id) })], bookings: [W, LEE] })
   await loginToOps(page)
-  // 散客表單（預設 2 位）：1F 只剩 101（6 人桌）、2F 有 207（4 人桌，原本浪費少會被建議）
+  // 散客表單 2 位（載入時人數未選，先點 2 位；驗收 F7）：1F 只剩 101（6 人桌）、2F 有 207（4 人桌，原本浪費少會被建議）
+  await page.getByRole('button', { name: '2 位', exact: true }).click()
   await expect(page.getByText(/建議 1F・101/)).toBeVisible()
   await expect(page.getByText(/建議 2F・207/)).toHaveCount(0)
   // 切到 2F 看 → 建議跟著改成 2F 的 207（偏好跟著店員目前看的樓層）
@@ -237,6 +238,7 @@ test('3 復原欄與「放大視圖／轉向」至少隔 16px；工具列高度�
   await loginToOps(page, true)
   // 先入座一組，讓復原欄出現可按的「復原」
   await page.getByRole('button', { name: '王', exact: true }).click()
+  await page.getByRole('button', { name: '2 位', exact: true }).click() // 載入時人數未選（驗收 F7）
   await mapTable(page, '113').click()
   await page.getByTestId('walkin-seat').click()
   await expect(page.getByTestId('seat-undo-action')).toBeVisible()
@@ -272,6 +274,8 @@ test('4 iPad 直：連續入座 3 組，畫面上的入座提示同時最多 1 �
   await loginToOps(page, true)
   for (const n of ['113', '108', '111']) {
     await page.getByRole('button', { name: '王', exact: true }).click()
+    // 入座後（與載入時）人數都是「未選」：每組都要重新點人數（C 包 #14／驗收 F7）
+    await page.getByRole('button', { name: '2 位', exact: true }).click()
     await mapTable(page, n).click()
     await expect(page.getByRole('button', { name: `移除桌 ${n}` })).toBeVisible()
     await page.getByTestId('walkin-seat').click()

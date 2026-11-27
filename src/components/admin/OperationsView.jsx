@@ -310,7 +310,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // === 現場帶位 v3（順序不拘）===
   // 系統只需要「桌」和「人數」：先點桌或先選人數都行，兩者到齊由面板的滑動手勢入座。
   // 桌的真相放這裡（不放面板內），桌況圖與帶位面板共用同一份，避免兩邊各記一套。
-  const [walkinGuests, setWalkinGuests] = useState(2)
+  // 人數初值＝「未選」（0），與入座後歸零一致（C 包驗收 F7）：預選 2 位會讓第一組 4 位被當 2 位入座。
+  const [walkinGuests, setWalkinGuests] = useState(0)
   const [walkinTableNumbers, setWalkinTableNumbers] = useState([])
   // A2：帶位面板預設單選（點別張＝改選）；按「＋再加一桌（併桌）」才多選。沒有單桌坐得下時自動多選（walkinAutoMulti）。
   const [walkinMultiOn, setWalkinMultiOn] = useState(false)
@@ -319,6 +320,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 卸載，state 會消失；連續同型客人（一直來 2 位）才是這功能要救的情境。
   // 刻意不記姓名／電話——那是每組不同的資料，沿用會把上一組的客人資料掛到新客人身上。
   const [lastParty, setLastParty] = useState(null)
+  // 復原散客入座時要回填的表單（姓氏、稱謂、小孩、電話、店員備註；C 包驗收 F4）。面板讀到後呼叫 onRestored 清掉。
+  const [walkinRestore, setWalkinRestore] = useState(null)
   // 復原時要讀「當下」的訂位狀態（toast 的 onClick 閉包會抓到入座當時的舊值）
   const bookingsRef = useRef(bookings)
   const tablesRef = useRef(tables)
@@ -1201,6 +1204,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     setLastSeated(null)
     setWalkinTableNumbers(snap.tableNumbers || []) // 桌回到已選狀態，方便馬上改帶別組
     if (snap.guests > 0) setWalkinGuests(snap.guests) // 人數也回來（C 包 #14 入座後人數歸零；復原＝回到按下入座前）
+    if (snap.form) setWalkinRestore({ ...snap.form, nonce: Date.now() }) // 姓氏、稱謂也回來（C 包驗收 F4）
     if ((snap.tableNumbers || []).length > 1) setWalkinMultiOn(true) // 併桌復原回來仍是多選，點桌才不會變成改選
     toast.info(`已復原：${snap.tableNumbers.join(' + ')} 回到空桌${note}`)
   }
@@ -1234,7 +1238,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     const releasedPreassigns = releaseOverlappingPreassigns(overridden, { releaseOverriddenAssignment, toast })
     const name = r.booking?.name || '散客'
     const guests = r.booking?.guests || payload.guests
-    const snap = { bookingId: r.booking?.id, tableNumbers: nums, name, guests, at: Date.now(), releasedPreassigns }
+    const snap = { bookingId: r.booking?.id, tableNumbers: nums, name, guests, at: Date.now(), releasedPreassigns, form: payload.form || null }
     setLastSeated(snap)
     // M6：供下一組一鍵沿用。只存店員手打的 staffNotes——payload.notes 還含著
     // 由電話帶出的「過敏：xxx」，沿用會把上一位客人的過敏資訊掛到新客人身上。
@@ -1551,6 +1555,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
               walkinWarning={walkinWarning}
               onWalkinSeat={handleWalkinSeat}
               lastParty={lastParty}
+              walkinRestore={walkinRestore}
+              onWalkinRestored={() => setWalkinRestore(null)}
               onLocateSuggestion={locateSuggestion}
               onApplySuggestion={applyWalkinSuggestion}
               showNextWaitlist={waitlistNext && waitlist.some(w => ['waiting', 'called'].includes(w.status))}

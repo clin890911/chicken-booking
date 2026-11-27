@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickDefaultWalkinGuests } from './helpers/opsWalkin'
 
 // 現場帶位 v3 的兩道防呆（拿掉二次確認後，警示改綁在「已選的桌」上）：
 // 1) 該桌是今日團體圈桌未入座 → 警示 + 滑桿鎖住，勾「仍要帶」才滑得動
@@ -28,6 +29,7 @@ async function loginToOps(page) {
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await pickDefaultWalkinGuests(page) // 載入時人數未選（C 包驗收 F7）→ 補點 2 位還原既有前提
 }
 
 const slider = (page) => page.getByTestId('walkin-seat')

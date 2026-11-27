@@ -25,7 +25,7 @@ export default function OpsRail({
   canWalkIn = true,
   walkinGuests, onWalkinGuestsChange, walkinTables, onRemoveWalkinTable, onClearWalkinTables,
   walkinMulti = false, walkinAutoMulti = false, onToggleWalkinMulti = null, walkinExcess = null,
-  walkinWarning, onWalkinSeat, lastParty, onLocateSuggestion, onApplySuggestion, showNextWaitlist, onNextWaitlist,
+  walkinWarning, onWalkinSeat, lastParty, walkinRestore = null, onWalkinRestored, onLocateSuggestion, onApplySuggestion, showNextWaitlist, onNextWaitlist,
 }) {
   const { bookings, waitlist, groupReservations, tables } = useBooking()
   const today = todayStr()
@@ -112,6 +112,8 @@ export default function OpsRail({
           warning={walkinWarning}
           onSeat={onWalkinSeat}
           lastParty={lastParty}
+          restore={walkinRestore}
+          onRestored={onWalkinRestored}
           onOpenTable={onFocusTable}
         />
       ) : (

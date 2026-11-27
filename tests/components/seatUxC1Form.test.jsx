@@ -82,9 +82,11 @@ describe('#8 已選桌卡在釘底動作列（不插在鍵盤上方）', () => {
     const remove = node.querySelector('button[aria-label="移除桌 103"]')
     expect(remove.closest('[data-rail-footer]')).toBeTruthy()
     expect(node.querySelector('button[aria-label="桌 103 詳情"]').closest('[data-rail-footer]')).toBeTruthy()
-    const scrollArea = node.querySelector('[data-rail-footer]').previousElementSibling
-    expect(scrollArea.firstElementChild.textContent).toContain('貴姓・稱謂')
-    expect(scrollArea.textContent).not.toContain('103')
+    // 驗收 F2：鍵盤區（姓氏＋人數）獨立成 data-rail-keys，不在可捲區、也不在釘底區
+    const keys = node.querySelector('[data-rail-keys]')
+    expect(keys.firstElementChild.textContent).toContain('貴姓・稱謂')
+    expect(keys.textContent).not.toContain('103')
+    expect(keys.contains(remove)).toBe(false)
   })
 })
 
@@ -144,5 +146,53 @@ describe('#4／#17 選桌任務只有一顆取消、主次鈕樣式', () => {
     act(() => root.render(<ModeBanner layout="rail" mode={{ ...base, kind: 'booking', replacing: true, booking: { id: 'D', name: '王先生', guests: 4, assignedTableId: '103' } }} onCancel={() => {}} onConfirmMulti={() => {}} />))
     expect(node.querySelector('header').className).toBe(headA)
     expect([...node.querySelectorAll('button')].filter(b => b.textContent.trim() === '取消')).toHaveLength(1)
+  })
+})
+
+describe('C 包驗收 F4／F6／F2：復原回填、定位建議桌次鈕、桌和人數都選好就收起沿用', () => {
+  it('F4：入座時把表單原樣交給父層；父層丟回 restore → 姓氏、稱謂、備註、電話都回填', () => {
+    const onSeat = vi.fn()
+    function H() {
+      const [guests, setGuests] = useState(4)
+      const [restore, setRestore] = useState(null)
+      const [form, setForm] = useState(null)
+      return (
+        <>
+          <button data-testid="do-undo" onClick={() => { setGuests(4); setRestore({ ...form, nonce: 1 }) }}>undo</button>
+          <FastWalkInPanel guests={guests} onGuestsChange={setGuests} tables={[T103]} restore={restore} onRestored={() => setRestore(null)}
+            onSeat={(p) => { onSeat(p); setForm(p.form); return true }} />
+        </>
+      )
+    }
+    mount(<H />)
+    click(node.querySelector('button[aria-label="陳"]'))
+    act(() => { const i = node.querySelector('input[placeholder^="例：靠窗"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, '靠窗'); i.dispatchEvent(new Event('input', { bubbles: true })) })
+    click(seatBtn())
+    expect(onSeat.mock.calls[0][0].form).toMatchObject({ surname: '陳', notes: '靠窗', kids: 0 })
+    expect(node.querySelector('button[aria-label="陳"]').getAttribute('aria-pressed')).toBe('false')
+    click(node.querySelector('[data-testid="do-undo"]'))
+    expect(node.querySelector('button[aria-label="陳"]').getAttribute('aria-pressed')).toBe('true')
+    expect(node.querySelector('input[placeholder^="例：靠窗"]').value).toBe('靠窗')
+    expect(seatBtn().textContent).toContain('陳先生 4 位')
+  })
+
+  it('F6：「定位建議桌」是次鈕（SEAT_SECONDARY），不是底線連結', async () => {
+    const { SEAT_SECONDARY } = await import('../../src/components/admin/ops/seatButtons')
+    vi.resetModules()
+    vi.doMock('../../src/contexts/BookingContext', () => ({ useBooking: () => ({ suggestTable: () => ({ number: '105', floor: '1F' }), suggestTableCombo: () => ({ enough: false }) }) }))
+    const Panel = (await import('../../src/components/admin/ops/FastWalkInPanel')).default
+    mount(<Panel guests={2} onGuestsChange={() => {}} tables={[]} onApplySuggestion={() => {}} onLocateSuggestion={() => {}} />)
+    const locate = node.querySelector('[data-testid="walkin-locate-suggestion"]')
+    expect(locate.textContent).toContain('定位建議桌 1F・105')
+    for (const c of SEAT_SECONDARY.split(' ')) expect(locate.className).toContain(c)
+    expect(locate.className).not.toContain('underline')
+    vi.doUnmock('../../src/contexts/BookingContext')
+  })
+
+  it('F2：「沿用上一組」在桌和人數都選好之後收起（只在還沒選桌或還沒選人數時出現）', () => {
+    mount(<Harness initialGuests={0} initialTables={[T103]} lastPartyInit={{ guests: 4, children: 0, notes: '' }} />)
+    expect(btnByText('沿用上一組')).toBeTruthy()
+    click(node.querySelector('button[aria-label="3 位"]'))
+    expect(btnByText('沿用上一組')).toBeUndefined()
   })
 })

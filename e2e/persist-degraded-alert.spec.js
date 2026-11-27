@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickDefaultWalkinGuests } from './helpers/opsWalkin'
 import { FIREBASE_STUB } from './helpers/firebaseStub.js'
 
 // 「同步基準線落不了地」的主動警示（PR #109 後半段）。
@@ -87,6 +88,7 @@ test.beforeEach(async ({ page }) => {
 async function loginToOnsite(page) {
   await page.goto('/admin')
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await pickDefaultWalkinGuests(page) // 載入時人數未選（C 包驗收 F7）→ 補點 2 位，確認鈕才是「請先選桌」
   await expect(page.getByRole('button', { name: /請先選桌/ })).toBeVisible()
 }
 

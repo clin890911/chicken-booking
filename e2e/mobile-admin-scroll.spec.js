@@ -169,6 +169,10 @@ for (const size of [{ width: 390, height: 844 }, { width: 360, height: 640 }, { 
 
     test('帶位：桌況圖選桌 → 跳回 → 確認入座可點且真的入座', async ({ page }) => {
       await page.locator('.lg-tabs button', { hasText: '帶位' }).tap()
+      // 載入時人數未選（C 包驗收 F7）：先點人數
+      const two = page.getByRole('button', { name: '2 位', exact: true })
+      await two.scrollIntoViewIfNeeded()
+      await two.tap()
       await swipeUntil(page, () => hittable(page, SEAT), { step: 100 })
       await page.locator(JUMP).tap()
       await expect.poll(() => mapVisibleHeight(page)).toBeGreaterThan(100)
@@ -427,7 +431,8 @@ test.describe('iPad 橫向 1180×820 回歸（尖峰主力，版面與互動不�
 
   test('整頁不捲、左欄與桌況圖尺寸與基準相同、預設籤帶位', async ({ page }) => {
     const m = await metrics(page)
-    expect(m).toEqual({ rail: 704, inner: 479, drawnW: 521, drawnH: 472, short: 49.3, overflow: 0, docOverflow: 0, contentOverflowY: 'hidden', tab: '帶位' })
+    // inner：左欄第一個可捲區。C 包驗收 F2 起姓氏＋人數鍵獨立成不捲的 data-rail-keys，可捲區只剩電話＋備註（原 479，整個上半部）
+    expect(m).toEqual({ rail: 704, inner: 277, drawnW: 521, drawnH: 472, short: 49.3, overflow: 0, docOverflow: 0, contentOverflowY: 'hidden', tab: '帶位' })
     await page.locator('[role=tablist][aria-label=樓層] button', { hasText: '2F' }).click()
     expect((await metrics(page)).short).toBe(42)
     expect(await hittable(page, SEAT)).toBe(true)

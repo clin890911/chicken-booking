@@ -91,8 +91,10 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
             // 這些是切換鈕，選中狀態原本只用顏色表達 → 補 aria-pressed，讀屏才讀得出來
             aria-pressed={value === n && !showInput}
             onClick={() => { setMore(false); onChange(n) }}
+            // lg：可點區左右各外擴 3px（剛好補滿 6px 的格線間距，不重疊鄰鍵）→ iPad 直向外觀 41.5px 寬、可點 47.5px（C 包驗收 F5）。
+            // after 以內距框起算，所以寫 5px＝2px 邊框＋3px 外擴；上下不外擴（手機 2 排之間不互搶）。
             className={`rounded-xl border-2 font-bold tabular-nums transition-all ${
-              lg ? 'h-[60px] phone:h-12 text-[22px]' : 'w-11 h-11 text-base'} ${
+              lg ? "h-[60px] phone:h-12 text-[22px] relative after:content-[''] after:absolute after:inset-y-0 after:-inset-x-[5px]" : 'w-11 h-11 text-base'} ${
               value === n && !showInput ? chipActive : chipIdle}`}
           >
             {n}

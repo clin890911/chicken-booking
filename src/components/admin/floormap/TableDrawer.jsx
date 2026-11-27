@@ -609,44 +609,39 @@ export default function TableDrawer({ table: storedTable, booking, preassign, gr
             </>
           )}
 
-          {displayStatus === 'dining' && booking && perms.seat && (diningPrimaryAction(table, { canMove: !!onStartMove }) === 'move' ? (
-            <>
-              {/* C 包 #13：剛入座（未滿 5 分）→ 最可能要做的是「坐錯桌、換一張」。換過去原桌直接回空桌（isQuickFixMove 同一條線） */}
-              <button data-testid="drawer-primary" onClick={onStartMove} className={`${SEAT_PRIMARY} w-full`}>
-                <GlyphText>↔ 換桌</GlyphText>
-              </button>
-              <p className="text-[11px] text-chicken-brown/60 text-center">剛入座未滿 5 分鐘：換桌後原桌直接回空桌</p>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={handleCheckout} className={`${SEAT_SECONDARY} text-sm`}>客人已離席</button>
-                <button onClick={() => setEditingBooking(true)} className={`${SEAT_SECONDARY} text-sm`}>改人數／備註</button>
-              </div>
-              <button
-                onClick={handleFinalize}
-                className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
-              >
-                直接釋出（已清桌完成）
-              </button>
-            </>
-          ) : (
-            <>
-              {/* 主要操作：漸進式 — 先進「等待清桌」，避免連點直接釋出髒桌 */}
-              <button data-testid="drawer-primary" onClick={handleCheckout} className={`${SEAT_PRIMARY} w-full`}>
-                客人已離席
-              </button>
-              {/* 次要：直接釋出（已清桌完成），降權重、較小較淡、保留 confirm */}
-              <button
-                onClick={handleFinalize}
-                className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
-              >
-                直接釋出（已清桌完成）
-              </button>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={onStartMove} className={`${SEAT_SECONDARY} text-sm`}><GlyphText>↔ 換桌</GlyphText></button>
+          {displayStatus === 'dining' && booking && perms.seat && (() => {
+            // 🔴 C 包驗收 F3：「換桌」固定在左、「客人已離席」固定在右，兩顆同尺寸並排；未滿／滿 5 分鐘只換強調樣式，
+            // 不交換位置——過去滿 5 分鐘時同一個位置的綠色大鈕會從「換桌」變成「客人已離席」，手指記住的位置按到另一個動作。
+            // 下方說明列、改人數、直接釋出也一律同位置（說明列兩種時間都佔一行，只換文字）。
+            const quick = diningPrimaryAction(table, { canMove: !!onStartMove }) === 'move'
+            return (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <button data-testid={quick ? 'drawer-primary' : 'drawer-move'} data-drawer-slot="move" onClick={onStartMove} disabled={!onStartMove}
+                    className={`${quick ? SEAT_PRIMARY : SEAT_SECONDARY} w-full min-h-[56px]`}>
+                    <GlyphText>↔ 換桌</GlyphText>
+                  </button>
+                  {/* 主要操作（滿 5 分）：漸進式 — 先進「等待清桌」，避免連點直接釋出髒桌 */}
+                  <button data-testid={quick ? 'drawer-checkout' : 'drawer-primary'} data-drawer-slot="checkout" onClick={handleCheckout}
+                    className={`${quick ? SEAT_SECONDARY : SEAT_PRIMARY} w-full min-h-[56px]`}>
+                    客人已離席
+                  </button>
+                </div>
+                <p data-testid="drawer-dining-hint" className="text-[11px] text-chicken-brown/60 text-center">
+                  {quick ? '剛入座未滿 5 分鐘：換桌後原桌直接回空桌' : '入座已滿 5 分鐘：換桌後原桌改為待清'}
+                </p>
                 {/* 用餐中加人／補過敏備註：原地改（只開放人數＋備註，桌位不動）；取代原本空殼的「訂單明細」 */}
-                <button onClick={() => setEditingBooking(true)} className={`${SEAT_SECONDARY} text-sm`}>改人數／備註</button>
-              </div>
-            </>
-          ))}
+                <button onClick={() => setEditingBooking(true)} className={`${SEAT_SECONDARY} w-full text-sm`}>改人數／備註</button>
+                {/* 次要：直接釋出（已清桌完成），降權重、較小較淡、保留 confirm */}
+                <button
+                  onClick={handleFinalize}
+                  className="w-full text-xs text-chicken-brown/55 hover:text-chicken-brown font-bold underline underline-offset-2 py-2 min-h-[44px]"
+                >
+                  直接釋出（已清桌完成）
+                </button>
+              </>
+            )
+          })()}
 
           {/* 團體桌的清桌（含接下一梯）在 GroupTableSection 內處理 */}
           {table.status === 'cleaning' && !groupRef && (

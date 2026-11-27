@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickDefaultWalkinGuests } from './helpers/opsWalkin'
 
 // 現場「帶位」主線（v3：順序不拘 + 滑動帶位）：
 // 同仁登入 → 現場分頁（左欄預設「帶位」籤）→ 點桌況圖上的空桌（選進面板）+ 選人數
@@ -27,6 +28,7 @@ async function loginToOps(page) {
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await pickDefaultWalkinGuests(page) // 載入時人數未選（C 包驗收 F7）→ 補點 2 位還原既有前提
 }
 
 // 拿到一個「可入座」的桌號：從帶位面板的建議文字讀（選好人數後會出現「建議 N」）

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickDefaultWalkinGuests } from './helpers/opsWalkin'
 import { todayTab } from './helpers/opsToday'
 
 // 現場直接改單＋建議桌一鍵套用（2026-10 前台尖峰 A2／A3／A4）：
@@ -45,6 +46,7 @@ async function loginToOps(page) {
   await page.getByRole('button', { name: /模擬登入/ }).click()
   await expect(page).toHaveURL(/\/admin/)
   await page.locator('aside').getByRole('button', { name: '現場' }).click()
+  await pickDefaultWalkinGuests(page) // 載入時人數未選（C 包驗收 F7）→ 補點 2 位還原既有前提
 }
 
 const readState = (page) => page.evaluate(() => ({

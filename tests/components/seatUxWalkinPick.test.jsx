@@ -47,6 +47,7 @@ describe('帶位面板 A2：點桌＝改選', () => {
   })
   it('按「＋再加一桌」後點 101 → 103 + 101，並出黃字「一張就夠」（2 位用 12 席）', () => {
     mount(<OperationsView />)
+    act(() => harness.rail.onWalkinGuestsChange(2)) // 載入時人數未選（C 包驗收 F7）
     pick('103'); act(() => harness.rail.onToggleWalkinMulti())
     expect(rail().dataset.multi).toBe('true')
     pick('101'); expect(rail().dataset.walkin).toBe('103,101')

@@ -90,6 +90,7 @@ describe('帶位面板「用建議桌」：建議組合不完整 → 一張都�
     ])
     h.combo = { enough: true, floor: '1F', tableNumbers: ['105', '107'] }
     render()
+    click(container.querySelector('button[aria-label="2 位"]')) // 載入時人數未選（C 包驗收 F7）：先點人數才有建議桌
     const apply = container.querySelector('[data-testid="walkin-apply-suggestion"]')
     expect(apply.textContent).toContain('105 + 107')
     click(apply)
@@ -103,6 +104,7 @@ describe('帶位面板「用建議桌」：建議組合不完整 → 一張都�
     tableService.bulkWrite([mkTable('105'), mkTable('106')])
     h.combo = { enough: true, floor: '1F', tableNumbers: ['105', '106'] }
     render()
+    click(container.querySelector('button[aria-label="2 位"]'))
     click(container.querySelector('[data-testid="walkin-apply-suggestion"]'))
     expect(toast.error).not.toHaveBeenCalled()
     expect(container.querySelector('[data-testid="walkin-seat"]').textContent).toContain('105 + 106')

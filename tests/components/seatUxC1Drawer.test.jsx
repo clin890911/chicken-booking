@@ -85,4 +85,30 @@ describe('TableDrawer 用餐中主鈕', () => {
     act(() => { vi.advanceTimersByTime(3000) })
     expect(primary().textContent.trim()).toBe('客人已離席')
   })
+
+  // C 包驗收 F3：兩顆鈕位置永遠固定（換桌在左、客人已離席在右，同一個 grid），只換強調樣式
+  it('未滿／滿 5 分鐘：「換桌」永遠是第 1 格、「客人已離席」永遠是第 2 格，只有強調樣式交換', () => {
+    const slots = () => {
+      const els = [...container.querySelectorAll('[data-drawer-slot]')]
+      return { order: els.map(e => e.dataset.drawerSlot), text: els.map(e => e.textContent.replace('↔', '').trim()), parentSame: els[0].parentElement === els[1].parentElement, cls: els.map(e => e.className) }
+    }
+    render(mkTable(minsAgo(2)))
+    const a = slots()
+    expect(a.order).toEqual(['move', 'checkout'])
+    expect(a.text).toEqual(['換桌', '客人已離席'])
+    expect(a.parentSame).toBe(true)
+    expect(a.cls[0]).toContain('bg-emerald-700')
+    expect(a.cls[1]).not.toContain('bg-emerald-700')
+    act(() => root.unmount()); container.remove()
+    render(mkTable(minsAgo(6)))
+    const b = slots()
+    expect(b.order).toEqual(['move', 'checkout'])
+    expect(b.text).toEqual(['換桌', '客人已離席'])
+    expect(b.cls[0]).not.toContain('bg-emerald-700')
+    expect(b.cls[1]).toContain('bg-emerald-700')
+    // 尺寸 class 相同（只差強調）：兩顆都 w-full min-h-[56px]
+    for (const c of [...a.cls, ...b.cls]) expect(c).toContain('min-h-[56px]')
+    // 說明列兩種時間都在（只換文字），下方按鈕不會因此上下移
+    expect(container.querySelector('[data-testid="drawer-dining-hint"]').textContent).toContain('5 分鐘')
+  })
 })
