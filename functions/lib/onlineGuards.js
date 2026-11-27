@@ -18,6 +18,8 @@ export function normalizeOnlineGuardSettings(settings = {}) {
   return {
     onlineAutoCloseEnabled: settings.onlineAutoCloseEnabled === true,
     onlineAutoClosePercent: clampInt(settings.onlineAutoClosePercent, 50, 100, 80),
+    // 已停用：線上訂位改由 guestReliability 的 MIN_GUEST_LEAD_MINUTES（抵達前 2 小時）控制；
+    // 此 key 只為相容雲端舊資料保留，不再擋任何訂位。
     onlineSessionCutoffMin: clampInt(settings.onlineSessionCutoffMin, 0, 720, 0),
   }
 }
@@ -30,14 +32,4 @@ export function isOverAutoCloseThreshold({ totalSeats, remaining, enabled, perce
   if (!Number.isFinite(total) || total <= 0) return false
   const used = total - Math.max(0, Number(remaining) || 0)
   return used / total >= clampInt(percent, 50, 100, 80) / 100
-}
-
-// 場次截止：now 已達「錨點 - cutoff 分鐘」即截止。
-// 錨點優先用場次開始時間（餐期），時段不屬於任何場次時退回時段本身的時間。
-export function isPastSessionCutoff({ nowMs, slotMs, sessionStartMs, cutoffMin }) {
-  const cutoff = clampInt(cutoffMin, 0, 720, 0)
-  if (cutoff <= 0) return false
-  const anchor = Number.isFinite(sessionStartMs) ? sessionStartMs : slotMs
-  if (!Number.isFinite(anchor)) return false
-  return Number(nowMs) >= anchor - cutoff * 60000
 }

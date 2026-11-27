@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest'
 import {
   normalizeOnlineGuardSettings,
   isOverAutoCloseThreshold,
-  isPastSessionCutoff,
 } from '../../functions/lib/onlineGuards.js'
 
 // 線上訂位防線純邏輯（functions/lib/onlineGuards.js）。
 // 這層擋的是兩類營運事故：
 // 1) 接近滿座仍收線上訂位 → 現場/電話客人無位可坐
 // 2) 餐期開始前才湧入的線上訂位 → 廚房備餐量失準
+//    （此項已改由 functions/lib/guestReliability.js「抵達前 2 小時」負責；onlineSessionCutoffMin 只剩相容資料 key）
 
 describe('normalizeOnlineGuardSettings（設定正規化）', () => {
   it('預設：關閉、80%、0 分鐘（不啟用截止）', () => {
@@ -59,29 +59,5 @@ describe('isOverAutoCloseThreshold（滿座門檻自動關閉）', () => {
   it('percent 非法時退回 80 計算', () => {
     expect(isOverAutoCloseThreshold({ ...base, percent: NaN, remaining: 20 })).toBe(true)
     expect(isOverAutoCloseThreshold({ ...base, percent: NaN, remaining: 21 })).toBe(false)
-  })
-})
-
-describe('isPastSessionCutoff（場次前截止）', () => {
-  const T0 = Date.parse('2026-06-10T11:00:00+08:00') // 場次開始
-  const slot = Date.parse('2026-06-10T12:00:00+08:00') // 場次內較晚的抵達時段
-  it('cutoff 0 = 不啟用，永遠 false', () => {
-    expect(isPastSessionCutoff({ nowMs: slot, slotMs: slot, sessionStartMs: T0, cutoffMin: 0 })).toBe(false)
-  })
-  it('cutoff 120：場次開始前 2 小時整點起截止（邊界含）', () => {
-    const cutoffAt = T0 - 120 * 60000
-    expect(isPastSessionCutoff({ nowMs: cutoffAt - 1, slotMs: slot, sessionStartMs: T0, cutoffMin: 120 })).toBe(false)
-    expect(isPastSessionCutoff({ nowMs: cutoffAt, slotMs: slot, sessionStartMs: T0, cutoffMin: 120 })).toBe(true)
-  })
-  it('錨點用場次開始時間：場次內較晚時段一樣在截止後關閉', () => {
-    expect(isPastSessionCutoff({ nowMs: T0 - 30 * 60000, slotMs: slot, sessionStartMs: T0, cutoffMin: 60 })).toBe(true)
-  })
-  it('時段不屬於任何場次（sessionStartMs 非數字）→ 退回時段本身時間當錨點', () => {
-    expect(isPastSessionCutoff({ nowMs: slot - 30 * 60000, slotMs: slot, sessionStartMs: NaN, cutoffMin: 60 })).toBe(true)
-    expect(isPastSessionCutoff({ nowMs: slot - 90 * 60000, slotMs: slot, sessionStartMs: NaN, cutoffMin: 60 })).toBe(false)
-  })
-  it('cutoff 非法值（負數/NaN）視為不啟用', () => {
-    expect(isPastSessionCutoff({ nowMs: slot, slotMs: slot, sessionStartMs: T0, cutoffMin: -30 })).toBe(false)
-    expect(isPastSessionCutoff({ nowMs: slot, slotMs: slot, sessionStartMs: T0, cutoffMin: 'x' })).toBe(false)
   })
 })
