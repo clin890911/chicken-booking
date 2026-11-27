@@ -56,8 +56,7 @@ test('H7 手機 390px 帶位：整頁捲、按鈕都按得到 @mobile', async ({
   console.log('H7 table 105 box', JSON.stringify(box))
   await page.screenshot({ path: test.info().outputPath(`H7-map.png`) })
   steps++; await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2)
-  await expect(page.locator(JUMP)).toContainText('回帶位')
-  steps++; await page.locator(JUMP).tap()
+  // C 包 #11：點桌後自動捲回確認鈕（不再按浮鈕「回帶位」）
   await page.waitForTimeout(600)
   await expect(page.locator(SEAT)).toContainText('105')
   const seatHit = await hittable(page, SEAT)

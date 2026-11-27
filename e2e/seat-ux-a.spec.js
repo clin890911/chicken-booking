@@ -365,6 +365,8 @@ for (const vp of [{ name: 'iPad 橫', width: 1180, height: 820 }, { name: 'iPad 
     const seats = ['113', '108', '111']
     for (const [i, n] of seats.entries()) {
       await page.getByRole('button', { name: '王', exact: true }).click()
+      // C 包 #14：入座後人數回到「未選」，每一組都要點人數
+      await page.getByRole('button', { name: '2 位', exact: true }).click()
       await page.locator(`svg[aria-label$="桌況圖"] g[data-table-number="${n}"]`).click()
       await expect(page.getByRole('button', { name: `移除桌 ${n}` })).toBeVisible()
       await page.getByTestId('walkin-seat').click()

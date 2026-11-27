@@ -63,8 +63,8 @@ test('帶位：點到今日團體圈桌 → 警示且滑桿鎖住，勾「仍要
   // 席數雖然夠，但警示未確認 → 滑桿仍鎖住
   await expect(slider(page)).toBeDisabled()
 
-  // 勾「我知道，仍要帶這桌」→ 解鎖 → 滑動入座
-  await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()
+  // 勾「我知道，仍要用這桌」→ 解鎖 → 滑動入座
+  await page.getByRole('checkbox', { name: /仍要用這桌/ }).check()
   await expect(slider(page)).not.toBeDisabled()
 
   await slide(page)

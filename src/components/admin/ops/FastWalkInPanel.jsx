@@ -12,6 +12,8 @@ import { todayStr } from '../../../utils/timeSlots'
 import { squeezeSeats } from '../../../utils/capacity'
 import GlyphText from '../../ui/GlyphText'
 import { History } from 'lucide-react'
+import RiskAck from './RiskAck'
+import { SEAT_PRIMARY, SEAT_SECONDARY } from './seatButtons'
 
 // 現場常駐「帶位」面板（v3）：順序不拘的狀態機——系統只需要「桌」和「幾位」，
 // 先點桌或先選人數都行，兩者到齊底部的確認鈕才亮；確認＝入座（唯一語意，不再二次確認）。
@@ -67,27 +69,29 @@ export default function FastWalkInPanel({
   const squeezed = enough && seats < g
 
   // 即時可坐判定（不估時間）。已選桌看合計席數；沒選桌才給建議。
+  // 文案（C 包 #16）：一行只講一件事，不用店內黑話（擠一擠）。超坐＝每桌可多坐 1 位，照樣可入座、標黃提醒。
   let verdict = null
   let recommendation = null
   if (tables.length > 0) {
     const label = tables.map(t => t.number).join(' + ')
     verdict = g <= 0
-      ? { tone: 'idle', icon: 'chair', text: `已選 ${label}（${seats} 席）· 再選人數` }
+      ? { tone: 'idle', icon: 'chair', text: `${label}（${seats} 席）· 請選人數` }
       : squeezed
-        ? { tone: 'multi', icon: 'warning', text: `${g} 位 → ${label}（${seats} 席，擠一擠超坐 ${g - seats} 位）` }
+        ? { tone: 'multi', icon: 'warning', text: `${g} 位 → ${label}（${seats} 席・超坐 ${g - seats} 位）` }
         : enough
           ? { tone: 'ok', icon: 'checkCircle', text: `${g} 位 → ${label}（${seats} 席）` }
-          : { tone: 'none', icon: 'warning', text: `${g} 位擠一擠也坐不下 ${seats} 席 → 再加一桌或換桌` }
+          : { tone: 'none', icon: 'warning', text: `${g} 位坐不下 ${label}（${seats} 席）· 再加一桌或換桌` }
   } else if (g > 0) {
     // 建議桌看「現在入座」的佔用區間 [現在, 現在+佔位)：避開其間已被別筆預配的桌與團保桌（只影響建議，不擋點選）
+    // 「（自行選桌）」拿掉：建議只是建議，店員點哪張就是哪張（點桌＝改選），下方「用建議桌」鈕一下選好
     const single = suggestTable(g, { date: todayStr(), mode: 'now' })
-    if (single) { recommendation = { ...single, tableNumbers: [String(single.number)] }; verdict = { tone: 'ok', icon: 'pointer', text: `${g} 位 · 建議 ${single.floor}・${single.number}（自行選桌）` } }
+    if (single) { recommendation = { ...single, tableNumbers: [String(single.number)] }; verdict = { tone: 'ok', icon: 'pointer', text: `${g} 位 · 建議 ${single.floor}・${single.number}` } }
     else {
       const combo = suggestTableCombo(g, { date: todayStr(), mode: 'now' })
       if (combo.enough) recommendation = { number: combo.tableNumbers?.[0], floor: combo.floor, tableNumbers: (combo.tableNumbers || []).map(String) }
       verdict = combo.enough
-        ? { tone: 'multi', icon: 'chair', text: `無單桌可容 → 建議 ${combo.floor}・${(combo.tableNumbers || []).join(' + ')}${combo.squeezed ? `（擠一擠：${combo.seats} 席坐 ${g} 位）` : ''}（自行選 ${combo.tableNumbers?.length || 2} 張桌）` }
-        : { tone: 'none', icon: 'hourglass', text: '目前座位不足 → 建議改候位取號' }
+        ? { tone: 'multi', icon: 'chair', text: `${g} 位 · 建議併桌 ${combo.floor}・${(combo.tableNumbers || []).join(' + ')}${combo.squeezed ? `（${combo.seats} 席・超坐 ${g - combo.seats} 位）` : ''}` }
+        : { tone: 'none', icon: 'hourglass', text: '目前座位不足 · 建議改候位取號' }
     }
   }
   const V = {
@@ -99,24 +103,28 @@ export default function FastWalkInPanel({
 
   const blockedByWarning = !!warning && !override
   const ready = enough && !blockedByWarning
+  // 停用時講「還缺哪一步」（灰底，不是淡紅——淡紅像錯誤，walkthrough #16）。
+  // 人數優先：入座後人數回到「未選」（C 包 #14），下一組一定要重新點人數，不會沿用到上一組的預設 2。
   const slideLabel = enough
-    ? (blockedByWarning ? '請先確認上方警示' : '確認入座 →')
-    : tables.length === 0 && g <= 0 ? '先選桌與人數'
-      : tables.length === 0 ? '還差桌位'
-        : g <= 0 ? '還差人數' : '席數不足 · 再加一桌'
+    ? (blockedByWarning ? '請先勾選上方確認' : '確認入座 →')
+    : g <= 0 ? '先選人數'
+      : tables.length === 0 ? '請先選桌'
+        : '席數不足 · 再加一桌'
 
   // 目前組好的稱呼（已選桌卡片與入座共用同一份，卡片上看到什麼就是會存進去的什麼）
   const displayName = composeName(title, surname, customName.trim()) || matched?.name || ''
 
+  // 入座後重置：人數回到「未選」（0），不預選 2（C 包 #14：預選的 2 位會讓下一組 4 位被當 2 位入座）。
+  // 要沿用上一組 → 按釘底的「沿用上一組 N 位」（只沿用人數＋店員手打的 staffNotes）。
   const reset = () => {
-    onGuestsChange(2); setKids(0); setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
+    onGuestsChange(0); setKids(0); setTitle(DEFAULT_TITLE); setSurname(null); setCustomName('')
     setPhone(''); setNotes(''); setKeypadOpen(false); setOverride(false)
   }
 
   const seat = () => {
     if (!tables.length) return toast.error('請先點桌況圖選一張桌')
     if (!(g > 0)) return toast.error('請選人數')
-    if (maxSeats < g) return toast.error(`${g} 位擠一擠也坐不下 ${seats} 席`)
+    if (maxSeats < g) return toast.error(`${g} 位坐不下 ${tables.map(t => t.number).join(' + ')}（${seats} 席）`)
     if (seatFired.current || blockedByWarning) return false
     seatFired.current = true
     const nm = displayName
@@ -134,79 +142,28 @@ export default function FastWalkInPanel({
     else seatFired.current = false
   }
 
+  // M6 沿用上一組：只有在「真的會改變什麼」時才出現（人數與註記都已相同就別佔版面、也別讓人白按一下）
+  const showReuse = !!lastParty && (g !== lastParty.guests || kids !== (lastParty.children || 0) || notes.trim() !== (lastParty.notes || ''))
+
   return (
     <div ref={rootRef} className="flex-1 min-h-0 phone:flex-none flex flex-col">
       {/* 可捲區：欄位再多也不會把底部動作推走 */}
       {/* p-3 space-y-1.5（原 p-4 space-y-3）：常態情境（一桌＋姓氏＋人數）要能一面式不捲。
-          省的是留白，不是按鈕——姓氏 h-16 / 人數・電話 60px / 滑桿 66px 一格都不縮。
-          「🪑 帶位」標題刻意不放：上方分頁籤已經寫著「帶位」。 */}
+          省的是留白，不是按鈕——姓氏 h-16 / 人數・電話 60px 一格都不缺。
+          「🪑 帶位」標題刻意不放：上方分頁籤已經寫著「帶位」。
+          🔴 C 包 #8：這一區的內容在「選桌前／選桌後／入座後」必須一模一樣——已選桌卡、「沿用上一組」都放到釘底動作列，
+          姓氏鍵、人數鍵的座標永遠不動（過去選桌後頂端插入桌卡，整個鍵盤下移 58px，手指點到別的姓氏／人數）。 */}
       <div className="flex-1 min-h-0 overflow-y-auto phone:flex-none phone:overflow-visible p-3 space-y-1.5">
-        {/* 桌位：已選→卡片（可多桌）；未選→提示點桌況圖 */}
-        {tables.length > 0 ? (
-          <div className="space-y-1.5">
-            {tables.map(t => (
-              <div key={t.number} className="flex items-center gap-3 rounded-xl border-2 border-chicken-green/60 bg-chicken-green/10 px-3 py-1.5">
-                <div className="min-w-0">
-                  <div className="text-xl font-bold leading-none text-chicken-brown tabular-nums">{t.number}</div>
-                  <div className="text-[11px] font-bold text-chicken-brown/60">
-                    {[`${t.capacity} 人桌`, [displayName, g > 0 ? `${g} 位` : ''].filter(Boolean).join(' ')]
-                      .filter(Boolean).join(' · ')}
-                  </div>
-                </div>
-                {/* 帶位籤上點空桌＝選位，抽屜點不到了 → 這裡補一個入口（維修/停用等仍在抽屜裡） */}
-                <button
-                  type="button"
-                  aria-label={`桌 ${t.number} 詳情`}
-                  onClick={() => onOpenTable?.(t.number)}
-                  className="ml-auto text-xs font-bold text-chicken-brown/60 bg-white border border-chicken-brown/15 rounded-lg px-2.5 py-1.5"
-                >
-                  詳情
-                </button>
-                <button
-                  type="button"
-                  aria-label={`移除桌 ${t.number}`}
-                  onClick={() => onRemoveTable?.(t.number)}
-                  className="text-xs font-bold text-chicken-brown/60 bg-white border border-chicken-brown/15 rounded-lg px-2.5 py-1.5"
-                >
-                  移除
-                </button>
-              </div>
-            ))}
-            {tables.length > 1 && (
-              <button
-                type="button"
-                onClick={onClearTables}
-                className="w-full text-xs font-bold text-chicken-brown/55 py-1"
-              >
-                清除全部（{tables.length} 桌 · {seats} 席）
-              </button>
-            )}
-          </div>
-        ) : null /* 未選桌不放提示框（Barry 2026-10-17：多佔一列；底部「還差桌位」與建議列已足夠提示） */}
-
         <HonorificNameField
           title={title}
           surname={surname}
           onChange={({ title: t, surname: s }) => { setTitle(t); setSurname(s) }}
           custom={customName}
           onCustomChange={setCustomName}
+          roomAbove
         />
 
         <PartySizeField total={guests} kids={kids} onChange={(t, c) => { setKids(c); onGuestsChange(t) }} accent="amber" size="lg" />
-
-        {/* M6 沿用上一組：連續同型客人（一直來 2 位）省掉重選。
-            只有在「真的會改變什麼」時才出現——人數與註記都已相同就別佔版面、也別讓人白按一下。 */}
-        {lastParty && (g !== lastParty.guests || kids !== (lastParty.children || 0) || notes.trim() !== (lastParty.notes || '')) && (
-          <button
-            type="button"
-            onClick={() => { setKids(lastParty.children || 0); onGuestsChange(lastParty.guests); setNotes(lastParty.notes || '') }}
-            className="w-full min-h-[44px] rounded-xl border-2 border-dashed border-chicken-brown/25 bg-chicken-cream/60 text-sm font-bold text-chicken-brown/70"
-          >
-            <GlyphText icon={History} size={16}>
-              沿用上一組（{lastParty.guests} 位{lastParty.children > 0 ? `（小${lastParty.children}）` : ''}{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
-            </GlyphText>
-          </button>
-        )}
 
         {/* 電話常駐（不再是收合鈕）：欄位只負責顯示，點它才浮出漂浮數字鍵盤。
             inputMode="none" 是為了不要叫出 iOS 軟鍵盤——鍵盤一跳，左欄就整個被推走。 */}
@@ -239,23 +196,37 @@ export default function FastWalkInPanel({
         />
       </div>
 
-      {/* 釘底：警示 + 可坐判定 + 確認入座。永遠可見，不隨上方欄位捲走 */}
+      {/* 釘底：已選桌＋警示＋可坐判定＋確認入座。永遠可見，不隨上方欄位捲走；
+          這裡長高只會壓縮上面可捲區的「下緣」，上面鍵盤的位置不動。 */}
       <div data-rail-footer className="flex-none border-t border-chicken-brown/10 bg-white p-3 space-y-2">
+        {/* 已選桌：一桌一列（帶位籤上點空桌＝選位，抽屜點不到了 → 「詳情」補一個入口；維修/停用等仍在抽屜裡） */}
+        {tables.length > 0 && (
+          <div data-testid="walkin-selected" className="space-y-1.5">
+            {tables.map(t => (
+              <div key={t.number} className="flex items-center gap-2 rounded-xl border-2 border-chicken-green/60 bg-chicken-green/10 pl-3 pr-1 py-0.5">
+                <span className="text-xl font-bold leading-none text-chicken-brown tabular-nums">{t.number}</span>
+                <span className="text-xs font-bold text-chicken-brown/70">{t.capacity} 人桌</span>
+                <button type="button" aria-label={`桌 ${t.number} 詳情`} onClick={() => onOpenTable?.(t.number)}
+                  className={`${SEAT_SECONDARY} ml-auto !px-3 text-sm`}>詳情</button>
+                <button type="button" aria-label={`移除桌 ${t.number}`} onClick={() => onRemoveTable?.(t.number)}
+                  className={`${SEAT_SECONDARY} !px-3 text-sm`}>移除</button>
+              </div>
+            ))}
+            {tables.length > 1 && (
+              <button type="button" onClick={onClearTables}
+                className="w-full min-h-[44px] text-sm font-bold text-chicken-brown/70 underline underline-offset-2">
+                清除全部（{tables.length} 桌 · {seats} 席）
+              </button>
+            )}
+          </div>
+        )}
         {warning && (
-          <div className="rounded-xl border border-chicken-red/40 bg-chicken-red/10 px-3 py-2">
+          <div className="rounded-xl border border-chicken-red/40 bg-chicken-red/10 px-3 pt-2">
             {/* 併桌時可能不只一張桌有問題 → 逐條列，勾同意前看得到全部 */}
             {(warning.lines || [warning.text]).map((line, i) => (
               <div key={i} className="text-sm font-bold text-chicken-red">{line}</div>
             ))}
-            <label className="mt-1.5 flex items-center gap-2 text-xs font-bold text-chicken-red cursor-pointer">
-              <input
-                type="checkbox"
-                checked={override}
-                onChange={e => setOverride(e.target.checked)}
-                className="w-4 h-4 accent-current"
-              />
-              我知道，仍要帶這桌
-            </label>
+            <RiskAck checked={override} onChange={setOverride} />
           </div>
         )}
         {verdict && (
@@ -270,7 +241,7 @@ export default function FastWalkInPanel({
               <span data-testid="walkin-auto-multi" className="text-sm font-bold text-amber-800">大組・可選多桌（沒有單桌坐得下 {g} 位）</span>
             ) : (
               <button type="button" data-testid="walkin-multi-toggle" aria-pressed={multi} onClick={onToggleMulti}
-                className={`tap min-h-[44px] px-3 rounded-xl border-2 text-sm font-bold ${multi ? 'border-chicken-brown bg-chicken-brown text-white' : 'border-dashed border-chicken-brown/40 text-chicken-brown'}`}>
+                className={`${SEAT_SECONDARY} text-sm ${multi ? '!border-chicken-brown !bg-chicken-brown !text-white' : '!border-dashed'}`}>
                 {multi ? '併桌中・點桌加／減（改回單桌）' : '＋再加一桌（併桌）'}
               </button>
             )}
@@ -281,19 +252,35 @@ export default function FastWalkInPanel({
         )}
         {/* 「用建議桌」＝切樓層＋選好建議桌（含併桌），店員再按確認入座；不自動勾（PR #137） */}
         {recommendation && (
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-4 flex-wrap">
             {onApplySuggestion && (
               <button type="button" data-testid="walkin-apply-suggestion"
                 onClick={() => onApplySuggestion(recommendation.tableNumbers)}
-                className="tap min-h-[44px] px-3 rounded-xl border-2 border-chicken-green bg-chicken-green/10 text-chicken-green text-sm font-bold">
+                className={`${SEAT_SECONDARY} text-sm`}>
                 用建議桌 {recommendation.floor}・{recommendation.tableNumbers.join(' + ')}
               </button>
             )}
             <button type="button" onClick={() => onLocateSuggestion?.(recommendation.number)} className="tap min-h-[44px] text-sm font-bold underline">定位建議桌 {recommendation.floor}・{recommendation.number}</button>
           </div>
         )}
-        <button data-testid="walkin-seat" type="button" onClick={seat} disabled={!ready} className="tap w-full min-h-[60px] rounded-xl bg-chicken-red text-white text-lg font-bold disabled:opacity-40">{ready ? `確認入座 · ${displayName || '現場客'} ${g} 位 · ${tables.map(t => t.number).join(' + ')}` : <GlyphText>{slideLabel}</GlyphText>}</button>
-        {showNextWaitlist && <button type="button" onClick={onNextWaitlist} className="tap w-full min-h-[44px] rounded-xl border border-chicken-green text-chicken-green font-bold">帶下一組候位</button>}
+        {/* M6 沿用上一組：連續同型客人（一直來 2 位）省掉重選。放釘底（C 包 #8）：入座後才出現，不可推動上方鍵盤。
+            只沿用人數＋店員手打的 staffNotes（🔴 不可沿用合成 notes：會把上一組的過敏資訊帶到這一組） */}
+        {showReuse && (
+          <button
+            type="button"
+            onClick={() => { setKids(lastParty.children || 0); onGuestsChange(lastParty.guests); setNotes(lastParty.notes || '') }}
+            className={`${SEAT_SECONDARY} w-full text-sm !border-dashed`}
+          >
+            <GlyphText icon={History} size={16}>
+              沿用上一組（{lastParty.guests} 位{lastParty.children > 0 ? `（小${lastParty.children}）` : ''}{lastParty.notes ? ` · ${lastParty.notes}` : ''}）
+            </GlyphText>
+          </button>
+        )}
+        <button data-testid="walkin-seat" type="button" onClick={seat} disabled={!ready}
+          className={`${SEAT_PRIMARY} w-full min-h-[60px] text-lg !whitespace-normal`}>
+          {ready ? `確認入座 · ${displayName || '現場客'} ${g} 位 · ${tables.map(t => t.number).join(' + ')}` : <GlyphText>{slideLabel}</GlyphText>}
+        </button>
+        {showNextWaitlist && <button type="button" onClick={onNextWaitlist} className={`${SEAT_SECONDARY} w-full`}>帶下一組候位</button>}
       </div>
 
       {/* 漂浮數字鍵盤（與候位取號共用 FloatingPhoneKeypad）：遮罩只用 bg-black/20，桌況圖全程看得見 */}

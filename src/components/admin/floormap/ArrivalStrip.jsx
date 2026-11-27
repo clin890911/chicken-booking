@@ -40,6 +40,7 @@ import { isArriveEligible, isPreassignArriveEligible, ARRIVE_WINDOW_BEFORE_MIN, 
 import GlyphText from '../../ui/GlyphText'
 import { formatPhone } from '../../../utils/phoneFormat'
 import { seatedText } from '../../../utils/seatFeedback'
+import { SEAT_PRIMARY, SEAT_SECONDARY } from '../ops/seatButtons'
 
 // 遲到判定沿用 UpcomingPanel/BookingCard 既有口徑（graceMin=15，見 utils/bookingPulse.js）。
 const LATE_GRACE_MIN = 15
@@ -311,7 +312,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                           disabled={!g.armed}
                           onClick={(e) => pressGhostUndo(e, g)}
                           aria-label={`復原入座 ${g.name}`}
-                          className="rounded-full bg-white border-2 border-chicken-green text-chicken-green text-xs font-bold shrink-0"
+                          className={`${SEAT_SECONDARY} !rounded-full text-xs shrink-0`}
                           style={{ height: 44, minWidth: 44, paddingLeft: 12, paddingRight: 12 }}
                         >
                           復原
@@ -367,10 +368,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                     type="button"
                     onClick={(e) => pressArrive(e, idx, arrive, null, booking.id)}
                     aria-label={`${booking.name} 到了，選桌入座`}
-                    className="rounded-full bg-chicken-green text-white text-xs font-bold shrink-0 whitespace-nowrap
-                               hover:opacity-90 focus-visible:outline focus-visible:outline-2
-                               focus-visible:outline-offset-2 focus-visible:outline-chicken-red
-                               motion-safe:transition-transform motion-safe:active:scale-95"
+                    className={`${SEAT_PRIMARY} !rounded-full text-xs shrink-0`}
                     style={{ height: 44, minWidth: 44, paddingLeft: 12, paddingRight: 12 }}
                   >
                     到了 · 選桌
@@ -421,10 +419,7 @@ export default function ArrivalStrip({ tables, bookings, onSelectTable, onArrive
                   type="button"
                   onClick={(e) => pressArrive(e, idx, arrive, seatsNow ? it.t : null, booking.id)}
                   aria-label={reseat ? `${booking.name} 到了，換桌入座` : `${booking.name} 到了，入座 ${table.number}`}
-                  className="rounded-full bg-chicken-green text-white text-xs font-bold shrink-0 whitespace-nowrap
-                             hover:opacity-90 focus-visible:outline focus-visible:outline-2
-                             focus-visible:outline-offset-2 focus-visible:outline-chicken-red
-                             motion-safe:transition-transform motion-safe:active:scale-95"
+                  className={`${SEAT_PRIMARY} !rounded-full text-xs shrink-0`}
                   style={{ height: 44, minWidth: 44, paddingLeft: 12, paddingRight: 12 }}
                 >
                   {reseat ? '到了 · 換桌' : <GlyphText size={15}>✓ 到了</GlyphText>}

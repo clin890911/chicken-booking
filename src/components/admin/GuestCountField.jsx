@@ -67,7 +67,8 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
     <button
       type="button"
       onClick={() => { setMore(true); setRaw('9'); onChange(9) }}
-      className={`px-3 rounded-xl border border-chicken-brown/10 bg-white text-sm font-bold text-chicken-brown/70 ${lg ? 'h-9' : 'h-11'}`}
+      // lg：外觀 36px，可點區上下各外擴 5px＝46px（after 以內距框起算，多 1px 邊框；量測有小數誤差，留 2px 餘裕）（C 包 #20；標題列本身 44px 高，外擴不出列、不蓋到下面的 chips）
+      className={`px-3 rounded-xl border border-chicken-brown/10 bg-white text-sm font-bold text-chicken-brown/70 ${lg ? "h-9 relative after:content-[''] after:absolute after:inset-x-0 after:-inset-y-[6px]" : 'h-11'}`}
     >
       9+ ▾
     </button>
@@ -80,7 +81,8 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
         {label && <label className={`label ${lg ? '!text-xs !mb-0' : ''}`}>{label}</label>}
         {lg && <><div className="flex-1" />{headerExtra}{overflowControl}</>}
       </div>
-      <div className={lg ? 'grid grid-cols-8 gap-1.5' : 'flex gap-1.5 flex-wrap items-center'}>
+      {/* lg 手機（phone:）：8 欄時每格只有 35px 寬（C 包 #20）→ 改 4 欄 × 2 排、每格 48px 高，寬高都 ≥44；iPad 維持 8 欄一排 */}
+      <div className={lg ? 'grid grid-cols-8 phone:grid-cols-4 gap-1.5' : 'flex gap-1.5 flex-wrap items-center'}>
         {QUICK.map(n => (
           <button
             key={n}
@@ -90,7 +92,7 @@ export default function GuestCountField({ value, onChange, max = 200, accent = '
             aria-pressed={value === n && !showInput}
             onClick={() => { setMore(false); onChange(n) }}
             className={`rounded-xl border-2 font-bold tabular-nums transition-all ${
-              lg ? 'h-[60px] text-[22px]' : 'w-11 h-11 text-base'} ${
+              lg ? 'h-[60px] phone:h-12 text-[22px]' : 'w-11 h-11 text-base'} ${
               value === n && !showInput ? chipActive : chipIdle}`}
           >
             {n}

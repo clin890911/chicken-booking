@@ -7,7 +7,10 @@ import { normalizeSplit } from '../../utils/partySplit'
 // 大人 = total − kids。小孩預設 0 → 常態（只有大人）點擊次數與過去完全相同。
 // 注意：不可命名為 children（React 保留 prop），一律叫 kids。
 export default function PartySizeField({ total, kids = 0, onChange, max = 200, accent = 'red', size = 'md', hint }) {
-  const { adults, children } = normalizeSplit(total, kids)
+  // total 為 0／空＝「人數未選」（現場帶位入座後的狀態，C 包 #14）：大人 chips 一顆都不亮，逼下一組重新點。
+  // 不可走 normalizeSplit——它會把 0 夾成 1，畫面就變成預選「1 位」。
+  const unset = !(Number(total) > 0)
+  const { adults, children } = unset ? { adults: 0, children: 0 } : normalizeSplit(total, kids)
   const lg = size === 'lg'
   const setAdults = (a) => onChange(a + children, children)
   const setKids = (c) => onChange(adults + c, c)

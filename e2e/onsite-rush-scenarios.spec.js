@@ -284,7 +284,7 @@ test('S9 散客帶位到團體預留桌 105 → 團保防呆，未勾「仍要�
   await expect(seat).toBeDisabled()
   expect(tableOf(await readState(page), '105').status).toBe('vacant')
 
-  await page.getByRole('checkbox', { name: /仍要帶這桌/ }).check()
+  await page.getByRole('checkbox', { name: /仍要用這桌/ }).check()
   await expect(seat).toBeEnabled()
   await seat.click()
   await expect(page.getByText(/→ 105 已入座/)).toBeVisible()

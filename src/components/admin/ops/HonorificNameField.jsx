@@ -8,6 +8,8 @@ import GlyphText from '../../ui/GlyphText'
 // 12 大姓依內政部戶政司 2023 全國姓名統計前 12 大姓，涵蓋約 57% 客人，免切注音就能完成登記。
 // 🔴 12 大姓一顆都不能少（少一顆就得切注音，這是這個元件存在的理由）。
 const TITLES = ['先生', '小姐', '太太']
+// 格子的可點區左右各外擴 3px（gap-1.5＝6px 的一半）：外觀不變、相鄰格不重疊
+const HIT_X = "relative after:content-[''] after:absolute after:inset-y-0 after:-inset-x-[3px]"
 const SURNAMES = ['陳', '林', '黃', '張', '李', '王', '吳', '劉', '蔡', '楊', '許', '鄭']
 
 // 預設稱謂：領檯多數情況直接用「先生」，不必先點一下才有稱謂。
@@ -40,7 +42,9 @@ export function composeName(title, surname, custom) {
 //   此時欄位兼收「姓氏」與「全名」：單字接稱謂、全名原樣（同 composeName）。
 // customPlaceholder / customLabel：常駐時的提示與無障礙名稱。
 // dense：格子 48px（仍 ≥44px 觸控門檻）——後台新增訂位表單用，讓時段在 iPad 橫向不必捲就看得到；現場頁維持 64px。
-export default function HonorificNameField({ title, surname, onChange, custom, onCustomChange, customAlwaysVisible = false, customPlaceholder, customLabel, label = '貴姓・稱謂', dense = false }) {
+// roomAbove（C 包 #20）：上方保證留有 ≥12px 空白（現場帶位面板：可捲區 p-3 的上內距）→「其他姓氏…」的可點區往上外擴 12px、往下 6px（標題列下距改 6px，剛好到姓氏格上緣，不重疊；after 以內距框起算所以多加 2px 邊框）＝44px，
+//   外觀仍是 28px 小鈕、版面高度不變。其他呼叫點上方緊鄰別的控制項，不外擴（外擴區會蓋住上一列的按鈕）。
+export default function HonorificNameField({ title, surname, onChange, custom, onCustomChange, customAlwaysVisible = false, customPlaceholder, customLabel, label = '貴姓・稱謂', dense = false, roomAbove = false }) {
   // 只用 state 記「店員手動展開過」；實際是否顯示還要 or 上 custom 有值。
   // 否則電話帶顧客檔在掛載**之後**才填入姓名時，輸入框不會打開 → 名字會被送出卻看不見。
   const [manualOpen, setManualOpen] = useState(false)
@@ -59,7 +63,7 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
 
   return (
     <div>
-      <div className="flex items-center gap-1.5 mb-1">
+      <div className={`flex items-center gap-1.5 ${roomAbove ? "mb-1.5" : "mb-1"}`}>
         <label className="label !text-xs !mb-0">{label}</label>
         <div className="flex-1" />
         {!customAlwaysVisible && <button
@@ -67,14 +71,15 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
           aria-label="其他"
           aria-pressed={showCustom}
           onClick={() => { if (showCustom) onCustomChange?.(''); setManualOpen(v => !v) }}
-          className={`rounded-lg border-2 px-2.5 py-1 text-xs font-bold transition-all ${
+          className={`rounded-lg border-2 px-2.5 py-1 text-xs font-bold transition-all ${roomAbove ? "relative after:content-[''] after:absolute after:inset-x-0 after:-top-[14px] after:-bottom-[8px]" : ''} ${
             showCustom ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown/70'}`}
         >
           其他姓氏…
         </button>}
       </div>
 
-      {/* 7 欄 × 2 排＝14 格：12 大姓佔前 12 格，稱謂鈕佔最後兩格 */}
+      {/* 7 欄 × 2 排＝14 格：12 大姓佔前 12 格，稱謂鈕佔最後兩格。
+          可點區左右各外擴半個間距（3px）：手機 375 寬時格子只有 41px，外擴後 47px（≥44，C 包 #20）；相鄰兩格各拿一半，不重疊 */}
       <div className="grid grid-cols-7 gap-1.5">
         {SURNAMES.map(s => (
           <button
@@ -83,7 +88,7 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
             aria-label={s}
             aria-pressed={surname === s}
             onClick={() => pickSurname(s)}
-            className={`${dense ? 'h-12 text-[20px]' : 'h-16 text-[23px]'} rounded-xl border-2 font-bold transition-all ${
+            className={`${HIT_X} ${dense ? 'h-12 text-[20px]' : 'h-16 text-[23px]'} rounded-xl border-2 font-bold transition-all ${
               surname === s ? 'border-chicken-red bg-chicken-red text-white' : 'border-chicken-brown/15 bg-white text-chicken-brown'}`}
           >
             {s}
@@ -94,7 +99,7 @@ export default function HonorificNameField({ title, surname, onChange, custom, o
           aria-label={`稱謂：${activeTitle}（點一下換${upcoming}）`}
           data-honorific-applies={applies ? 'true' : 'false'}
           onClick={cycleTitle}
-          className={`col-span-2 ${dense ? 'h-12' : 'h-16'} rounded-xl border-2 border-chicken-brown bg-chicken-brown text-white flex flex-col items-center justify-center gap-0.5 transition-all ${
+          className={`${HIT_X} col-span-2 ${dense ? 'h-12' : 'h-16'} rounded-xl border-2 border-chicken-brown bg-chicken-brown text-white flex flex-col items-center justify-center gap-0.5 transition-all ${
             applies ? '' : 'opacity-40'}`}
         >
           <span className={`${dense ? 'text-[18px]' : 'text-[22px]'} font-bold leading-none`}>{activeTitle}</span>
