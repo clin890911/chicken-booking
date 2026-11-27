@@ -1,5 +1,6 @@
 import { HandoffProvider } from './HandoffContext'
 import { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { PreferFloorContext } from './preferFloorContext'
 import * as bookingService from '../services/bookingService'
 import * as tableService from '../services/tableService'
 import * as settingsService from '../services/settingsService'
@@ -1040,4 +1041,20 @@ export function BookingProvider({ children }) {
   return <BookingContext.Provider value={value}><HandoffProvider>{children}</HandoffProvider></BookingContext.Provider>
 }
 
-export const useBooking = () => useContext(BookingContext)
+// 子樹有 PreferFloorContext（現場頁）→ 建議桌帶上目前樓層（preferFloor）；其他動作與資料原樣透傳。
+// suggestTable 不帶 opts（null）時維持原義（不看時段衝突、不帶偏好）；呼叫端自己給 preferFloor 時以呼叫端為準。
+function withPreferFloor(ctx, floor) {
+  if (!ctx || !floor) return ctx
+  return {
+    ...ctx,
+    suggestTable: (partySize, opts) => ctx.suggestTable(partySize, opts ? { preferFloor: floor, ...opts } : opts),
+    suggestTableCombo: (partySize, opts) => ctx.suggestTableCombo(partySize, { preferFloor: floor, ...(opts || {}) }),
+  }
+}
+
+export const useBooking = () => {
+  const ctx = useContext(BookingContext)
+  const preferFloor = useContext(PreferFloorContext)
+  return useMemo(() => withPreferFloor(ctx, preferFloor), [ctx, preferFloor])
+}
+

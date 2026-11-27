@@ -2882,3 +2882,29 @@ describe('undoSeatBooking（四個「客人到了」入口共用的復原）', (
     expect(tableService.getByNumber('105').status).toBe('cleaning')
   })
 })
+
+// 2026-11-27 C 包（walkthrough #18）：建議桌以店員目前看的樓層優先（opts.preferFloor）。排序偏好、不是硬限制。
+describe('建議桌目前樓層優先（preferFloor）', () => {
+  it('2 位：沒帶偏好 → 2F 4 人桌（浪費少）；站在 1F → 1F 6 人桌（只多 2 席）', () => {
+    tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('207', 4, '2F')])
+    expect(seating.suggestTable(2, { mode: 'now' }).number).toBe('207')
+    expect(seating.suggestTable(2, { mode: 'now', preferFloor: '1F' }).number).toBe('101')
+    expect(seating.suggestTable(2, { mode: 'now', preferFloor: '2F' }).number).toBe('207')
+  })
+  it('目前樓層只剩大很多的桌 → 照舊建議別層', () => {
+    tableService.bulkWrite([mkTable('101', 10, '1F'), mkTable('207', 4, '2F')])
+    expect(seating.suggestTable(2, { mode: 'now', preferFloor: '1F' }).number).toBe('207')
+  })
+  it('不帶 opts（可點選集合）維持原本排序，不受影響', () => {
+    tableService.bulkWrite([mkTable('101', 6, '1F'), mkTable('207', 4, '2F')])
+    expect(seating.findSuitableTables(2).map(t => t.number)).toEqual(['207', '101'])
+  })
+  it('併桌組合：同桌數、座位差 ≤2 → 目前樓層的組合', () => {
+    tableService.bulkWrite([
+      mkTable('101', 6, '1F'), mkTable('102', 4, '1F'),
+      mkTable('201', 6, '2F'), mkTable('203', 6, '2F'),
+    ])
+    expect(seating.suggestTableCombo(9).floor).toBe('1F')
+    expect(seating.suggestTableCombo(9, { preferFloor: '2F' })).toMatchObject({ floor: '2F', enough: true, tableNumbers: ['201', '203'] })
+  })
+})

@@ -21,6 +21,8 @@ import BookingDetailSheet from '../booking/BookingDetailSheet'
 import { nextBookableSlot, pastSlotFix } from './ops/QuickReservePanel'
 import { convertNote, finishConvertedWaitlist } from '../../services/waitlistService'
 import { useBooking } from '../../contexts/BookingContext'
+import { PreferFloorContext } from '../../contexts/preferFloorContext'
+import { suggestionFloorHint } from '../../utils/floorPreference'
 import { useToast, useConfirm } from '../ui/Toast'
 import { useRegisterSeatUndoSlot } from '../ui/seatUndoContext'
 import { useAuth } from '../../contexts/AuthContext'
@@ -51,6 +53,8 @@ import { isPhoneLayout, scrollContentTo, usePhoneLayout } from '../../utils/phon
 // 否則兩格同樣的藍會被讀成圖例畫錯。
 // 地圖卡片頂端的樓層大分頁（取代頂列的小分段控制）。目前樓層深色實心；另一層白底粗框。
 // nudge＝本層分頁數字是 0、另一層 >0 → 紅點＋輕微脈動提示切換（motion-safe 才動）；口徑同分頁上的數字。
+// suggest＝建議桌在這一層、但店員正看著另一層（C 包，walkthrough #18）：進選桌模式不再自動跳樓層，
+// 改在這一層的分頁上標「建議桌在 2F」，讓店員自己切（不脈動、不改分頁尺寸）。
 function FloorTabs({ floor, onChange, counts, className = '' }) {
   // 一顆膠囊切兩半（Barry 2026-10-17）：外框一圈、中間無縫；選中那半實心深色「滑塊」，另一半透明。
   return (
@@ -65,7 +69,8 @@ function FloorTabs({ floor, onChange, counts, className = '' }) {
                 : c.nudge ? 'text-chicken-brown ring-2 ring-inset ring-chicken-red motion-safe:animate-pulse'
                 : 'text-chicken-brown/70 hover:bg-chicken-brown/[0.06]'}`}>
             <span className="text-lg">{c.key}</span>
-            <span className={`text-sm tabular-nums ${active ? 'text-white/85' : 'text-chicken-brown/60'}`}>{c.label} {c.value}</span>
+            <span className={`text-sm tabular-nums ${active ? 'text-white/85' : 'text-chicken-brown/60'} ${c.suggest ? 'phone:hidden' : ''}`}>{c.label} {c.value}</span>
+            {c.suggest && <span data-testid="floor-suggest-hint" className="min-w-0 truncate px-2 py-0.5 rounded-full bg-chicken-brown text-white text-xs font-bold">建議桌在 {c.key}</span>}
             {c.nudge && <span aria-label={`另一層有${c.label}的桌`} className="absolute top-1 right-1.5 w-3 h-3 rounded-full bg-chicken-red" />}
           </button>
         )
@@ -391,7 +396,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     // 可點選集合（suitable）不因他筆預配／團保縮小（那些走警示＋「將解除／會保留」）：
     //   hold＝此刻空桌；preassign＝桌子不必此刻空著，只要此刻的佔用不延續進預配區間
     const suitable = (lockKind === 'preassign' ? preassignableTables(1, reserveOpts) : findSuitableTables(1)).map(t => t.number)
-    const suggestion = findReserveCandidates(guests, reserveOpts).tables[0]
+    const suggestion = findReserveCandidates(guests, { ...reserveOpts, preferFloor: floor }).tables[0]
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { ...reserveOpts, mode: lockKind })
     startMultiMode({ kind: 'booking', booking, need: guests, lockKind, suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
   }
@@ -403,7 +408,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (!booking || booking.assignedTableId || !(Number(booking.guests) > 0)) return null
     const date = booking.date || todayStr()
     const lockKind = lockKindFor({ date, timeSlot: booking.timeSlot })
-    const n = findReserveCandidates(Number(booking.guests), { bookingId: booking.id, date, timeSlot: booking.timeSlot }).tables[0]?.number
+    const n = findReserveCandidates(Number(booking.guests), { bookingId: booking.id, date, timeSlot: booking.timeSlot, preferFloor: floor }).tables[0]?.number
     if (!n) return null
     const m = { type: 'assign', booking, lockKind, suitable: [n] }
     if (preassignConflictsFor(n, m).some(c => c.overlaps) || groupHoldTables[n]?.holds?.length) return null
@@ -438,7 +443,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 回傳 { tables, squeezed }：squeezed＝原席數湊不到、要擠一擠（每桌多坐 1 位）才坐得下的組合（橫幅照實標出）。
   const comboSuggestionFor = (need, suitable, opts) => {
     if (!(need > 0)) return { tables: [], squeezed: false }
-    const combo = suggestTableCombo(need, opts)
+    // 建議以店員目前看的樓層優先（容量合適的前提下；utils/floorPreference）
+    const combo = suggestTableCombo(need, { preferFloor: floor, ...opts })
     const nums = (combo?.enough ? combo.tableNumbers || [] : []).map(String)
     const pool = new Set((suitable || []).map(String))
     const ok = nums.length > 1 && nums.every(n => pool.has(n))
@@ -456,8 +462,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
       suggestionSqueezed: !suggestion && sugTables.length > 1 && !!suggestionSqueezed, replacing, confirmedWarning: null })
     setSelectedTable(null)
     setPendingConfirm(null)
-    const suggestedTable = tables.find(t => String(t.number) === String(suggestion || sugTables[0]))
-    if (suggestedTable) setFloor(suggestedTable.floor)
+    // 不自動切到建議桌的樓層（C 包，walkthrough #18／verify P2-3）：維持店員目前看的樓層；
+    // 建議桌在別層時，樓層分頁標「建議桌在 2F」（suggestFloor），由店員自己切（或按「用建議桌」定位過去）。
   }
 
   // 「用建議桌」：切到建議桌樓層並選好（含併桌組合），店員再按確認。整組都仍可點（與手點同一個可選集合）才選；
@@ -484,7 +490,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     if (blockedByReserve()) return
     const guests = Number(wait.partySize) || 0
     const suitable = findSuitableTables(1).map(t => t.number)
-    const suggestion = suggestTable(guests, { date: todayStr(), mode: 'now' })
+    const suggestion = suggestTable(guests, { date: todayStr(), mode: 'now', preferFloor: floor })
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { date: todayStr(), mode: 'now' })
     startMultiMode({ kind: 'waitlist', wait, need: guests, suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed })
   }
@@ -507,7 +513,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   }
   const startArriveMode = (booking, guests, extra = {}) => {
     const suitable = findSuitableTables(1).map(t => t.number)
-    const suggestion = suggestTable(guests, { bookingId: booking.id, date: todayStr(), mode: 'now' })
+    const suggestion = suggestTable(guests, { bookingId: booking.id, date: todayStr(), mode: 'now', preferFloor: floor })
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, suitable, { bookingId: booking.id, date: todayStr(), mode: 'now' })
     startMultiMode({ kind: 'arrive', booking, need: guests, lockKind: 'now', suitable, suggestion: suggestion?.number, suggestionTables: combo.tables, suggestionSqueezed: combo.squeezed, extra })
   }
@@ -515,7 +521,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   const changeArriveNeed = (n) => {
     if (mode?.type !== 'assign-multi' || mode.kind !== 'arrive') return
     const guests = Math.max(1, Math.min(200, Math.floor(Number(n) || 1)))
-    const opts = { bookingId: mode.booking.id, date: todayStr(), mode: 'now' }
+    const opts = { bookingId: mode.booking.id, date: todayStr(), mode: 'now', preferFloor: floor }
     const suggestion = suggestTable(guests, opts)
     const combo = suggestion ? { tables: [], squeezed: false } : comboSuggestionFor(guests, mode.suitable, opts)
     const sugTables = suggestion ? [String(suggestion.number)] : combo.tables
@@ -1335,6 +1341,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
   // 紅點（nudge）＝跟分頁上「顯示的數字」同一個口徑（#194 收尾，2026-10-31）：本層顯示 0、另一層顯示 >0
   //   → 另一層亮紅點提示切換。以前紅點看選桌池、數字看 seatableNowTables，會出現「紅點亮著、旁邊寫可坐 0」
   //   （另一層只剩時段衝突的空桌：選得到、但不是現在就能坐）。紅點只在選桌情境（指派/改桌、帶位籤）出現。
+  // 選桌模式的建議桌（單桌或併桌組合）在別層 → 那一層的分頁標「建議桌在 2F」（不自動切樓層）
+  const suggestFloor = mode ? suggestionFloorHint(mode.suggestionTables?.length ? mode.suggestionTables : [mode.suggestion], tables, floor) : null
   const floorCounts = (() => {
     const selecting = mode?.suitable ? 'mode' : (!mode && !reserveOpen && railTab === 'walkin' && canWalkIn) ? 'walkin' : null
     const pool = selecting === 'mode' ? new Set((mode.suitable || []).map(String)) : null
@@ -1345,6 +1353,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
     return ['1F', '2F'].map(f => ({
       key: f, value: shown(f), label, total: tables.filter(t => t.floor === f).length,
       nudge: !!selecting && f !== floor && shown(floor) === 0 && shown(f) > 0,
+      suggest: suggestFloor === f,
     }))
   })()
 
@@ -1523,6 +1532,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
           ) : null}
           <div hidden={!!mode || !!selectedTableObj} aria-hidden={!!mode || !!selectedTableObj} inert={mode || selectedTableObj ? '' : undefined} style={mode || selectedTableObj ? { display: 'none' } : undefined} className="flex-1 min-h-0 phone:flex-none flex flex-col">
             <HandoffPanel onLocate={n=>{const t=tables.find(t=>String(t.number)===String(n));if(t)setFloor(t.floor);setSelectedTable(n)}}/>
+            {/* 帶位表單的建議桌以目前樓層優先（PreferFloorContext → useBooking().suggestTable 帶 preferFloor；C 包 #18） */}
+            <PreferFloorContext.Provider value={floor}>
             <OpsRail
               suspended={!!mode || !!selectedTableObj}
               activeTab={railTab}
@@ -1585,6 +1596,7 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 setSelectedTable(n)
               }}
             />
+            </PreferFloorContext.Provider>
           </div>
         </div>
 
@@ -1652,7 +1664,8 @@ export default function OperationsView({ pendingAssign, onAssignDone, pendingMov
                 // 入座復原欄：工具列右端固定保留（取代工程師文案「Tab 選桌…」）。basis-0＋min-w：iPad 橫向接在按鈕右邊；
                 // iPad 直向／手機放不下就整個換到工具列第二行、撐滿寬度——不論有沒有內容都佔同一個位置與高度，零位移。
                 // 手機選桌模式中收起（桌況圖要留給選桌；模式中不會產生新的復原，確認後模式結束它就回來）。
-                toolbarEnd={<SeatUndoBar className={`flex-1 basis-0 min-w-[160px] ml-auto ${mode ? 'phone:hidden' : ''}`} />}
+                // toolbar：和「放大視圖／轉向」至少隔 16px（同一行＝分隔線＋內距；換到第二行＝下移 8px），不改工具列高度（C 包 P2-1）
+                toolbarEnd={<SeatUndoBar toolbar className={`flex-1 basis-0 min-w-[160px] ml-auto ${mode ? 'phone:hidden' : ''}`} />}
                 locateTableNumber={locateTableRequest?.number}
                 locateRequestId={locateTableRequest?.seq || 0}
                 tablePresentation={tablePresentation}
